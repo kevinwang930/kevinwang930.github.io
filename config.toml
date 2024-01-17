@@ -15,7 +15,7 @@
 baseURL = "https://kevinwang930.github.io/"
 languageCode = "en-us"
 defaultContentLanguage = "en-us"
-title = "Hugo tranquilpeak theme"
+title = "Kevin wang's blog"
 theme = "hugo-tranquilpeak-theme"
 disqusShortname = "hugo-tranquilpeak-theme"
 # googleAnalytics = "UA-123-45"
@@ -49,12 +49,12 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
 # Author
 # ------
 [author]
-  name = "Firstname Lastname"
-  bio = "Super bio with markdown support **COOL**"
-  job = "Your job title"
-  location = "France"
+  name = "Kevin Wang (王永)"
+  bio = "写点代码"
+  job = "software developer"
+  location = "中国"
   # Your Gravatar email. Overwrite `author.picture` everywhere in the blog
-  gravatarEmail = "thibaud.lepretre@gmail.com"
+  gravatarEmail = "kevinwang930@hotmail.com"
   # Your profile picture
   # Overwritten by your gravatar image if `author.gravatarEmail` is filled
   picture = "https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"
@@ -102,13 +102,7 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   identifier = "github"
   name = "GitHub"
   pre = "<i class=\"sidebar-button-icon fab fa-lg fa-github\" aria-hidden=\"true\"></i>"
-  url = "https://github.com/kakawait"
-[[menu.links]]
-  weight = 2
-  identifier = "stackoverflow"
-  name = "Stack Overflow"
-  pre = "<i class=\"sidebar-button-icon fab fa-lg fa-stack-overflow\" aria-hidden=\"true\"></i>"
-  url = "https://stackoverflow.com/users/636472/kakawait"
+  url = "https://github.com/kevinwang930"
 
 [[menu.misc]]
   weight = 1
@@ -388,4 +382,4 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   # --------------------
   # Customize copyright value "© 2017 <CUSTOMIZATION>. All Rights Reserved"
   #  [params.footer]
-  #    copyright = "<a href=\"https://github.com/kakawait\">kakawait</a>"
+  #    copyright = "<a href=\"https://github.com/kevinwang930\">kevinwang930</a>"
