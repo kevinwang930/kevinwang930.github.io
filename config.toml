@@ -22,6 +22,11 @@ disqusShortname = "hugo-tranquilpeak-theme"
 paginate = 7
 canonifyurls = true
 
+[module]
+
+[[module.imports]]
+path = "github.com/kakawait/hugo-tranquilpeak-theme"
+
 [permalinks]
   posts = "/:year/:month/:slug/"
 
