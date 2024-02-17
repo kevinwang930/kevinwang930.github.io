@@ -85,6 +85,11 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   pre = "<i class=\"sidebar-button-icon fas fa-lg fa-tags\" aria-hidden=\"true\"></i>"
   url = "/tags"
 [[menu.main]]
+  identifier = "email"
+  name = "Email"
+  url = "mailto:kevinwang930@hotmail.com"
+  weight = 4
+[[menu.main]]
   weight = 4
   identifier = "archives"
   name = "Archives"
