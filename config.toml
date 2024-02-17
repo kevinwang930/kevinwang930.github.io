@@ -52,14 +52,15 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   name = "Kevin Wang (王永)"
   bio = "写点代码"
   job = "software developer"
-  location = "中国"
+  location = "Asia"
+  email = "kevinwang930@hotmail.com"
   # Your Gravatar email. Overwrite `author.picture` everywhere in the blog
   gravatarEmail = "kevinwang930@hotmail.com"
   # Your profile picture
   # Overwritten by your gravatar image if `author.gravatarEmail` is filled
   picture = "https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"
   # Your Twitter username without the @. E.g : thibaudlepretre
-  # twitter = "thibaudlepretre"
+  twitter = "kevinwang930"
   # Your google plus profile id. E.g : +ThibaudLepretre or 114625208755123718311
   # googlePlus = "+ThibaudLepretre"
 
@@ -104,12 +105,6 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   pre = "<i class=\"sidebar-button-icon fab fa-lg fa-github\" aria-hidden=\"true\"></i>"
   url = "https://github.com/kevinwang930"
 
-[[menu.misc]]
-  weight = 1
-  identifier = "rss"
-  name = "RSS"
-  pre = "<i class=\"sidebar-button-icon fas fa-lg fa-rss\" aria-hidden=\"true\"></i>"
-  url = "/index.xml"
 
 # -------------
 # Customization
@@ -118,7 +113,7 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   # -----------
   # Description
   # -----------
-  description = "Hugo tranquilpeak theme demo"
+  description = "kevin wang's blog"
 
   # ------------------
   # Syntax highlighter
