@@ -3,6 +3,7 @@ title: "Spring boot 启动流程"
 date: 2024-01-09T23:29:20+08:00
 tags: ["spring"]
 draft: false
+mermaid: true
 ---
 
 
