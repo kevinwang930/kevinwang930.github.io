@@ -86,24 +86,24 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   url = "/tags"
 [[menu.main]]
   identifier = "email"
-  name = "Email"
+  name = "Email:kevinwang930@hotmail.com"
   url = "mailto:kevinwang930@hotmail.com"
   weight = 4
 [[menu.main]]
-  weight = 4
+  weight = 5
   identifier = "archives"
   name = "Archives"
   pre = "<i class=\"sidebar-button-icon fas fa-lg fa-archive\" aria-hidden=\"true\"></i>"
   url = "/archives"
 [[menu.main]]
-  weight = 5
+  weight = 6
   identifier = "about"
   name = "About"
   pre = "<i class=\"sidebar-button-icon fas fa-lg fa-question\" aria-hidden=\"true\"></i>"
   url = "/#about"
 
 [[menu.links]]
-  weight = 1
+  weight = 7
   identifier = "github"
   name = "GitHub"
   pre = "<i class=\"sidebar-button-icon fab fa-lg fa-github\" aria-hidden=\"true\"></i>"
