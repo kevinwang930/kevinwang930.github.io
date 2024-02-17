@@ -50,7 +50,7 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
 # ------
 [author]
   name = "Kevin Wang (王永)"
-  bio = "写点代码"
+  bio = "Email: kevinwang930@hotmail.com"
   job = "software developer"
   location = "Asia"
   # Your Gravatar email. Overwrite `author.picture` everywhere in the blog
@@ -104,11 +104,6 @@ path = "github.com/kakawait/hugo-tranquilpeak-theme"
   name = "GitHub"
   pre = "<i class=\"sidebar-button-icon fab fa-lg fa-github\" aria-hidden=\"true\"></i>"
   url = "https://github.com/kevinwang930"
-[[menu.main]]
-  identifier = "email"
-  name = "Email:kevinwang930@hotmail.com"
-  url = "mailto:kevinwang930@hotmail.com"
-  weight = 7
 
 # -------------
 # Customization
