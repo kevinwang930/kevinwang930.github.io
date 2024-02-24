@@ -26,8 +26,3 @@ interface ConfigurableApplicationContext {
 SpringApplication --> ConfigurableApplicationContext:create
 
 ```
-
-```mermaid
-flowchart 
-a --> b 
-```
