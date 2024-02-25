@@ -1,5 +1,5 @@
 ---
-title: "java数据结构"
+title: "java collections internals"
 date: 2024-02-24T19:16:25+08:00
 categories:
 - java
@@ -12,7 +12,7 @@ tags:
 
 <!--more-->
 
-# 1. CollectionsFramework concept
+# 1. Collections
 
  A collection is an object that represents a group of objects (such as the classic Vector class). A collections framework is a unified architecture for representing and manipulating collections, enabling collections to be manipulated independently of implementation details.
 
@@ -168,8 +168,8 @@ tags:
     ```
 
 
-
-## 1.3 concurrent collection interfaces
+# 1. concurrent collection
+## 1.1 concurrent collection interfaces
 
 ```
 BlockingQueue
@@ -179,12 +179,32 @@ ConcurrentMap
 ConcurrentNavigableMap
 ```
 
-## 1.4 concurrent collection implementations
-```
-1. LinkedBlockingQueue
+## 1.2 concurrent collection implementations
 
-ArrayBlockingQueue
-PriorityBlockingQueue
+### 1.2.1 BlockingQueue
+使用reentrantLock + condition 
+1. LinkedBlockingQueue
+    ```plantuml
+    class LinkedBlockingQueue {
+        private final int capacity
+    private final AtomicInteger count = new AtomicInteger();
+    transient Node<E> head;
+    private transient Node<E> last;
+    private final ReentrantLock takeLock = new ReentrantLock();
+    private final Condition notEmpty = takeLock.newCondition();
+    private final ReentrantLock putLock = new ReentrantLock();
+    private final Condition notFull = putLock.newCondition();
+    }
+    class Node<E> {
+        E item;
+        Node<E> next;
+    }
+    LinkedBlockingQueue *-- Node
+    ```
+2. ArrayBlockingQueue
+   实现方式与LinkeBlockingQueue类似，区别采用数组存放元素
+3. PriorityBlockingQueue
+   元素存储在内部数组中，采用 balancedBinaryHeap 实现排序
 DelayQueue
 SynchronousQueue
 LinkedBlockingDeque
