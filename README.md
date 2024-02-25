@@ -6,5 +6,5 @@ hugo server
 
 ## 添加blog
 ```
-hugo new content post/my-first-post.md
+hugo new post/my-first-post.md
 ```

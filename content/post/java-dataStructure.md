@@ -43,34 +43,7 @@ tags:
 | `Deque`   |                                                         | <tt>ArrayDeque</tt> |                  | <tt>LinkedList</tt> |                          |
 | `Map`     | <tt>HashMap</tt> |                                                               | <tt>TreeMap</tt> |                                                               | <tt>LinkedHashMap</tt>   |
 
-## 1.3 concurrent collection interfaces
 
-```
-BlockingQueue
-TransferQueue
-BlockingDeque
-ConcurrentMap
-ConcurrentNavigableMap
-```
-
-## 1.4 concurrent collection implementations
-```
-LinkedBlockingQueue
-ArrayBlockingQueue
-PriorityBlockingQueue
-DelayQueue
-SynchronousQueue
-LinkedBlockingDeque
-LinkedTransferQueue
-CopyOnWriteArrayList
-CopyOnWriteArraySet
-ConcurrentSkipListSet
-ConcurrentHashMap
-ConcurrentSkipListMap
-```
-
-
-# 2. Implementations
 
 1. ArrayList
     ```plantuml
@@ -162,6 +135,13 @@ ConcurrentSkipListMap
         V value;
         Node<K,V> next;
     } 
+    class TreeNode<K,V> {
+        TreeNode<K,V> parent;  // red-black tree links
+        TreeNode<K,V> left;
+        TreeNode<K,V> right;
+        TreeNode<K,V> prev;    // needed to unlink next upon deletion
+        boolean red;
+    }
 
    class LinkedHashMap<K,V> extends HashMap {
     transient LinkedHashMap.Entry<K,V> head
@@ -174,5 +154,47 @@ ConcurrentSkipListMap
         Entry<K,V> after
     }
     HashMap *-right- Node
+    HashMap *-down-- TreeNode
     LinkedHashMap *-right- Entry
+    Entry <|--TreeNode
    ```
+7. TreeSet
+    ```plantuml
+    title: tree set backed by treeMap
+    class TreeSet {
+        private transient NavigableMap<E,Object> m
+        private static final Object PRESENT = new Object()
+    }
+    ```
+
+
+
+## 1.3 concurrent collection interfaces
+
+```
+BlockingQueue
+TransferQueue
+BlockingDeque
+ConcurrentMap
+ConcurrentNavigableMap
+```
+
+## 1.4 concurrent collection implementations
+```
+1. LinkedBlockingQueue
+
+ArrayBlockingQueue
+PriorityBlockingQueue
+DelayQueue
+SynchronousQueue
+LinkedBlockingDeque
+LinkedTransferQueue
+CopyOnWriteArrayList
+CopyOnWriteArraySet
+ConcurrentSkipListSet
+ConcurrentHashMap
+ConcurrentSkipListMap
+```
+
+
+# 2. Red black tree
