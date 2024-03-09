@@ -36,6 +36,67 @@ tags:
     java.util.concurrent.ConcurrentMap
     java.util.concurrent.ConcurrentNavigableMap
     ```
+
+```plantuml
+interface Collection<E> {
+    int size()
+    boolean isEmpty()
+    contains()
+    Iterator<E> iterator()
+    T[] toArray(T[] a)
+    boolean add(E e)
+    boolean remove(Object o)
+    default boolean removeIf(Predicate<? super E> filter)
+    void clear()
+    default Spliterator<E> spliterator()
+    default Stream<E> stream()
+}
+interface SequencedCollection<E> extends Collection {
+    void addFirst(E e)
+    void addLast(E e)
+    E getFirst()
+    E getLast()
+    E removeFirst()
+    E removeLast()
+
+}
+interface List<E> extends SequencedCollection {
+    void add(int index, E element)
+    E get(int index)
+    E set(int index, E element)
+    E remove(int index)
+    int indexOf(Object o)
+    int lastIndexOf(Object o)
+    ListIterator<E> listIterator(int index)
+    List<E> subList(int fromIndex, int toIndex)
+    static <E> List<E> of(E e)
+}
+interface Set<E> extends Collection {
+    static <E> Set<E> of(E... elements)
+}
+interface SequencedSet<E> extends SequencedCollection, Set {
+    SequencedSet<E> reversed()
+}
+interface SortedSet<E> extends Set, SequencedSet {
+    E first()
+    E last()
+    SortedSet<E> subSet(E fromElement, E toElement)
+}
+interface Queue<E> extends Collection {
+    boolean offer(E e)
+    E poll()
+    E element()
+    E peek()
+}
+interface Deque<E> extends Queue, SequencedCollection {
+    void push(E e)
+    E pop()
+    E pollLast()
+    E pollFirst()
+    E peekFirst()
+    E peekLast()
+}
+```
 ## 1.2 Collection implementations
 | Interface | Hash Table                                              | Resizable                                                     | Balanced Tree    | Linked List                                                   | Hash Table + Linked List |
 | :-------- | :------------------------------------------------------ | :------------------------------------------------------------ | :--------------- | :------------------------------------------------------------ | :----------------------- |
@@ -214,7 +275,8 @@ CopyOnWriteArraySet
 ConcurrentSkipListSet
 ConcurrentHashMap
 ConcurrentSkipListMap
-```
+
 
 
 # 2. Red black tree
+

@@ -49,10 +49,33 @@ C --> F
 
 ```
 
+
+### 1.1.2 Binary Search Tree
+BST, or binary sorted tree
+1. binary tree
+2. key of each node is greater than the keys of left subtree
+3. key of each node is smaller than the keys of right subtree
+
+### 1.1.3 Balanced Search Tree
+1. Binary Search Tree
+2. for height balanced tree the height of n items is guaranteed to be `o(logn)`
+
+
+# 1.2 Red Black Tree
+1. binary search tree
+2. every node is either red or black
+3. all NIL nodes are considered black
+4. A red node does not have a red child
+5. Every path from a given node to any of its descendant NIL nodes goes through same number of black nodes
+6. if a node N has exactly one child, it must be a red child, because if it were black, its NIL descendants would sit at a different black depth than N's NIL child. violation 5
+   
+红黑书作为二叉搜索树，使用旋转保持树的平衡。
+
+
 # 2. Tree based data Structures
 
 <!--more-->
 ## 2.1 Balanced Binary Heap
 Based on completed binary tree, usually backed by array, used in PriorityBlockingQueue
-# 2. Red Black Tree
+
 
