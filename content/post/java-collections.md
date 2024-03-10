@@ -38,6 +38,7 @@ tags:
     ```
 
 ```plantuml
+title:collection
 interface Collection<E> {
     int size()
     boolean isEmpty()
@@ -95,7 +96,41 @@ interface Deque<E> extends Queue, SequencedCollection {
     E pollFirst()
     E peekFirst()
     E peekLast()
+    boolean offerFirst()
+    boolean offerLast()
 }
+```
+
+```plantuml
+title: map
+interface Map<K, V> {
+    int size()
+    boolean isEmpty()
+    boolean containsKey()
+    boolean containsValue()
+    v get(Object key)
+    v put(k key, v value)
+    V remove(Object key)
+    void clear()
+    void putAll(Map<? extends k, ? extends v> m)
+    Set<K> keySet()
+    Collection<V> values()
+    Set<Map.Entry<K, V>> entrySet()
+    default void forEach(BiConsumer<? super K, ? super V> action)
+    default void replaceAll(BiFunction<? super K, ? super V, ? extends V> function)
+    default V putIfAbsent(K key, V value)
+    default boolean remove(Object key, Object value)
+    default boolean replace(K key, V oldValue, V newValue)
+    static <K, V> Map<K, V> of(K k1, V v1)
+}
+interface Entry<K, V>  {
+    K getKey()
+    V getValue()
+    V setValue(V value)
+    boolean equals(Object o)
+    
+}
+Map o-- Entry
 ```
 ## 1.2 Collection implementations
 | Interface | Hash Table                                              | Resizable                                                     | Balanced Tree    | Linked List                                                   | Hash Table + Linked List |
@@ -277,6 +312,4 @@ ConcurrentHashMap
 ConcurrentSkipListMap
 
 
-
-# 2. Red black tree
 

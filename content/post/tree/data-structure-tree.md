@@ -61,7 +61,14 @@ BST, or binary sorted tree
 2. for height balanced tree the height of n items is guaranteed to be `o(logn)`
 
 
-# 1.2 Red Black Tree
+## 1.2 Balanced Binary Heap
+Based on completed binary tree, usually backed by array, used in PriorityBlockingQueue
+for index K 
+1. parent index `(k-1)>>>1`
+2. left child `(k<<<1)+1`
+3. right child `left+1`
+
+## 1.3 Red Black Tree
 1. binary search tree
 2. every node is either red or black
 3. all NIL nodes are considered black
@@ -69,13 +76,20 @@ BST, or binary sorted tree
 5. Every path from a given node to any of its descendant NIL nodes goes through same number of black nodes
 6. if a node N has exactly one child, it must be a red child, because if it were black, its NIL descendants would sit at a different black depth than N's NIL child. violation 5
    
-红黑书作为二叉搜索树，使用旋转保持树的平衡。
+red black tree can be seen as the binary representation of 2-3-4 tree
+![alt text](images/image.png)
+
+Insertion types：
+1. no rotation
+   ![alt text](image.png)
+2. left or right rotation, grandpa and parent is red,uncle is black. new node same direction with parent.
+   ![alt text](image-1.png)
+   ![alt text](image-2.png)
+3. double rotation new node is between grandpa and parent
+   ![alt text](image-3.png)
 
 
-# 2. Tree based data Structures
 
-<!--more-->
-## 2.1 Balanced Binary Heap
-Based on completed binary tree, usually backed by array, used in PriorityBlockingQueue
+
 
 
