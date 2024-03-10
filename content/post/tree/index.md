@@ -12,12 +12,12 @@ tags:
 
 
 
-# 1.  Tree
 
-## 1.1 Binary tree 
+
+# 1. Binary tree 
 each node has at most 2 child nodes called left node and right node.
 
-### 1.1.1 Complete Binary Tree
+## 1.1 Complete Binary Tree
 definitions:
    1. binary tree
    2. every level is completely filled except the last level
@@ -49,26 +49,27 @@ C --> F
 
 ```
 
-
-### 1.1.2 Binary Search Tree
-BST, or binary sorted tree
-1. binary tree
-2. key of each node is greater than the keys of left subtree
-3. key of each node is smaller than the keys of right subtree
-
-### 1.1.3 Balanced Search Tree
-1. Binary Search Tree
-2. for height balanced tree the height of n items is guaranteed to be `o(logn)`
-
-
-## 1.2 Balanced Binary Heap
+### 1.1.1 Balanced Binary Heap
 Based on completed binary tree, usually backed by array, used in PriorityBlockingQueue
 for index K 
 1. parent index `(k-1)>>>1`
 2. left child `(k<<<1)+1`
 3. right child `left+1`
 
-## 1.3 Red Black Tree
+## 1.2 Binary Search Tree
+BST, or binary sorted tree
+1. binary tree
+2. key of each node is greater than the keys of left subtree
+3. key of each node is smaller than the keys of right subtree
+
+### 1.2.1 Balanced Search Tree
+1. Binary Search Tree
+2. for height balanced tree the height of n items is guaranteed to be `o(logn)`
+
+
+
+
+## 1.2.2 Red Black Tree
 1. binary search tree
 2. every node is either red or black
 3. all NIL nodes are considered black
@@ -77,16 +78,16 @@ for index K
 6. if a node N has exactly one child, it must be a red child, because if it were black, its NIL descendants would sit at a different black depth than N's NIL child. violation 5
    
 red black tree can be seen as the binary representation of 2-3-4 tree
-![alt text](images/image.png)
+![alt text](images/image4.png)
 
 Insertion types：
 1. no rotation
-   ![alt text](image.png)
+   ![alt text](images/image.png)
 2. left or right rotation, grandpa and parent is red,uncle is black. new node same direction with parent.
-   ![alt text](image-1.png)
-   ![alt text](image-2.png)
+   ![alt text](images/image-1.png)
+   ![alt text](images/image-2.png)
 3. double rotation new node is between grandpa and parent
-   ![alt text](image-3.png)
+   ![alt text](images/image-3.png)
 
 
 
