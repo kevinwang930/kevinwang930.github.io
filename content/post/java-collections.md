@@ -277,7 +277,7 @@ ConcurrentNavigableMap
 
 ## 1.2 concurrent collection implementations
 
-### 1.2.1 BlockingQueue
+###  BlockingQueue
 使用reentrantLock + condition 
 1. LinkedBlockingQueue
     ```plantuml
@@ -298,9 +298,10 @@ ConcurrentNavigableMap
     LinkedBlockingQueue *-- Node
     ```
 2. ArrayBlockingQueue
-   实现方式与LinkeBlockingQueue类似，区别采用数组存放元素
+   实现方式与LinkedBlockingQueue类似，区别采用数组存放元素
 3. PriorityBlockingQueue
    元素存储在内部数组中，采用 balancedBinaryHeap 实现排序
+### other concurrent collections
 DelayQueue
 SynchronousQueue
 LinkedBlockingDeque

@@ -70,6 +70,9 @@ BST, or binary sorted tree
 
 
 ## 1.2.2 Red Black Tree
+
+
+definition:
 1. binary search tree
 2. every node is either red or black
 3. all NIL nodes are considered black
@@ -88,7 +91,7 @@ Insertion types：
    ![alt text](images/image-2.png)
 3. double rotation new node is between grandpa and parent
    ![alt text](images/image-3.png)
-
+[资料参考普度大学cs251](https://www.cs.purdue.edu/homes/ayg/CS251/slides/chap13b.pdf)
 
 
 
