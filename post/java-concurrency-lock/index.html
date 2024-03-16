@@ -12,7 +12,58 @@ The concurrency utilities packages provide a powerful, extensible framework of h
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Concurrency in Java</h1><div class="postShorten-meta post-meta"><time datetime=2024-02-25T01:57:48+08:00>February 25, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/concurrency>concurrency</a></div></div><div class="post-content markdown"><div class=main-content-wrap><h1 id=concurrency-utilities-in-java>Concurrency Utilities in Java</h1><p>The concurrency utilities packages provide a powerful, extensible framework of high-performance threading utilities such as thread pools and blocking queues. This package frees the programmer from the need to craft these utilities by hand, in much the same manner the collections framework did for data structures. Additionally, these packages provide low-level primitives for advanced concurrent programming.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
+<a class=category-link href=https://kevinwang930.github.io/categories/concurrency>concurrency</a></div></div><div class="post-content markdown"><div class=main-content-wrap><h1 id=concurrency-utilities-in-java>Concurrency Utilities in Java</h1><p>The concurrency utilities packages provide a powerful, extensible framework of high-performance threading utilities such as thread pools and blocking queues. This package frees the programmer from the need to craft these utilities by hand, in much the same manner the collections framework did for data structures. Additionally, these packages provide low-level primitives for advanced concurrent programming.</p><h2 id=task-scheduling>Task Scheduling</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Executor {
+    void execute(Runnable command)
+}
+interface ExecutorService extends Executor, AutoCloseable {
+    void shutdown()
+    List&lt;Runnable&gt; shutdownNow()
+    boolean isShutdown()
+    boolean isTerminated()
+    boolean awaitTermination(long timeout, TimeUnit unit)
+    &lt;T&gt; Future&lt;T&gt; submit(Callable&lt;T&gt; task)
+    &lt;T&gt; Future&lt;T&gt; submit(Runnable task, T result)
+    Future&lt;?&gt; submit(Runnable task)
+    &lt;T&gt; List&lt;Future&lt;T&gt;&gt; invokeAll(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks)
+    &lt;T&gt; List&lt;Future&lt;T&gt;&gt; invokeAll(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks,long timeout, TimeUnit unit)
+    &lt;T&gt; T invokeAny(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks)
+        throws InterruptedException, ExecutionException
+    default void close()
+}
+abstract class AbstractExecutorService implements ExecutorService
+
+interface Future&lt;V&gt; {
+    boolean cancel(boolean mayInterruptIfRunning)
+    boolean isCancelled()
+    boolean isDone()
+    V get() 
+    V get(long timeout, TimeUnit unit)
+    default V resultNow() 
+    default Throwable exceptionNow()
+    default State state()
+}
+interface RunnableFuture&lt;V&gt; extends Runnable, Future {
+    void run()
+}
+
+class ThreadPoolExecutor extends AbstractExecutorService {
+    AtomicInteger ctl
+    BlockingQueue&lt;Runnable&gt; workQueue
+    ReentrantLock mainLock
+    HashSet&lt;Worker&gt; workers
+    SharedThreadContainer container
+    int largestPoolSize
+    long completedTaskCount
+    volatile ThreadFactory threadFactory
+    volatile RejectedExecutionHandler handler
+    volatile long keepAliveTime
+    volatile boolean allowCoreThreadTimeOut
+    volatile int corePoolSize
+    volatile int maximumPoolSize
+    Condition termination = mainLock.newCondition
+
+}
+</code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/ocncurrency/>ocncurrency</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/lock/>lock</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/tree/ data-tooltip=数据结构-树 aria-label="NEXT: 数据结构-树"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java-collections/ data-tooltip="java collections internals" aria-label="PREVIOUS: java collections internals"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
