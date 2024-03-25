@@ -14,8 +14,15 @@ keywords:
 <!--more-->
 
 
-# 概述
-bash用于linux系统和mac系统中
-bash启动可分为
+# bash initilization
 
+for login shell profile and rc config will be loaded, non-login shell will only load rc file.
+
+## system
+1. login shell will read `/etc/profile`
+2. `/etc/bashrc` specific for bash
+
+## user
+1. ~/.bash_profile
+2. ~/.bashrc
 
