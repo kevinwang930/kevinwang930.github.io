@@ -277,6 +277,35 @@ ConcurrentNavigableMap
 
 ## 1.2 concurrent collection implementations
 
+### ConcurrentHashMap
+
+`ConcurrentHashMap`使用java类`Unsafe`提供的原子操作和`Synchronized`对象锁保证线程安全。
+
+map val节点 使用`volatile`保证修改内容的可见性
+
+```plantuml
+class ConcurrentHashMap {
+    transient volatile Node<K,V>[] table
+    transient volatile Node<K,V>[] nextTable
+    transient volatile long baseCount
+    transient volatile int sizeCtl
+    transient volatile int transferIndex
+    transient volatile int cellsBusy
+    transient volatile CounterCell[] counterCells
+    transient KeySetView<K,V> keySet
+    transient ValuesView<K,V> values
+    transient EntrySetView<K,V> entrySet
+}
+
+class Node<K,V> {
+        final int hash;
+        final K key;
+        volatile V value;
+        volatile Node<K,V> next;
+    } 
+ConcurrentHashMap o-- Node
+```
+
 ###  BlockingQueue
 使用reentrantLock + condition 
 1. LinkedBlockingQueue
@@ -301,13 +330,36 @@ ConcurrentNavigableMap
    实现方式与LinkedBlockingQueue类似，区别采用数组存放元素
 3. PriorityBlockingQueue
    元素存储在内部数组中，采用 balancedBinaryHeap 实现排序
+
+
+### CopyOnWriteArrayList/CopyOnWriteArraySet
+
+CopyOnWriteArrayList A thread-safe variant of ArrayList in which all mutative operations (add, set, and so on) are implemented by making a fresh copy of the underlying array.
+
+CopyOnWriteArraySet use CopyOnWriteArrayList internally
+
+```plantuml
+class CopyOnWriteArrayList {
+    transient Object lock = new Object()
+    transient volatile Object[] array
+    Object[] getArray()
+    void setArray(Object[] a)
+    boolean addIfAbsent(E e)
+}
+
+class CopyOnWriteArraySet<E> {
+    final CopyOnWriteArrayList<E> al
+
+}
+
+CopyOnWriteArraySet *-- CopyOnWriteArrayList
+```
+
 ### other concurrent collections
 DelayQueue
 SynchronousQueue
 LinkedBlockingDeque
 LinkedTransferQueue
-CopyOnWriteArrayList
-CopyOnWriteArraySet
 ConcurrentSkipListSet
 ConcurrentHashMap
 ConcurrentSkipListMap
