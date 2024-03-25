@@ -218,7 +218,27 @@ TransferQueue
 BlockingDeque
 ConcurrentMap
 ConcurrentNavigableMap
-</code></pre><h2 id=12-concurrent-collection-implementations>1.2 concurrent collection implementations</h2><h3 id=blockingqueue>BlockingQueue</h3><p>使用reentrantLock + condition</p><ol><li>LinkedBlockingQueue<pre tabindex=0><code class=language-plantuml data-lang=plantuml>class LinkedBlockingQueue {
+</code></pre><h2 id=12-concurrent-collection-implementations>1.2 concurrent collection implementations</h2><h3 id=concurrenthashmap>ConcurrentHashMap</h3><p><code>ConcurrentHashMap</code>使用java类<code>Unsafe</code>提供的原子操作和<code>Synchronized</code>对象锁保证线程安全。</p><p>map val节点 使用<code>volatile</code>保证修改内容的可见性</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class ConcurrentHashMap {
+    transient volatile Node&lt;K,V&gt;[] table
+    transient volatile Node&lt;K,V&gt;[] nextTable
+    transient volatile long baseCount
+    transient volatile int sizeCtl
+    transient volatile int transferIndex
+    transient volatile int cellsBusy
+    transient volatile CounterCell[] counterCells
+    transient KeySetView&lt;K,V&gt; keySet
+    transient ValuesView&lt;K,V&gt; values
+    transient EntrySetView&lt;K,V&gt; entrySet
+}
+
+class Node&lt;K,V&gt; {
+        final int hash;
+        final K key;
+        volatile V value;
+        volatile Node&lt;K,V&gt; next;
+    } 
+ConcurrentHashMap o-- Node
+</code></pre><h3 id=blockingqueue>BlockingQueue</h3><p>使用reentrantLock + condition</p><ol><li>LinkedBlockingQueue<pre tabindex=0><code class=language-plantuml data-lang=plantuml>class LinkedBlockingQueue {
     private final int capacity
 private final AtomicInteger count = new AtomicInteger();
 transient Node&lt;E&gt; head;
@@ -235,12 +255,24 @@ class Node&lt;E&gt; {
 LinkedBlockingQueue *-- Node
 </code></pre></li><li>ArrayBlockingQueue
 实现方式与LinkedBlockingQueue类似，区别采用数组存放元素</li><li>PriorityBlockingQueue
-元素存储在内部数组中，采用 balancedBinaryHeap 实现排序</li></ol><h3 id=other-concurrent-collections>other concurrent collections</h3><p>DelayQueue
+元素存储在内部数组中，采用 balancedBinaryHeap 实现排序</li></ol><h3 id=copyonwritearraylistcopyonwritearrayset>CopyOnWriteArrayList/CopyOnWriteArraySet</h3><p>CopyOnWriteArrayList A thread-safe variant of ArrayList in which all mutative operations (add, set, and so on) are implemented by making a fresh copy of the underlying array.</p><p>CopyOnWriteArraySet use CopyOnWriteArrayList internally</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class CopyOnWriteArrayList {
+    transient Object lock = new Object()
+    transient volatile Object[] array
+    Object[] getArray()
+    void setArray(Object[] a)
+    boolean addIfAbsent(E e)
+}
+
+class CopyOnWriteArraySet&lt;E&gt; {
+    final CopyOnWriteArrayList&lt;E&gt; al
+
+}
+
+CopyOnWriteArraySet *-- CopyOnWriteArrayList
+</code></pre><h3 id=other-concurrent-collections>other concurrent collections</h3><p>DelayQueue
 SynchronousQueue
 LinkedBlockingDeque
 LinkedTransferQueue
-CopyOnWriteArrayList
-CopyOnWriteArraySet
 ConcurrentSkipListSet
 ConcurrentHashMap
 ConcurrentSkipListMap</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
