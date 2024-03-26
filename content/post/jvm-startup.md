@@ -12,6 +12,11 @@ keywords:
 
 本文记录jvm启动流程
 <!--more-->
+
+
+# 启动概述
+
+
 ```plantuml
 main.c-->main.c:main(int argc, char **argv)
 main.c-->java.c:JLI_Launch(...)
@@ -31,5 +36,11 @@ JNIEnv-->jni.cpp:jni_GetStaticMethodID
 java.c-->JNIEnv:CallStaticVoidMethod
 JNIEnv-->jni.cpp:jni_CallStaticVoidMethod
 jni.cpp-->jni.cpp:jni_invoke_static
+jni.cpp-->javaCalls.cpp:call
+javaCalls.cpp-->javaCalls.cpp:call_helper
 
 ```
+
+# jvm调用java方法
+
+jvm 由 c++ 编写， 调用java方法时借用函数指针的方式，调用interpreter对应函数入口
