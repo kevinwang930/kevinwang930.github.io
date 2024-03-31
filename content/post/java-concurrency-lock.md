@@ -6,7 +6,7 @@ categories:
 - concurrency
 tags:
 - java
-- ocncurrency
+- concurrency
 - lock
 
 #thumbnailImage: //example.com/image.jpg
@@ -73,3 +73,9 @@ class ThreadPoolExecutor extends AbstractExecutorService {
 }
 ```
 
+
+## Lock
+
+### CountdownLatch
+
+used in tomcat endpoint to control connection size.
