@@ -1,13 +1,13 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang (王永)","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"本文记录spring和springBoot 内部实现\n1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.\nprofile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active\nproperties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on","url":"https:\/\/kevinwang930.github.io\/post\/spring-boot\/","keywords":"[]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.124.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang (王永)"><meta name=keywords content><meta name=description content="本文记录spring和springBoot 内部实现
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang (王永)","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"本文记录springBoot 内部实现\n1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.\nprofile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active\nproperties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on","url":"https:\/\/kevinwang930.github.io\/post\/spring-boot\/","keywords":"[]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.124.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang (王永)"><meta name=keywords content><meta name=description content="本文记录springBoot 内部实现
 1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.
 profile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active
-properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta property="og:description" content="本文记录spring和springBoot 内部实现
+properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta property="og:description" content="本文记录springBoot 内部实现
 1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.
 profile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active
-properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta property="og:type" content="article"><meta property="og:title" content="Spring internals"><meta name=twitter:title content="Spring internals"><meta property="og:url" content="https://kevinwang930.github.io/post/spring-boot/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/spring-boot/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录spring和springBoot 内部实现
+properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta property="og:type" content="article"><meta property="og:title" content="Spring internals"><meta name=twitter:title content="Spring internals"><meta property="og:url" content="https://kevinwang930.github.io/post/spring-boot/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/spring-boot/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录springBoot 内部实现
 1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.
 profile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active
-properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta name=twitter:description content="本文记录spring和springBoot 内部实现
+properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta name=twitter:description content="本文记录springBoot 内部实现
 1. Environment abstraction Environment Interface is an abstraction in container that models 2 key aspects of application environment.
 profile A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active
 properties Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-01-09T23:29:20"><meta property="article:modified_time" content="2024-01-09T23:29:20"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="spring"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Spring internals</title>
@@ -20,7 +20,7 @@ properties Properties play an important role in almost all applications and may 
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring internals</h1><div class="postShorten-meta post-meta"><time datetime=2024-01-09T23:29:20+08:00>January 9, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录spring和springBoot 内部实现</p><h1 id=1-environment-abstraction>1. Environment abstraction</h1><p>Environment Interface is an abstraction in container that models 2 key aspects of application environment.</p><h2 id=profile>profile</h2><p>A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active</p><h2 id=properties>properties</h2><p>Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface PropertyResolver {
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录springBoot 内部实现</p><h1 id=1-environment-abstraction>1. Environment abstraction</h1><p>Environment Interface is an abstraction in container that models 2 key aspects of application environment.</p><h2 id=profile>profile</h2><p>A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active</p><h2 id=properties>properties</h2><p>Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface PropertyResolver {
 + boolean containsProperty(String)
 + String getProperty(String)
 + String getProperty(String,String)
@@ -75,28 +75,59 @@ package Spring {
 
     interface BeanFactory {
         + {static} String FACTORY_BEAN_PREFIX
-        + Object getBean(String)
-        + T getBean(String,Class&lt;T&gt;)
-        + Object getBean(String,Object)
-        + T getBean(Class&lt;T&gt;)
-        + T getBean(Class&lt;T&gt;,Object)
+        + T getBean()
         + ObjectProvider&lt;T&gt; getBeanProvider(Class&lt;T&gt;)
-        + ObjectProvider&lt;T&gt; getBeanProvider(ResolvableType)
         + boolean containsBean(String)
         + boolean isSingleton(String)
         + boolean isPrototype(String)
-        + boolean isTypeMatch(String,ResolvableType)
         + boolean isTypeMatch(String,Class&lt;?&gt;)
         + Class&lt;?&gt; getType(String)
-        + Class&lt;?&gt; getType(String,boolean)
         + String[] getAliases(String)
+    }
+
+    interface EnvironmentCapable {
+        Environment getEnvironment()
     }
     interface HierarchicalBeanFactory extends BeanFactory
 interface ListableBeanFactory extends BeanFactory
-interface ApplicationContext extends EnvironmentCapable, ListableBeanFactory, HierarchicalBeanFactory,MessageSource, ApplicationEventPublisher, ResourcePatternResolver
+interface ApplicationContext extends EnvironmentCapable, ListableBeanFactory, HierarchicalBeanFactory,MessageSource, ApplicationEventPublisher, ResourcePatternResolver {
+    ApplicationContext getParent()
+}
 
-interface ConfigurableApplicationContext  {
+interface Lifecycle {
+    void start()
+    void stop()
+    boolean isRunning()
+}
+
+interface ConfigurableApplicationContext extends Lifecycle {
+    void setEnvironment()
     void refresh()
+}
+
+interface WebApplicationContext extends ApplicationContext {
+    ServletContext getServletContext()
+}
+
+interface ConfigurableWebApplicationContext extends WebApplicationContext, ConfigurableApplicationContext {
+    String[] getConfigLocations()
+    void setConfigLocation()
+    void setServletContext()
+}
+
+interface BeanDefinitionRegistry {
+void registerBeanDefinition()
+void removeBeanDefinition() 
+BeanDefinition getBeanDefinition()
+}
+
+abstract class  AbstractApplicationContext {
+    ApplicationContext parent
+    ConfigurableEnvironment environment
+    LifecycleProcessor lifecycleProcessor
+    List&lt;BeanFactoryPostProcessor&gt; beanFactoryPostProcessors
+    abstract void refreshBeanFactory()
+    abstract void closeBeanFactory()
 }
 
 class GenericApplicationContext {
@@ -119,22 +150,12 @@ class GenericApplicationContext {
 + ConfigurableListableBeanFactory getBeanFactory()
 + DefaultListableBeanFactory getDefaultListableBeanFactory()
 + AutowireCapableBeanFactory getAutowireCapableBeanFactory()
-+ void registerBeanDefinition(String,BeanDefinition)
-+ void removeBeanDefinition(String)
-+ BeanDefinition getBeanDefinition(String)
-+ boolean isBeanDefinitionOverridable(String)
-+ boolean isBeanNameInUse(String)
 + void registerAlias(String,String)
 + void removeAlias(String)
 + boolean isAlias(String)
 + void refreshForAotProcessing(RuntimeHints)
 - void preDetermineBeanTypes(RuntimeHints)
 + void registerBean(Class&lt;T&gt;,Object)
-+ void registerBean(String,Class&lt;T&gt;,Object)
-+ void registerBean(Class&lt;T&gt;,BeanDefinitionCustomizer)
-+ void registerBean(String,Class&lt;T&gt;,BeanDefinitionCustomizer)
-+ void registerBean(Class&lt;T&gt;,Supplier&lt;T&gt;,BeanDefinitionCustomizer)
-+ void registerBean(String,Class&lt;T&gt;,Supplier&lt;T&gt;,BeanDefinitionCustomizer)
 }
 
 
@@ -143,9 +164,6 @@ class GenericApplicationContext$ClassDerivedBeanDefinition {
 + RootBeanDefinition cloneBeanDefinition()
 }
 
-abstract class AbstractApplicationContext {
-
-}
 
 
 class GenericWebApplicationContext {
@@ -247,9 +265,9 @@ SpringApplication--&gt; SpringApplication:prepareContext
 SpringApplication--&gt; SpringApplication:refreshContext
 SpringApplication--&gt; SpringApplication:afterRefresh
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java-nio/ data-tooltip="Java Nio" aria-label="NEXT: Java Nio"><i class="fa fa-angle-left"></i>
-<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--disabled"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/tomcat/ data-tooltip aria-label="PREVIOUS: "><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/spring-boot/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/spring-boot/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/spring-boot/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/spring-boot/",this.page.identifier="/post/spring-boot/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="hugo-tranquilpeak-theme",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2024 Kevin Wang (王永). All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior=4><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java-nio/ data-tooltip="Java Nio" aria-label="NEXT: Java Nio"><i class="fa fa-angle-left"></i>
-<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--disabled"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/tomcat/ data-tooltip aria-label="PREVIOUS: "><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/spring-boot/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/spring-boot/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/spring-boot/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fspring-boot%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fspring-boot%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fspring-boot%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>  
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'; 
     mermaid.initialize({ startOnLoad: true });  
