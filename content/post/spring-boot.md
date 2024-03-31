@@ -9,7 +9,7 @@ draft: false
 mermaid: true
 ---
 
-本文记录spring和springBoot 内部实现
+本文记录springBoot 内部实现
 
 # 1. Environment abstraction
 
@@ -83,28 +83,59 @@ package Spring {
 
     interface BeanFactory {
         + {static} String FACTORY_BEAN_PREFIX
-        + Object getBean(String)
-        + T getBean(String,Class<T>)
-        + Object getBean(String,Object)
-        + T getBean(Class<T>)
-        + T getBean(Class<T>,Object)
+        + T getBean()
         + ObjectProvider<T> getBeanProvider(Class<T>)
-        + ObjectProvider<T> getBeanProvider(ResolvableType)
         + boolean containsBean(String)
         + boolean isSingleton(String)
         + boolean isPrototype(String)
-        + boolean isTypeMatch(String,ResolvableType)
         + boolean isTypeMatch(String,Class<?>)
         + Class<?> getType(String)
-        + Class<?> getType(String,boolean)
         + String[] getAliases(String)
+    }
+
+    interface EnvironmentCapable {
+        Environment getEnvironment()
     }
     interface HierarchicalBeanFactory extends BeanFactory
 interface ListableBeanFactory extends BeanFactory
-interface ApplicationContext extends EnvironmentCapable, ListableBeanFactory, HierarchicalBeanFactory,MessageSource, ApplicationEventPublisher, ResourcePatternResolver
+interface ApplicationContext extends EnvironmentCapable, ListableBeanFactory, HierarchicalBeanFactory,MessageSource, ApplicationEventPublisher, ResourcePatternResolver {
+    ApplicationContext getParent()
+}
 
-interface ConfigurableApplicationContext  {
+interface Lifecycle {
+    void start()
+    void stop()
+    boolean isRunning()
+}
+
+interface ConfigurableApplicationContext extends Lifecycle {
+    void setEnvironment()
     void refresh()
+}
+
+interface WebApplicationContext extends ApplicationContext {
+    ServletContext getServletContext()
+}
+
+interface ConfigurableWebApplicationContext extends WebApplicationContext, ConfigurableApplicationContext {
+    String[] getConfigLocations()
+    void setConfigLocation()
+    void setServletContext()
+}
+
+interface BeanDefinitionRegistry {
+void registerBeanDefinition()
+void removeBeanDefinition() 
+BeanDefinition getBeanDefinition()
+}
+
+abstract class  AbstractApplicationContext {
+    ApplicationContext parent
+    ConfigurableEnvironment environment
+    LifecycleProcessor lifecycleProcessor
+    List<BeanFactoryPostProcessor> beanFactoryPostProcessors
+    abstract void refreshBeanFactory()
+    abstract void closeBeanFactory()
 }
 
 class GenericApplicationContext {
@@ -127,22 +158,12 @@ class GenericApplicationContext {
 + ConfigurableListableBeanFactory getBeanFactory()
 + DefaultListableBeanFactory getDefaultListableBeanFactory()
 + AutowireCapableBeanFactory getAutowireCapableBeanFactory()
-+ void registerBeanDefinition(String,BeanDefinition)
-+ void removeBeanDefinition(String)
-+ BeanDefinition getBeanDefinition(String)
-+ boolean isBeanDefinitionOverridable(String)
-+ boolean isBeanNameInUse(String)
 + void registerAlias(String,String)
 + void removeAlias(String)
 + boolean isAlias(String)
 + void refreshForAotProcessing(RuntimeHints)
 - void preDetermineBeanTypes(RuntimeHints)
 + void registerBean(Class<T>,Object)
-+ void registerBean(String,Class<T>,Object)
-+ void registerBean(Class<T>,BeanDefinitionCustomizer)
-+ void registerBean(String,Class<T>,BeanDefinitionCustomizer)
-+ void registerBean(Class<T>,Supplier<T>,BeanDefinitionCustomizer)
-+ void registerBean(String,Class<T>,Supplier<T>,BeanDefinitionCustomizer)
 }
 
 
@@ -151,9 +172,6 @@ class GenericApplicationContext$ClassDerivedBeanDefinition {
 + RootBeanDefinition cloneBeanDefinition()
 }
 
-abstract class AbstractApplicationContext {
-
-}
 
 
 class GenericWebApplicationContext {
