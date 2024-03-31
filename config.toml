@@ -46,7 +46,7 @@ canonifyurls = true
 # Author
 # ------
 [author]
-  name = "Kevin Wang (王永)"
+  name = "Kevin Wang"
   bio = "Email: kevinwang930@hotmail.com"
   job = "software developer"
   location = "Asia"

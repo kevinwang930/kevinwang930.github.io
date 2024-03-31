@@ -1,21 +1,20 @@
 ---
-title: "Spring微服务架构与实现"
-date: 2024-03-27T14:39:29+08:00
+title: "spring ioc - bean container"
+date: 2024-03-31T12:56:25+08:00
 categories:
 - java
 - spring
 tags:
-- java
 - spring
+- ioc
 keywords:
 - spring
-- mvc
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录spring微服务架构与实现细节
+本文记录spring bean 容器的架构与实现细节
 <!--more-->
-Spring web applications built on the Servlet API and deployed to Servlet containers.
 
+Spring web applications built on the Servlet API and deployed to Servlet containers.
 
 # IOC container
 
@@ -55,11 +54,22 @@ In the container, the bean definitions are represented as `BeanDefinition` objec
 7. Initialization method
 8. Destruction method
 
+## BeanFactory
+`BeanFactory` interface for accessing a Spring bean container
+
+`ConfigurableBeanFactory` configuration interface to be implemented by most bean factories, provides bean factory configuration methods.
+1. parent bean factory
+2. bean class loader
+4. bean alias
+5. bean scope
+6. bean register and deletion
+
+
+
 ## ApplicationContext
 
-`BeanFactory` interface for accessing a Spring bean container
 `ApplicationContext` is a sub-interface of `BeanFactory` . it adds:
-1. apo feature
+1. aop feature
 2. resouce handling
 3. event publication
 4. application-layer specific contexts for use in web applications.
@@ -167,6 +177,7 @@ abstract class FactoryBeanRegistrySupport extends DefaultSingletonBeanRegistry
 
 abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport implements ConfigurableBeanFactory {
     List<BeanPostProcessor> beanPostProcessors
+    abstract Object createBean()
 }
 
 abstract class  AbstractApplicationContext {
@@ -229,211 +240,106 @@ DefaultResourceLoader <|-- AbstractApplicationContext
 ```
 
 
-### Bean Instantiation
+### Application context initialization
 1. `ApplicationContext` refresh will create `BeanFactory`
 2. `BeanFactory` will load all beanDefinitions
-3. `BeanFactory` postprocess
+3. BeanFactorypostprocess
+   1. BeanDefinitionRegistryPostProcessor
+      1. spring boot config bean
+      2. mybatis mapperscanner
+   2. BeanFactoryPostProcessor
+      1. configClassEnhancer - proxy to generate bean
 4. init all Singleton Beans
 
 ```plantuml
-ApplicationContext--> ApplicationContext:refresh
-ApplicationContext --> BeanFactory: create
+title : application context initialization
+AbstractApplicationContext--> AbstractApplicationContext:refresh
+AbstractApplicationContext --> BeanFactory: create
 BeanFactory --> BeanFactory:loadBeanDefinitions
-ApplicationContext --> BeanFactory:preparBeanFactory
-ApplicationContext --> PostProcessorRegistrationDelegate:invokeBeanFactoryPostProcessors
+AbstractApplicationContext --> AbstractApplicationContext:prepareBeanFactory
+AbstractApplicationContext --> AbstractApplicationContext:postProcessBeanFactory
+AbstractApplicationContext --> PostProcessorRegistrationDelegate:invokeBeanFactoryPostProcessors
 PostProcessorRegistrationDelegate --> BeanDefinitionRegistryPostProcessor:postProcessBeanDefinitionRegistry
-ApplicationContext --> ApplicationContext:finishBeanFactoryInitialization
+AbstractApplicationContext--> AbstractApplicationContext:registerBeanPostProcessors
+AbstractApplicationContext --> AbstractApplicationContext:finishBeanFactoryInitialization
+AbstractApplicationContext --> BeanFactory:preInstantiateSingletons
 ```
 
 
-# web on servlet
-Servlet-stack web applications built on the servlet API and deployed to Servlet containers
-
-## Tomcat
-tomcat works as a servlet container.
+## bean Initialization
 
 ```plantuml
+DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingletons
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory:getBean
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory: doGetBean
+DefaultListableBeanFactory --> DefaultListableBeanFactory: createBean
+DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeanClass
+alt proxy
+DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeforeInstantiation
+end
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory: doCreateBean
+DefaultListableBeanFactory --> DefaultListableBeanFactory: createBeanInstance
+alt instanceSupplier
+DefaultListableBeanFactory --> DefaultListableBeanFactory: obtainFromSupplier
+end
+DefaultListableBeanFactory --> BeanDefinition: getFactoryMethodName
+alt factoryMethod
+DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateUsingFactoryMethod
+end
+alt resolved
+alt autowireNecesary
+DefaultListableBeanFactory --> DefaultListableBeanFactory: autowireConstructor
+else 
+DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateBean
+end
+end
+DefaultListableBeanFactory --> DefaultListableBeanFactory: determineConstructorsFromBeanPostProcessors
+alt autowiremode
+DefaultListableBeanFactory --> ConstructorResolver: new
+ConstructorResolver --> ConstructorResolver: autowireConstructor
+ConstructorResolver --> ConstructorResolver: instantiate
+ConstructorResolver --> DefaultListableBeanFactory:beanWrapper
+else 
+DefaultListableBeanFactory --> DefaultListableBeanFactory:instantiateBean
+end
+DefaultListableBeanFactory --> DefaultListableBeanFactory:applyMergedBeanDefinitionPostProcessors
+DefaultListableBeanFactory --> DefaultListableBeanFactory:populateBean : properties
+DefaultListableBeanFactory --> DefaultListableBeanFactory:initializeBean
 
 
-    package Tomcat(Server) {
-    
-        
-        component c  [ 
-            listener
-            globl naming resouce
-            jndi
-        ] 
-        component services {
-            component connector
-            component Engine {
-                component Host {
-                    Component Context {
-                        Component Servlet
-                    }
-                }
-            }
-        }
-        
-        c --> services
-    }
-cloud http
-http -right-> services
+
+
+
+
+
+
+
+
+
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory: getSingleton
 ```
 
-## ServletContext
 
-`ServletContext` Defines a set of methods that a servlet uses to communicate with its servlet container
 
-spring uses `ContextLoaderListener` to listen to the initialization of `ServletContext`, then init spring `WebApplicationContext`
+### post processor
 
+Factory hook that allows for custom modification of new bean instances
 ```plantuml
-
-package Tomcat {
-    interface ServletContextListener {
-        + void contextInitialized( sce)
-        + void contextDestroyed( sce)
-    }
-
-    interface ServletContext {
-        + ServletContext getContext(String)
-        + URL getResource(String)
-        + RequestDispatcher getRequestDispatcher(String)
-        + boolean setInitParameter(String,String)
-        + void setAttribute(String,Object)
-        + ServletRegistration.Dynamic addServlet(String,String)
-        + ServletRegistration getServletRegistration(String)
-        + FilterRegistration.Dynamic addFilter(String,Filter)
-        + SessionCookieConfig getSessionCookieConfig()
-        + void addListener(Class<? extends EventListener>)
-        + ClassLoader getClassLoader()
-        + void setSessionTimeout(int)
-    }
-
-    class ApplicationContext implements ServletContext {
-        Map<String,Object> attributes
-
-    }
+interface BeanPostProcessor {
++ Object postProcessBeforeInitialization(Object,String)
++ Object postProcessAfterInitialization(Object,String)
 }
 
-package Spring {
-    class ContextLoader {
-        {static} Map<ClassLoader, WebApplicationContext> currentContextPerThread
-        {static} volatile  currentContext
-        WebApplicationContext context
-        initWebApplicationContext(sc)
-        createWebApplicationContext(sc)
-        closeWebApplicationContext(sc)
-    }
-    class ContextLoaderListener   {
-        
-        contextInitialized(sce)
-        contextDestroyed(sce)
-    }
-
-    abstract class AbstractRefreshableWebApplicationContext  {
-        ServletContext servletContext
-        ServletConfig servletConfig
-    }
-
-    class XmlWebApplicationContext extends AbstractRefreshableWebApplicationContext {
-
-    }
-      ContextLoader <|-up-ContextLoaderListener
-    ContextLoader -left-> XmlWebApplicationContext:create
+interface MergedBeanDefinitionPostProcessor extends BeanPostProcessor  {
+    void postProcessMergedBeanDefinition()
 }
-
-
-ApplicationContext <|-- ConfigurableApplicationContext 
-
-
-    
-
-
-
- ServletContextListener <|..... ContextLoaderListener
-ConfigurableApplicationContext *-- XmlWebApplicationContext
-
+interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
+    default Object postProcessBeforeInstantiation()
+    default boolean postProcessAfterInstantiation()
+    default PropertyValues postProcessProperties()
+}
 ```
-
-# DispatcherServlet
-
-Spring MVC is designed aroud the front controller pattern where a central `servlet`, the `DispatcherServlet`, provides a shared algorithm for request processing, while actual work is performed by configurable delegate components.
-
-
-```plantuml
-
-package Tomcat {
-    interface Servlet {
-    + void init(ServletConfig)
-    + ServletConfig getServletConfig()
-    + void service(ServletRequest,ServletResponse)
-    + String getServletInfo()
-    + void destroy()
-    }
-
-    interface ServletConfig {
-    + String getServletName()
-    + ServletContext getServletContext()
-    + String getInitParameter(String)
-    + Enumeration<String> getInitParameterNames()
-    }
-
-    abstract class GenericServlet {
-    - ServletConfig config
-    }
-
-    abstract class HttpServlet {
-    - Object cachedAllowHeaderValueLock
-    - String cachedAllowHeaderValue
-    - boolean cachedUseLegacyDoHead
-
-    # void doGet(HttpServletRequest,HttpServletResponse)
-    # long getLastModified(HttpServletRequest)
-    # void doHead(HttpServletRequest,HttpServletResponse)
-    # void doPatch(HttpServletRequest,HttpServletResponse)
-    # void doPost(HttpServletRequest,HttpServletResponse)
-    # void doPut(HttpServletRequest,HttpServletResponse)
-    # void doDelete(HttpServletRequest,HttpServletResponse)
-    # void doOptions(HttpServletRequest,HttpServletResponse)
-    # void doTrace(HttpServletRequest,HttpServletResponse)
-    # boolean isSensitiveHeader(String)
-    # void service(HttpServletRequest,HttpServletResponse)
-    + void service(ServletRequest,ServletResponse)
-    }
-}
-
-package Spring {
-    abstract class HttpServletBean  {
-        ConfigurableEnvironment environment
-        void initServletBean()
-    }
-
-    abstract class FrameworkServlet extends HttpServletBean {
-        WebApplicationContext webApplicationContext
-        String contextId
-        String namespace
-        String contextConfigLocation
-        void processRequest( request,  response)
-        abstract void doService( request,  response)
-    }
-
-    class DispatcherServlet extends FrameworkServlet {
-        List<HandlerMapping> handlerMappings
-        List<HandlerAdapter> handlerAdapters
-        List<HandlerExceptionResolver> handlerExceptionResolvers
-        protected void doService( request,  response) 
-        protected void doDispatch( request,  response)
-    }
-}
-
-
-
-Servlet <|.. GenericServlet
-ServletConfig <|.. GenericServlet
-GenericServlet <|-- HttpServlet
-HttpServlet<|-- HttpServletBean
-```
-
-
-
-
