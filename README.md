@@ -7,4 +7,5 @@ hugo server
 ## 添加blog
 ```
 hugo new post/my-first-post.md
+hugo new post/java/spring/aop.md
 ```
