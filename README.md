@@ -8,4 +8,5 @@ hugo server
 ```
 hugo new post/my-first-post.md
 hugo new post/java/spring/aop.md
+hugo new post/java/spring/security.md
 ```

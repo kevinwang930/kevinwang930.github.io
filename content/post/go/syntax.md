@@ -50,13 +50,18 @@ unicode_letter = /* a Unicode code point categorized as "Letter" */ .
 unicode_digit  = /* a Unicode code point categorized as "Number, decimal digit" */ .
 ```
 
-# variable  declration
-varaible declaration create one or more variables.
 
-    VarDecl     = "var" ( VarSpec | "(" { VarSpec ";" } ")" ) .
-    VarSpec     = IdentifierList ( Type [ "=" ExpressionList ] | "=" ExpressionList ) .
+
+
 
 # type
+A type determines a set of values together with operations and methods specific to those values.
+    Type      = TypeName [ TypeArgs ] | TypeLit | "(" Type ")" .
+    TypeName  = identifier | QualifiedIdent .
+    TypeArgs  = "[" TypeList [ "," ] "]" .
+    TypeList  = Type { "," Type } .
+    TypeLit   = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
+                SliceType | MapType | ChannelType .
 
 a type definition creates a new , distinct type and binds an identifier to it
 
@@ -66,6 +71,13 @@ a type definition creates a new , distinct type and binds an identifier to it
     ArrayType   = "[" ArrayLength "]" ElementType .
     ArrayLength = Expression .
     ElementType = Type .
+
+## struct types
+A struct is a sequence of named elements, called fields, each of which has a name and a type.
+    StructType    = "struct" "{" { FieldDecl ";" } "}" .
+    FieldDecl     = (IdentifierList Type | EmbeddedField) [ Tag ] .
+    EmbeddedField = [ "*" ] TypeName [ TypeArgs ] .
+    Tag           = string_lit .
 
 ## Pointer type
     PointerType = "*" BaseType .
@@ -99,20 +111,84 @@ A Channel provides a mechanism for concurrently executing functions to communica
     ChannelType = ( "chan" | "chan" "<-" | "<-" "chan" ) ElementType .
 
 
+
+# blocks
+A block is possibly empty sequence of declrations and statements within matching brace brackets.
+    Block = "{" StatementList "}" .
+    StatementList = { Statement ";" } .
+
+
 # declaraton and scope
     Declaration   = ConstDecl | TypeDecl | VarDecl .
     TopLevelDecl  = Declaration | FunctionDecl | MethodDecl .
-## Const declaration
+
+## variable  declration
+varaible declaration create one or more variables.
+
+    VarDecl     = "var" ( VarSpec | "(" { VarSpec ";" } ")" ) .
+    VarSpec     = IdentifierList ( Type [ "=" ExpressionList ] | "=" ExpressionList ) .
+
+### short variable declaration
+
+    ShortVarDecl = IdentifierList ":=" ExpressionList .
+### Const declaration
     ConstDecl      = "const" ( ConstSpec | "(" { ConstSpec ";" } ")" ) .
     ConstSpec      = IdentifierList [ [ Type ] "=" ExpressionList ] .
     IdentifierList = identifier { "," identifier } .
     ExpressionList = Expression { "," Expression } .
+### zero value
+Variables declared without an explicit initial value are given their zero value.
+1. 0 for numeric types
+2. false for boolean
+3. "" for string
+
+
+
 ## type declaration
 type declaration binds an identifier, the type name to a type
 
     TypeDecl = "type" ( TypeSpec | "(" { TypeSpec ";" } ")" ) .
     TypeSpec = AliasDecl | TypeDef .
     AliasDecl = identifier "=" Type .
+
+
+# Expressions
+An expression specifies the computation of a value by applying operators and functions to operands.
+
+
+
+# statements
+Statement control execution.
+
+    Statement =
+        Declaration | LabeledStmt | SimpleStmt |
+        GoStmt | ReturnStmt | BreakStmt | ContinueStmt | GotoStmt |
+        FallthroughStmt | Block | IfStmt | SwitchStmt | SelectStmt | ForStmt |
+        DeferStmt .
+
+    SimpleStmt = EmptyStmt | ExpressionStmt | SendStmt | IncDecStmt | Assignment | ShortVarDecl .
+## for statement
+
+    ForStmt = "for" [ Condition | ForClause | RangeClause ] Block .
+    Condition = Expression .
+    ForClause = [ InitStmt ] ";" [ Condition ] ";" [ PostStmt ] .
+    InitStmt = SimpleStmt .
+    PostStmt = SimpleStmt .
+    RangeClause = [ ExpressionList "=" | IdentifierList ":=" ] "range" Expression .
+
+## if statement
+    IfStmt = "if" [ SimpleStmt ";" ] Expression Block [ "else" ( IfStmt | Block ) ] .
+
+## Switch statement
+    SwitchStmt = ExprSwitchStmt | TypeSwitchStmt .
+    ExprSwitchStmt = "switch" [ SimpleStmt ";" ] [ Expression ] "{" { ExprCaseClause } "}" .
+    ExprCaseClause = ExprSwitchCase ":" StatementList .
+    ExprSwitchCase = "case" ExpressionList | "default" .
+
+    TypeSwitchStmt  = "switch" [ SimpleStmt ";" ] TypeSwitchGuard "{" { TypeCaseClause } "}" .
+    TypeSwitchGuard = [ identifier ":=" ] PrimaryExpr "." "(" "type" ")" .
+    TypeCaseClause  = TypeSwitchCase ":" StatementList .
+    TypeSwitchCase  = "case" TypeList | "default" .
 
 
 # Assignment

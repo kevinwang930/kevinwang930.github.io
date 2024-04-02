@@ -21,36 +21,6 @@ Spring web applications built on the Servlet API and deployed to Servlet contain
 # web on servlet
 Servlet-stack web applications built on the servlet API and deployed to Servlet containers
 
-## Tomcat
-tomcat works as a servlet container.
-
-```plantuml
-
-
-    package Tomcat(Server) {
-    
-        
-        component c  [ 
-            listener
-            globl naming resouce
-            jndi
-        ] 
-        component services {
-            component connector
-            component Engine {
-                component Host {
-                    Component Context {
-                        Component Servlet
-                    }
-                }
-            }
-        }
-        
-        c --> services
-    }
-cloud http
-http -right-> services
-```
 
 ## ServletContext
 
