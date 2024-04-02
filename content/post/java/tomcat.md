@@ -195,113 +195,35 @@ abstract class LifecycleMBeanBase extends LifecycleBase implements JmxEnabled {
 
 
 class Connector extends LifecycleMBeanBase {
-- {static} Log log
-+ {static} String INTERNAL_EXECUTOR_NAME
+
 # Service service
-# boolean allowBackslash
-# boolean allowTrace
+
 # long asyncTimeout
-# boolean enableLookups
-# boolean enforceEncodingInGetWriter
-# boolean xpoweredBy
-# String proxyName
-# int proxyPort
-# boolean discardFacades
-# int redirectPort
 # String scheme
-# boolean secure
-# {static} StringManager sm
+
 - int maxCookieCount
 # int maxParameterCount
 # int maxPostSize
 # int maxSavePostSize
 # String parseBodyMethods
 # HashSet<String> parseBodyMethodsSet
-# boolean useIPVHosts
+
 # String protocolHandlerClassName
 # String configuredProtocol
 # ProtocolHandler protocolHandler
 # Adapter adapter
-- Charset uriCharset
-- EncodedSolidusHandling encodedSolidusHandling
-# boolean useBodyEncodingForURI
-- boolean rejectSuspiciousURIs
-+ Object getProperty(String)
-+ boolean setProperty(String,String)
-+ Service getService()
-+ void setService(Service)
-+ boolean getAllowBackslash()
-+ void setAllowBackslash(boolean)
-+ boolean getAllowTrace()
-+ void setAllowTrace(boolean)
-+ long getAsyncTimeout()
-+ void setAsyncTimeout(long)
-+ boolean getDiscardFacades()
-+ void setDiscardFacades(boolean)
-+ boolean getEnableLookups()
-+ void setEnableLookups(boolean)
-+ boolean getEnforceEncodingInGetWriter()
-+ void setEnforceEncodingInGetWriter(boolean)
-+ int getMaxCookieCount()
-+ void setMaxCookieCount(int)
-+ int getMaxParameterCount()
-+ void setMaxParameterCount(int)
-+ int getMaxPostSize()
-+ void setMaxPostSize(int)
-+ int getMaxSavePostSize()
-+ void setMaxSavePostSize(int)
-+ String getParseBodyMethods()
-+ void setParseBodyMethods(String)
-# boolean isParseBodyMethod(String)
-+ int getPort()
-+ void setPort(int)
-+ int getPortOffset()
-+ void setPortOffset(int)
-+ int getPortWithOffset()
-+ int getLocalPort()
-+ String getProtocol()
-+ String getProtocolHandlerClassName()
-+ ProtocolHandler getProtocolHandler()
-+ String getProxyName()
-+ void setProxyName(String)
-+ int getProxyPort()
-+ void setProxyPort(int)
-+ int getRedirectPort()
-+ void setRedirectPort(int)
-+ int getRedirectPortWithOffset()
-+ String getScheme()
-+ void setScheme(String)
-+ boolean getSecure()
-+ void setSecure(boolean)
-+ String getURIEncoding()
-+ Charset getURICharset()
-+ void setURIEncoding(String)
-+ boolean getUseBodyEncodingForURI()
-+ void setUseBodyEncodingForURI(boolean)
-+ boolean getXpoweredBy()
-+ void setXpoweredBy(boolean)
-+ void setUseIPVHosts(boolean)
-+ boolean getUseIPVHosts()
+
+
 + String getExecutorName()
 + void addSslHostConfig(SSLHostConfig)
 + SSLHostConfig[] findSslHostConfigs()
-+ void addUpgradeProtocol(UpgradeProtocol)
-+ UpgradeProtocol[] findUpgradeProtocols()
-+ String getEncodedSolidusHandling()
-+ void setEncodedSolidusHandling(String)
+
 + EncodedSolidusHandling getEncodedSolidusHandlingInternal()
-+ boolean getRejectSuspiciousURIs()
-+ void setRejectSuspiciousURIs(boolean)
+
 + Request createRequest(org.apache.coyote.Request)
 + Response createResponse(org.apache.coyote.Response)
 # String createObjectNameKeyProperties(String)
-+ void pause()
-+ void resume()
-# void initInternal()
-# void startInternal()
-# void stopInternal()
-# void destroyInternal()
-+ String toString()
+
 # String getDomainInternal()
 # String getObjectNameKeyProperties()
 }

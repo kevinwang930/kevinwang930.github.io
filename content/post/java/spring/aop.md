@@ -96,15 +96,12 @@ abstract class AbstractAdvisorAutoProxyCreator extends AbstractAutoProxyCreator 
 # List<Advisor> findAdvisorsThatCanApply(List<Advisor>,Class<?>,String)
 # boolean isEligibleAdvisorBean(String)
 # List<Advisor> sortAdvisors(List<Advisor>)
-# void extendAdvisors(List<Advisor>)
-# boolean advisorsPreFiltered()
+
 }
 
 
 abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport implements SmartInstantiationAwareBeanPostProcessor, BeanFactoryAware {
-# {static} Object[] DO_NOT_PROXY
-# {static} Object[] PROXY_WITHOUT_ADDITIONAL_INTERCEPTORS
-# Log logger
+
 - AdvisorAdapterRegistry advisorAdapterRegistry
 - boolean freezeProxy
 - String[] interceptorNames
@@ -115,8 +112,7 @@ abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport implements
 - Map<Object,Object> earlyBeanReferences
 - Map<Object,Class<?>> proxyTypes
 - Map<Object,Boolean> advisedBeans
-+ void setFrozen(boolean)
-+ boolean isFrozen()
+
 + void setAdvisorAdapterRegistry(AdvisorAdapterRegistry)
 + void setCustomTargetSourceCreators(TargetSourceCreator)
 + void setInterceptorNames(String)

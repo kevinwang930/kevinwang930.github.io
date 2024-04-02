@@ -273,14 +273,12 @@ DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingleto
 
 DefaultListableBeanFactory --> DefaultListableBeanFactory:getBean
 
-DefaultListableBeanFactory --> DefaultListableBeanFactory: doGetBean
 DefaultListableBeanFactory --> DefaultListableBeanFactory: createBean
 DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeanClass
 alt proxy
 DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeforeInstantiation
 end
 
-DefaultListableBeanFactory --> DefaultListableBeanFactory: doCreateBean
 DefaultListableBeanFactory --> DefaultListableBeanFactory: createBeanInstance
 alt instanceSupplier
 DefaultListableBeanFactory --> DefaultListableBeanFactory: obtainFromSupplier
@@ -289,13 +287,13 @@ DefaultListableBeanFactory --> BeanDefinition: getFactoryMethodName
 alt factoryMethod
 DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateUsingFactoryMethod
 end
-alt resolved
+
 alt autowireNecesary
 DefaultListableBeanFactory --> DefaultListableBeanFactory: autowireConstructor
 else 
 DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateBean
 end
-end
+
 DefaultListableBeanFactory --> DefaultListableBeanFactory: determineConstructorsFromBeanPostProcessors
 alt autowiremode
 DefaultListableBeanFactory --> ConstructorResolver: new
