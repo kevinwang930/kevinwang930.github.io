@@ -195,14 +195,12 @@ AbstractApplicationContext --&gt; BeanFactory:preInstantiateSingletons
 
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory:getBean
 
-DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: doGetBean
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: createBean
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: resolveBeanClass
 alt proxy
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: resolveBeforeInstantiation
 end
 
-DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: doCreateBean
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: createBeanInstance
 alt instanceSupplier
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: obtainFromSupplier
@@ -211,13 +209,13 @@ DefaultListableBeanFactory --&gt; BeanDefinition: getFactoryMethodName
 alt factoryMethod
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: instantiateUsingFactoryMethod
 end
-alt resolved
+
 alt autowireNecesary
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: autowireConstructor
 else 
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: instantiateBean
 end
-end
+
 DefaultListableBeanFactory --&gt; DefaultListableBeanFactory: determineConstructorsFromBeanPostProcessors
 alt autowiremode
 DefaultListableBeanFactory --&gt; ConstructorResolver: new
