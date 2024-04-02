@@ -8,32 +8,7 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring微服务架构与实现</h1><div class="postShorten-meta post-meta"><time datetime=2024-03-27T14:39:29+08:00>March 27, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录spring微服务架构与实现细节</p><p>Spring web applications built on the Servlet API and deployed to Servlet containers.</p><h1 id=web-on-servlet>web on servlet</h1><p>Servlet-stack web applications built on the servlet API and deployed to Servlet containers</p><h2 id=tomcat>Tomcat</h2><p>tomcat works as a servlet container.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
-
-    package Tomcat(Server) {
-    
-        
-        component c  [ 
-            listener
-            globl naming resouce
-            jndi
-        ] 
-        component services {
-            component connector
-            component Engine {
-                component Host {
-                    Component Context {
-                        Component Servlet
-                    }
-                }
-            }
-        }
-        
-        c --&gt; services
-    }
-cloud http
-http -right-&gt; services
-</code></pre><h2 id=servletcontext>ServletContext</h2><p><code>ServletContext</code> Defines a set of methods that a servlet uses to communicate with its servlet container</p><p>spring uses <code>ContextLoaderListener</code> to listen to the initialization of <code>ServletContext</code>, then init spring <code>WebApplicationContext</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录spring微服务架构与实现细节</p><p>Spring web applications built on the Servlet API and deployed to Servlet containers.</p><h1 id=web-on-servlet>web on servlet</h1><p>Servlet-stack web applications built on the servlet API and deployed to Servlet containers</p><h2 id=servletcontext>ServletContext</h2><p><code>ServletContext</code> Defines a set of methods that a servlet uses to communicate with its servlet container</p><p>spring uses <code>ContextLoaderListener</code> to listen to the initialization of <code>ServletContext</code>, then init spring <code>WebApplicationContext</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 package Tomcat {
     interface ServletContextListener {
         + void contextInitialized( sce)

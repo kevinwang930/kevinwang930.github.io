@@ -23,13 +23,21 @@ Repetition  = &#34;{&#34; Expression &#34;}&#34; .
 unicode_char   = /* an arbitrary Unicode code point except newline */ .
 unicode_letter = /* a Unicode code point categorized as &#34;Letter&#34; */ .
 unicode_digit  = /* a Unicode code point categorized as &#34;Number, decimal digit&#34; */ .
-</code></pre><h1 id=variable--declration>variable declration</h1><p>varaible declaration create one or more variables.</p><pre><code>VarDecl     = &quot;var&quot; ( VarSpec | &quot;(&quot; { VarSpec &quot;;&quot; } &quot;)&quot; ) .
-VarSpec     = IdentifierList ( Type [ &quot;=&quot; ExpressionList ] | &quot;=&quot; ExpressionList ) .
-</code></pre><h1 id=type>type</h1><p>a type definition creates a new , distinct type and binds an identifier to it</p><pre><code>TypeDef = identifier [ TypeParameters ] Type .
+</code></pre><h1 id=type>type</h1><p>A type determines a set of values together with operations and methods specific to those values.
+Type = TypeName [ TypeArgs ] | TypeLit | &ldquo;(&rdquo; Type &ldquo;)&rdquo; .
+TypeName = identifier | QualifiedIdent .
+TypeArgs = &ldquo;[&rdquo; TypeList [ &ldquo;,&rdquo; ] &ldquo;]&rdquo; .
+TypeList = Type { &ldquo;,&rdquo; Type } .
+TypeLit = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
+SliceType | MapType | ChannelType .</p><p>a type definition creates a new , distinct type and binds an identifier to it</p><pre><code>TypeDef = identifier [ TypeParameters ] Type .
 </code></pre><h2 id=array-type>Array type</h2><pre><code>ArrayType   = &quot;[&quot; ArrayLength &quot;]&quot; ElementType .
 ArrayLength = Expression .
 ElementType = Type .
-</code></pre><h2 id=pointer-type>Pointer type</h2><pre><code>PointerType = &quot;*&quot; BaseType .
+</code></pre><h2 id=struct-types>struct types</h2><p>A struct is a sequence of named elements, called fields, each of which has a name and a type.
+StructType = &ldquo;struct&rdquo; &ldquo;{&rdquo; { FieldDecl &ldquo;;&rdquo; } &ldquo;}&rdquo; .
+FieldDecl = (IdentifierList Type | EmbeddedField) [ Tag ] .
+EmbeddedField = [ &ldquo;*&rdquo; ] TypeName [ TypeArgs ] .
+Tag = string_lit .</p><h2 id=pointer-type>Pointer type</h2><pre><code>PointerType = &quot;*&quot; BaseType .
 BaseType    = Type .
 </code></pre><h2 id=function-type>Function type</h2><pre><code>FunctionType   = &quot;func&quot; Signature .
 Signature      = Parameters [ Result ] .
@@ -47,15 +55,43 @@ UnderlyingType = &quot;~&quot; Type .
 </code></pre><h2 id=map-type>map type</h2><p>unordered group of elements of one type</p><pre><code>MapType     = &quot;map&quot; &quot;[&quot; KeyType &quot;]&quot; ElementType .
 KeyType     = Type .
 </code></pre><h2 id=channel-type>Channel type</h2><p>A Channel provides a mechanism for concurrently executing functions to communicate by sending and reciving values of s specified element type
-ChannelType = ( &ldquo;chan&rdquo; | &ldquo;chan&rdquo; &ldquo;&lt;-&rdquo; | &ldquo;&lt;-&rdquo; &ldquo;chan&rdquo; ) ElementType .</p><h1 id=declaraton-and-scope>declaraton and scope</h1><pre><code>Declaration   = ConstDecl | TypeDecl | VarDecl .
+ChannelType = ( &ldquo;chan&rdquo; | &ldquo;chan&rdquo; &ldquo;&lt;-&rdquo; | &ldquo;&lt;-&rdquo; &ldquo;chan&rdquo; ) ElementType .</p><h1 id=blocks>blocks</h1><p>A block is possibly empty sequence of declrations and statements within matching brace brackets.
+Block = &ldquo;{&rdquo; StatementList &ldquo;}&rdquo; .
+StatementList = { Statement &ldquo;;&rdquo; } .</p><h1 id=declaraton-and-scope>declaraton and scope</h1><pre><code>Declaration   = ConstDecl | TypeDecl | VarDecl .
 TopLevelDecl  = Declaration | FunctionDecl | MethodDecl .
-</code></pre><h2 id=const-declaration>Const declaration</h2><pre><code>ConstDecl      = &quot;const&quot; ( ConstSpec | &quot;(&quot; { ConstSpec &quot;;&quot; } &quot;)&quot; ) .
+</code></pre><h2 id=variable--declration>variable declration</h2><p>varaible declaration create one or more variables.</p><pre><code>VarDecl     = &quot;var&quot; ( VarSpec | &quot;(&quot; { VarSpec &quot;;&quot; } &quot;)&quot; ) .
+VarSpec     = IdentifierList ( Type [ &quot;=&quot; ExpressionList ] | &quot;=&quot; ExpressionList ) .
+</code></pre><h3 id=short-variable-declaration>short variable declaration</h3><pre><code>ShortVarDecl = IdentifierList &quot;:=&quot; ExpressionList .
+</code></pre><h3 id=const-declaration>Const declaration</h3><pre><code>ConstDecl      = &quot;const&quot; ( ConstSpec | &quot;(&quot; { ConstSpec &quot;;&quot; } &quot;)&quot; ) .
 ConstSpec      = IdentifierList [ [ Type ] &quot;=&quot; ExpressionList ] .
 IdentifierList = identifier { &quot;,&quot; identifier } .
 ExpressionList = Expression { &quot;,&quot; Expression } .
-</code></pre><h2 id=type-declaration>type declaration</h2><p>type declaration binds an identifier, the type name to a type</p><pre><code>TypeDecl = &quot;type&quot; ( TypeSpec | &quot;(&quot; { TypeSpec &quot;;&quot; } &quot;)&quot; ) .
+</code></pre><h3 id=zero-value>zero value</h3><p>Variables declared without an explicit initial value are given their zero value.</p><ol><li>0 for numeric types</li><li>false for boolean</li><li>"" for string</li></ol><h2 id=type-declaration>type declaration</h2><p>type declaration binds an identifier, the type name to a type</p><pre><code>TypeDecl = &quot;type&quot; ( TypeSpec | &quot;(&quot; { TypeSpec &quot;;&quot; } &quot;)&quot; ) .
 TypeSpec = AliasDecl | TypeDef .
 AliasDecl = identifier &quot;=&quot; Type .
+</code></pre><h1 id=expressions>Expressions</h1><p>An expression specifies the computation of a value by applying operators and functions to operands.</p><h1 id=statements>statements</h1><p>Statement control execution.</p><pre><code>Statement =
+    Declaration | LabeledStmt | SimpleStmt |
+    GoStmt | ReturnStmt | BreakStmt | ContinueStmt | GotoStmt |
+    FallthroughStmt | Block | IfStmt | SwitchStmt | SelectStmt | ForStmt |
+    DeferStmt .
+
+SimpleStmt = EmptyStmt | ExpressionStmt | SendStmt | IncDecStmt | Assignment | ShortVarDecl .
+</code></pre><h2 id=for-statement>for statement</h2><pre><code>ForStmt = &quot;for&quot; [ Condition | ForClause | RangeClause ] Block .
+Condition = Expression .
+ForClause = [ InitStmt ] &quot;;&quot; [ Condition ] &quot;;&quot; [ PostStmt ] .
+InitStmt = SimpleStmt .
+PostStmt = SimpleStmt .
+RangeClause = [ ExpressionList &quot;=&quot; | IdentifierList &quot;:=&quot; ] &quot;range&quot; Expression .
+</code></pre><h2 id=if-statement>if statement</h2><pre><code>IfStmt = &quot;if&quot; [ SimpleStmt &quot;;&quot; ] Expression Block [ &quot;else&quot; ( IfStmt | Block ) ] .
+</code></pre><h2 id=switch-statement>Switch statement</h2><pre><code>SwitchStmt = ExprSwitchStmt | TypeSwitchStmt .
+ExprSwitchStmt = &quot;switch&quot; [ SimpleStmt &quot;;&quot; ] [ Expression ] &quot;{&quot; { ExprCaseClause } &quot;}&quot; .
+ExprCaseClause = ExprSwitchCase &quot;:&quot; StatementList .
+ExprSwitchCase = &quot;case&quot; ExpressionList | &quot;default&quot; .
+
+TypeSwitchStmt  = &quot;switch&quot; [ SimpleStmt &quot;;&quot; ] TypeSwitchGuard &quot;{&quot; { TypeCaseClause } &quot;}&quot; .
+TypeSwitchGuard = [ identifier &quot;:=&quot; ] PrimaryExpr &quot;.&quot; &quot;(&quot; &quot;type&quot; &quot;)&quot; .
+TypeCaseClause  = TypeSwitchCase &quot;:&quot; StatementList .
+TypeSwitchCase  = &quot;case&quot; TypeList | &quot;default&quot; .
 </code></pre><h1 id=assignment>Assignment</h1><pre tabindex=0><code>Assignment = ExpressionList assign_op ExpressionList .
 
 assign_op = [ add_op | mul_op ] &#34;=&#34; .
