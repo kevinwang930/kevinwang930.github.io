@@ -12,6 +12,32 @@ keywords:
 ---
 本文记录go 语法
 <!--more-->
+- [Notation](#notation)
+- [source code](#source-code)
+  - [characters](#characters)
+- [type](#type)
+  - [Array type](#array-type)
+  - [struct types](#struct-types)
+  - [Pointer type](#pointer-type)
+  - [Function type](#function-type)
+  - [interface Type](#interface-type)
+  - [map type](#map-type)
+  - [Channel type](#channel-type)
+- [blocks](#blocks)
+- [declaraton and scope](#declaraton-and-scope)
+  - [variable  declaration](#variable--declaration)
+    - [short variable declaration](#short-variable-declaration)
+    - [Const declaration](#const-declaration)
+    - [zero value](#zero-value)
+  - [type declaration](#type-declaration)
+    - [type definition](#type-definition)
+    - [](#)
+- [Expressions](#expressions)
+- [statements](#statements)
+  - [for statement](#for-statement)
+  - [if statement](#if-statement)
+  - [Switch statement](#switch-statement)
+- [Assignment](#assignment)
 
 
 [go语法文档](https://go.dev/ref/spec#Assignment_statements)
@@ -56,6 +82,7 @@ unicode_digit  = /* a Unicode code point categorized as "Number, decimal digit" 
 
 # type
 A type determines a set of values together with operations and methods specific to those values.
+
     Type      = TypeName [ TypeArgs ] | TypeLit | "(" Type ")" .
     TypeName  = identifier | QualifiedIdent .
     TypeArgs  = "[" TypeList [ "," ] "]" .
@@ -63,9 +90,7 @@ A type determines a set of values together with operations and methods specific 
     TypeLit   = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
                 SliceType | MapType | ChannelType .
 
-a type definition creates a new , distinct type and binds an identifier to it
 
-    TypeDef = identifier [ TypeParameters ] Type .
 
 ## Array type
     ArrayType   = "[" ArrayLength "]" ElementType .
@@ -74,6 +99,7 @@ a type definition creates a new , distinct type and binds an identifier to it
 
 ## struct types
 A struct is a sequence of named elements, called fields, each of which has a name and a type.
+
     StructType    = "struct" "{" { FieldDecl ";" } "}" .
     FieldDecl     = (IdentifierList Type | EmbeddedField) [ Tag ] .
     EmbeddedField = [ "*" ] TypeName [ TypeArgs ] .
@@ -122,7 +148,7 @@ A block is possibly empty sequence of declrations and statements within matching
     Declaration   = ConstDecl | TypeDecl | VarDecl .
     TopLevelDecl  = Declaration | FunctionDecl | MethodDecl .
 
-## variable  declration
+## variable  declaration
 varaible declaration create one or more variables.
 
     VarDecl     = "var" ( VarSpec | "(" { VarSpec ";" } ")" ) .
@@ -144,6 +170,7 @@ Variables declared without an explicit initial value are given their zero value.
 
 
 
+
 ## type declaration
 type declaration binds an identifier, the type name to a type
 
@@ -151,6 +178,13 @@ type declaration binds an identifier, the type name to a type
     TypeSpec = AliasDecl | TypeDef .
     AliasDecl = identifier "=" Type .
 
+### type definition
+
+a type definition creates a new , distinct type and binds an identifier to it
+
+    TypeDef = identifier [ TypeParameters ] Type .
+
+###
 
 # Expressions
 An expression specifies the computation of a value by applying operators and functions to operands.

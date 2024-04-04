@@ -16,13 +16,56 @@ keywords:
 
 tomcat works as a servlet/jsp container.
 
-# Architecture
+# Servlet
+A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.
+
+```plantuml
+package Tomcat {
+    interface Servlet {
+    + void init(ServletConfig)
+    + ServletConfig getServletConfig()
+    + void service(ServletRequest,ServletResponse)
+    + String getServletInfo()
+    + void destroy()
+    }
+
+    interface ServletConfig {
+    + String getServletName()
+    + ServletContext getServletContext()
+    + String getInitParameter(String)
+    + Enumeration<String> getInitParameterNames()
+    }
+
+    abstract class GenericServlet {
+    - ServletConfig config
+    }
+
+    abstract class HttpServlet {
+    # void service(HttpServletRequest,HttpServletResponse)
+    + void service(ServletRequest,ServletResponse)
+    }
+
+    interface ServletRequest {}
+    interface HttpServletRequest extends ServletRequest
+
+    interface ServletResponse {}
+    interface HttpServletResponse extends ServletResponse
+
+}
+Servlet <|.. GenericServlet
+ServletConfig <|.. GenericServlet
+GenericServlet <|-- HttpServlet
+HttpServletRequest -right-> HttpServlet
+HttpServlet -right-> HttpServletResponse
+
+```
+# Tomcat Architecture
 
 ## Server
 Server represents the whole container
 
 ## Service
-A service is an intermidiate component which lives inside a server and ties one or more Connectors to exactly one Engine
+A service is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine
 
 
 
@@ -39,7 +82,7 @@ A Connector handles communications with the client.
 
 ```plantuml
 
-
+title: Tomcat Architecture
     package Tomcat(Server) {
     
         
@@ -234,14 +277,14 @@ Service o-- Connector
 
 ## Container
 container is an object that can execute requests received from a client, and return responses based on those requests
-A container may optionally support a pipeline of Valves that processes the request in an order confiugured at runtime, by implementing the pipeline interface as well.
-Containers will exist at serverl levels within catlina:
+A container may optionally support a pipeline of Valves that processes the request in an order configured at runtime, by implementing the pipeline interface as well.
+Containers will exist at several levels within catalina:
 1. engine
 2. host
 3. context
 4. wrapper
 
-A container may also be associated with a number of support components that provide functionality which may be shared (by attching it to a parent container) or individually customized. the following support components are currently recognized.
+A container may also be associated with a number of support components that provide functionality which may be shared (by attaching it to a parent container) or individually customized. the following support components are currently recognized.
 1. loader
 2. logger
 3. manager  manager for the pool of sessions
@@ -253,7 +296,7 @@ A container may also be associated with a number of support components that prov
 
 
 ### Engine
-Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all reqeusts from these connectors, handling the response back to the appropriate connector for transmission to the client.
+Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.
 
 ### Host
 A Host is a Container that represents a virtual host in the catalina servlet engine. 
@@ -270,9 +313,11 @@ Implementations are responsible for managing the sevlet life circle.
 ### Valve
 A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.
 
+`StandardWrapperValve` in tomcat call FilterChain to filter request before invoke servlet.
+
 
 ```plantuml
-scale 1536 width
+title: Tomcat Container Architecture
 interface Lifecycle {
 
 + void addLifecycleListener(LifecycleListener)
@@ -477,3 +522,23 @@ StandardWrapper *-right- StandardWrapperValve
 ```
 
 
+# Request handling pipeline
+
+In `Container` section, we see that `Container` contains `Pipeline`,`Pipeline` contains `Valves` in order. the request handling is actually invoke the `Valves` in the `Pipeline` of the specified container one by one. 
+
+
+```plantuml
+rectangle OrderedPipelineValves {
+    rectangle Engine
+    rectangle Host
+    rectangle context
+    rectangle wrapper
+Engine --> Host
+Host --> context
+context --> wrapper
+}
+rectangle FilterChain
+rectangle Servlet
+wrapper --> FilterChain
+FilterChain --> Servlet
+```
