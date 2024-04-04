@@ -8,7 +8,74 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Security</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-02T12:25:39+08:00>April 2, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录spring 安全相关的内容</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a>
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录spring 安全相关的内容</p><h1 id=architecture>Architecture</h1><p>In the <a href=https://kevinwang930.github.io/post/java/tomcat/>Tomcat</a> Article, we see that request handling will go through FilterChain before invoking servlet.
+Spring security&rsquo;s Servlet support is based on servlet Filters.</p><ul><li>client sends a request to the application</li><li>container creates a FilterChain</li><li>Filter can do<ol><li>prevent downstream filter or servlet from being invoked. in this case filter writes the <code>HttpServletResponse</code></li><li>Filter can modify <code>HttpServletRequest</code> or <code>HttpServletResponse</code> used by downstream Filter instances and <code>Servlet</code></li></ol></li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>left to right direction
+rectangle client
+package FilterChain {
+    rectangle Filter0
+    rectangle Filter1
+    rectangle Filter2
+    rectangle Servlet
+}
+client --&gt; Filter0
+Filter0 --&gt; Filter1
+Filter1 --&gt; Filter2
+Filter2 --&gt; Servlet
+</code></pre><h2 id=delegatingfilterproxy>DelegatingFilterProxy</h2><p>Spring provides Filter implementation <code>DelegatingFilterProxy</code> that delegate all the work to a Spring bean that implement Filter.</p><p>Spring Security provides a special Filter <code>FilterChainProxy</code> that allows delegating to many Filter instances through <code>SecurityFilterChain</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+rectangle client
+package FilterChain {
+    rectangle Filter0
+    rectangle DelegatingFilterProxy {
+        rectangle FilterChainProxy
+    }
+    rectangle Filter2
+    rectangle Servlet
+}
+rectangle SecurityFilterChain {
+    rectangle sf as &#34;Security Filters&#34;
+}
+client --&gt; Filter0
+Filter0 --&gt; DelegatingFilterProxy
+DelegatingFilterProxy --&gt; Filter2
+Filter2 --&gt; Servlet
+FilterChainProxy -right-&gt; SecurityFilterChain
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+package jakarta {
+    interface FilterChain {
+        void doFilter( request,  response) 
+    }
+    interface Filter {
+        void init( filterConfig)
+        doFilter( request,  response,  chain)
+    }
+
+    FilterChain o-right- Filter
+}
+</code></pre><h1 id=authentication>Authentication</h1><h2 id=username-and-password>username and password</h2><p>username and password is very common way to authentication.
+spring identify user with sessionid in cookie.</p><ol><li>user make unauthenticated request to /page</li><li>spring responds with 302 redirct to /login</li><li>client request /login with username and possword</li><li>spring response with JSESSIONID</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>client --&gt; spring: /page
+spring --&gt; client: 302 Location: /login
+client --&gt; spring: post /login
+spring --&gt; client: set-cookie:JSESSIONID 302  /page
+client --&gt; spring: /page with cookie: JESSIONID
+</code></pre><h2 id=oauth2>OAuth2</h2><p>The OAuth2 Login feature lets an application have users log into the application by using their existing account at an OAuth2 provider (such as github) or OpenId Connect 1.0 provider(such as google).</p><p>Resource Owner: entity that can grant access to a protected resource. Typically this is the end-user.</p><p>Client: Application requesting access to a protected resource on behalf of the resource owner.</p><p>Resource Server: Server hosting the protected resources. the APi client want to access.</p><p>Authorization Server: Server that authenticates the resource owner and issues Access Tokens after getting proper authorization.</p><p>User Agent: Agent used by the Resource Owner to interact with the client (a browser or a native application)</p><p>A typical oauth2 authorization code grant process:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>entity client
+participant ua as &#34;User Agent&#34;
+actor ro as &#34;resource Owner&#34;
+control rs as &#34;Authorization server&#34;
+
+client --&gt; ua : init OAuth2
+ua --&gt; rs: Authorization request
+
+rs --&gt; ua: owner request
+ro --&gt; ua: owner grant
+rs --&gt;  client: authorization code
+client --&gt; rs: token endpoint /w auth code
+rs --&gt; client: access code
+</code></pre><h1 id=security-filters>security Filters</h1><h2 id=csrf-protection>CSRF Protection</h2><p>cross site request forgery is an attack that tricks a user into accidentally using their credentials to invoke a state changing activity such as funds transferring.</p><h3 id=prevention>prevention</h3><h4 id=sop>SOP</h4><p>same origin policy restrict scripts on one origin from accessing another origin.</p><pre tabindex=0><code>origin := (protocol://host:port)
+</code></pre><h4 id=cors>CORS</h4><p>cross origin resource sharing is an Http-header based mechanism that allows a server to indicate any origins other than itw own from which a browser should permit loading resources.</p><p>simplest access control request and response will be like below</p><pre tabindex=0><code>request header
+    1. origin:https://foo.example
+response header
+    1. Access-Control-Allow-Origin:https://foo.example
+</code></pre><p>There are other related access control <a href=https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS>response headers</a></p><h4 id=synchronizer-token>synchronizer token</h4><ol><li>client request form</li><li>server responses form with token</li><li>client send form with token</li><li>server compare token with the original one.</li></ol></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/security/>security</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/tomcat/ data-tooltip="Tomcat- Servlet Container" aria-label="NEXT: Tomcat- Servlet Container"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/aop/ data-tooltip="spring aop 架构与实现" aria-label="PREVIOUS: spring aop 架构与实现"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/security/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/security/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/security/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring/security/",this.page.identifier="/post/java/spring/security/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="hugo-tranquilpeak-theme",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2024 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior=4><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/tomcat/ data-tooltip="Tomcat- Servlet Container" aria-label="NEXT: Tomcat- Servlet Container"><i class="fa fa-angle-left"></i>

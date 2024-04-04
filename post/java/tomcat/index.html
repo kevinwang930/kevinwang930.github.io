@@ -8,8 +8,45 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Tomcat- Servlet Container</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-02T12:50:11+08:00>April 2, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/tomcat>tomcat</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录tomcat 架构与实现</p><p>tomcat works as a servlet/jsp container.</p><h1 id=architecture>Architecture</h1><h2 id=server>Server</h2><p>Server represents the whole container</p><h2 id=service>Service</h2><p>A service is an intermidiate component which lives inside a server and ties one or more Connectors to exactly one Engine</p><h2 id=connector>Connector</h2><p>A Connector handles communications with the client.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+<a class=category-link href=https://kevinwang930.github.io/categories/tomcat>tomcat</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录tomcat 架构与实现</p><p>tomcat works as a servlet/jsp container.</p><h1 id=servlet>Servlet</h1><p>A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>package Tomcat {
+    interface Servlet {
+    + void init(ServletConfig)
+    + ServletConfig getServletConfig()
+    + void service(ServletRequest,ServletResponse)
+    + String getServletInfo()
+    + void destroy()
+    }
 
+    interface ServletConfig {
+    + String getServletName()
+    + ServletContext getServletContext()
+    + String getInitParameter(String)
+    + Enumeration&lt;String&gt; getInitParameterNames()
+    }
+
+    abstract class GenericServlet {
+    - ServletConfig config
+    }
+
+    abstract class HttpServlet {
+    # void service(HttpServletRequest,HttpServletResponse)
+    + void service(ServletRequest,ServletResponse)
+    }
+
+    interface ServletRequest {}
+    interface HttpServletRequest extends ServletRequest
+
+    interface ServletResponse {}
+    interface HttpServletResponse extends ServletResponse
+
+}
+Servlet &lt;|.. GenericServlet
+ServletConfig &lt;|.. GenericServlet
+GenericServlet &lt;|-- HttpServlet
+HttpServletRequest -right-&gt; HttpServlet
+HttpServlet -right-&gt; HttpServletResponse
+</code></pre><h1 id=tomcat-architecture>Tomcat Architecture</h1><h2 id=server>Server</h2><p>Server represents the whole container</p><h2 id=service>Service</h2><p>A service is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine</p><h2 id=connector>Connector</h2><p>A Connector handles communications with the client.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+title: Tomcat Architecture
     package Tomcat(Server) {
     
         
@@ -196,11 +233,11 @@ class Connector extends LifecycleMBeanBase {
 Server o-- Service
 Service o-- Connector
 </code></pre><h2 id=container>Container</h2><p>container is an object that can execute requests received from a client, and return responses based on those requests
-A container may optionally support a pipeline of Valves that processes the request in an order confiugured at runtime, by implementing the pipeline interface as well.
-Containers will exist at serverl levels within catlina:</p><ol><li>engine</li><li>host</li><li>context</li><li>wrapper</li></ol><p>A container may also be associated with a number of support components that provide functionality which may be shared (by attching it to a parent container) or individually customized. the following support components are currently recognized.</p><ol><li>loader</li><li>logger</li><li>manager manager for the pool of sessions</li><li>realm read-only interface to a security domain, for authenticating user identities and their corresponding roles.</li><li>resources JNDI directory context enabling access to static resources.</li></ol><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all reqeusts from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
+A container may optionally support a pipeline of Valves that processes the request in an order configured at runtime, by implementing the pipeline interface as well.
+Containers will exist at several levels within catalina:</p><ol><li>engine</li><li>host</li><li>context</li><li>wrapper</li></ol><p>A container may also be associated with a number of support components that provide functionality which may be shared (by attaching it to a parent container) or individually customized. the following support components are currently recognized.</p><ol><li>loader</li><li>logger</li><li>manager manager for the pool of sessions</li><li>realm read-only interface to a security domain, for authenticating user identities and their corresponding roles.</li><li>resources JNDI directory context enabling access to static resources.</li></ol><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
 Multiple host can be configured in catalina, each has its own request processing logic</p><h3 id=context>Context</h3><p>A context represents a web application. A host may contain multiple contexts,each with a unique path.</p><h3 id=wrapper>wrapper</h3><p>A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application.
 It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
-Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>scale 1536 width
+Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: Tomcat Container Architecture
 interface Lifecycle {
 
 + void addLifecycleListener(LifecycleListener)
@@ -401,6 +438,19 @@ Context o-- Wrapper
 ContainerBase *-- Pipeline
 Pipeline o-- Valve
 StandardWrapper *-right- StandardWrapperValve
+</code></pre><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>rectangle OrderedPipelineValves {
+    rectangle Engine
+    rectangle Host
+    rectangle context
+    rectangle wrapper
+Engine --&gt; Host
+Host --&gt; context
+context --&gt; wrapper
+}
+rectangle FilterChain
+rectangle Servlet
+wrapper --&gt; FilterChain
+FilterChain --&gt; Servlet
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/tomcat/>tomcat</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/servlet/>servlet</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip=Security aria-label="PREVIOUS: Security"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>

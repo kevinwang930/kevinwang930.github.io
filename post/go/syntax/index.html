@@ -7,7 +7,7 @@
 <span class=sidebar-button-desc>About</span></a></li></ul><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://github.com/kevinwang930 target=_blank rel=noopener title=GitHub><i class="sidebar-button-icon fab fa-lg fa-github" aria-hidden=true></i>
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>go Syntax</h1><div class="postShorten-meta post-meta"><time datetime=2024-03-31T20:48:33+08:00>March 31, 2024
 </time><span>in</span>
-<a class=category-link href=https://kevinwang930.github.io/categories/go>go</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录go 语法</p><p><a href=https://go.dev/ref/spec#Assignment_statements>go语法文档</a></p><p>The syntax is specified using writh syntax notation</p><h1 id=notation>Notation</h1><pre tabindex=0><code>Syntax      = { Production } .
+<a class=category-link href=https://kevinwang930.github.io/categories/go>go</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录go 语法</p><ul><li><a href=#notation>Notation</a></li><li><a href=#source-code>source code</a><ul><li><a href=#characters>characters</a></li></ul></li><li><a href=#type>type</a><ul><li><a href=#array-type>Array type</a></li><li><a href=#struct-types>struct types</a></li><li><a href=#pointer-type>Pointer type</a></li><li><a href=#function-type>Function type</a></li><li><a href=#interface-type>interface Type</a></li><li><a href=#map-type>map type</a></li><li><a href=#channel-type>Channel type</a></li></ul></li><li><a href=#blocks>blocks</a></li><li><a href=#declaraton-and-scope>declaraton and scope</a><ul><li><a href=#variable--declaration>variable declaration</a><ul><li><a href=#short-variable-declaration>short variable declaration</a></li><li><a href=#const-declaration>Const declaration</a></li><li><a href=#zero-value>zero value</a></li></ul></li><li><a href=#type-declaration>type declaration</a><ul><li><a href=#type-definition>type definition</a></li><li><a href=#></a></li></ul></li></ul></li><li><a href=#expressions>Expressions</a></li><li><a href=#statements>statements</a><ul><li><a href=#for-statement>for statement</a></li><li><a href=#if-statement>if statement</a></li><li><a href=#switch-statement>Switch statement</a></li></ul></li><li><a href=#assignment>Assignment</a></li></ul><p><a href=https://go.dev/ref/spec#Assignment_statements>go语法文档</a></p><p>The syntax is specified using writh syntax notation</p><h1 id=notation>Notation</h1><pre tabindex=0><code>Syntax      = { Production } .
 Production  = production_name &#34;=&#34; [ Expression ] &#34;.&#34; .
 Expression  = Term { &#34;|&#34; Term } .
 Term        = Factor { Factor } .
@@ -23,21 +23,20 @@ Repetition  = &#34;{&#34; Expression &#34;}&#34; .
 unicode_char   = /* an arbitrary Unicode code point except newline */ .
 unicode_letter = /* a Unicode code point categorized as &#34;Letter&#34; */ .
 unicode_digit  = /* a Unicode code point categorized as &#34;Number, decimal digit&#34; */ .
-</code></pre><h1 id=type>type</h1><p>A type determines a set of values together with operations and methods specific to those values.
-Type = TypeName [ TypeArgs ] | TypeLit | &ldquo;(&rdquo; Type &ldquo;)&rdquo; .
-TypeName = identifier | QualifiedIdent .
-TypeArgs = &ldquo;[&rdquo; TypeList [ &ldquo;,&rdquo; ] &ldquo;]&rdquo; .
-TypeList = Type { &ldquo;,&rdquo; Type } .
-TypeLit = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
-SliceType | MapType | ChannelType .</p><p>a type definition creates a new , distinct type and binds an identifier to it</p><pre><code>TypeDef = identifier [ TypeParameters ] Type .
+</code></pre><h1 id=type>type</h1><p>A type determines a set of values together with operations and methods specific to those values.</p><pre><code>Type      = TypeName [ TypeArgs ] | TypeLit | &quot;(&quot; Type &quot;)&quot; .
+TypeName  = identifier | QualifiedIdent .
+TypeArgs  = &quot;[&quot; TypeList [ &quot;,&quot; ] &quot;]&quot; .
+TypeList  = Type { &quot;,&quot; Type } .
+TypeLit   = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
+            SliceType | MapType | ChannelType .
 </code></pre><h2 id=array-type>Array type</h2><pre><code>ArrayType   = &quot;[&quot; ArrayLength &quot;]&quot; ElementType .
 ArrayLength = Expression .
 ElementType = Type .
-</code></pre><h2 id=struct-types>struct types</h2><p>A struct is a sequence of named elements, called fields, each of which has a name and a type.
-StructType = &ldquo;struct&rdquo; &ldquo;{&rdquo; { FieldDecl &ldquo;;&rdquo; } &ldquo;}&rdquo; .
-FieldDecl = (IdentifierList Type | EmbeddedField) [ Tag ] .
-EmbeddedField = [ &ldquo;*&rdquo; ] TypeName [ TypeArgs ] .
-Tag = string_lit .</p><h2 id=pointer-type>Pointer type</h2><pre><code>PointerType = &quot;*&quot; BaseType .
+</code></pre><h2 id=struct-types>struct types</h2><p>A struct is a sequence of named elements, called fields, each of which has a name and a type.</p><pre><code>StructType    = &quot;struct&quot; &quot;{&quot; { FieldDecl &quot;;&quot; } &quot;}&quot; .
+FieldDecl     = (IdentifierList Type | EmbeddedField) [ Tag ] .
+EmbeddedField = [ &quot;*&quot; ] TypeName [ TypeArgs ] .
+Tag           = string_lit .
+</code></pre><h2 id=pointer-type>Pointer type</h2><pre><code>PointerType = &quot;*&quot; BaseType .
 BaseType    = Type .
 </code></pre><h2 id=function-type>Function type</h2><pre><code>FunctionType   = &quot;func&quot; Signature .
 Signature      = Parameters [ Result ] .
@@ -59,7 +58,7 @@ ChannelType = ( &ldquo;chan&rdquo; | &ldquo;chan&rdquo; &ldquo;&lt;-&rdquo; | &l
 Block = &ldquo;{&rdquo; StatementList &ldquo;}&rdquo; .
 StatementList = { Statement &ldquo;;&rdquo; } .</p><h1 id=declaraton-and-scope>declaraton and scope</h1><pre><code>Declaration   = ConstDecl | TypeDecl | VarDecl .
 TopLevelDecl  = Declaration | FunctionDecl | MethodDecl .
-</code></pre><h2 id=variable--declration>variable declration</h2><p>varaible declaration create one or more variables.</p><pre><code>VarDecl     = &quot;var&quot; ( VarSpec | &quot;(&quot; { VarSpec &quot;;&quot; } &quot;)&quot; ) .
+</code></pre><h2 id=variable--declaration>variable declaration</h2><p>varaible declaration create one or more variables.</p><pre><code>VarDecl     = &quot;var&quot; ( VarSpec | &quot;(&quot; { VarSpec &quot;;&quot; } &quot;)&quot; ) .
 VarSpec     = IdentifierList ( Type [ &quot;=&quot; ExpressionList ] | &quot;=&quot; ExpressionList ) .
 </code></pre><h3 id=short-variable-declaration>short variable declaration</h3><pre><code>ShortVarDecl = IdentifierList &quot;:=&quot; ExpressionList .
 </code></pre><h3 id=const-declaration>Const declaration</h3><pre><code>ConstDecl      = &quot;const&quot; ( ConstSpec | &quot;(&quot; { ConstSpec &quot;;&quot; } &quot;)&quot; ) .
@@ -69,7 +68,8 @@ ExpressionList = Expression { &quot;,&quot; Expression } .
 </code></pre><h3 id=zero-value>zero value</h3><p>Variables declared without an explicit initial value are given their zero value.</p><ol><li>0 for numeric types</li><li>false for boolean</li><li>"" for string</li></ol><h2 id=type-declaration>type declaration</h2><p>type declaration binds an identifier, the type name to a type</p><pre><code>TypeDecl = &quot;type&quot; ( TypeSpec | &quot;(&quot; { TypeSpec &quot;;&quot; } &quot;)&quot; ) .
 TypeSpec = AliasDecl | TypeDef .
 AliasDecl = identifier &quot;=&quot; Type .
-</code></pre><h1 id=expressions>Expressions</h1><p>An expression specifies the computation of a value by applying operators and functions to operands.</p><h1 id=statements>statements</h1><p>Statement control execution.</p><pre><code>Statement =
+</code></pre><h3 id=type-definition>type definition</h3><p>a type definition creates a new , distinct type and binds an identifier to it</p><pre><code>TypeDef = identifier [ TypeParameters ] Type .
+</code></pre><h3 id=heading></h3><h1 id=expressions>Expressions</h1><p>An expression specifies the computation of a value by applying operators and functions to operands.</p><h1 id=statements>statements</h1><p>Statement control execution.</p><pre><code>Statement =
     Declaration | LabeledStmt | SimpleStmt |
     GoStmt | ReturnStmt | BreakStmt | ContinueStmt | GotoStmt |
     FallthroughStmt | Block | IfStmt | SwitchStmt | SelectStmt | ForStmt |
