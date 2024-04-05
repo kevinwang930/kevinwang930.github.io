@@ -27,6 +27,7 @@ contribution:
 3. [The process of object-oriented design](https://dl.acm.org/doi/pdf/10.1145/141937.141942)
 
 ## Chris Hegarty 
+OpenJDK Reviewer, Apache Lucene Committer and PMC member
 
 contribution: 
 1. jdk11 httpclient
