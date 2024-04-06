@@ -1,5 +1,5 @@
 ---
-title: "Algorithms"
+title: "基础算法-排序查找"
 date: 2024-03-02T16:55:12+08:00
 categories:
 - 算法
@@ -9,6 +9,8 @@ keywords:
 - 算法
 #thumbnailImage: //example.com/image.jpg
 ---
+本文记录常见的排序与查找算法
+<!--more-->
 
 # 1. Sort
 
