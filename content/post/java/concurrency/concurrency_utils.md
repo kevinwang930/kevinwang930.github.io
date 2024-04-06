@@ -11,8 +11,10 @@ tags:
 
 #thumbnailImage: //example.com/image.jpg
 ---
+本文记录jdk提供的并发编程基础模块，包含：1. 线程池，2. 异步执行框架，3.线程安全集合，4. 同步器
+<!--more-->
 
-# Concurrency Utilities in Java
+
 The concurrency utilities packages provide a powerful, extensible framework of high-performance threading utilities such as thread pools and blocking queues. This package frees the programmer from the need to craft these utilities by hand, in much the same manner the collections framework did for data structures. Additionally, these packages provide low-level primitives for advanced concurrent programming.
 
 The concurrency utilities include:
@@ -26,7 +28,7 @@ Developer guides on concurrency utilities can be found [here](https://docs.oracl
 
 <!--more-->
 
-## Task Scheduling
+# Task Scheduling
 
 Runnable An operation that does not return a result.
 
@@ -41,7 +43,7 @@ Future represents the result of asynchronous computation. Methods are provided t
 CompletableFuture A Future that may be explicitly completed, supports dependent functions and actions that trigger upon its completion.
 
 
-### Interface
+## Interface
 
 ```plantuml
 title: Task scheduling interface
@@ -119,7 +121,7 @@ ExecutorService -right-> Future: result
 
 ```
 
-### Thread pool Implementation
+## Thread pool Implementation
 
 FutureTask A cancellable asynchronous computation. 
 
@@ -189,7 +191,7 @@ class ThreadPoolExecutor extends AbstractExecutorService {
 
 ```
 
-### Asynchronous Execution Implementation
+## Asynchronous Execution Implementation
 
 CompletionStage A stage of a possibly asynchronous computation. 
 A stage's execution may be trigger by completion of other stages, it inturn can trigger computation of other stages. Thus form a asynchronous task chain.
