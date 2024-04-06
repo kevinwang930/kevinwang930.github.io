@@ -12,8 +12,9 @@ keywords:
 - tech
 #thumbnailImage: //example.com/image.jpg
 ---
+本文记录java Nio的接口与实现
+<!--more-->
 
-# Java NIO
 
 ## 1. stream api
 ```plantuml

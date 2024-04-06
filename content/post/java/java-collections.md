@@ -10,13 +10,14 @@ tags:
 #thumbnailImage: //example.com/image.jpg
 ---
 
+本文记录java集合的接口与实现
 <!--more-->
 
-# 1. Collections
+
 
  A collection is an object that represents a group of objects (such as the classic Vector class). A collections framework is a unified architecture for representing and manipulating collections, enabling collections to be manipulated independently of implementation details.
 
- ## 1.1 Collection interfaces
+ # Collection interfaces
 
  1. java.util.collection
     ```
@@ -29,7 +30,7 @@ tags:
     java.util.Deque
     java.util.concurrent.BlockingDeque
     ```
-2. java.util.map and offspring
+1. java.util.map and offspring
     ```
     java.util.SortedMap
     java.util.NavigableMap
@@ -132,7 +133,7 @@ interface Entry<K, V>  {
 }
 Map o-- Entry
 ```
-## 1.2 Collection implementations
+#  Collection implementations
 | Interface | Hash Table                                              | Resizable                                                     | Balanced Tree    | Linked List                                                   | Hash Table + Linked List |
 | :-------- | :------------------------------------------------------ | :------------------------------------------------------------ | :--------------- | :------------------------------------------------------------ | :----------------------- |
 | `List`    |                                                         | <tt>ArrayList</tt> |                  | <tt>LinkedList</tt> |                          |
@@ -264,8 +265,8 @@ Map o-- Entry
     ```
 
 
-# 1. concurrent collection
-## 1.1 concurrent collection interfaces
+#  concurrent collection
+##  concurrent collection interfaces
 
 ```
 BlockingQueue
@@ -275,7 +276,7 @@ ConcurrentMap
 ConcurrentNavigableMap
 ```
 
-## 1.2 concurrent collection implementations
+##  concurrent collection implementations
 
 ### ConcurrentHashMap
 

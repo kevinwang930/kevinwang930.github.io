@@ -10,7 +10,8 @@ tags:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-
+本文记录数据结构中书的类型及其应用
+<!--more-->
 
 
 

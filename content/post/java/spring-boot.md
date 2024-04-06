@@ -10,8 +10,9 @@ mermaid: true
 ---
 
 本文记录springBoot 内部实现
+<!--more-->
 
-# 1. Environment abstraction
+# Environment abstraction
 
 Environment Interface is an abstraction in container that models 2 key aspects of application environment.
 
