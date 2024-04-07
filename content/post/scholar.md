@@ -15,7 +15,7 @@ keywords:
 <!--more-->
 
 
-# Java
+
 
 
 ## Douglas S. Lea 
@@ -33,3 +33,48 @@ contribution:
 1. jdk11 httpclient
 2. jdk record
 [blog](https://inside.java/u/ChrisHegarty/)
+
+
+
+
+
+## John M. Mellor-Crummey
+
+Professor of Computer Science, Rice University
+
+Contributions:
+1. [Algorithms for scalable synchronization on shared-memory multiprocessors](https://dl.acm.org/doi/pdf/10.1145/103727.103729)
+
+
+ 
+## Maged M Michael
+Concurrent Algorithms
+
+contribution:
+1. [Simple, fast, and practical non-blocking and blocking concurrent queue algorithms](https://dl.acm.org/doi/pdf/10.1145/248052.248106)
+2. [Hazard pointers: Safe memory reclamation for lock-free objects](https://www.tsingfun.com/uploadfile/2022/0224/Hazard%20Pointers.pdf)
+
+## Michael L. Scott
+Arthur Gould Yates Professor, Computer Science
+contributions:
+```
+1. Algorithms for scalable synchronization on shared-memory multiprocessors
+2. [Simple, fast, and practical non-blocking and blocking concurrent queue algorithms](https://dl.acm.org/doi/pdf/10.1145/248052.248106)
+3. [Programming language pragmatics](http://54.186.36.238/Programming%20Language%20Pragmatics%20-%203E%20-%20Scott.pdf)
+```
+    
+
+ 
+
+## Anders Landin
+
+contributions:
+1. [Queue locks on cache coherent multiprocessors](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=f20bb59b95d2eb95013d386cde3f8969ffd7f0b7)
+
+
+# Publication
+
+## Algorithms for scalable synchronization on shared-memory multiprocessors
+[pdf](https://dl.acm.org/doi/pdf/10.1145/103727.103729)
+
+the paper introduces spin locks and barries based on spin lock.the spin lock part is genius. but other contents seems difficult to comprehend.
