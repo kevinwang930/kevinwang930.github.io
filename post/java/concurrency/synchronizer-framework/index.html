@@ -17,8 +17,15 @@ while (synchronization state does not allow acquire) {
 release:
 if (state permit a blocked thread to acquire)
     unblock one or more queued threads 
-</code></pre><p>Support for these operations requires the coordination of three basic components:</p><ol><li>Atomically managing synchronization state.</li><li>blocking and unblocking threads</li><li>maintaining queues</li></ol><p>The central decision in the synchronizer framework was to choose a concrete implementation of each of these three components, while still permitting a wide range of options in how they are used.</p><h2 id=synchronization-state>Synchronization state</h2><ol><li>getState()</li><li>compareAndSetState()</li></ol><p>Concrete classes based on AbstractQueuedSynchronizer must define methods:</p><ol><li>tryAcquire</li><li>tryRelease</li></ol><h2 id=blocking>Blocking</h2><p><code>java.util.concurrent.locks</code> package includes a LockSupport class with methods that :</p><ol><li>LockSupport.park blocks the current thread.</li><li>Thread.interrupt interrupting a thread unparks it.</li><li>LockSupport.unpark unblocks the current thread.
-HotspotJVM uses a pthread condvar</li></ol><h2 id=queues>Queues</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+</code></pre><p>Support for these operations requires the coordination of three basic components:</p><ol><li>Atomically managing synchronization state.</li><li>blocking and unblocking threads</li><li>maintaining queues</li></ol><p>The central decision in the synchronizer framework was to choose a concrete implementation of each of these three components, while still permitting a wide range of options in how they are used.</p><h2 id=synchronization-state>Synchronization state</h2><p>AQS maintains synchronization state using only a single (32-bit) int, and exports operations to access and update state</p><ol><li>getState()</li><li>setState()</li><li>compareAndSetState()</li></ol><p>Concrete classes based on AbstractQueuedSynchronizer must define methods:</p><ol><li>tryAcquire</li><li>tryRelease</li></ol><h2 id=blocking>Blocking</h2><p><code>java.util.concurrent.locks</code> package includes a LockSupport class with methods that :</p><ol><li>LockSupport.park blocks the current thread.</li><li>Thread.interrupt interrupting a thread unparks it.</li><li>LockSupport.unpark unblocks the current thread.
+HotspotJVM uses a pthread condvar</li></ol><h2 id=queues>Queues</h2><p>The heart of the framework is maintenance of queues of blocked threads, which are restricted to FIFO queues.
+The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
+CLH have been used only in spinlocks.
+AQS made modification to the CLH locks to support blocking,cancellation and timeouts.
+1. CLH node with <code>prev</code> node link can deal with timeouts and cancellation
+2. CLH node with <code>next</code> node link to support blocking and waking up (park/unpark)
+3. <code>status</code> field kept in each node for purposes of controlling blocking.
+4. garbage collection of nodes relies on GC</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 abstract class AbstractOwnableSynchronizer {
     transient Thread exclusiveOwnerThread
 }
@@ -36,6 +43,151 @@ class Node {
 }
 
 AbstractQueuedSynchronizer o-- Node
+</code></pre><h2 id=condition-queues>Condition queues</h2><p>The synchronizer framework provides a <code>ConditionObject</code> class for use by synchronizers that maintain exclusive synchronization and conform to the <code>LOCK</code> interface.
+Any number of condition objects may be attached to a lock object, providing classis monitor-style await, signal and signalAll operations.</p><p>A <code>ConditionObject</code> uses the same internal queue nodes as synchronizers, but maintains them on a separate condition queue. The signal operation is implemented as a queue transfer from the condition queue to the lock queue, without necessarily waking up the signalled thread before it has re-acquired its lock.</p><pre tabindex=0><code>await:
+    create and add new node to condition queue;
+    release lock;
+    block until node is on lock queue;
+    re-acquire lock;
+
+signal:
+    transfer the first node from condition queue to lock queue.
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+interface Condition {
+    void await()
+    void awaitUninterruptibly()
+    long awaitNanos(long nanosTimeout)
+    boolean await(long time, TimeUnit unit)
+    boolean awaitUntil(Date deadline)
+    void signal()
+    void signalAll()
+}
+
+class Node {
+    volatile Node prev
+    volatile Node next
+    Thread waiter
+    volatile int status
+}
+
+class ConditionObject implements Condition {
+    transient ConditionNode firstWaiter
+    transient ConditionNode lastWaiter
+}
+
+interface ManagedBlocker {
+    boolean block() throws InterruptedException
+    boolean isReleasable()
+}
+
+class ConditionNode extends Node implements ManagedBlocker {
+    ConditionNode nextWaiter
+}
+
+ConditionObject *-right- ConditionNode
+</code></pre><h1 id=synchronizers>Synchronizers</h1><h2 id=reentrantlock>ReentrantLock</h2><p>ReentrantLock will check the current owner of the lock,if it is the current thread, it set state and return directly.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Lock {
+    void lock()
+    void lockInterruptibly() throws InterruptedException
+    boolean tryLock()
+    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
+    void unlock()
+    Condition newCondition()
+}
+
+class ReentrantLock implements Lock {
+    final Sync sync
+}
+
+abstract class AbstractOwnableSynchronizer {
+    transient Thread exclusiveOwnerThread
+}
+class AbstractQueuedSynchronizer extends AbstractOwnableSynchronizer {
+    transient volatile Node head
+    transient volatile Node tail
+    volatile int state
+}
+
+class Node {
+    volatile Node prev
+    volatile Node next
+    Thread waiter
+    volatile int status
+}
+abstract  class Sync extends AbstractQueuedSynchronizer {
+
+}
+ReentrantLock *-- Sync
+AbstractQueuedSynchronizer o-- Node
+</code></pre><h2 id=reentrantreadwritelock>ReentrantReadWriteLock</h2><p>State of lock is 32 bit, upper 16 bits store shared count, lower 16 bits store exclusive count.</p><p>The ReadLock uses the <code>acquireShared</code> methods to enable multiple readers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+interface Lock {
+    void lock()
+    void lockInterruptibly() throws InterruptedException
+    boolean tryLock()
+    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
+    void unlock()
+    Condition newCondition()
+}
+
+interface ReadWriteLock {
+    Lock readLock()
+    Lock writeLock()
+}
+
+class ReentrantReadWriteLock  {
+    ReadLock readerLock
+    WriteLock writerLock
+    Sync sync
+}
+
+class ReadLock {
+    Sync sync
+}
+
+class WriteLock  {
+    Sync sync
+}
+abstract class Sync extends AbstractQueuedSynchronizer {
+    ThreadLocalHoldCounter readHolds
+    HoldCounter cachedHoldCounter
+    Thread firstReader
+    int firstReaderHoldCount
+}
+
+class NonfairSync extends Sync
+Lock &lt;|--- ReadLock
+Lock &lt;|--- WriteLock
+ReadWriteLock &lt;|-- ReentrantReadWriteLock
+ReentrantReadWriteLock *-left- ReadLock
+ReentrantReadWriteLock *-right- WriteLock
+
+
+ReentrantReadWriteLock *-down- Sync
+</code></pre><h2 id=semaphore>Semaphore</h2><p>Semaphore uses the synchronization state to hold the current count. It defines <code>acquireShared</code> to decrement the count or block if nonpositive, and <code>tryRelease</code> to increment the count, possibly unblocking threads if it is now positive.</p><h2 id=countdownlatch>CountDownlatch</h2><p><code>CountDownLatch</code> uses the synchronization state to represent the count.All acquires pass when it reaches zero.</p><h2 id=futuretask>FutureTask</h2><p><code>FutureTask</code> uses synchronization state to represent the run-state of a future(initial, running, cancelled, done). Setting or cancelling a future invokes release, unblocking threads waiting for its computed value via <code>acquire</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Future&lt;V&gt; {
+    boolean cancel(boolean mayInterruptIfRunning)
+    boolean isCancelled()
+    boolean isDone()
+    V get() 
+    V get(long timeout, TimeUnit unit)
+    default V resultNow() 
+    default Throwable exceptionNow()
+    default State state()
+}
+interface RunnableFuture&lt;V&gt; extends Runnable, Future {
+    void run()
+}
+
+class FutureTask&lt;V&gt; implements RunnableFuture {
+    volatile int state
+    Callable&lt;V&gt; callable
+    Object outcome
+    volatile Thread runner
+    volatile WaitNode waiters
+}
+class WaitNode {
+    Thread thread
+    WaitNode next
+}
+FutureTask *-right- WaitNode
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/synchronizer/>synchronizer</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/concurrency/>concurrency</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/concurrency/synchronization/ data-tooltip=Synchronization aria-label="NEXT: Synchronization"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrency/fork-join-framework/ data-tooltip="java Concurrency - Fork Join Framework" aria-label="PREVIOUS: java Concurrency - Fork Join Framework"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
