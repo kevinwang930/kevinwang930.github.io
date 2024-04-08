@@ -62,8 +62,12 @@ Support for these operations requires the coordination of three basic components
 The central decision in the synchronizer framework was to choose a concrete implementation of each of these three components, while still permitting a wide range of options in how they are used.
 
 ## Synchronization state
-1. getState()
-2. compareAndSetState()
+AQS maintains synchronization state using only a single (32-bit) int, and exports operations to access and update state
+
+   1. getState()
+   2. setState()
+   3. compareAndSetState()
+
 
 Concrete classes based on AbstractQueuedSynchronizer must define methods:
 1. tryAcquire
@@ -80,6 +84,14 @@ HotspotJVM uses a pthread condvar
 
 ## Queues
 
+The heart of the framework is maintenance of queues of blocked threads, which are restricted to FIFO queues.
+The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
+CLH have been used only in spinlocks.
+AQS made modification to the CLH locks to support blocking,cancellation and timeouts.
+    1. CLH node with `prev` node link can deal with timeouts and cancellation
+    2. CLH node with `next` node link to support blocking and waking up (park/unpark)
+    3. `status` field kept in each node for purposes of controlling blocking.
+    4. garbage collection of nodes relies on GC
 
 
 ```plantuml
@@ -101,4 +113,205 @@ class Node {
 }
 
 AbstractQueuedSynchronizer o-- Node
+```
+
+## Condition queues
+
+The synchronizer framework provides a `ConditionObject` class for use by synchronizers that maintain exclusive synchronization and conform to the `LOCK` interface.
+Any number of condition objects may be attached to a lock object, providing classis monitor-style await, signal and signalAll operations.
+
+A `ConditionObject` uses the same internal queue nodes as synchronizers, but maintains them on a separate condition queue. The signal operation is implemented as a queue transfer from the condition queue to the lock queue, without necessarily waking up the signalled thread before it has re-acquired its lock.
+
+```
+await:
+    create and add new node to condition queue;
+    release lock;
+    block until node is on lock queue;
+    re-acquire lock;
+
+signal:
+    transfer the first node from condition queue to lock queue.
+```
+
+
+
+
+
+
+```plantuml
+
+interface Condition {
+    void await()
+    void awaitUninterruptibly()
+    long awaitNanos(long nanosTimeout)
+    boolean await(long time, TimeUnit unit)
+    boolean awaitUntil(Date deadline)
+    void signal()
+    void signalAll()
+}
+
+class Node {
+    volatile Node prev
+    volatile Node next
+    Thread waiter
+    volatile int status
+}
+
+class ConditionObject implements Condition {
+    transient ConditionNode firstWaiter
+    transient ConditionNode lastWaiter
+}
+
+interface ManagedBlocker {
+    boolean block() throws InterruptedException
+    boolean isReleasable()
+}
+
+class ConditionNode extends Node implements ManagedBlocker {
+    ConditionNode nextWaiter
+}
+
+ConditionObject *-right- ConditionNode
+
+```
+
+
+# Synchronizers
+
+## ReentrantLock
+
+
+ReentrantLock will check the current owner of the lock,if it is the current thread, it set state and return directly.
+
+```plantuml
+interface Lock {
+    void lock()
+    void lockInterruptibly() throws InterruptedException
+    boolean tryLock()
+    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
+    void unlock()
+    Condition newCondition()
+}
+
+class ReentrantLock implements Lock {
+    final Sync sync
+}
+
+abstract class AbstractOwnableSynchronizer {
+    transient Thread exclusiveOwnerThread
+}
+class AbstractQueuedSynchronizer extends AbstractOwnableSynchronizer {
+    transient volatile Node head
+    transient volatile Node tail
+    volatile int state
+}
+
+class Node {
+    volatile Node prev
+    volatile Node next
+    Thread waiter
+    volatile int status
+}
+abstract  class Sync extends AbstractQueuedSynchronizer {
+
+}
+ReentrantLock *-- Sync
+AbstractQueuedSynchronizer o-- Node
+```
+
+## ReentrantReadWriteLock
+
+State of lock is 32 bit, upper 16 bits store shared count, lower 16 bits store exclusive count.
+
+The ReadLock uses the `acquireShared` methods to enable multiple readers.
+
+
+
+
+```plantuml
+
+interface Lock {
+    void lock()
+    void lockInterruptibly() throws InterruptedException
+    boolean tryLock()
+    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
+    void unlock()
+    Condition newCondition()
+}
+
+interface ReadWriteLock {
+    Lock readLock()
+    Lock writeLock()
+}
+
+class ReentrantReadWriteLock  {
+    ReadLock readerLock
+    WriteLock writerLock
+    Sync sync
+}
+
+class ReadLock {
+    Sync sync
+}
+
+class WriteLock  {
+    Sync sync
+}
+abstract class Sync extends AbstractQueuedSynchronizer {
+    ThreadLocalHoldCounter readHolds
+    HoldCounter cachedHoldCounter
+    Thread firstReader
+    int firstReaderHoldCount
+}
+
+class NonfairSync extends Sync
+Lock <|--- ReadLock
+Lock <|--- WriteLock
+ReadWriteLock <|-- ReentrantReadWriteLock
+ReentrantReadWriteLock *-left- ReadLock
+ReentrantReadWriteLock *-right- WriteLock
+
+
+ReentrantReadWriteLock *-down- Sync
+
+```
+
+## Semaphore
+Semaphore uses the synchronization state to hold the current count. It  defines `acquireShared` to decrement the count or block if nonpositive, and `tryRelease` to increment the count, possibly unblocking threads if it is now positive.
+
+
+## CountDownlatch 
+`CountDownLatch` uses the synchronization state to represent the count.All acquires pass when it reaches zero.
+
+
+## FutureTask
+`FutureTask` uses synchronization state to represent the run-state of a future(initial, running, cancelled, done). Setting or cancelling a future invokes release, unblocking threads waiting for its computed value via `acquire`.
+
+```plantuml
+interface Future<V> {
+    boolean cancel(boolean mayInterruptIfRunning)
+    boolean isCancelled()
+    boolean isDone()
+    V get() 
+    V get(long timeout, TimeUnit unit)
+    default V resultNow() 
+    default Throwable exceptionNow()
+    default State state()
+}
+interface RunnableFuture<V> extends Runnable, Future {
+    void run()
+}
+
+class FutureTask<V> implements RunnableFuture {
+    volatile int state
+    Callable<V> callable
+    Object outcome
+    volatile Thread runner
+    volatile WaitNode waiters
+}
+class WaitNode {
+    Thread thread
+    WaitNode next
+}
+FutureTask *-right- WaitNode
 ```

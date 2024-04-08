@@ -1,5 +1,5 @@
 ---
-title: "Concurrency utilities in Java"
+title: "Java Concurrency - Task Scheduling"
 date: 2024-02-25T01:57:48+08:00
 categories:
 - java
@@ -11,7 +11,7 @@ tags:
 
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录jdk提供的并发编程基础模块，包含：1. 线程池，2. 异步执行框架，3.线程安全集合，4. 同步器
+本文记录jdk提供的并发编程基础模块 - 线程池与异步执行框架
 <!--more-->
 
 
@@ -225,8 +225,3 @@ class CompletableFuture<T> implements Future, CompletionStage {
     Completion stack
 }
 ```
-## Lock
-
-### CountdownLatch
-
-used in tomcat endpoint to control connection size.

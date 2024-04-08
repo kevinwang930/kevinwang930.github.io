@@ -45,6 +45,18 @@ ticket lock probes with read operation only(thus avoids the overhead of unnecess
 ## Array-Based Queuing Locks
 Each processor has its own address to spin 
 
+
+```plantuml
+left to right direction
+
+State Thread1:status:Running
+Thread2:status:waiting
+Thread3:status:waiting
+Thread1--> Thread2
+Thread2 --> Thread3
+
+```
+
 ## MCS Queue Lock
 ```
 type qnode = record
@@ -92,7 +104,7 @@ procedure central_barrier
 ```
 
 ## Software Combining Tree Barrier
-
+to be continued
 ```
 type node = record
     k: integer
