@@ -109,6 +109,8 @@ client --> spring: /page with cookie: JESSIONID
 ```
 
 
+
+
 ## OAuth2 
 The OAuth2 Login feature lets an application have users log into the application by using their existing account at an OAuth2 provider (such as github) or OpenId Connect 1.0 provider(such as google).
 

@@ -107,10 +107,22 @@ class ForkJoinPool extends AbstractExecutorService {
     int parallelism
  }
 
-class ForkJoinWorkerThread extends Thread
+ class WorkQueue {
+    ForkJoinWorkerThread owner
+    ForkJoinTask<?>[] array
+    int base
+    final int config
+    int top 
+    int phase
+    int stackPred
+    volatile int source
+    int nsteals
+    volatile int parking
+ }
 
-
+ ForkJoinPool o-- WorkQueue
+ WorkQueue o-- ForkJoinTask
 ForkJoinTask *-- Aux
-ForkJoinTask -right-> ForkJoinPool: poolSubmit
+
 
 ```
