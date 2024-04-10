@@ -64,11 +64,22 @@ class ForkJoinPool extends AbstractExecutorService {
     int parallelism
  }
 
-class ForkJoinWorkerThread extends Thread
+ class WorkQueue {
+    ForkJoinWorkerThread owner
+    ForkJoinTask&lt;?&gt;[] array
+    int base
+    final int config
+    int top 
+    int phase
+    int stackPred
+    volatile int source
+    int nsteals
+    volatile int parking
+ }
 
-
+ ForkJoinPool o-- WorkQueue
+ WorkQueue o-- ForkJoinTask
 ForkJoinTask *-- Aux
-ForkJoinTask -right-&gt; ForkJoinPool: poolSubmit
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/concurrency/>concurrency</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/forkjoin/>forkJoin</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/ data-tooltip="java concurrency - Synchronizer Framework" aria-label="NEXT: java concurrency - Synchronizer Framework"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/scholar/ data-tooltip=Scholar aria-label="PREVIOUS: Scholar"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
