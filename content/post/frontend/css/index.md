@@ -70,7 +70,10 @@ if `width` not specified, box will extend in the inline direction to fill the co
     margin
     border
 }
+
 ```
+![box display](images/box.png)
+
 ## inline display type
 
 ## Flex model
