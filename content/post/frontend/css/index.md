@@ -109,3 +109,30 @@ A grid will typically have columns, rows.
 7. rem  relative t the font size of the root element
 8. vh   viewport's height
 9. vw   viewport's width
+
+
+# Less
+
+Less (Leaner Style Sheets) is a backwards-compatible extension for CSS.
+
+```
+@name           //  variable
+
+#page {         //  scope
+    @name:red
+    #header {
+        color:@name
+    }
+}
+.name()         //  mixin
+#header {       //  nesting
+    .logo {
+        width:300px
+    }
+}
+
+@base:@name*2               //  operations
+@base:percentage(@base)     //  functions
+@import "library"           //  import
+
+```
