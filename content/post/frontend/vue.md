@@ -76,7 +76,17 @@ use `computed()` to create a computed ref that computes its `.value` based on ot
 use `ref="name"` to declare one ref in template
 
 
+## Script
 
+### reactive()     
+implemented use JavaScript Proxies 
+### ref()
+take any value type and create an object that exposes the inner value under a `.value` property
+### watch()
+perform side effect reactively 
+```
+watch(state,func)
+```
 
 
 
