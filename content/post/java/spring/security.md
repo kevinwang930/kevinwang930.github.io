@@ -69,7 +69,7 @@ client --> Filter0
 Filter0 --> DelegatingFilterProxy
 DelegatingFilterProxy --> Filter2
 Filter2 --> Servlet
-FilterChainProxy -right-> SecurityFilterChain
+FilterChainProxy ----> SecurityFilterChain
 ```
 
 ```plantuml
@@ -88,6 +88,56 @@ package jakarta {
 
 ```
 
+# Implementation
+
+`HttpSecurity` is a builder that build `DefaultSecurityFilterChain` in the final
+
+```plantuml
+interface SecurityBuilder<O> {
+    O build()
+}
+interface SecurityConfigurer<O, B extends SecurityBuilder<O>> {
+    void init(B builder)
+    void configure(B builder)
+}
+
+interface HttpSecurityBuilder<H extends HttpSecurityBuilder<H>> extends SecurityBuilder {
+    C getConfigurer(Class<C> clazz)
+    C removeConfigurer(Class<C> clazz)
+    void setSharedObject(Class<C> sharedType, C object)
+    C getSharedObject(Class<C> sharedType)
+}
+
+abstract class SecurityConfigurerAdapter<O, B extends SecurityBuilder<O>> implements SecurityConfigurer {
+    B SecurityBuilder
+    CompositeObjectPostProcessor objectPostProcessor
+    protected <T> T postProcess(T object)
+    void addObjectPostProcessor()
+    void setBuilder()
+}
+
+abstract class AbstractSecurityBuilder<O> implements SecurityBuilder {
+    O object
+    protected abstract O doBuild()
+}
+
+abstract class AbstractConfiguredSecurityBuilder<O,B> extends AbstractSecurityBuilder {
+    LinkedHashMap<Class, List<SecurityConfigurer<O, B>>> configurers
+    List<SecurityConfigurer<O, B>> configurersAddedInInitializing
+    Map<Class<?>, Object> sharedObjects
+    ObjectPostProcessor<Object> objectPostProcessor
+}
+
+class HttpSecurity extends AbstractConfiguredSecurityBuilder implements SecurityBuilder, HttpSecurityBuilder {
+    RequestMatcherConfigurer requestMatcherConfigurer
+    List<OrderedFilter> filters
+    RequestMatcher requestMatcher
+    FilterOrderRegistration filterOrders
+    AuthenticationManager authenticationManager
+}
+
+SecurityConfigurer --> SecurityBuilder: configure
+```
 
 # Authentication
 
