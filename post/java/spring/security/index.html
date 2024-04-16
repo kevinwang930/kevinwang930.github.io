@@ -38,7 +38,7 @@ client --&gt; Filter0
 Filter0 --&gt; DelegatingFilterProxy
 DelegatingFilterProxy --&gt; Filter2
 Filter2 --&gt; Servlet
-FilterChainProxy -right-&gt; SecurityFilterChain
+FilterChainProxy ----&gt; SecurityFilterChain
 </code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 package jakarta {
     interface FilterChain {
@@ -51,6 +51,50 @@ package jakarta {
 
     FilterChain o-right- Filter
 }
+</code></pre><h1 id=implementation>Implementation</h1><p><code>HttpSecurity</code> is a builder that build <code>DefaultSecurityFilterChain</code> in the final</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface SecurityBuilder&lt;O&gt; {
+    O build()
+}
+interface SecurityConfigurer&lt;O, B extends SecurityBuilder&lt;O&gt;&gt; {
+    void init(B builder)
+    void configure(B builder)
+}
+
+interface HttpSecurityBuilder&lt;H extends HttpSecurityBuilder&lt;H&gt;&gt; extends SecurityBuilder {
+    C getConfigurer(Class&lt;C&gt; clazz)
+    C removeConfigurer(Class&lt;C&gt; clazz)
+    void setSharedObject(Class&lt;C&gt; sharedType, C object)
+    C getSharedObject(Class&lt;C&gt; sharedType)
+}
+
+abstract class SecurityConfigurerAdapter&lt;O, B extends SecurityBuilder&lt;O&gt;&gt; implements SecurityConfigurer {
+    B SecurityBuilder
+    CompositeObjectPostProcessor objectPostProcessor
+    protected &lt;T&gt; T postProcess(T object)
+    void addObjectPostProcessor()
+    void setBuilder()
+}
+
+abstract class AbstractSecurityBuilder&lt;O&gt; implements SecurityBuilder {
+    O object
+    protected abstract O doBuild()
+}
+
+abstract class AbstractConfiguredSecurityBuilder&lt;O,B&gt; extends AbstractSecurityBuilder {
+    LinkedHashMap&lt;Class, List&lt;SecurityConfigurer&lt;O, B&gt;&gt;&gt; configurers
+    List&lt;SecurityConfigurer&lt;O, B&gt;&gt; configurersAddedInInitializing
+    Map&lt;Class&lt;?&gt;, Object&gt; sharedObjects
+    ObjectPostProcessor&lt;Object&gt; objectPostProcessor
+}
+
+class HttpSecurity extends AbstractConfiguredSecurityBuilder implements SecurityBuilder, HttpSecurityBuilder {
+    RequestMatcherConfigurer requestMatcherConfigurer
+    List&lt;OrderedFilter&gt; filters
+    RequestMatcher requestMatcher
+    FilterOrderRegistration filterOrders
+    AuthenticationManager authenticationManager
+}
+
+SecurityConfigurer --&gt; SecurityBuilder: configure
 </code></pre><h1 id=authentication>Authentication</h1><h2 id=username-and-password>username and password</h2><p>username and password is very common way to authentication.
 spring identify user with sessionid in cookie.</p><ol><li>user make unauthenticated request to /page</li><li>spring responds with 302 redirct to /login</li><li>client request /login with username and possword</li><li>spring response with JSESSIONID</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>client --&gt; spring: /page
 spring --&gt; client: 302 Location: /login
