@@ -14,8 +14,6 @@ keywords:
 ---
 本文记录spring微服务架构与实现细节
 <!--more-->
-Spring web applications built on the Servlet API and deployed to Servlet containers.
-
 
 
 # web on servlet
@@ -175,7 +173,4 @@ ServletConfig <|.. GenericServlet
 GenericServlet <|-- HttpServlet
 HttpServlet<|-- HttpServletBean
 ```
-
-
-
 

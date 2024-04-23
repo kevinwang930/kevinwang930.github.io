@@ -11,7 +11,7 @@ keywords:
 - synchronizer
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录 java AbstractQueuedSynchronizer (AQS) 的设计与实现
+本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。
 <!--more-->
 
 # Requirement

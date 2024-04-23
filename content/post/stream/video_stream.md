@@ -35,6 +35,21 @@ Interlaced picture is a method of encoding a bitmap image such that a person who
    1. common                5-10  Mbit/s
    2. high definition       15-30 Mbit/s
 
+## MP3
+formally MPEG-1 audio layer III or MPEG-2 audio layer III is a coding format is a coding format for digital audio. Originally defined as the third audio format of the MPEG-1 standard, it was retained and further extended as the third audio format of the subsequent MPEG-2 standard.
+
+MP3 as a file format commonly designates files containing an elementary stream of MPEG-1 audio or MPEG-2 Audio encoded data.
+MP3 uses lossy data compression to encode data.
+
+
+### M3U
+(MP3 URL or Moving Picture Experts Group Audio layer 3 Uniform Resource Locator) is a computer file format for a multimedia playlist.
+
+Although originally designed for audio files, it is commonly used to point media players to audio and video resources.
+
+
+
+
 ## MP4
 
 MP4 refers to the digital container file that cats as a wrapper around the video.

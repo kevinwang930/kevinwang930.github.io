@@ -194,6 +194,20 @@ rs --> client: access code
 
 ```
 
+## JWT 
+A JSON Web Token is a JSON object that is defined in RFC7519 as a safe way of transmitting information between two parties. 
+
+JWT is a  sign and verify method.
+request contains 2 part:
+1. Header
+2. Payload
+
+response jwt is :
+```
+encodedString = base64UrlEncode(header) + "." + base64UrlEncode(payload);
+HMACSHA256(encodedString, 'secret')
+```
+after the first jwt request, each time client send request to server, server decrypt the header and payload part using the secret and compare with the signature, if it is the same, authorization succeed.
 
 # security Filters
 
