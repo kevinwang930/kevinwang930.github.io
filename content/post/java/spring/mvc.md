@@ -174,3 +174,20 @@ GenericServlet <|-- HttpServlet
 HttpServlet<|-- HttpServletBean
 ```
 
+# RestController
+
+
+## Annotation
+
+`PathVariable` indicates that a method parameter should be bound to a URI template variable.
+```
+@GetMapping("/hello/{name}/{age}")
+
+public void select(@PathVariable("name") String name,
+                    @PathVariable("age") int age)
+```
+
+`RequestParam` indicates that a method parameter should be bound to a web request parameter.
+In spring mvc, request parameters map to a query parameters, form data and parts in multipart request.
+
+
