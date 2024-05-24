@@ -17,20 +17,7 @@ keywords:
 
 Spring gateway provides a simple , yet effective way to route to APIs and provide cross cutting concerns such as security, resiliency.
 route code example:
-```
-@Bean
-    public RouteLocator routes(RouteLocatorBuilder builder,UriConfiguration uriConfiguration) {
-        String httpUri = uriConfiguration.getHttpbin();
-        return builder.routes().route(p -> p.path("/get")
-                        .filters(f -> f.addRequestHeader("Hello", "world"))
-                        .uri(httpUri))
-                .route(p->p.host("*.circuitbreaker.com")
-                        .filters(f->f.circuitBreaker(config -> config.setName("mycmd").setFallbackUri("forward" +
-                                ":/fallback")))
-                        .uri(httpUri))
-                .build();
-    }
-```
+
 
 # service registration and discovery
 
@@ -70,6 +57,29 @@ actuator provides endpoints to monitor and interact with application.
 common endpoints include:
 ```
 health
+```
+
+
+# General microServices and Structures
+
+## Auth
+
+```plantuml
+title: microservice architecture
+left to right direction
+actor user
+rectangle gateway
+rectangle auth 
+rectangle system
+rectangle BizModule
+user --> gateway
+
+gateway --> auth: login
+
+gateway --> system: api
+auth -right-> system : feign
+gateway --> BizModule: bizApi
+BizModule -left-> system: feign
 ```
 
 
