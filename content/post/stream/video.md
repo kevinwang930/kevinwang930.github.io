@@ -33,7 +33,7 @@ in RGB  each channel has 8 bits, so total 24 bits.
 A codec(coder/decoder) is a method for compressing and decompressing data so that it can be easily transported and received by different applications.
 
 ### video encoding
-Video encoding is the proces of turning uncompressed video input into a form that can be stored and played by a variety of devices. Video encoing involves two main processes: compression and transcoding.
+Video encoding is the process of turning uncompressed video input into a form that can be stored and played by a variety of devices. Video encoding involves two main processes: compression and transcoding.
 
 Compression significantly decreases the size of the video file.
 
