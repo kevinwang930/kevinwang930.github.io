@@ -83,7 +83,8 @@ A Connector handles communications with the client.
 ```plantuml
 
 title: Tomcat Architecture
-    package Tomcat(Server) {
+cloud http
+    package Tomcat {
     
         
         component c  [ 
@@ -102,10 +103,10 @@ title: Tomcat Architecture
             }
         }
         
-        c --> services
+        c -right-> services
     }
-cloud http
-http -right-> services
+
+http -right-> Tomcat
 ```
 
 
@@ -542,3 +543,101 @@ rectangle Servlet
 wrapper --> FilterChain
 FilterChain --> Servlet
 ```
+
+## Connector Internals
+
+Adapter represents the entry point in a coyote-based servlet container.
+
+ProtocolHandler abstract the protocol implementation, including threading.
+
+EndPoint handles the low level interactions with network socket.
+
+```plantuml
+
+interface Handler {
+    SocketState process(SocketWrapperBase<S> socket,SocketEvent status)
+}
+
+abstract class AbstractEndpoint<S,U> {
+    SynchronizedStack<SocketProcessorBase<S>> processorCache
+    Map<U, SocketWrapperBase<S>> connections
+    int port
+    InetAddress address
+    Acceptor<U> acceptor
+    Handler<S> handler
+    HashMap<String, Object> attributes
+    abstract void bind()
+}
+abstract class AbstractNetworkChannelEndpoint<S extends Channel, U extends NetworkChannel> extends AbstractEndpoint {
+    abstract NetworkChannel getServerSocket()
+    abstract S createChannel(SocketBufferHandler buffer)
+}
+class NioEndpoint extends AbstractNetworkChannelEndpoint {
+    ServerSocketChannel serverSock
+    CountDownLatch stopLatch
+    SynchronizedStack<PollerEvent> eventCache
+    Poller poller
+}
+
+interface Adapter {
+    void service(Request req,Response res)
+    boolean prepare(Request req, Response res)
+}
+interface ProtocolHandler {
+    Adaptor getAdaptor()
+    void setAdaptor(Adaptor adaptor)
+    Executor getExecutor()
+    void init()
+    void start()
+    void stop()
+    void destroy()
+}
+
+abstract class AbstractProtocol<S> implements ProtocolHandler {
+    AbstractEndpoint<S, ?> endpoint
+    Handler<S> handler
+    Adapter adapter
+    Set<Processor> waitingProcessors
+    ScheduledFuture<?> timeoutFuture
+}
+
+abstract class AbstractHttp11Protocol<S> extends AbstractProtocol
+
+class Http11NioProtocol extends AbstractHttp11Protocol {
+
+}
+
+class Connector {
+    ProtocolHandler protocolHandler
+    Service service
+    Adapter adapter
+}
+
+class CoyoteAdapter implements Adapter {
+    Connector connector
+}
+
+AbstractProtocol *-left- Handler
+AbstractProtocol *-right- AbstractEndpoint
+
+Connector *-right- ProtocolHandler
+Connector *-left- Adapter
+```
+
+
+## EndPoint Internals
+
+```plantuml
+interface Channel {
+    boolean isOpen()
+    void close()
+}
+
+interface NetworkChannel extends Channel {
+    NetworkChannel bind(SocketAddress local)
+    SocketAddress getLocalAddress()
+}
+```
+
+
+
