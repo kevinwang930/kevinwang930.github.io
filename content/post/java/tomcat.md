@@ -546,16 +546,16 @@ FilterChain --> Servlet
 
 ## Connector Internals
 
-Adapter represents the entry point in a coyote-based servlet container.
+`Adapter` represents the entry point in a coyote-based servlet container.
 
-ProtocolHandler abstract the protocol implementation, including threading.
+`ProtocolHandler` abstract the protocol implementation, including threading.
 
-EndPoint handles the low level interactions with network socket.
+`EndPoint` handles the low level interactions with network socket.
 
 ```plantuml
 
 interface Handler {
-    SocketState process(SocketWrapperBase<S> socket,SocketEvent status)
+    SocketState process(socket,SocketEvent status)
 }
 
 abstract class AbstractEndpoint<S,U> {
@@ -618,9 +618,9 @@ class CoyoteAdapter implements Adapter {
 }
 
 AbstractProtocol *-left- Handler
-AbstractProtocol *-right- AbstractEndpoint
+AbstractProtocol *-down- AbstractEndpoint
 
-Connector *-right- ProtocolHandler
+Connector *-down- ProtocolHandler
 Connector *-left- Adapter
 ```
 
@@ -628,15 +628,27 @@ Connector *-left- Adapter
 ## EndPoint Internals
 
 ```plantuml
-interface Channel {
-    boolean isOpen()
-    void close()
+
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class AbstractEndpoint<S, U>
+class AbstractJsseEndpoint<S, U>
+class NioEndpoint {
+    ServerSocketChannel serverSock
+    CountDownLatch stopLatch
+    SynchronizedStack<PollerEvent> eventCache
+    SynchronizedStack<NioChannel> nioChannels
+    Poller poller
+    initServerSocket()
 }
 
-interface NetworkChannel extends Channel {
-    NetworkChannel bind(SocketAddress local)
-    SocketAddress getLocalAddress()
-}
+AbstractJsseEndpoint  -[#000082,plain]-^  AbstractEndpoint     
+NioEndpoint           -[#000082,plain]-^  AbstractJsseEndpoint 
+
+
 ```
 
 
