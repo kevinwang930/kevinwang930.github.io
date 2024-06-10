@@ -4,12 +4,12 @@ date: 2024-01-09T23:29:20+08:00
 categories:
 - java
 - spring
-tags: ["spring"]
+tags: ["springBoot"]
 draft: false
 mermaid: true
 ---
 
-本文记录springBoot 内部实现
+本文介绍springBoot架构
 <!--more-->
 
 # Environment abstraction

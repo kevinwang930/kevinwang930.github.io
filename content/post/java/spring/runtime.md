@@ -12,7 +12,7 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-本文记录spring配置和属性的加载过程
+本文记录spring启动过程
 <!--more-->
 
 
@@ -57,7 +57,10 @@ skinparam linetype ortho
 
 
 ' Declare interfaces
-interface PropertyResolver <<interface>>
+interface PropertyResolver <<interface>> {
+    boolean containsProperty(String key)
+    String getProperty(String key)
+}
 interface ConfigurablePropertyResolver <<interface>>
 interface Environment <<interface>>
 interface ConfigurableEnvironment <<interface>>
@@ -112,7 +115,11 @@ SpringApplication *-- ApplicationServletEnvironment
 reference: [博客](https://cloud.tencent.com/developer/article/2342951)
 
 
-## EnvironmentPostProcessorApplicationListener
+## ApplicationListener
+
+
+
+### EnvironmentPostProcessorApplicationListener
 
 ```plantuml
 @startuml
@@ -128,6 +135,7 @@ interface ApplicationListener<E> << interface >> {
 class EnvironmentPostProcessorApplicationListener {
     Function<ClassLoader, EnvironmentPostProcessorsFactory> postProcessorsFactory
     getEnvironmentPostProcessors(resourceLoader,bootstrapContext)
+    onApplicationEnvironmentPreparedEvent( event) 
 }
 interface EventListener << interface >>
 annotation FunctionalInterface << annotation >>
@@ -147,6 +155,145 @@ SmartApplicationListener                     -[#008200,plain]-^  Ordered
 @enduml
 
 ```
+
+
+## EnvironmentPostProcessor
+
+
+### ConfigDataEnvironmentPostProcessor
+
+```plantuml
+
+
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class ConfigDataEnvironmentPostProcessor {
+    void postProcessEnvironment( environment,  application)
+}
+class ConfigDataEnvironment {
+    ConfigurableBootstrapContext bootstrapContext
+    ConfigurableEnvironment environment
+    ConfigDataLocationResolvers resolvers
+    Collection<String> additionalProfiles
+    ConfigDataEnvironmentUpdateListener environmentUpdateListener
+    ConfigDataLoaders loaders
+    ConfigDataEnvironmentContributors contributors
+    void processAndApply()
+}
+
+
+interface EnvironmentPostProcessor << interface >>
+
+interface Ordered << interface >>
+
+ConfigDataEnvironmentPostProcessor  -[#008200,dashed]-^  EnvironmentPostProcessor           
+ConfigDataEnvironmentPostProcessor  -[#008200,dashed]-^  Ordered     
+
+ConfigDataEnvironmentPostProcessor --> ConfigDataEnvironment: process
+        
+
+```
+
+#### ConfigData processing
+
+`ConfigDataLocationResolver` strategy interface used to resolve locations into on or more resources.
+
+`ConfigDataLoader` strategy class that can be used to load `ConfigData` for a given `ConfigDataResource`
+
+
+
+
+
+
+
+
+```plantuml
+class EnvironmentPostProcessorApplicationListener{
+    onApplicationEnvironmentPreparedEvent(event)
+}
+
+
+class ConfigDataEnvironmentPostProcessor {
+    void postProcessEnvironment( environment,  application)
+}
+
+class ConfigDataEnvironment {
+
+    ConfigurableEnvironment environment
+    ConfigDataLocationResolvers resolvers
+    Collection<String> additionalProfiles
+    ConfigDataEnvironmentUpdateListener environmentUpdateListener
+    ConfigDataLoaders loaders
+    ConfigDataEnvironmentContributors contributors
+    void processAndApply()
+}
+
+class ConfigDataLocationResolvers {
+    List<ConfigDataLocationResolver<?>> resolvers
+    List<ConfigDataResolutionResult> resolve(context, location,profiles)
+}
+
+interface  ConfigDataLocationResolver<R extends ConfigDataResource> {
+    boolean isResolvable(context,location)
+    List<R> resolve(context,location)
+}
+
+class StandardConfigDataLocationResolver implements  ConfigDataLocationResolver<StandardConfigDataResource> {
+    String[] configNames
+    List<PropertySourceLoader> propertySourceLoaders
+}
+
+interface PropertySourceLoader {
+    String[] getFileExtensions()
+    List<PropertySource<?>> load(String name, Resource resource)
+}
+
+class ConfigDataLoaders {
+    List<ConfigDataLoader> loaders
+}
+
+class ConfigDataEnvironmentContributors {
+    ConfigDataEnvironmentContributor root
+    ConfigurableBootstrapContext bootstrapContext
+    Binder getBinder(activationContext,filter,options)
+}
+
+class ConfigDataEnvironmentContributor implements Iterable {
+    ConfigDataLocation location
+    ConfigDataResource resource
+    PropertySource<?> propertySource
+    ConfigurationPropertySource configurationPropertySource
+    ConfigDataProperties properties
+    Map<ImportPhase, List<ConfigDataEnvironmentContributor>> children
+    iterator()
+
+}
+
+class Binder {
+    Iterable<ConfigurationPropertySource> sources
+    ConfigurationProperty findProperty(name, target,context)
+}
+
+
+EnvironmentPostProcessorApplicationListener --> ConfigDataEnvironmentPostProcessor: onEnvironmentPrepared
+ConfigDataEnvironmentPostProcessor --> ConfigDataEnvironment: createEnv
+
+ConfigDataEnvironment *-- ConfigDataLocationResolvers
+ConfigDataEnvironment *-- ConfigDataLoaders
+ConfigDataEnvironment *-- ConfigDataEnvironmentContributors
+ConfigDataEnvironmentContributors *-- ConfigDataEnvironmentContributor
+ConfigDataEnvironmentContributors --> Binder
+
+ConfigDataLocationResolvers o-- ConfigDataLocationResolver
+
+StandardConfigDataLocationResolver o-- PropertySourceLoader
+
+```
+
+
 
 
 
