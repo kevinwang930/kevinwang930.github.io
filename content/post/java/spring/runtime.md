@@ -206,10 +206,6 @@ ConfigDataEnvironmentPostProcessor --> ConfigDataEnvironment: process
 
 
 
-
-
-
-
 ```plantuml
 class EnvironmentPostProcessorApplicationListener{
     onApplicationEnvironmentPreparedEvent(event)

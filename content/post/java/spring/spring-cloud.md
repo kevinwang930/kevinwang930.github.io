@@ -13,6 +13,42 @@ keywords:
 ---
 <!--more-->
 
+
+# Context
+
+```plantuml
+
+interface  ApplicationListener
+class BootstrapApplicationListener implements ApplicationListener {
+    onApplicationEvent(event)
+}
+
+
+
+Class BootStrapApplicationContext
+
+
+class BootstrapImportSelectorConfiguration {}
+
+BootstrapApplicationListener --> BootStrapApplicationContext: create
+
+BootStrapApplicationContext --> BootstrapImportSelectorConfiguration: source
+
+BootstrapImportSelectorConfiguration --> BootstrapImportSelector: import
+
+BootstrapImportSelector-->BootstrapConfiguration:loadFactory
+
+
+class PropertySourceBootstrapConfiguration {
+    List<PropertySourceLocator> propertySourceLocators
+}
+
+BootstrapConfiguration <|-- PropertySourceBootstrapConfiguration
+
+
+```
+
+
 # gateway
 
 Spring gateway provides a simple , yet effective way to route to APIs and provide cross cutting concerns such as security, resiliency.
@@ -20,26 +56,6 @@ route code example:
 
 
 # service registration and discovery
-
-## nacos
-Naming and Configuration Service
-
-Service registration
-```
-curl -X POST 'http://127.0.0.1:8848/nacos/v1/ns/instance?serviceName=nacos.naming.serviceName&ip=20.18.7.10&port=8080'
-```
-Service discovery
-```
-curl -X GET 'http://127.0.0.1:8848/nacos/v1/ns/instance/list?serviceName=nacos.naming.serviceName'
-```
-Publish Config
-```
-curl -X POST "http://127.0.0.1:8848/nacos/v1/cs/configs?dataId=nacos.cfg.dataId&group=test&content=helloWorld"
-```
-Get config
-```
-curl -X GET "http://127.0.0.1:8848/nacos/v1/cs/configs?dataId=nacos.cfg.dataId&group=test"
-```
 
 
 # loadBalancer
