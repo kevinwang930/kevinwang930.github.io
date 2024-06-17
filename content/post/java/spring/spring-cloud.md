@@ -16,6 +16,10 @@ keywords:
 
 # Context
 
+## BootstrapApplicationListener
+
+A listener that prepares a SpringApplication by delegating to `ApplicationContextInitializer` beans in a separate bootstrap context.
+
 ```plantuml
 
 interface  ApplicationListener
