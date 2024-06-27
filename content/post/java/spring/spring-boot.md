@@ -84,6 +84,11 @@ DefaultBootstrapContext -right-> BootstrapRegistryInitializer: init
 
 ### SpringApplicationRunListeners
 
+
+`EventPublishingRunListener` use an internal `AppicationEventMulticaster` to publish `SpringApplicationEvent`
+
+`EnvironmentPostProcessorApplicationListener` used to trigger `EnvironmentpostProcessors` registered in the `spring.factories` file. 
+
 ```plantuml
 class SpringApplicationRunListeners {
     List<SpringApplicationRunListener> listeners
@@ -108,12 +113,8 @@ SpringApplicationRunListeners o-- SpringApplicationRunListener
 ```
 
 
-
-
-## SpringBoot Factory
-
 ## ApplicationContextFactory
-Strategy interface for creating applicationContext and ApplicationEnvironment.
+Strategy interface for creating `ApplicationContext` and `ApplicationEnvironment`.
 
 ```plantuml
 interface ApplicationContextFactory {
@@ -127,9 +128,11 @@ ServletWebServerApplicationContextFactory --> ApplicationServletEnvironment: cre
 ServletWebServerApplicationContextFactory --> ServletWebServerApplicationContext: create Context
 ```
 
+## ApplicationServletEnvironment
+
+default `StandardServletEnvironment` used in SpringApplication
 
 ```plantuml
-title: ApplicationServletEnvironment
 skinparam linetype ortho
 
 
@@ -279,6 +282,8 @@ ConfigDataEnvironmentPostProcessor --> ConfigDataEnvironment: process
 `ConfigDataLocationResolver` strategy interface used to resolve locations into on or more resources.
 
 `ConfigDataLoader` strategy class that can be used to load `ConfigData` for a given `ConfigDataResource`
+
+`Binder` A container object which Binds objects from one or more `ConfigurationPropertySources`
 
 
 

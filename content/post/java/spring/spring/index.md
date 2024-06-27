@@ -22,12 +22,11 @@ keywords:
 
 ## 1.1 Environment 
 
-Environment Interface is an abstraction in container that models 2 key aspects of application environment.
+Environment Interface is an abstraction in container that models 2 key aspects of application environment. 
 
-### profile
+
 A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active
 
-### properties
 Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on
 
 
@@ -82,6 +81,46 @@ AbstractEnvironment  <|-- StandardEnvironment
 ConfigurableWebEnvironment  <|-- StandardServletEnvironment
 StandardServletEnvironment <|-- ApplicationServletEnvironment        
 ```
+
+### 1.1 properties
+
+`PropertySource` Abstract base class representing a source of name/value property pairs. The underlying `source` object may be of any type `T` that encapsulates properties. 
+ 
+Examples include `java.util.Properties` objects,`java.uti.Map` objects,`ServletContext` and `Sevletconfig` objects.
+
+
+```plantuml
+@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+interface Iterable<PropertySource> << interface >>
+class MutablePropertySources {
+    List<PropertySource<?>> propertySourceList
+}
+interface PropertySources << interface >> {
+    
+    Stream<PropertySource<?>> stream()
+    PropertySource<?> get(String name)
+
+}
+
+abstract class PropertySource<T> {
+    String name;
+    T source
+    abstract Object getProperty(String name)
+    T getSource()
+}
+
+MutablePropertySources  -[#008200,dashed]-^  PropertySources        
+PropertySources         -[#008200,plain]-^  Iterable    
+MutablePropertySources o--      PropertySource      
+@enduml
+
+```
+
 
 # 2. Context
 
@@ -164,6 +203,8 @@ WebServerApplicationContext                         -[#008200,plain]-^  Applicat
 
 ## 2.1 Event
  
+`ApplicationListener` can generically declare the event type that it is interested in. When registered with a Spring `ApplicationContext`, event will be filtered accordingly, with the listener getting invoked for matching event objects.
+
 `ApplicationEventMulticaster` Interface to be implemented by objects that can manage a number of `Applicationlistener` objects and publish events to them.
 
 `SimpleApplicationEventMulticaster` is the simple implementation of the `ApplicationEventMulticaster` interface.Multicasts all events to all registered listeners.
@@ -245,5 +286,8 @@ SimpleApplicationEventMulticaster    -[#000082,plain]-^  AbstractApplicationEven
 @enduml
 
 ```
+
+
+
 
 
