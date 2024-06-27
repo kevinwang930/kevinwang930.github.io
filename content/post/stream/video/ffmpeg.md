@@ -3,9 +3,11 @@ title: "FFMPEG功能介绍"
 date: 2024-04-22T13:11:20+08:00
 categories:
 - stream
+- video
 - ffmpeg
 tags:
 - stream
+- video
 - ffmpeg
 keywords:
 - ffmpeg

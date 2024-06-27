@@ -3,12 +3,15 @@ title: "HLS- HTTP live streaming"
 date: 2024-04-28T17:13:03+08:00
 categories:
 - stream
+- video
 - hls
 tags:
 - stream
+- video
 - hls
 keywords:
 - hls
+- video stream
 #thumbnailImage: //example.com/image.jpg
 ---
 Http live Streaming was originally developed by Apple, now become a international standard.
