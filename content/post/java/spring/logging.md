@@ -14,7 +14,7 @@ keywords:
 本文记录spring logging 的原理与配置
 <!--more-->
 
-
+# framework logging
 
 Spring Boot uses `Commons Logging` for all internal logging but leaves the underlying log implementation open. 
 
@@ -51,4 +51,18 @@ Log4jAdapter -down-> Log4jLog : new
 
 ```
 
+# slf4j logging
+
+
+`slf4j` use `SLF4JServiceProvider` SPI to detect available loggings in class path.
+
+
+
+```plantuml
+class LoggerFactory {
+    static List<SLF4JServiceProvider> findServiceProviders()
+}
+
+
+```
 
