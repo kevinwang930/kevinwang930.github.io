@@ -16,64 +16,21 @@ keywords:
 
 tomcat works as a servlet/jsp container.
 
-# Servlet
-A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.
-
-```plantuml
-package Tomcat {
-    interface Servlet {
-    + void init(ServletConfig)
-    + ServletConfig getServletConfig()
-    + void service(ServletRequest,ServletResponse)
-    + String getServletInfo()
-    + void destroy()
-    }
-
-    interface ServletConfig {
-    + String getServletName()
-    + ServletContext getServletContext()
-    + String getInitParameter(String)
-    + Enumeration<String> getInitParameterNames()
-    }
-
-    abstract class GenericServlet {
-    - ServletConfig config
-    }
-
-    abstract class HttpServlet {
-    # void service(HttpServletRequest,HttpServletResponse)
-    + void service(ServletRequest,ServletResponse)
-    }
-
-    interface ServletRequest {}
-    interface HttpServletRequest extends ServletRequest
-
-    interface ServletResponse {}
-    interface HttpServletResponse extends ServletResponse
-
-}
-Servlet <|.. GenericServlet
-ServletConfig <|.. GenericServlet
-GenericServlet <|-- HttpServlet
-HttpServletRequest -right-> HttpServlet
-HttpServlet -right-> HttpServletResponse
-
-```
 # Tomcat Architecture
 
-## Server
-Server represents the whole container
 
-## Service
-A service is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine
+`Server` represents the whole container
 
 
+A `service` is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine
 
 
-## Connector
-A Connector handles communications with the client. 
+A `Connector` handles communications with the client. 
 
 
+`LifeCycle` common interface for Catalina components to implement in order to provide a consistent mechanism to start and stop the component
+
+The `LifecycleEvent`s fired during state changes are defined in the methods that trigger the change
 
 
 
@@ -109,9 +66,10 @@ cloud http
 http -right-> Tomcat
 ```
 
-
-
 ```plantuml
+
+skinparam linetype ortho
+
 interface Lifecycle {
 
 + void addLifecycleListener(LifecycleListener)
@@ -122,73 +80,39 @@ interface Lifecycle {
 + void stop()
 + void destroy()
 + LifecycleState getState()
-+ String getStateName()
 }
 
 interface Server extends Lifecycle {
-+ NamingResourcesImpl getGlobalNamingResources()
-+ void setGlobalNamingResources(NamingResourcesImpl)
-+ javax.naming.Context getGlobalNamingContext()
-+ int getPort()
-+ void setPort(int)
-+ int getPortOffset()
-+ void setPortOffset(int)
-+ int getPortWithOffset()
 + String getAddress()
-+ void setAddress(String)
-+ String getShutdown()
-+ void setShutdown(String)
 + ClassLoader getParentClassLoader()
 + void setParentClassLoader(ClassLoader)
 + Catalina getCatalina()
 + void setCatalina(Catalina)
 + File getCatalinaBase()
-+ void setCatalinaBase(File)
 + File getCatalinaHome()
-+ void setCatalinaHome(File)
 + int getUtilityThreads()
 + void setUtilityThreads(int)
 + void addService(Service)
 + void await()
-+ Service findService(String)
-+ Service[] findServices()
-+ void removeService(Service)
-+ Object getNamingToken()
-+ ScheduledExecutorService getUtilityExecutor()
 }
 
 interface Service extends Lifecycle {
 + Engine getContainer()
 + void setContainer(Engine)
 + String getName()
-+ void setName(String)
 + Server getServer()
-+ void setServer(Server)
 + ClassLoader getParentClassLoader()
 + void setParentClassLoader(ClassLoader)
 + String getDomain()
-+ void addConnector(Connector)
 + Connector[] findConnectors()
-+ void removeConnector(Connector)
-+ void addExecutor(Executor)
-+ Executor[] findExecutors()
 + Executor getExecutor(String)
-+ void removeExecutor(Executor)
 + Mapper getMapper()
 }
 
 abstract class LifecycleBase implements Lifecycle {
-- {static} Log log
-- {static} StringManager sm
+
 - List<LifecycleListener> lifecycleListeners
 - LifecycleState state
-- boolean throwOnFailure
-+ boolean getThrowOnFailure()
-+ void setThrowOnFailure(boolean)
-+ void addLifecycleListener(LifecycleListener)
-+ LifecycleListener[] findLifecycleListeners()
-+ void removeLifecycleListener(LifecycleListener)
-# void fireLifecycleEvent(String,Object)
 + void init()
 # {abstract}void initInternal()
 + void start()
@@ -197,83 +121,46 @@ abstract class LifecycleBase implements Lifecycle {
 # {abstract}void stopInternal()
 + void destroy()
 # {abstract}void destroyInternal()
-+ LifecycleState getState()
-+ String getStateName()
-# void setState(LifecycleState)
-# void setState(LifecycleState,Object)
+
 }
 
-interface MBeanRegistration {
-    ObjectName preRegister(MBeanServer server,
-                                  ObjectName name)
-    void postRegister(Boolean registrationDone)
-    void preDeregister()
-    void postDeregister()
-}
-interface JmxEnabled extends MBeanRegistration {
-~ String getDomain()
-~ void setDomain(String)
-~ ObjectName getObjectName()
+
+abstract class LifecycleMBeanBase extends LifecycleBase  {
 }
 
-abstract class LifecycleMBeanBase extends LifecycleBase implements JmxEnabled {
-- {static} Log log
-- {static} StringManager sm
-- String domain
-- ObjectName oname
-# void initInternal()
-# void destroyInternal()
-+ void setDomain(String)
-+ String getDomain()
-# {abstract}String getDomainInternal()
-+ ObjectName getObjectName()
-# {abstract}String getObjectNameKeyProperties()
-# ObjectName register(Object,String)
-# void unregister(String)
-# void unregister(ObjectName)
-+ void postDeregister()
-+ void postRegister(Boolean)
-+ void preDeregister()
-+ ObjectName preRegister(MBeanServer,ObjectName)
+interface Container extends Lifecycle {
+    Pipeline getPipeline()
 }
+
+interface Engine extends Container {
++ String getDefaultHost()
++ void setDefaultHost(String)
++ String getJvmRoute()
++ void setJvmRoute(String)
++ Service getService()
++ void setService(Service)
+}
+
+interface Host extends Container {
+}
+
 
 
 class Connector extends LifecycleMBeanBase {
-
 # Service service
-
-# long asyncTimeout
 # String scheme
-
-- int maxCookieCount
-# int maxParameterCount
-# int maxPostSize
-# int maxSavePostSize
-# String parseBodyMethods
-# HashSet<String> parseBodyMethodsSet
-
-# String protocolHandlerClassName
-# String configuredProtocol
 # ProtocolHandler protocolHandler
 # Adapter adapter
-
-
-+ String getExecutorName()
-+ void addSslHostConfig(SSLHostConfig)
-+ SSLHostConfig[] findSslHostConfigs()
-
 + EncodedSolidusHandling getEncodedSolidusHandlingInternal()
-
 + Request createRequest(org.apache.coyote.Request)
 + Response createResponse(org.apache.coyote.Response)
-# String createObjectNameKeyProperties(String)
-
-# String getDomainInternal()
-# String getObjectNameKeyProperties()
 }
 
 Server o-- Service
 Service o-- Connector
+Service o-- Engine
+Engine --> Host: invoke
+
 ```
 
 ## Container
@@ -294,72 +181,12 @@ A container may also be associated with a number of support components that prov
 
 
 
-
-
-### Engine
-Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.
-
-### Host
-A Host is a Container that represents a virtual host in the catalina servlet engine. 
-Multiple host can be configured in catalina, each has its own request processing logic 
-
-### Context
-A context represents a web application. A host may contain multiple contexts,each with a unique path.
-
-### wrapper
-A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application. 
-It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
-Implementations are responsible for managing the sevlet life circle.
-
-### Valve
-A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.
-
-`StandardWrapperValve` in tomcat call FilterChain to filter request before invoke servlet.
-
-
 ```plantuml
 title: Tomcat Container Architecture
-interface Lifecycle {
-
-+ void addLifecycleListener(LifecycleListener)
-+ LifecycleListener[] findLifecycleListeners()
-+ void removeLifecycleListener(LifecycleListener)
-+ void init()
-+ void start()
-+ void stop()
-+ void destroy()
-+ LifecycleState getState()
-+ String getStateName()
-}
+skinparam linetype ortho
 
 
-abstract class LifecycleBase implements Lifecycle {
-- List<LifecycleListener> lifecycleListeners
-- LifecycleState state
-- boolean throwOnFailure
-}
-
-interface MBeanRegistration {
-    ObjectName preRegister(MBeanServer server,
-                                  ObjectName name)
-    void postRegister(Boolean registrationDone)
-    void preDeregister()
-    void postDeregister()
-}
-interface JmxEnabled extends MBeanRegistration {
-~ String getDomain()
-~ void setDomain(String)
-~ ObjectName getObjectName()
-}
-
-abstract class LifecycleMBeanBase extends LifecycleBase implements JmxEnabled {
-
-- String domain
-- ObjectName oname
-}
-
-
-interface Container extends Lifecycle {
+interface Container  {
 
 + Pipeline getPipeline()
 + Container getParent()
@@ -383,6 +210,11 @@ interface Engine extends Container {
 + void setService(Service)
 }
 
+class StandardEngine extends ContainerBase implements Engine {
+    Service service
+
+}
+
 interface Host extends Container {
 
 + String getXmlBase()
@@ -393,7 +225,7 @@ interface Host extends Container {
 + void setAppBase(String)
 }
 
-abstract class ContainerBase extends LifecycleMBeanBase implements Container {
+abstract class ContainerBase implements Container {
 # Pipeline pipeline
 # HashMap<String,Container> children
 # Container parent
@@ -404,80 +236,21 @@ abstract class ContainerBase extends LifecycleMBeanBase implements Container {
 # ExecutorService startStopExecutor
 }
 class StandardHost extends ContainerBase implements Host {
-
-- String[] aliases
 - String appBase
 - File appBaseFile
-- String legacyAppBase
-- File legacyAppBaseFile
 - String xmlBase
 - File hostConfigBase
-- boolean autoDeploy
 - String configClass
 - String contextClass
-- boolean deployOnStartup
-- boolean deployXML
-- boolean copyXML
-- String errorReportValveClass
-- boolean unpackWARs
 - String workDir
 - boolean createDirs
 - Map<ClassLoader,String> childClassLoaders
-- Pattern deployIgnore
-- boolean undeployOldVersions
-- boolean failCtxIfServletStartFails
-}
-
-interface Context extends Container, ContextBind{
-
-}
-
-class StandardContext extends ContainerBase implements Context {
-    CopyOnWriteArrayList<String> applicationListeners
-    Set<Object> noPluggabilityListeners
-    List<Object> applicationEventListenersList
-    Map<ServletContainerInitializer,Set<Class<?>>> initializers
-    ApplicationParameter applicationParameters[]
-    URL configFile
-    ApplicationContext context
-    String path
-    Map<String,ApplicationFilterConfig> filterConfigs
-    Map<String,FilterDef> filterDefs
-    Loader loader
-    LoginConfig loginConfig
-    NamingContextListener namingContextListener
-    NamingResourcesImpl namingResources
-    Map<String,String> mimeMappings
-    Map<String,String> parameters
-    Map<String,String> roleMappings
-    Map<String,String> servletMappings
-    Class<?> wrapperClass
-    Set<String> resourceOnlyServlets
-    Set<Servlet> createdServlets
 }
 
 
-interface Wrapper extends Container  {
-
-+ long getAvailable()
-+ void setAvailable(long)
-+ Servlet getServlet()
-+ void setServlet(Servlet)
-+ void addInitParameter(String,String)
-+ void addMapping(String)
-+ void addSecurityReference(String,String)
-+ Servlet allocate()
-+ void deallocate(Servlet)
-+ void load()
-+ void unload()
-}
 
 
-class StandardWrapper extends ContainerBase implements ServletConfig, Wrapper {
-# StandardWrapperFacade facade
-# Servlet instance
-# StandardWrapperValve swValve
-}
+
 
 
 
@@ -494,6 +267,12 @@ interface Pipeline extends Contained {
     Valve getFirst()
 }
 
+class StandardPipeline implements Pipeline {
+    Valve basic
+    Container container
+    Valve first
+}
+
 interface Valve {
     Valve getNext()
     void setNext(Valve valve)
@@ -501,48 +280,119 @@ interface Valve {
     void invoke(Request request, Response response)
 }
 
-abstract class ValveBase extends LifecycleMBeanBase implements Contained, Valve {
+abstract class ValveBase  implements Contained, Valve {
     Container container
     Log containerLog
     Valve next
 
 }
+class StandardEngineValve extends ValveBase
 
-class StandardWrapperValve extends ValveBase {
-    invoke(request,response)
-}
+class StandardHostValve extends ValveBase
 
+StandardEngine *-- StandardEngineValve
 
+StandardHost *-- StandardHostValve
 Engine o-- Host
-Host o-- Context
-Context o-- Wrapper
-ContainerBase *-- Pipeline
+Container *-- Pipeline
 Pipeline o-- Valve
-StandardWrapper *-right- StandardWrapperValve
+
 
 ```
+
+
+### Engine
+Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.
+
+### Host
+A Host is a Container that represents a virtual host in the catalina servlet engine. 
+Multiple host can be configured in catalina, each has its own request processing logic 
+
+### Context
+A context is a container that represents a servlet context, and therefore an individual web application, in the catalina servlet engine. A host may contain multiple contexts,each with a unique path.
+
+### wrapper
+A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application. 
+It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
+Implementations are responsible for managing the sevlet life circle.
+
+### Valve
+A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.
+
+`StandardWrapperValve` in tomcat call FilterChain to filter request before invoke servlet.
+
 
 
 # Request handling pipeline
 
 In `Container` section, we see that `Container` contains `Pipeline`,`Pipeline` contains `Valves` in order. the request handling is actually invoke the `Valves` in the `Pipeline` of the specified container one by one. 
 
-
 ```plantuml
-rectangle OrderedPipelineValves {
-    rectangle Engine
-    rectangle Host
-    rectangle context
-    rectangle wrapper
-Engine --> Host
-Host --> context
-context --> wrapper
+@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+interface Contained << interface >>
+
+class StandardEngineValve extends ValveBase
+interface Valve << interface >> {
+    Valve getNext()
+    void invoke( request,  response)
 }
-rectangle FilterChain
-rectangle Servlet
-wrapper --> FilterChain
-FilterChain --> Servlet
+class ValveBase {
+    Container container
+    Valve next
+}
+
+class StandardHostValve extends ValveBase
+
+abstract class ValveBase implements Contained, Valve
+
+
+interface Container << interface >> 
+class ContainerBase implements Container
+interface Context << interface >> extends Container, ContextBind 
+interface ContextBind << interface >>
+class StandardContext extends ContainerBase implements Context
+class TomcatEmbeddedContext  extends StandardContext
+            
+class StandardContextValve extends ValveBase
+
+interface Wrapper {
+    Servlet allocate()
+}
+class StandardWrapper extends ContainerBase implements Wrapper {
+    volatile Servlet instance
+}
+
+class StandardWrapperValve extends ValveBase  
+
+class ApplicationFilterChain 
+
+class DispatcherServlet {
+    void service( req,  res) 
+}
+      
+StandardEngineValve -right->StandardHostValve: call
+
+StandardHostValve -right-> StandardContextValve:call
+
+TomcatEmbeddedContext o-- StandardContextValve
+
+StandardContextValve -right-> StandardWrapperValve: call     
+
+StandardWrapper o-- StandardWrapperValve
+
+StandardWrapperValve --> ApplicationFilterChain
+ApplicationFilterChain --> DispatcherServlet
+
+@enduml
+
+
 ```
+
 
 ## Connector Internals
 
@@ -551,6 +401,8 @@ FilterChain --> Servlet
 `ProtocolHandler` abstract the protocol implementation, including threading.
 
 `EndPoint` handles the low level interactions with network socket.
+
+`Poller` 
 
 ```plantuml
 
@@ -617,11 +469,28 @@ class CoyoteAdapter implements Adapter {
     Connector connector
 }
 
+class Poller implements Runnable {
+    Selector selector
+    SynchronizedQueue<PollerEvent> events
+}
+
+class PollerEvent {
+    NioSocketWrapper socketWrapper
+    int interestOps
+}
+
+
+
+
+
 AbstractProtocol *-left- Handler
 AbstractProtocol *-down- AbstractEndpoint
 
 Connector *-down- ProtocolHandler
 Connector *-left- Adapter
+
+NioEndpoint *-- Poller
+Poller o-- PollerEvent
 ```
 
 
@@ -653,3 +522,97 @@ NioEndpoint           -[#000082,plain]-^  AbstractJsseEndpoint
 
 
 
+
+# Servlet
+A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.
+
+```plantuml
+package Tomcat {
+    interface Servlet {
+    + void init(ServletConfig)
+    + ServletConfig getServletConfig()
+    + void service(ServletRequest,ServletResponse)
+    + String getServletInfo()
+    + void destroy()
+    }
+
+    interface ServletConfig {
+    + String getServletName()
+    + ServletContext getServletContext()
+    + String getInitParameter(String)
+    + Enumeration<String> getInitParameterNames()
+    }
+
+    abstract class GenericServlet {
+    - ServletConfig config
+    }
+
+    abstract class HttpServlet {
+    # void service(HttpServletRequest,HttpServletResponse)
+    + void service(ServletRequest,ServletResponse)
+    }
+
+    interface ServletRequest {}
+    interface HttpServletRequest extends ServletRequest
+
+    interface ServletResponse {}
+    interface HttpServletResponse extends ServletResponse
+
+}
+Servlet <|.. GenericServlet
+ServletConfig <|.. GenericServlet
+GenericServlet <|-- HttpServlet
+HttpServletRequest -right-> HttpServlet
+HttpServlet -right-> HttpServletResponse
+
+```
+
+## servlet processing 
+```plantuml
+interface Context extends Container, ContextBind{
+
+}
+
+class StandardContext extends ContainerBase implements Context {
+    
+    Loader loader
+    NamingResourcesImpl namingResources
+    Map<String,String> mimeMappings
+    Map<String,String> parameters
+    Map<String,String> roleMappings
+    Map<String,String> servletMappings
+    Class<?> wrapperClass
+    Set<Servlet> createdServlets
+}
+
+
+
+interface Wrapper extends Container  {
+
++ long getAvailable()
++ void setAvailable(long)
++ Servlet getServlet()
++ void setServlet(Servlet)
++ void addInitParameter(String,String)
++ void addMapping(String)
++ void addSecurityReference(String,String)
++ Servlet allocate()
++ void deallocate(Servlet)
++ void load()
++ void unload()
+}
+
+
+class StandardWrapper extends ContainerBase implements  Wrapper {
+# StandardWrapperFacade facade
+# Servlet instance
+# StandardWrapperValve swValve
+}
+
+class StandardWrapperValve extends ValveBase {
+    invoke(request,response)
+}
+StandardWrapper *-right- StandardWrapperValve
+
+
+```

@@ -58,6 +58,7 @@ abstract class AbstractSelectableChannel extends SelectableChannel {
     SelectionKey[] keys
     Object keyLock
     Object regLock
+    SelectionKey register( sel,  ops, att)
 
 
 }
@@ -126,7 +127,10 @@ abstract class SelectorProvider {
         native int poll(int kqfd, long pollAddress, int nevents, long timeout)
     }
 
-    abstract class SocketChannel extends  AbstractSelectableChannel implements NetworkChannel
+    abstract class SocketChannel extends  AbstractSelectableChannel implements NetworkChannel {
+        abstract int read(ByteBuffer dst)
+        abstract int write(ByteBuffer src)
+    }
 
     class KQueueSelectorProvider extends SelectorProviderImpl
 
