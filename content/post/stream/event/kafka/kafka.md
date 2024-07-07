@@ -37,3 +37,14 @@ Topics      Events are organized and durably stored in topics.
 Partition   Topics are partitioned, spread over a number of buckets located on different kafka brokers
 
 ![partition](images/image.png)
+
+
+
+
+# security
+
+## SASL
+
+Simple Authentication and Security Layer(SASL) is a framework for authentication and data security in internet protocols. It decouple authentication mechanisms from application protocols.
+
+### 

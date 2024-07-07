@@ -27,9 +27,7 @@ Servlet API is synchronous (Filter, Servlet) or blocking(getParameter, getPart) 
 A Reactive Streams Publisher with basic rx operations that emits at most one item via `onNext` signal then terminates with `onComplete` signal, or only emits `onError` signal.
 
 ```plantuml
-interface HttpHandler {
-    Mono<Void> handle( request,  response)
-}
+
 
 interface Publisher<T> {
     void subscribe(subscriber)
@@ -59,8 +57,24 @@ interface Subscription {
 
 
 abstract class Mono<T> implements CorePublisher {
+    cache()
+    Mono<T> doOnCancel(onCancel)
+    Mono<T> doOnNext(onNext)
+    Mono<T> filter(tester)
+    Flux<T> expand(expander)
+    Mono<R> flatMap(transformer)
+    Mono<Boolean> hasElement()
+    Mono<T> onErrorComplete()
+    Mono<T> retry()
+    Disposable subscribe()
+    Mono<V> then(Mono<V> other)
+}
+
+class Flux<T> implements CorePublisher {
 
 }
 
-HttpHandler -right-> Mono : return
+
+Subscriber -left-> Publisher
+Subscriber -right-> Subscription
 ```
