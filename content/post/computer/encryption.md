@@ -19,6 +19,17 @@ Encryption is commonly used in web, this article try to explore the encryption a
 
 # Algorithms
 
+# hex
+
+hex transform every octet to 2 hex from 0~F
+
+# Base64 
+Base64 is a group of binary-to-text encoding schemes that transform binary data into a sequence of printable characters.
+The source binary data is taken 6 bits at a time, then this group of 6 bits is mapped to one of 64 unique characters.
+Base64 transform every 3 octets to 4 characters in base64 table. with "=" as padding. 
+Base64 compression is better than hex.
+
+
 ## AES
 Advanced Encryption Standard  established in 2001, supersedes the DES(Data Decryption Standard). It is a symmetric-key algorithm.
 

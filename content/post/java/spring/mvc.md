@@ -191,3 +191,32 @@ public void select(@PathVariable("name") String name,
 In spring mvc, request parameters map to a query parameters, form data and parts in multipart request.
 
 
+# Aspect Oriented Programming
+
+Aspect A modularization of a concern that cuts across multiple classes.
+
+Joint Point A point during the execution of a program. In Spring AOP , a join point always represents a method execution.
+
+Advice: Action taken by an aspect at a particular join point.
+advice types:
+    * before
+    * around
+    * after
+
+PointCut: A predicate that matches join points. Advice is associated with a pointCut expression and runs at any join point matched by the pointCut.
+
+## Point cut expression
+signature and point cut expression  
+```
+@Pointcut("execution(* transfer(..))") // the pointcut expression
+private void anyOldTransfer() {} // the pointcut signature
+```
+
+
+
+
+
+
+
+
+
