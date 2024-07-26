@@ -1,5 +1,5 @@
 ---
-title: "Tcp Ip协议详解"
+title: "常见网络协议报文详解"
 date: 2024-07-22T17:00:32+08:00
 categories:
 - network
@@ -12,7 +12,7 @@ keywords:
 - network
 #thumbnailImage: //example.com/image.jpg
 ---
-本文介绍TCP/IP的详细内容
+本文介绍常见网络协议的报文
 <!--more-->
 
 # OSI model
@@ -20,18 +20,19 @@ keywords:
 
 The open System interconnection model is a conceptual framework that divides network communication functions into seven layers.
 
-![osi](images/image.png)
+![osi](images/osi.png)
 
-## IP Packet
+## IP 
 
 Internet Protocol packet structure is used for data transmission in computer networks
 
 ![ip](images/ip.png)
 
+
 IP packet fields:
 
 * Version(4 bits) 
-* header length (4 bits) HE-LEN-bytes = number * 4
+* IHL internet header length (4 bits) HE-LEN-bytes = number * 4
 * type of service (8 bits) 
 * total length (16 bits) total length of ip packet from minimum 20 bytes to maximum 65535 bytes
 * identification if the ip package is fragmented then each fragmented packet will use the same 16 bit identification number to identify to which IP packet they belong to
@@ -47,7 +48,9 @@ IP packet fields:
 * destination address (32 bits)
 * ip option variable length
 
-## tcp Packet
+## TCP
+
+Transmission Control Protocol is a communications standard that enables application programs and computing devices to exchange message over a network. It is designed to send packets across the internet and ensure the successful delivery of data and messages over networks.
 
 ![tcp](images/tcp.png)
 * Source Port (16 bits)
@@ -71,3 +74,25 @@ IP packet fields:
 * Options (Variable 0-320 bits, in units of 32 bits)
   1. maximum segment size (4 bytes) 
   2. window scale (3 bytes)
+
+### TCP connection
+![tcp-handshake](images/tcp-handshake.png)
+![tcp-handoff](images/tcp-handoff.png)
+
+
+
+
+## TLS
+Transport Layer Security is a cryptographic protocol designed to provide communications security over a computer network.
+TLS works as upgrade and substitution of SSL.
+
+
+
+## MQTT
+
+MQTT is a lightweight, publish-subscribe, machine to machine network protocol. originally developed by IBM to monitor oil pipelines.
+
+
+### Data representation
+* Bits 
+* Two Byte Integer
