@@ -416,9 +416,20 @@ abstract class AbstractEndpoint<S,U> {
     int port
     InetAddress address
     Acceptor<U> acceptor
+    Executor executor
     Handler<S> handler
     HashMap<String, Object> attributes
     abstract void bind()
+    boolean processSocket(SocketWrapperBase<S> socketWrapper,
+            SocketEvent event, boolean dispatch)
+    abstract SocketProcessorBase<S> createSocketProcessor(
+            SocketWrapperBase<S> socketWrapper, SocketEvent event)
+}
+
+
+class Acceptor<U> implements Runnable{
+    AbstractEndpoint<?,U> endpoint
+
 }
 abstract class AbstractNetworkChannelEndpoint<S extends Channel, U extends NetworkChannel> extends AbstractEndpoint {
     abstract NetworkChannel getServerSocket()
@@ -429,6 +440,17 @@ class NioEndpoint extends AbstractNetworkChannelEndpoint {
     CountDownLatch stopLatch
     SynchronizedStack<PollerEvent> eventCache
     Poller poller
+    SocketProcessorBase<NioChannel> createSocketProcessor(
+            SocketWrapperBase<NioChannel> socketWrapper, SocketEvent event)
+}
+
+abstract class SocketProcessorBase<S> implements Runnable {
+    SocketWrapperBase<S> socketWrapper
+    SocketEvent event
+}
+
+class SocketProcessor extends SocketProcessorBase<NioChannel> {
+
 }
 
 interface Adapter {
@@ -472,6 +494,9 @@ class CoyoteAdapter implements Adapter {
 class Poller implements Runnable {
     Selector selector
     SynchronizedQueue<PollerEvent> events
+    register(NioSocketWrapper socketWrapper)
+    boolean events()
+    void processKey(SelectionKey key, NioSocketWrapper socketWrapper)
 }
 
 class PollerEvent {
@@ -479,6 +504,31 @@ class PollerEvent {
     int interestOps
 }
 
+abstract class NioSocketWrapper extends SocketWrapperBase<NioChannel> {
+    SynchronizedStack<NioChannel> nioChannels
+    Poller poller
+    int interestOps
+    SendfileData sendfileData
+    long lastRead
+    long lastWrite
+    Object readLock
+    volatile boolean readBlocking
+    Object writeLock
+    volatile boolean writeBlocking
+}
+
+abstract class SocketWrapperBase<E> {
+    E socket
+    AbstractEndpoint<E,?> endpoint
+    ReentrantLock lock
+    ServletConnection servletConnection
+    SocketBufferHandler socketBufferHandler
+    WriteBuffer nonBlockingWriteBuffer
+    Semaphore readPending
+    OperationState<?> readOperation
+    Semaphore writePending
+    OperationState<?> writeOperation
+}
 
 
 
@@ -488,9 +538,11 @@ AbstractProtocol *-down- AbstractEndpoint
 
 Connector *-down- ProtocolHandler
 Connector *-left- Adapter
-
+NioEndpoint -left-> SocketProcessor: createSocketProcessor
 NioEndpoint *-- Poller
+NioEndpoint *-- Acceptor
 Poller o-- PollerEvent
+PollerEvent *-- NioSocketWrapper
 ```
 
 

@@ -15,6 +15,10 @@ keywords:
 本文记录java Nio的接口与实现
 <!--more-->
 
+# NIO
+
+
+
 `Channel`  a nexus for I/O operations, it represents an open connection to an entity such as a hardware device, a file , a network socket and so on.
 
 `SelectableChannel`  A Channel that can be multiplexed via a `Selector`
@@ -108,6 +112,7 @@ abstract class SelectorProvider {
     abstract class AbstractSelector extends Selector {
         SelectorProvider provider
         Set<SelectionKey> cancelledKeys
+        SelectionKey register(AbstractSelectableChannel ch,int ops, Object att)
     }
 
     abstract class SelectorImpl extends AbstractSelector {
@@ -145,12 +150,8 @@ KQueueSelectorProvider --> KQueueSelectorImpl: provide
 
 
 
-## netty
 
-### event loop
-1. i/o processor
-2. custom task
-### channel
-wrapper of socket
-1. channel pipeline
-2. channel handler
+
+# NIO2
+
+

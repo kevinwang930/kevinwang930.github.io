@@ -38,6 +38,18 @@ tags:
     java.util.concurrent.ConcurrentNavigableMap
     ```
 
+
+## Queue
+Insert Operation
+    *  add throw IllegalStateException if no space
+    *  offer return fail if no space
+Remove Operation
+    *  remove() throw NoSuchElementException if no element
+    *  poll() return null if no element
+Examine Operation
+    *  element() throw NoSuchElementException if no element
+    *  peek()  return null if no element 
+
 ```plantuml
 title:collection
 interface Collection<E> {
