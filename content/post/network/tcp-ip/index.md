@@ -79,6 +79,62 @@ Transmission Control Protocol is a communications standard that enables applicat
 ![tcp-handshake](images/tcp-handshake.png)
 ![tcp-handoff](images/tcp-handoff.png)
 
+## WebSocket
+
+WebSocket provides simultaneous two-way communication channel over a single TCP connection. 
+WebSocket handshake uses the HTTP Upgrade header to change from the HTTP protocol to the WebSocket protocol.
+
+
+### Opening handshake
+
+Example Request
+```
+GET /chat HTTP/1.1
+Host: server.example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==
+Sec-WebSocket-Protocol: chat, superchat
+Sec-WebSocket-Version: 13
+Origin: http://example.com
+```
+
+Example Response
+
+```
+
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: HSmrc0sMlYUkAGmm5OPpG2HaGWk=
+Sec-WebSocket-Protocol: chat
+
+```
+
+### Frame-based message
+
+Client and Server can send data messages(text or binary) and control messages(close, ping, pong) to each other. A message is composed of one or more frames.
+
+Fragmentation allows a message to be split into two or more frames. It enables sending messages with initial data available but complete length unknown. Without fragmentation, the whole message must be sent in one frame, so the complete length is needed before the first byte can be sent, which requires a buffer.
+
+
+#### Frame Structure
+Unfragmented message `FIN = 1` and `opcode` $\neq$ `0`
+fragmented message 
+1. first frame `FIN = 0` and `opcode` $\neq$ `0`
+2. zero or more frames `FIN = 0` and `opcode = 0`
+3. final frame `FIN = 1` and `opcode = 0`
+
+![frame](images/frame.png)
+
+#### Opcodes
+
+![opcode](images/opcode.png)
+
+
+
+
+
 
 
 

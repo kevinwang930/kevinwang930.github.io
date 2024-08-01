@@ -406,10 +406,14 @@ ApplicationFilterChain --> DispatcherServlet
 
 ```plantuml
 
-interface Handler {
+interface Handler<S> {
     SocketState process(socket,SocketEvent status)
 }
 
+class ConnectionHandler<S> implements Handler<S> {
+    AbstractProtocol<S> proto
+    RecycledProcessors recycledProcessors
+}
 abstract class AbstractEndpoint<S,U> {
     SynchronizedStack<SocketProcessorBase<S>> processorCache
     Map<U, SocketWrapperBase<S>> connections
@@ -447,6 +451,16 @@ class NioEndpoint extends AbstractNetworkChannelEndpoint {
 abstract class SocketProcessorBase<S> implements Runnable {
     SocketWrapperBase<S> socketWrapper
     SocketEvent event
+    AtomicReference<Object> currentProcessor
+    abstract void doRun()
+}
+
+class Http11Processor extends AbstractProcessor {
+    AbstractHttp11Protocol<?> protocol
+    Http11InputBuffer inputBuffer
+    Http11OutputBuffer outputBuffer
+    HttpParser httpParser
+    SendfileDataBase sendfileData
 }
 
 class SocketProcessor extends SocketProcessorBase<NioChannel> {
@@ -473,13 +487,32 @@ abstract class AbstractProtocol<S> implements ProtocolHandler {
     Adapter adapter
     Set<Processor> waitingProcessors
     ScheduledFuture<?> timeoutFuture
+    Processor createProcessor()
 }
 
 abstract class AbstractHttp11Protocol<S> extends AbstractProtocol
 
 class Http11NioProtocol extends AbstractHttp11Protocol {
-
+    Processor createProcessor()
 }
+
+interface Processor {
+    SocketState process(SocketWrapperBase<?> socketWrapper, SocketEvent status)
+}
+
+abstract class AbstractProcessorLight implements Processor {
+    Set<DispatchType> dispatches
+}
+
+abstract class AbstractProcessor extends AbstractProcessorLight implements ActionHook {
+    Adapter adapter
+    AsyncStateMachine asyncStateMachine
+    Request request
+    Response response
+    SocketWrapperBase<?> socketWrapper
+}
+
+
 
 class Connector {
     ProtocolHandler protocolHandler
@@ -533,16 +566,17 @@ abstract class SocketWrapperBase<E> {
 
 
 
-AbstractProtocol *-left- Handler
+AbstractEndpoint *-left- ConnectionHandler
 AbstractProtocol *-down- AbstractEndpoint
 
 Connector *-down- ProtocolHandler
 Connector *-left- Adapter
-NioEndpoint -left-> SocketProcessor: createSocketProcessor
+NioEndpoint -right-> SocketProcessor: createSocketProcessor
 NioEndpoint *-- Poller
 NioEndpoint *-- Acceptor
 Poller o-- PollerEvent
 PollerEvent *-- NioSocketWrapper
+Http11NioProtocol -right-> Http11Processor
 ```
 
 
