@@ -13,12 +13,9 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 Kafka is an open-source distributed event streaming platform 
+
 <!--more-->
-
-
 # Concept
-
-
 
 Servers     Kafka is run as a cluster of one or more services that can span multiple data centers or cloud regions.
 
