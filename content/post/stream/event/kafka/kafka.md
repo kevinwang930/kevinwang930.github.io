@@ -36,6 +36,150 @@ Partition   Topics are partitioned, spread over a number of buckets located on d
 ![partition](images/image.png)
 
 
+# Producer
+
+`KafkaProducer` A Kafka client that publishes records to the kafka cluster.
+  The Producer is thread safe and sharing a single producer instance across threads will generally be faster than having multiple instances
+  The `send()` method is asynchronous. When called, it adds the record to a buffer of pending record sends and immediately return.
+
+`RecordAccumulator` acts as a queue that accumulates records into `MemoryRecords`
+
+
+
+
+
+
+
+
+```plantuml
+interface Producer<K, V> extends Closeable {
+  Future<RecordMetadata> send(ProducerRecord<K, V> record)
+  void flush()
+}
+class KafkaProducer<K, V> implements Producer {
+    ProducerConfig producerConfig
+    ProducerMetadata metadata
+    RecordAccumulator accumulator
+    Sender sender
+    Thread ioThread
+    Serializer<K> keySerializer
+    Serializer<V> valueSerializer
+    ProducerInterceptors<K, V> interceptors
+}
+
+class RecordAccumulator {
+}
+
+class Sender implements Runnable {
+  KafkaClient client
+  RecordAccumulator accumulator
+  ProducerMetadata metadata
+  TransactionManager transactionManager
+}
+
+class KafkaThread extends Thread 
+
+class BufferPool
+
+interface KafkaClient {
+  boolean isReady(Node node, long now)
+  boolean ready(Node node, long now)
+  void send(ClientRequest request, long now)
+  List<ClientResponse> poll(long timeout, long now)
+  void disconnect(String nodeId)
+  void close(String nodeId)
+}
+
+class NetworkClient implements KafkaClient {
+  Selectable selector
+  MetadataUpdater metadataUpdater
+  ClusterConnectionStates connectionStates
+}
+
+class Selector implements Selectable {
+  Selector nioSelector
+  Map<String, KafkaChannel> channels
+}
+
+class ProducerMetadata {
+  Map<String, Long> topics
+  Set<String> newTopics
+}
+
+KafkaProducer o-- RecordAccumulator
+KafkaProducer o-right- KafkaThread: ioThread
+KafkaThread o-- Sender
+RecordAccumulator o-- BufferPool
+Sender o-- KafkaClient
+NetworkClient o-- Selectable
+KafkaProducer *-- ProducerMetadata
+
+
+```
+
+## Metadata
+
+`Metadata` A class encapsulating some of the logic around metadata.
+This class is shared by the client thread(for partitioning) and the background sender thread.
+
+`Metadata` is maintained for only a subset of topics, which can be added to over time. 
+
+`MetadataSnapshot` An internal immutable snapshot of nodes, topics, and partitions in the kafka cluster. 
+
+```plantuml
+class Metadata implements Closeable {
+  MetadataSnapshot metadataSnapshot
+  List<InetSocketAddress> bootstrapAddresses
+}
+
+class MetadataSnapshot {
+  - unauthorizedTopics: Set<String>
+  - clusterInstance: Cluster
+  - metadataByPartition: Map<TopicPartition, PartitionMetadata>
+  - invalidTopics: Set<String>
+  - topicNames: Map<Uuid, String>
+  - nodes: Map<Integer, Node>
+  - clusterId: String
+  - topicIds: Map<String, Uuid>
+  - controller: Node
+  - internalTopics: Set<String>
+}
+
+class Cluster {
+  List<Node> nodes
+  Node controller
+  Map<TopicPartition, PartitionInfo> partitionsByTopicPartition
+  Map<String, List<PartitionInfo>> partitionsByTopic
+  Map<Integer, List<PartitionInfo>> partitionsByNode
+  Map<Integer, Node> nodesById
+  ClusterResource clusterResource
+  Map<String, Uuid> topicIds
+  Map<Uuid, String> topicNames
+}
+
+class ProducerMetadata {
+  Map<String, Long> topics
+  Set<String> newTopics
+}
+
+Metadata o-- MetadataSnapshot
+MetadataSnapshot o-- Cluster
+Metadata <|-right-  ProducerMetadata
+```
+
+
+
+## Producer Configs
+* `batch.size`
+  Producer will attempt to batch records together into fewer requests whenever multiple records are being sent to the same partition. This setting gives the upper bound of the batch size to be sent.
+* `linger.ms`
+  The producer groups together any records that arrive in between request transmissions into a single batched request. This setting gives the upper bound on the delay for batching.
+* `retry.backoff.ms`
+  the amount of time to wait before attempting to retry a failed request to a given topic
+* `retry.backoff.max.ms`
+  The maximum amount of time in milliseconds to wait when retrying a request to the broker that has repeatedly failed
+* `reconnect.backoff.ms`
+* `reconnect.backoff.max.ms`
 
 
 # security

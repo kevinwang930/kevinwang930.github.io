@@ -17,7 +17,7 @@ keywords:
 # Requirement
 Synchronizers possess two kinds of methods: 
 1. acquire operation blocks the calling thread until the synchronization state allows it to proceed.
-2. release operation changes synchronization state ina way that may allow one or more blocked threads to unblock.
+2. release operation changes synchronization state in a way that may allow one or more blocked threads to unblock.
 
 Each synchronizer supports:
 1. nonblocking synchronization attempts as well as blocking versions. 
@@ -86,7 +86,7 @@ HotspotJVM uses a pthread condvar
 
 The heart of the framework is maintenance of queues of blocked threads, which are restricted to FIFO queues.
 The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
-CLH have been used only in spinlocks.
+CLH(lock queue) have been used only in spinlocks.
 AQS made modification to the CLH locks to support blocking,cancellation and timeouts.
     1. CLH node with `prev` node link can deal with timeouts and cancellation
     2. CLH node with `next` node link to support blocking and waking up (park/unpark)
@@ -114,6 +114,8 @@ class Node {
 
 AbstractQueuedSynchronizer o-- Node
 ```
+
+
 
 ## Condition queues
 

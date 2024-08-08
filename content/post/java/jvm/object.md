@@ -3,15 +3,15 @@ title: "java对象的内存实现"
 date: 2024-04-22T18:11:29+08:00
 categories:
 - java
-- object
+- jvm
 tags:
-- java
+- jvm
 - object
 keywords:
-- java object
+- jvm object
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录java object 内存实现
+本文记录jvm 对象内部实现
 <!--more-->
 
 # oopDesc
@@ -28,7 +28,12 @@ class markword {
     uintptr_t _value
 }
 
+class Handle {
+    oop* _handle
+}
 
+
+Handle --> oopDesc
 oopDesc -right-> markword: header 
 ```
 Markword describes the header of the object.
@@ -56,7 +61,6 @@ We assume that stack/thread pointers have the lowest 2 bits cleared.
 
 inflating is a distinguished markword value of all zeros that is used when inflating an existing stack-lock into an ObjectMonitor
 ```
-
 
 
 
