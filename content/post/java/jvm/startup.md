@@ -1,7 +1,8 @@
 ---
-title: "JVM 启动流程"
+title: "JVM startup"
 date: 2024-03-20T00:46:56+08:00
 categories:
+- java
 - jvm
 tags:
 - jvm
@@ -41,6 +42,3 @@ javaCalls.cpp-->javaCalls.cpp:call_helper
 
 ```
 
-# jvm调用java方法
-
-jvm 由 c++ 编写， 调用java方法时借用函数指针的方式，调用interpreter对应函数入口

@@ -1,5 +1,5 @@
 ---
-title: "java对象的内存实现"
+title: "JVM object internals"
 date: 2024-04-22T18:11:29+08:00
 categories:
 - java

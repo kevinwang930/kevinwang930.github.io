@@ -12,3 +12,21 @@ keywords:
 ---
 本文记录cpp函数指针及其调用方式
 <!--more-->
+
+# syntax
+
+* pointer syntax
+    ```
+    datatype *var_name; 
+    ```
+* function pointer syntax
+    ```
+    // Declaring
+    return_type (*FuncPtr) (parameter type, ....); 
+
+    // Referencing
+    FuncPtr= function_name;
+
+    // Dereferencing
+    data_type x=*FuncPtr; 
+    ```
