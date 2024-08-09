@@ -1,0 +1,236 @@
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文介绍spring架构\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring\/spring\/","keywords":"[spring]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.131.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="spring"><meta name=description content="本文介绍spring架构"><meta property="og:description" content="本文介绍spring架构"><meta property="og:type" content="article"><meta property="og:title" content="Spring"><meta name=twitter:title content="Spring"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring/spring/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring/spring/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文介绍spring架构"><meta name=twitter:description content="本文介绍spring架构"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-06-08T18:30:11"><meta property="article:modified_time" content="2024-06-08T18:30:11"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="java"><meta property="article:tag" content="spring"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Spring</title>
+<link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/spring/spring/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
+<span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
+<span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
+<span class=sidebar-button-desc>Tags</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/archives title=Archives><i class="sidebar-button-icon fas fa-lg fa-archive" aria-hidden=true></i>
+<span class=sidebar-button-desc>Archives</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/#about title=About><i class="sidebar-button-icon fas fa-lg fa-question" aria-hidden=true></i>
+<span class=sidebar-button-desc>About</span></a></li></ul><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://github.com/kevinwang930 target=_blank rel=noopener title=GitHub><i class="sidebar-button-icon fab fa-lg fa-github" aria-hidden=true></i>
+<span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring</h1><div class="postShorten-meta post-meta"><time datetime=2024-06-08T18:30:11+08:00>June 8, 2024
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文介绍spring架构</p><p><img src=images/image.png alt="alt text"></p><h1 id=1-core>1. Core</h1><h2 id=11-environment>1.1 Environment</h2><p>Environment Interface is an abstraction in container that models 2 key aspects of application environment.</p><p>A profile is a named, logical group of bean definitions to be registered with the container only if the given profile is active</p><p>Properties play an important role in almost all applications and may originate from a variety of sources: properties files, JVM system properties, system environment variables, JNDI, servlet context parameters, ad-hoc Properties objects, Map objects, and so on</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: Environment
+skinparam linetype ortho
+
+
+&#39; Declare interfaces
+interface PropertyResolver &lt;&lt;interface&gt;&gt; {
+    boolean containsProperty(String key)
+    String getProperty(String key)
+}
+interface ConfigurablePropertyResolver &lt;&lt;interface&gt;&gt;
+interface Environment &lt;&lt;interface&gt;&gt;
+interface ConfigurableEnvironment &lt;&lt;interface&gt;&gt;
+interface ConfigurableWebEnvironment &lt;&lt;interface&gt;&gt;
+
+&#39; Declare classes
+class AbstractEnvironment {
+    Set&lt;String&gt; activeProfiles
+    Set&lt;String&gt; defaultProfiles
+    MutablePropertySources propertySources
+    ConfigurablePropertyResolver propertyResolver
+    protected void customizePropertySources(propertySources)
+    protected ConfigurablePropertyResolver createPropertyResolver( propertySources)
+}
+class StandardEnvironment {
+    protected void customizePropertySources(propertySources)
+}
+note &#34;system properties system envs&#34; as p1
+StandardEnvironment .. p1
+class StandardServletEnvironment {
+    protected void customizePropertySources(propertySources)
+}
+package SpringBoot {
+    class ApplicationServletEnvironment {
+
+    }
+}
+
+
+&#39; Define relationships with arrow pointing from class to interface (left to right)
+PropertyResolver &lt;|-- ConfigurablePropertyResolver
+Environment &lt;|-- ConfigurableEnvironment
+PropertyResolver &lt;|-- Environment
+ConfigurablePropertyResolver&lt;|-- ConfigurableEnvironment
+ConfigurableEnvironment &lt;|-- ConfigurableWebEnvironment
+ConfigurableEnvironment &lt;|-- AbstractEnvironment
+AbstractEnvironment  &lt;|-- StandardEnvironment
+ StandardEnvironment  &lt;-- StandardServletEnvironment
+ConfigurableWebEnvironment  &lt;|-- StandardServletEnvironment
+StandardServletEnvironment &lt;|-- ApplicationServletEnvironment        
+</code></pre><h3 id=11-properties>1.1 properties</h3><p><code>PropertySource</code> Abstract base class representing a source of name/value property pairs. The underlying <code>source</code> object may be of any type <code>T</code> that encapsulates properties.</p><p>Examples include <code>java.util.Properties</code> objects,<code>java.uti.Map</code> objects,<code>ServletContext</code> and <code>Sevletconfig</code> objects.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+interface Iterable&lt;PropertySource&gt; &lt;&lt; interface &gt;&gt;
+class MutablePropertySources {
+    List&lt;PropertySource&lt;?&gt;&gt; propertySourceList
+}
+interface PropertySources &lt;&lt; interface &gt;&gt; {
+    
+    Stream&lt;PropertySource&lt;?&gt;&gt; stream()
+    PropertySource&lt;?&gt; get(String name)
+
+}
+
+abstract class PropertySource&lt;T&gt; {
+    String name;
+    T source
+    abstract Object getProperty(String name)
+    T getSource()
+}
+
+MutablePropertySources  -[#008200,dashed]-^  PropertySources        
+PropertySources         -[#008200,plain]-^  Iterable    
+MutablePropertySources o--      PropertySource      
+@enduml
+</code></pre><h1 id=2-context>2. Context</h1><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+scale 1536 width
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+package SpringBoot {
+class AnnotationConfigServletWebServerApplicationContext
+}
+class AbstractApplicationContext
+interface AliasRegistry &lt;&lt; interface &gt;&gt;
+interface AnnotationConfigRegistry &lt;&lt; interface &gt;&gt;
+
+interface ApplicationContext &lt;&lt; interface &gt;&gt;
+interface ApplicationEventPublisher &lt;&lt; interface &gt;&gt;
+interface AutoCloseable &lt;&lt; interface &gt;&gt;
+interface BeanDefinitionRegistry &lt;&lt; interface &gt;&gt;
+interface BeanFactory &lt;&lt; interface &gt;&gt;
+interface Closeable &lt;&lt; interface &gt;&gt;
+interface ConfigurableApplicationContext &lt;&lt; interface &gt;&gt;
+interface ConfigurableWebApplicationContext &lt;&lt; interface &gt;&gt;
+interface ConfigurableWebServerApplicationContext &lt;&lt; interface &gt;&gt;
+class DefaultResourceLoader
+annotation Deprecated &lt;&lt; annotation &gt;&gt;
+interface EnvironmentCapable &lt;&lt; interface &gt;&gt;
+annotation FunctionalInterface &lt;&lt; annotation &gt;&gt;
+class GenericApplicationContext
+class GenericWebApplicationContext
+interface HierarchicalBeanFactory &lt;&lt; interface &gt;&gt;
+interface Lifecycle &lt;&lt; interface &gt;&gt;
+interface ListableBeanFactory &lt;&lt; interface &gt;&gt;
+interface MessageSource &lt;&lt; interface &gt;&gt;
+interface ResourceLoader &lt;&lt; interface &gt;&gt;
+interface ResourcePatternResolver &lt;&lt; interface &gt;&gt;
+class ServletWebServerApplicationContext
+interface ThemeSource &lt;&lt; interface &gt;&gt;
+interface WebApplicationContext &lt;&lt; interface &gt;&gt;
+interface WebServerApplicationContext &lt;&lt; interface &gt;&gt;
+
+AbstractApplicationContext                          -[#008200,dashed]-^  ConfigurableApplicationContext                     
+AbstractApplicationContext                          -[#000082,plain]-^  DefaultResourceLoader                              
+AnnotationConfigServletWebServerApplicationContext  -[#008200,dashed]-^  AnnotationConfigRegistry                           
+AnnotationConfigServletWebServerApplicationContext  -[#000082,plain]-^  ServletWebServerApplicationContext                 
+ApplicationContext                                  -[#008200,plain]-^  ApplicationEventPublisher                          
+ApplicationContext                                  -[#008200,plain]-^  EnvironmentCapable                                 
+ApplicationContext                                  -[#008200,plain]-^  HierarchicalBeanFactory                            
+ApplicationContext                                  -[#008200,plain]-^  ListableBeanFactory                                
+ApplicationContext                                  -[#008200,plain]-^  MessageSource                                      
+ApplicationContext                                  -[#008200,plain]-^  ResourcePatternResolver                            
+ApplicationEventPublisher                           -[#999900,dotted]-  FunctionalInterface                                
+BeanDefinitionRegistry                              -[#008200,plain]-^  AliasRegistry                                      
+Closeable                                           -[#008200,plain]-^  AutoCloseable                                      
+ConfigurableApplicationContext                      -[#008200,plain]-^  ApplicationContext                                 
+ConfigurableApplicationContext                      -[#008200,plain]-^  Closeable                                          
+ConfigurableApplicationContext                      -[#008200,plain]-^  Lifecycle                                          
+ConfigurableWebApplicationContext                   -[#008200,plain]-^  ConfigurableApplicationContext                     
+ConfigurableWebApplicationContext                   -[#008200,plain]-^  WebApplicationContext                              
+ConfigurableWebServerApplicationContext             -[#008200,plain]-^  ConfigurableApplicationContext                     
+ConfigurableWebServerApplicationContext             -[#008200,plain]-^  WebServerApplicationContext                        
+DefaultResourceLoader                               -[#008200,dashed]-^  ResourceLoader                                     
+GenericApplicationContext                           -[#000082,plain]-^  AbstractApplicationContext                         
+GenericApplicationContext                           -[#008200,dashed]-^  BeanDefinitionRegistry                             
+GenericWebApplicationContext                        -[#008200,dashed]-^  ConfigurableWebApplicationContext                  
+GenericWebApplicationContext                        -[#000082,plain]-^  GenericApplicationContext                          
+GenericWebApplicationContext                        -[#008200,dashed]-^  ThemeSource                                        
+HierarchicalBeanFactory                             -[#008200,plain]-^  BeanFactory                                        
+ListableBeanFactory                                 -[#008200,plain]-^  BeanFactory                                        
+ResourcePatternResolver                             -[#008200,plain]-^  ResourceLoader                                     
+ServletWebServerApplicationContext                  -[#008200,dashed]-^  ConfigurableWebServerApplicationContext            
+ServletWebServerApplicationContext                  -[#000082,plain]-^  GenericWebApplicationContext                       
+ThemeSource                                         -[#999900,dotted]-  Deprecated                                         
+WebApplicationContext                               -[#008200,plain]-^  ApplicationContext                                 
+WebServerApplicationContext                         -[#008200,plain]-^  ApplicationContext                                 
+@enduml
+</code></pre><h2 id=21-event>2.1 Event</h2><p><code>ApplicationListener</code> can generically declare the event type that it is interested in. When registered with a Spring <code>ApplicationContext</code>, event will be filtered accordingly, with the listener getting invoked for matching event objects.</p><p><code>ApplicationEventMulticaster</code> Interface to be implemented by objects that can manage a number of <code>Applicationlistener</code> objects and publish events to them.</p><p><code>SimpleApplicationEventMulticaster</code> is the simple implementation of the <code>ApplicationEventMulticaster</code> interface.Multicasts all events to all registered listeners.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class ApplicationEvent {
+   
+}
+interface ApplicationListener&lt;E&gt; &lt;&lt; interface &gt;&gt; {
+     void onApplicationEvent(E event)
+}
+interface EventListener &lt;&lt; interface &gt;&gt;
+interface ApplicationEventPublisher {
+    void publishEvent(ApplicationEvent event) 
+}
+
+interface ApplicationEventMulticaster {
+    void addApplicationListener(ApplicationListener&lt;?&gt; listener)
+    void addApplicationListenerBean(String listenerBeanName)
+    void multicastEvent(ApplicationEvent event)
+}
+
+ApplicationListener  -[#595959,dashed]-&gt;  ApplicationEvent    
+ApplicationListener  -[#008200,plain]-^  EventListener     
+ApplicationEventPublisher --&gt; ApplicationEventMulticaster: publish
+ApplicationEventMulticaster --&gt; ApplicationListener: multicast
+ApplicationEventPublisher &lt;|-- ApplicationContext
+@enduml
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: SimpleApplicationEventMulticaster
+@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class AbstractApplicationEventMulticaster {
+    ClassLoader beanClassLoader
+    ConfigurableBeanFactory beanFactory
+    DefaultListenerRetriever defaultRetriever
+}
+interface ApplicationEventMulticaster &lt;&lt; interface &gt;&gt; {
+    void multicastEvent(ApplicationEvent event)
+}
+interface Aware &lt;&lt; interface &gt;&gt;
+interface BeanClassLoaderAware &lt;&lt; interface &gt;&gt; {
+    void setBeanClassLoader(ClassLoader classLoader)
+}
+interface BeanFactoryAware &lt;&lt; interface &gt;&gt; {
+    void setBeanFactory(BeanFactory beanFactory)
+}
+class SimpleApplicationEventMulticaster {
+    Executor taskExecutor
+}
+
+class DefaultListenerRetriever {
+    Set&lt;ApplicationListener&lt;?&gt;&gt; applicationListeners
+    Set&lt;String&gt; applicationListenerBeans
+}
+
+
+AbstractApplicationEventMulticaster *-left- DefaultListenerRetriever
+
+AbstractApplicationEventMulticaster  -[#008200,dashed]-^  ApplicationEventMulticaster         
+AbstractApplicationEventMulticaster  -[#008200,dashed]-^  BeanClassLoaderAware                
+AbstractApplicationEventMulticaster  -[#008200,dashed]-^  BeanFactoryAware                    
+BeanClassLoaderAware                 -[#008200,plain]-^  Aware                               
+BeanFactoryAware                     -[#008200,plain]-^  Aware                               
+SimpleApplicationEventMulticaster    -[#000082,plain]-^  AbstractApplicationEventMulticaster 
+@enduml
+</code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/nacos/ data-tooltip=Nacos aria-label="NEXT: Nacos"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/computer/encryption/ data-tooltip="Security and Encryption" aria-label="PREVIOUS: Security and Encryption"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring/spring/",this.page.identifier="/post/java/spring/spring/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="hugo-tranquilpeak-theme",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2024 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior=4><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/nacos/ data-tooltip=Nacos aria-label="NEXT: Nacos"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/computer/encryption/ data-tooltip="Security and Encryption" aria-label="PREVIOUS: Security and Encryption"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/spring/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fspring%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fspring%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fspring%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script></body></html>

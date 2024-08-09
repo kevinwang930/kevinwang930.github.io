@@ -1,4 +1,4 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文记录tomcat 架构与实现\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/tomcat\/","keywords":"[tomcat]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.124.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="tomcat"><meta name=description content="本文记录tomcat 架构与实现"><meta property="og:description" content="本文记录tomcat 架构与实现"><meta property="og:type" content="article"><meta property="og:title" content="Tomcat- Servlet Container"><meta name=twitter:title content="Tomcat- Servlet Container"><meta property="og:url" content="https://kevinwang930.github.io/post/java/tomcat/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/tomcat/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录tomcat 架构与实现"><meta name=twitter:description content="本文记录tomcat 架构与实现"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-04-02T12:50:11"><meta property="article:modified_time" content="2024-04-02T12:50:11"><meta property="article:section" content="java"><meta property="article:section" content="tomcat"><meta property="article:tag" content="tomcat"><meta property="article:tag" content="servlet"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Tomcat- Servlet Container</title>
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文记录tomcat 架构与实现\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/tomcat\/","keywords":"[tomcat]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.131.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="tomcat"><meta name=description content="本文记录tomcat 架构与实现"><meta property="og:description" content="本文记录tomcat 架构与实现"><meta property="og:type" content="article"><meta property="og:title" content="Tomcat- Servlet Container"><meta name=twitter:title content="Tomcat- Servlet Container"><meta property="og:url" content="https://kevinwang930.github.io/post/java/tomcat/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/tomcat/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录tomcat 架构与实现"><meta name=twitter:description content="本文记录tomcat 架构与实现"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-04-02T12:50:11"><meta property="article:modified_time" content="2024-04-02T12:50:11"><meta property="article:section" content="java"><meta property="article:section" content="tomcat"><meta property="article:tag" content="tomcat"><meta property="article:tag" content="servlet"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Tomcat- Servlet Container</title>
 <link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/tomcat/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
 <span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
 <span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
@@ -8,7 +8,497 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Tomcat- Servlet Container</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-02T12:50:11+08:00>April 2, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/tomcat>tomcat</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录tomcat 架构与实现</p><p>tomcat works as a servlet/jsp container.</p><h1 id=servlet>Servlet</h1><p>A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>package Tomcat {
+<a class=category-link href=https://kevinwang930.github.io/categories/tomcat>tomcat</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录tomcat 架构与实现</p><p>tomcat works as a servlet/jsp container.</p><h1 id=tomcat-architecture>Tomcat Architecture</h1><p><code>Server</code> represents the whole container</p><p>A <code>service</code> is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine</p><p>A <code>Connector</code> handles communications with the client.</p><p><code>LifeCycle</code> common interface for Catalina components to implement in order to provide a consistent mechanism to start and stop the component</p><p>The <code>LifecycleEvent</code>s fired during state changes are defined in the methods that trigger the change</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+title: Tomcat Architecture
+cloud http
+    package Tomcat {
+    
+        
+        component c  [ 
+            listener
+            globl naming resouce
+            jndi
+        ] 
+        component services {
+            component connector
+            component Engine {
+                component Host {
+                    Component Context {
+                        Component Servlet
+                    }
+                }
+            }
+        }
+        
+        c -right-&gt; services
+    }
+
+http -right-&gt; Tomcat
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+skinparam linetype ortho
+
+interface Lifecycle {
+
++ void addLifecycleListener(LifecycleListener)
++ LifecycleListener[] findLifecycleListeners()
++ void removeLifecycleListener(LifecycleListener)
++ void init()
++ void start()
++ void stop()
++ void destroy()
++ LifecycleState getState()
+}
+
+interface Server extends Lifecycle {
++ String getAddress()
++ ClassLoader getParentClassLoader()
++ void setParentClassLoader(ClassLoader)
++ Catalina getCatalina()
++ void setCatalina(Catalina)
++ File getCatalinaBase()
++ File getCatalinaHome()
++ int getUtilityThreads()
++ void setUtilityThreads(int)
++ void addService(Service)
++ void await()
+}
+
+interface Service extends Lifecycle {
++ Engine getContainer()
++ void setContainer(Engine)
++ String getName()
++ Server getServer()
++ ClassLoader getParentClassLoader()
++ void setParentClassLoader(ClassLoader)
++ String getDomain()
++ Connector[] findConnectors()
++ Executor getExecutor(String)
++ Mapper getMapper()
+}
+
+abstract class LifecycleBase implements Lifecycle {
+
+- List&lt;LifecycleListener&gt; lifecycleListeners
+- LifecycleState state
++ void init()
+# {abstract}void initInternal()
++ void start()
+# {abstract}void startInternal()
++ void stop()
+# {abstract}void stopInternal()
++ void destroy()
+# {abstract}void destroyInternal()
+
+}
+
+
+abstract class LifecycleMBeanBase extends LifecycleBase  {
+}
+
+interface Container extends Lifecycle {
+    Pipeline getPipeline()
+}
+
+interface Engine extends Container {
++ String getDefaultHost()
++ void setDefaultHost(String)
++ String getJvmRoute()
++ void setJvmRoute(String)
++ Service getService()
++ void setService(Service)
+}
+
+interface Host extends Container {
+}
+
+
+
+class Connector extends LifecycleMBeanBase {
+# Service service
+# String scheme
+# ProtocolHandler protocolHandler
+# Adapter adapter
++ EncodedSolidusHandling getEncodedSolidusHandlingInternal()
++ Request createRequest(org.apache.coyote.Request)
++ Response createResponse(org.apache.coyote.Response)
+}
+
+Server o-- Service
+Service o-- Connector
+Service o-- Engine
+Engine --&gt; Host: invoke
+</code></pre><h2 id=container>Container</h2><p>container is an object that can execute requests received from a client, and return responses based on those requests
+A container may optionally support a pipeline of Valves that processes the request in an order configured at runtime, by implementing the pipeline interface as well.
+Containers will exist at several levels within catalina:</p><ol><li>engine</li><li>host</li><li>context</li><li>wrapper</li></ol><p>A container may also be associated with a number of support components that provide functionality which may be shared (by attaching it to a parent container) or individually customized. the following support components are currently recognized.</p><ol><li>loader</li><li>logger</li><li>manager manager for the pool of sessions</li><li>realm read-only interface to a security domain, for authenticating user identities and their corresponding roles.</li><li>resources JNDI directory context enabling access to static resources.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: Tomcat Container Architecture
+skinparam linetype ortho
+
+
+interface Container  {
+
++ Pipeline getPipeline()
++ Container getParent()
++ Realm getRealm()
++ {static} String getConfigPath(Container,String)
++ {static} Service getService(Container)
++ void addChild(Container)
++ void addContainerListener(ContainerListener)
++ void fireContainerEvent(String,Object)
++ void logAccess(Request,Response,long,boolean)
++ File getCatalinaBase()
++ File getCatalinaHome()
+}
+
+interface Engine extends Container {
++ String getDefaultHost()
++ void setDefaultHost(String)
++ String getJvmRoute()
++ void setJvmRoute(String)
++ Service getService()
++ void setService(Service)
+}
+
+class StandardEngine extends ContainerBase implements Engine {
+    Service service
+
+}
+
+interface Host extends Container {
+
++ String getXmlBase()
++ void setXmlBase(String)
++ File getConfigBaseFile()
++ String getAppBase()
++ File getAppBaseFile()
++ void setAppBase(String)
+}
+
+abstract class ContainerBase implements Container {
+# Pipeline pipeline
+# HashMap&lt;String,Container&gt; children
+# Container parent
+# List&lt;ContainerListener&gt; listeners
+# String name
+# ClassLoader parentClassLoader
+- Realm realm
+# ExecutorService startStopExecutor
+}
+class StandardHost extends ContainerBase implements Host {
+- String appBase
+- File appBaseFile
+- String xmlBase
+- File hostConfigBase
+- String configClass
+- String contextClass
+- String workDir
+- boolean createDirs
+- Map&lt;ClassLoader,String&gt; childClassLoaders
+}
+
+
+
+
+
+
+
+
+interface Contained {
+    Container getContainer()
+    void setContainer(Container container)
+}
+
+interface Pipeline extends Contained {
+    Valve getBasic()
+    void setBasic(Valve valve)
+    void addValve(Valve valve)
+    Valve[] getValves()
+    Valve getFirst()
+}
+
+class StandardPipeline implements Pipeline {
+    Valve basic
+    Container container
+    Valve first
+}
+
+interface Valve {
+    Valve getNext()
+    void setNext(Valve valve)
+    void backgroundProcess()
+    void invoke(Request request, Response response)
+}
+
+abstract class ValveBase  implements Contained, Valve {
+    Container container
+    Log containerLog
+    Valve next
+
+}
+class StandardEngineValve extends ValveBase
+
+class StandardHostValve extends ValveBase
+
+StandardEngine *-- StandardEngineValve
+
+StandardHost *-- StandardHostValve
+Engine o-- Host
+Container *-- Pipeline
+Pipeline o-- Valve
+</code></pre><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
+Multiple host can be configured in catalina, each has its own request processing logic</p><h3 id=context>Context</h3><p>A context is a container that represents a servlet context, and therefore an individual web application, in the catalina servlet engine. A host may contain multiple contexts,each with a unique path.</p><h3 id=wrapper>wrapper</h3><p>A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application.
+It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
+Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+interface Contained &lt;&lt; interface &gt;&gt;
+
+class StandardEngineValve extends ValveBase
+interface Valve &lt;&lt; interface &gt;&gt; {
+    Valve getNext()
+    void invoke( request,  response)
+}
+class ValveBase {
+    Container container
+    Valve next
+}
+
+class StandardHostValve extends ValveBase
+
+abstract class ValveBase implements Contained, Valve
+
+
+interface Container &lt;&lt; interface &gt;&gt; 
+class ContainerBase implements Container
+interface Context &lt;&lt; interface &gt;&gt; extends Container, ContextBind 
+interface ContextBind &lt;&lt; interface &gt;&gt;
+class StandardContext extends ContainerBase implements Context
+class TomcatEmbeddedContext  extends StandardContext
+            
+class StandardContextValve extends ValveBase
+
+interface Wrapper {
+    Servlet allocate()
+}
+class StandardWrapper extends ContainerBase implements Wrapper {
+    volatile Servlet instance
+}
+
+class StandardWrapperValve extends ValveBase  
+
+class ApplicationFilterChain 
+
+class DispatcherServlet {
+    void service( req,  res) 
+}
+      
+StandardEngineValve -right-&gt;StandardHostValve: call
+
+StandardHostValve -right-&gt; StandardContextValve:call
+
+TomcatEmbeddedContext o-- StandardContextValve
+
+StandardContextValve -right-&gt; StandardWrapperValve: call     
+
+StandardWrapper o-- StandardWrapperValve
+
+StandardWrapperValve --&gt; ApplicationFilterChain
+ApplicationFilterChain --&gt; DispatcherServlet
+
+@enduml
+</code></pre><h2 id=connector-internals>Connector Internals</h2><p><code>Adapter</code> represents the entry point in a coyote-based servlet container.</p><p><code>ProtocolHandler</code> abstract the protocol implementation, including threading.</p><p><code>EndPoint</code> handles the low level interactions with network socket.</p><p><code>Poller</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+interface Handler&lt;S&gt; {
+    SocketState process(socket,SocketEvent status)
+}
+
+class ConnectionHandler&lt;S&gt; implements Handler&lt;S&gt; {
+    AbstractProtocol&lt;S&gt; proto
+    RecycledProcessors recycledProcessors
+}
+abstract class AbstractEndpoint&lt;S,U&gt; {
+    SynchronizedStack&lt;SocketProcessorBase&lt;S&gt;&gt; processorCache
+    Map&lt;U, SocketWrapperBase&lt;S&gt;&gt; connections
+    int port
+    InetAddress address
+    Acceptor&lt;U&gt; acceptor
+    Executor executor
+    Handler&lt;S&gt; handler
+    HashMap&lt;String, Object&gt; attributes
+    abstract void bind()
+    boolean processSocket(SocketWrapperBase&lt;S&gt; socketWrapper,
+            SocketEvent event, boolean dispatch)
+    abstract SocketProcessorBase&lt;S&gt; createSocketProcessor(
+            SocketWrapperBase&lt;S&gt; socketWrapper, SocketEvent event)
+}
+
+
+class Acceptor&lt;U&gt; implements Runnable{
+    AbstractEndpoint&lt;?,U&gt; endpoint
+
+}
+abstract class AbstractNetworkChannelEndpoint&lt;S extends Channel, U extends NetworkChannel&gt; extends AbstractEndpoint {
+    abstract NetworkChannel getServerSocket()
+    abstract S createChannel(SocketBufferHandler buffer)
+}
+class NioEndpoint extends AbstractNetworkChannelEndpoint {
+    ServerSocketChannel serverSock
+    CountDownLatch stopLatch
+    SynchronizedStack&lt;PollerEvent&gt; eventCache
+    Poller poller
+    SocketProcessorBase&lt;NioChannel&gt; createSocketProcessor(
+            SocketWrapperBase&lt;NioChannel&gt; socketWrapper, SocketEvent event)
+}
+
+abstract class SocketProcessorBase&lt;S&gt; implements Runnable {
+    SocketWrapperBase&lt;S&gt; socketWrapper
+    SocketEvent event
+    AtomicReference&lt;Object&gt; currentProcessor
+    abstract void doRun()
+}
+
+class Http11Processor extends AbstractProcessor {
+    AbstractHttp11Protocol&lt;?&gt; protocol
+    Http11InputBuffer inputBuffer
+    Http11OutputBuffer outputBuffer
+    HttpParser httpParser
+    SendfileDataBase sendfileData
+}
+
+class SocketProcessor extends SocketProcessorBase&lt;NioChannel&gt; {
+
+}
+
+interface Adapter {
+    void service(Request req,Response res)
+    boolean prepare(Request req, Response res)
+}
+interface ProtocolHandler {
+    Adaptor getAdaptor()
+    void setAdaptor(Adaptor adaptor)
+    Executor getExecutor()
+    void init()
+    void start()
+    void stop()
+    void destroy()
+}
+
+abstract class AbstractProtocol&lt;S&gt; implements ProtocolHandler {
+    AbstractEndpoint&lt;S, ?&gt; endpoint
+    Handler&lt;S&gt; handler
+    Adapter adapter
+    Set&lt;Processor&gt; waitingProcessors
+    ScheduledFuture&lt;?&gt; timeoutFuture
+    Processor createProcessor()
+}
+
+abstract class AbstractHttp11Protocol&lt;S&gt; extends AbstractProtocol
+
+class Http11NioProtocol extends AbstractHttp11Protocol {
+    Processor createProcessor()
+}
+
+interface Processor {
+    SocketState process(SocketWrapperBase&lt;?&gt; socketWrapper, SocketEvent status)
+}
+
+abstract class AbstractProcessorLight implements Processor {
+    Set&lt;DispatchType&gt; dispatches
+}
+
+abstract class AbstractProcessor extends AbstractProcessorLight implements ActionHook {
+    Adapter adapter
+    AsyncStateMachine asyncStateMachine
+    Request request
+    Response response
+    SocketWrapperBase&lt;?&gt; socketWrapper
+}
+
+
+
+class Connector {
+    ProtocolHandler protocolHandler
+    Service service
+    Adapter adapter
+}
+
+class CoyoteAdapter implements Adapter {
+    Connector connector
+}
+
+class Poller implements Runnable {
+    Selector selector
+    SynchronizedQueue&lt;PollerEvent&gt; events
+    register(NioSocketWrapper socketWrapper)
+    boolean events()
+    void processKey(SelectionKey key, NioSocketWrapper socketWrapper)
+}
+
+class PollerEvent {
+    NioSocketWrapper socketWrapper
+    int interestOps
+}
+
+abstract class NioSocketWrapper extends SocketWrapperBase&lt;NioChannel&gt; {
+    SynchronizedStack&lt;NioChannel&gt; nioChannels
+    Poller poller
+    int interestOps
+    SendfileData sendfileData
+    long lastRead
+    long lastWrite
+    Object readLock
+    volatile boolean readBlocking
+    Object writeLock
+    volatile boolean writeBlocking
+}
+
+abstract class SocketWrapperBase&lt;E&gt; {
+    E socket
+    AbstractEndpoint&lt;E,?&gt; endpoint
+    ReentrantLock lock
+    ServletConnection servletConnection
+    SocketBufferHandler socketBufferHandler
+    WriteBuffer nonBlockingWriteBuffer
+    Semaphore readPending
+    OperationState&lt;?&gt; readOperation
+    Semaphore writePending
+    OperationState&lt;?&gt; writeOperation
+}
+
+
+
+
+AbstractEndpoint *-left- ConnectionHandler
+AbstractProtocol *-down- AbstractEndpoint
+
+Connector *-down- ProtocolHandler
+Connector *-left- Adapter
+NioEndpoint -right-&gt; SocketProcessor: createSocketProcessor
+NioEndpoint *-- Poller
+NioEndpoint *-- Acceptor
+Poller o-- PollerEvent
+PollerEvent *-- NioSocketWrapper
+Http11NioProtocol -right-&gt; Http11Processor
+</code></pre><h2 id=endpoint-internals>EndPoint Internals</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class AbstractEndpoint&lt;S, U&gt;
+class AbstractJsseEndpoint&lt;S, U&gt;
+class NioEndpoint {
+    ServerSocketChannel serverSock
+    CountDownLatch stopLatch
+    SynchronizedStack&lt;PollerEvent&gt; eventCache
+    SynchronizedStack&lt;NioChannel&gt; nioChannels
+    Poller poller
+    initServerSocket()
+}
+
+AbstractJsseEndpoint  -[#000082,plain]-^  AbstractEndpoint     
+NioEndpoint           -[#000082,plain]-^  AbstractJsseEndpoint 
+</code></pre><h1 id=servlet>Servlet</h1><p>A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>package Tomcat {
     interface Servlet {
     + void init(ServletConfig)
     + ServletConfig getServletConfig()
@@ -45,335 +535,22 @@ ServletConfig &lt;|.. GenericServlet
 GenericServlet &lt;|-- HttpServlet
 HttpServletRequest -right-&gt; HttpServlet
 HttpServlet -right-&gt; HttpServletResponse
-</code></pre><h1 id=tomcat-architecture>Tomcat Architecture</h1><h2 id=server>Server</h2><p>Server represents the whole container</p><h2 id=service>Service</h2><p>A service is an intermediate component which lives inside a server and ties one or more Connectors to exactly one Engine</p><h2 id=connector>Connector</h2><p>A Connector handles communications with the client.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
-title: Tomcat Architecture
-    package Tomcat(Server) {
-    
-        
-        component c  [ 
-            listener
-            globl naming resouce
-            jndi
-        ] 
-        component services {
-            component connector
-            component Engine {
-                component Host {
-                    Component Context {
-                        Component Servlet
-                    }
-                }
-            }
-        }
-        
-        c --&gt; services
-    }
-cloud http
-http -right-&gt; services
-</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Lifecycle {
-
-+ void addLifecycleListener(LifecycleListener)
-+ LifecycleListener[] findLifecycleListeners()
-+ void removeLifecycleListener(LifecycleListener)
-+ void init()
-+ void start()
-+ void stop()
-+ void destroy()
-+ LifecycleState getState()
-+ String getStateName()
-}
-
-interface Server extends Lifecycle {
-+ NamingResourcesImpl getGlobalNamingResources()
-+ void setGlobalNamingResources(NamingResourcesImpl)
-+ javax.naming.Context getGlobalNamingContext()
-+ int getPort()
-+ void setPort(int)
-+ int getPortOffset()
-+ void setPortOffset(int)
-+ int getPortWithOffset()
-+ String getAddress()
-+ void setAddress(String)
-+ String getShutdown()
-+ void setShutdown(String)
-+ ClassLoader getParentClassLoader()
-+ void setParentClassLoader(ClassLoader)
-+ Catalina getCatalina()
-+ void setCatalina(Catalina)
-+ File getCatalinaBase()
-+ void setCatalinaBase(File)
-+ File getCatalinaHome()
-+ void setCatalinaHome(File)
-+ int getUtilityThreads()
-+ void setUtilityThreads(int)
-+ void addService(Service)
-+ void await()
-+ Service findService(String)
-+ Service[] findServices()
-+ void removeService(Service)
-+ Object getNamingToken()
-+ ScheduledExecutorService getUtilityExecutor()
-}
-
-interface Service extends Lifecycle {
-+ Engine getContainer()
-+ void setContainer(Engine)
-+ String getName()
-+ void setName(String)
-+ Server getServer()
-+ void setServer(Server)
-+ ClassLoader getParentClassLoader()
-+ void setParentClassLoader(ClassLoader)
-+ String getDomain()
-+ void addConnector(Connector)
-+ Connector[] findConnectors()
-+ void removeConnector(Connector)
-+ void addExecutor(Executor)
-+ Executor[] findExecutors()
-+ Executor getExecutor(String)
-+ void removeExecutor(Executor)
-+ Mapper getMapper()
-}
-
-abstract class LifecycleBase implements Lifecycle {
-- {static} Log log
-- {static} StringManager sm
-- List&lt;LifecycleListener&gt; lifecycleListeners
-- LifecycleState state
-- boolean throwOnFailure
-+ boolean getThrowOnFailure()
-+ void setThrowOnFailure(boolean)
-+ void addLifecycleListener(LifecycleListener)
-+ LifecycleListener[] findLifecycleListeners()
-+ void removeLifecycleListener(LifecycleListener)
-# void fireLifecycleEvent(String,Object)
-+ void init()
-# {abstract}void initInternal()
-+ void start()
-# {abstract}void startInternal()
-+ void stop()
-# {abstract}void stopInternal()
-+ void destroy()
-# {abstract}void destroyInternal()
-+ LifecycleState getState()
-+ String getStateName()
-# void setState(LifecycleState)
-# void setState(LifecycleState,Object)
-}
-
-interface MBeanRegistration {
-    ObjectName preRegister(MBeanServer server,
-                                  ObjectName name)
-    void postRegister(Boolean registrationDone)
-    void preDeregister()
-    void postDeregister()
-}
-interface JmxEnabled extends MBeanRegistration {
-~ String getDomain()
-~ void setDomain(String)
-~ ObjectName getObjectName()
-}
-
-abstract class LifecycleMBeanBase extends LifecycleBase implements JmxEnabled {
-- {static} Log log
-- {static} StringManager sm
-- String domain
-- ObjectName oname
-# void initInternal()
-# void destroyInternal()
-+ void setDomain(String)
-+ String getDomain()
-# {abstract}String getDomainInternal()
-+ ObjectName getObjectName()
-# {abstract}String getObjectNameKeyProperties()
-# ObjectName register(Object,String)
-# void unregister(String)
-# void unregister(ObjectName)
-+ void postDeregister()
-+ void postRegister(Boolean)
-+ void preDeregister()
-+ ObjectName preRegister(MBeanServer,ObjectName)
-}
-
-
-class Connector extends LifecycleMBeanBase {
-
-# Service service
-
-# long asyncTimeout
-# String scheme
-
-- int maxCookieCount
-# int maxParameterCount
-# int maxPostSize
-# int maxSavePostSize
-# String parseBodyMethods
-# HashSet&lt;String&gt; parseBodyMethodsSet
-
-# String protocolHandlerClassName
-# String configuredProtocol
-# ProtocolHandler protocolHandler
-# Adapter adapter
-
-
-+ String getExecutorName()
-+ void addSslHostConfig(SSLHostConfig)
-+ SSLHostConfig[] findSslHostConfigs()
-
-+ EncodedSolidusHandling getEncodedSolidusHandlingInternal()
-
-+ Request createRequest(org.apache.coyote.Request)
-+ Response createResponse(org.apache.coyote.Response)
-# String createObjectNameKeyProperties(String)
-
-# String getDomainInternal()
-# String getObjectNameKeyProperties()
-}
-
-Server o-- Service
-Service o-- Connector
-</code></pre><h2 id=container>Container</h2><p>container is an object that can execute requests received from a client, and return responses based on those requests
-A container may optionally support a pipeline of Valves that processes the request in an order configured at runtime, by implementing the pipeline interface as well.
-Containers will exist at several levels within catalina:</p><ol><li>engine</li><li>host</li><li>context</li><li>wrapper</li></ol><p>A container may also be associated with a number of support components that provide functionality which may be shared (by attaching it to a parent container) or individually customized. the following support components are currently recognized.</p><ol><li>loader</li><li>logger</li><li>manager manager for the pool of sessions</li><li>realm read-only interface to a security domain, for authenticating user identities and their corresponding roles.</li><li>resources JNDI directory context enabling access to static resources.</li></ol><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
-Multiple host can be configured in catalina, each has its own request processing logic</p><h3 id=context>Context</h3><p>A context represents a web application. A host may contain multiple contexts,each with a unique path.</p><h3 id=wrapper>wrapper</h3><p>A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application.
-It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
-Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: Tomcat Container Architecture
-interface Lifecycle {
-
-+ void addLifecycleListener(LifecycleListener)
-+ LifecycleListener[] findLifecycleListeners()
-+ void removeLifecycleListener(LifecycleListener)
-+ void init()
-+ void start()
-+ void stop()
-+ void destroy()
-+ LifecycleState getState()
-+ String getStateName()
-}
-
-
-abstract class LifecycleBase implements Lifecycle {
-- List&lt;LifecycleListener&gt; lifecycleListeners
-- LifecycleState state
-- boolean throwOnFailure
-}
-
-interface MBeanRegistration {
-    ObjectName preRegister(MBeanServer server,
-                                  ObjectName name)
-    void postRegister(Boolean registrationDone)
-    void preDeregister()
-    void postDeregister()
-}
-interface JmxEnabled extends MBeanRegistration {
-~ String getDomain()
-~ void setDomain(String)
-~ ObjectName getObjectName()
-}
-
-abstract class LifecycleMBeanBase extends LifecycleBase implements JmxEnabled {
-
-- String domain
-- ObjectName oname
-}
-
-
-interface Container extends Lifecycle {
-
-+ Pipeline getPipeline()
-+ Container getParent()
-+ Realm getRealm()
-+ {static} String getConfigPath(Container,String)
-+ {static} Service getService(Container)
-+ void addChild(Container)
-+ void addContainerListener(ContainerListener)
-+ void fireContainerEvent(String,Object)
-+ void logAccess(Request,Response,long,boolean)
-+ File getCatalinaBase()
-+ File getCatalinaHome()
-}
-
-interface Engine extends Container {
-+ String getDefaultHost()
-+ void setDefaultHost(String)
-+ String getJvmRoute()
-+ void setJvmRoute(String)
-+ Service getService()
-+ void setService(Service)
-}
-
-interface Host extends Container {
-
-+ String getXmlBase()
-+ void setXmlBase(String)
-+ File getConfigBaseFile()
-+ String getAppBase()
-+ File getAppBaseFile()
-+ void setAppBase(String)
-}
-
-abstract class ContainerBase extends LifecycleMBeanBase implements Container {
-# Pipeline pipeline
-# HashMap&lt;String,Container&gt; children
-# Container parent
-# List&lt;ContainerListener&gt; listeners
-# String name
-# ClassLoader parentClassLoader
-- Realm realm
-# ExecutorService startStopExecutor
-}
-class StandardHost extends ContainerBase implements Host {
-
-- String[] aliases
-- String appBase
-- File appBaseFile
-- String legacyAppBase
-- File legacyAppBaseFile
-- String xmlBase
-- File hostConfigBase
-- boolean autoDeploy
-- String configClass
-- String contextClass
-- boolean deployOnStartup
-- boolean deployXML
-- boolean copyXML
-- String errorReportValveClass
-- boolean unpackWARs
-- String workDir
-- boolean createDirs
-- Map&lt;ClassLoader,String&gt; childClassLoaders
-- Pattern deployIgnore
-- boolean undeployOldVersions
-- boolean failCtxIfServletStartFails
-}
-
-interface Context extends Container, ContextBind{
+</code></pre><h2 id=servlet-processing>servlet processing</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Context extends Container, ContextBind{
 
 }
 
 class StandardContext extends ContainerBase implements Context {
-    CopyOnWriteArrayList&lt;String&gt; applicationListeners
-    Set&lt;Object&gt; noPluggabilityListeners
-    List&lt;Object&gt; applicationEventListenersList
-    Map&lt;ServletContainerInitializer,Set&lt;Class&lt;?&gt;&gt;&gt; initializers
-    ApplicationParameter applicationParameters[]
-    URL configFile
-    ApplicationContext context
-    String path
-    Map&lt;String,ApplicationFilterConfig&gt; filterConfigs
-    Map&lt;String,FilterDef&gt; filterDefs
+    
     Loader loader
-    LoginConfig loginConfig
-    NamingContextListener namingContextListener
     NamingResourcesImpl namingResources
     Map&lt;String,String&gt; mimeMappings
     Map&lt;String,String&gt; parameters
     Map&lt;String,String&gt; roleMappings
     Map&lt;String,String&gt; servletMappings
     Class&lt;?&gt; wrapperClass
-    Set&lt;String&gt; resourceOnlyServlets
     Set&lt;Servlet&gt; createdServlets
 }
+
 
 
 interface Wrapper extends Container  {
@@ -392,65 +569,16 @@ interface Wrapper extends Container  {
 }
 
 
-class StandardWrapper extends ContainerBase implements ServletConfig, Wrapper {
+class StandardWrapper extends ContainerBase implements  Wrapper {
 # StandardWrapperFacade facade
 # Servlet instance
 # StandardWrapperValve swValve
 }
 
-
-
-interface Contained {
-    Container getContainer()
-    void setContainer(Container container)
-}
-
-interface Pipeline extends Contained {
-    Valve getBasic()
-    void setBasic(Valve valve)
-    void addValve(Valve valve)
-    Valve[] getValves()
-    Valve getFirst()
-}
-
-interface Valve {
-    Valve getNext()
-    void setNext(Valve valve)
-    void backgroundProcess()
-    void invoke(Request request, Response response)
-}
-
-abstract class ValveBase extends LifecycleMBeanBase implements Contained, Valve {
-    Container container
-    Log containerLog
-    Valve next
-
-}
-
 class StandardWrapperValve extends ValveBase {
     invoke(request,response)
 }
-
-
-Engine o-- Host
-Host o-- Context
-Context o-- Wrapper
-ContainerBase *-- Pipeline
-Pipeline o-- Valve
 StandardWrapper *-right- StandardWrapperValve
-</code></pre><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>rectangle OrderedPipelineValves {
-    rectangle Engine
-    rectangle Host
-    rectangle context
-    rectangle wrapper
-Engine --&gt; Host
-Host --&gt; context
-context --&gt; wrapper
-}
-rectangle FilterChain
-rectangle Servlet
-wrapper --&gt; FilterChain
-FilterChain --&gt; Servlet
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/tomcat/>tomcat</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/servlet/>servlet</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/scholar/ data-tooltip=Scholar aria-label="NEXT: Scholar"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip=Security aria-label="PREVIOUS: Security"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
