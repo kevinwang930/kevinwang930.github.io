@@ -35,6 +35,60 @@ Partition   Topics are partitioned, spread over a number of buckets located on d
 
 ![partition](images/image.png)
 
+# Network
+
+Kafka Uses a binary protocol over TCP. The protocol defines all API as request response message pairs. All messages are size delimited and are made up of the following primitive types
+
+```
+Boolean
+int8...int64
+varint
+string
+array
+bytes
+records
+```
+
+* Common Request and Response Structure
+```
+RequestOrResponse => Size (RequestMessage | ResponseMessage)
+Size => int32
+```
+* Request Message Headers
+```
+Request Header v0 => request_api_key request_api_version correlation_id 
+request_api_key => INT16
+request_api_version => INT16
+correlation_id => INT32
+
+
+Request Header v1 => request_api_key request_api_version correlation_id client_id 
+request_api_key => INT16
+request_api_version => INT16
+correlation_id => INT32
+client_id => NULLABLE_STRING
+
+
+Request Header v2 => request_api_key request_api_version correlation_id client_id TAG_BUFFER 
+request_api_key => INT16
+request_api_version => INT16
+correlation_id => INT32
+client_id => NULLABLE_STRING
+
+Api_key defines api type
+```
+* Response Message Headers
+```
+Response Header v0 => correlation_id 
+correlation_id => INT32
+
+Response Header v1 => correlation_id TAG_BUFFER 
+correlation_id => INT32
+
+
+```
+Other protocol formats can be found in [official doc](https://kafka.apache.org/protocol)
+
 
 # Producer
 
@@ -86,6 +140,7 @@ interface KafkaClient {
   boolean ready(Node node, long now)
   void send(ClientRequest request, long now)
   List<ClientResponse> poll(long timeout, long now)
+  void wakeup()
   void disconnect(String nodeId)
   void close(String nodeId)
 }
@@ -94,6 +149,13 @@ class NetworkClient implements KafkaClient {
   Selectable selector
   MetadataUpdater metadataUpdater
   ClusterConnectionStates connectionStates
+  InFlightRequests inFlightRequests
+}
+
+interface Selectable {
+  void send(NetworkSend send)
+  void wakeup()
+  void poll(long timeout)
 }
 
 class Selector implements Selectable {
@@ -113,8 +175,6 @@ RecordAccumulator o-- BufferPool
 Sender o-- KafkaClient
 NetworkClient o-- Selectable
 KafkaProducer *-- ProducerMetadata
-
-
 ```
 
 ## Metadata
@@ -130,6 +190,9 @@ This class is shared by the client thread(for partitioning) and the background s
 class Metadata implements Closeable {
   MetadataSnapshot metadataSnapshot
   List<InetSocketAddress> bootstrapAddresses
+  int updateVersion
+  int requestVersion
+  long lastRefreshMs
 }
 
 class MetadataSnapshot {
