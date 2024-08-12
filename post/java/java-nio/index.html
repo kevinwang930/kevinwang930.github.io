@@ -111,16 +111,18 @@ abstract class SelectorProvider {
     abstract class SocketChannel extends  AbstractSelectableChannel implements NetworkChannel {
         abstract int read(ByteBuffer dst)
         abstract int write(ByteBuffer src)
+        static SocketChannel open()
     }
 
     class KQueueSelectorProvider extends SelectorProviderImpl
 
     Channel o-- FileChannel
-    Selector *-left- SelectorProvider
+    Selector *-- SelectorProvider
     Selector -down-&gt; SelectableChannel : select
 
     Channel &lt;|-- SelectableChannel
 KQueueSelectorProvider --&gt; KQueueSelectorImpl: provide
+SelectorProvider --&gt; SocketChannel:open
 </code></pre><h1 id=nio2>NIO2</h1></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/netty/>netty</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/nio/>nio</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/java-collections/ data-tooltip="java collections internals" aria-label="NEXT: java collections internals"><i class="fa fa-angle-left"></i>
