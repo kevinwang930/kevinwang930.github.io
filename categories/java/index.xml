@@ -1,5 +1,8 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Java on Kevin wang's blog</title><link>https://kevinwang930.github.io/categories/java/</link><description>Recent content in Java on Kevin wang's blog</description><generator>Hugo</generator><language>en-us</language><lastBuildDate>Sun, 11 Aug 2024 15:58:33 +0800</lastBuildDate><atom:link href="https://kevinwang930.github.io/categories/java/index.xml" rel="self" type="application/rss+xml"/><item><title>Java native interface</title><link>https://kevinwang930.github.io/post/java/jvm/jni/</link><pubDate>Sun, 11 Aug 2024 15:58:33 +0800</pubDate><guid>https://kevinwang930.github.io/post/java/jvm/jni/</guid><description>&lt;p>Java native Interface(JNI) is a native programming interface that allows java code that runs inside a Java Virtual Machine(VM) to interoperate with applications and libraries written in other programming languages. such as C, C++ , an assembly.&lt;/p>
-&lt;h1 id="jni-header">JNI header&lt;/h1>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Java on Kevin wang's blog</title><link>https://kevinwang930.github.io/categories/java/</link><description>Recent content in Java on Kevin wang's blog</description><generator>Hugo</generator><language>en-us</language><lastBuildDate>Mon, 12 Aug 2024 15:49:03 +0800</lastBuildDate><atom:link href="https://kevinwang930.github.io/categories/java/index.xml" rel="self" type="application/rss+xml"/><item><title>JVM ByteCode Interpreter</title><link>https://kevinwang930.github.io/post/java/jvm/interpreter/</link><pubDate>Mon, 12 Aug 2024 15:49:03 +0800</pubDate><guid>https://kevinwang930.github.io/post/java/jvm/interpreter/</guid><description>&lt;p>This article describes JVM ByteCode Interpreter&lt;/p></description></item><item><title>java project management - Maven</title><link>https://kevinwang930.github.io/post/java/maven/</link><pubDate>Mon, 12 Aug 2024 12:04:00 +0800</pubDate><guid>https://kevinwang930.github.io/post/java/maven/</guid><description>&lt;p>This article introduce java project management and comprehension tool - Maven&lt;/p></description></item><item><title>Java native interface</title><link>https://kevinwang930.github.io/post/java/jvm/jni/</link><pubDate>Sun, 11 Aug 2024 15:58:33 +0800</pubDate><guid>https://kevinwang930.github.io/post/java/jvm/jni/</guid><description>&lt;p>Java native Interface(JNI) is a native programming interface that allows java code that runs inside a Java Virtual Machine(VM) to interoperate with applications and libraries written in other programming languages. such as C, C++ , an assembly.&lt;/p>
+&lt;h1 id="jni-load">JNI load&lt;/h1>
+&lt;h1 id="bytecode">bytecode&lt;/h1>
+&lt;h1 id="example">example&lt;/h1>
+&lt;h2 id="jni-header">JNI header&lt;/h2>
 &lt;p>&lt;code>javac&lt;/code> can be used to compile java class, use &lt;code>-h&lt;/code> to generate JNI header.&lt;/p>
 &lt;pre tabindex="0">&lt;code>&amp;#34;$JAVA_HOME&amp;#34;/bin/javac -h c -d target Simple.java
 &lt;/code>&lt;/pre>&lt;p>A example Simple.java&lt;/p>
@@ -59,11 +62,11 @@ JNIEXPORT jint JNICALL Java_kevin_project_jni_Simple_plus
  printf (&amp;#34;inside c code\n&amp;#34;);
  return a + b;
 }
-&lt;/code>&lt;/pre>&lt;h1 id="jni-shared-library">JNI Shared library&lt;/h1>
+&lt;/code>&lt;/pre>&lt;h2 id="jni-shared-library">JNI Shared library&lt;/h2>
 &lt;p>native C++ code can be compiled to shared library, and loaded into jvm dynamically.
 When compile JNI shared library, JNI headers needs to be included.&lt;/p>
 &lt;pre tabindex="0">&lt;code>cc -g -shared -fpic -I${JAVA_HOME}/include -I${JAVA_HOME}/include/darwin c/kevin_project_jni_Simple.c -o lib/libSimple.dylib
-&lt;/code>&lt;/pre>&lt;h1 id="load-jni-shared-library">load JNI shared library&lt;/h1>
+&lt;/code>&lt;/pre>&lt;h2 id="load-jni-shared-library">load JNI shared library&lt;/h2>
 &lt;p>when start jvm, specify &lt;code>library.path&lt;/code> to the generated shared library&lt;/p>
 &lt;pre tabindex="0">&lt;code>&amp;#34;$JAVA_HOME&amp;#34;/bin/java -Djava.library.path=&amp;#34;$LD_LIBRARY_PATH&amp;#34;:./lib -cp target kevin.project.jni.Simple
 &lt;/code>&lt;/pre>&lt;h1 id="reference">Reference&lt;/h1>
