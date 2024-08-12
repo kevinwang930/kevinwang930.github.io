@@ -14,9 +14,15 @@ keywords:
 
 Java native Interface(JNI) is a native programming interface that allows java code that runs inside a Java Virtual Machine(VM) to interoperate with applications and libraries written in other programming languages. such as C, C++ , an assembly.
 
+# JNI load
+
+# bytecode
 
 
-# JNI header
+
+#  example
+
+## JNI header
 
 `javac` can be used to compile java class, use `-h` to generate JNI header.
 
@@ -95,14 +101,14 @@ JNIEXPORT jint JNICALL Java_kevin_project_jni_Simple_plus
 
 ```
 
-# JNI Shared library
+## JNI Shared library
 native C++ code can be compiled to shared library, and loaded into jvm dynamically.
 When compile JNI shared library, JNI headers needs to be included.
 ```
 cc -g -shared -fpic -I${JAVA_HOME}/include -I${JAVA_HOME}/include/darwin c/kevin_project_jni_Simple.c -o  lib/libSimple.dylib
 ```
 
-# load JNI shared library
+## load JNI shared library
 
 when start jvm, specify `library.path` to the generated shared library
 
