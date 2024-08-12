@@ -245,6 +245,41 @@ Metadata <|-right-  ProducerMetadata
 * `reconnect.backoff.max.ms`
 
 
+# Server
+
+
+
+
+
+```plantuml
+class KafaRaftServer {
+  SharedServer sharedServer
+  Option[BrokerServer] broker
+  Option[ControllerServer] controller
+  startup()
+  shutdown()
+}
+
+
+class BrokerServer {
+  SharedServer sharedServer
+  KafkaRaftManager[ApiMessageAndVersion] raftManager
+  BrokerLifecycleManager lifecycleManager
+  AssignmentsManager assignmentsManager
+  KafkaApis dataPlaneRequestProcessor
+  SocketServer socketServer
+  KafkaRequestHandlerPool dataPlaneRequestHandlerPool
+  Option[RemoteLogManager] remoteLogManagerOpt
+  ReplicaManager _replicaManager
+  GroupCoordinator groupCoordinator
+  TransactionCoordinator transactionCoordinator
+  NodeToControllerChannelManager clientToControllerChannelManager
+  AutoTopicCreationManager autoTopicCreationManager
+  KafkaScheduler kafkaScheduler
+  KRaftMetadataCache metadataCache
+}
+```
+
 # security
 
 ## SASL

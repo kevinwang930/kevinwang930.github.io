@@ -1,5 +1,5 @@
 ---
-title: "Mybatis架构与实现"
+title: "Mybatis internals"
 date: 2024-04-15T18:45:41+08:00
 categories:
 - java
@@ -12,7 +12,7 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-MyBatis 作为一个流行的java数据层操作与映射框架，大大提升了java数据层开发的效率，本文介绍mybatis的框架，实现及常见应用场景。 引导思考真正高效的数据层开发是什么样的。 
+本文介绍 Mybatis 以及拦截器内部实现 
 <!--more-->
 
 # Architecture
@@ -46,7 +46,40 @@ class DefaultSqlSession implements SqlSession {
 
 class Configuration {
     Map<String, MappedStatement> mappedStatements
+    InterceptorChain interceptorChain
+}
+
+class InterceptorChain {
+    List<Interceptor> interceptors
 }
 DefaultSqlSession o-- Configuration
+Configuration *-- InterceptorChain
 
+interface Interceptor {
+    Object intercept(Invocation invocation)
+}
+
+package pageHelper {
+
+    class PageInterceptor  {
+        Dialect dialect
+    }
+
+interface Dialect  {
+}
+
+class AbstractDialect implements Dialect{
+}
+class AbstractRowBoundsDialect extends AbstractDialect {
+}
+
+class MySqlRowBoundsDialect extends AbstractRowBoundsDialect{
+}
+
+PageInterceptor *-- Dialect
+}
+
+
+InterceptorChain *-- Interceptor
+Interceptor <|--  PageInterceptor 
 ```

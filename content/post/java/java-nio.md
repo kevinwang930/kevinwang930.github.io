@@ -135,16 +135,18 @@ abstract class SelectorProvider {
     abstract class SocketChannel extends  AbstractSelectableChannel implements NetworkChannel {
         abstract int read(ByteBuffer dst)
         abstract int write(ByteBuffer src)
+        static SocketChannel open()
     }
 
     class KQueueSelectorProvider extends SelectorProviderImpl
 
     Channel o-- FileChannel
-    Selector *-left- SelectorProvider
+    Selector *-- SelectorProvider
     Selector -down-> SelectableChannel : select
 
     Channel <|-- SelectableChannel
 KQueueSelectorProvider --> KQueueSelectorImpl: provide
+SelectorProvider --> SocketChannel:open
 
 ```
 
