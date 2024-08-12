@@ -11,6 +11,8 @@ keywords:
 - jni
 #thumbnailImage: //example.com/image.jpg
 ---
+This article describes Java native interface
+<!--more-->
 
 Java native Interface(JNI) is a native programming interface that allows java code that runs inside a Java Virtual Machine(VM) to interoperate with applications and libraries written in other programming languages. such as C, C++ , an assembly.
 
