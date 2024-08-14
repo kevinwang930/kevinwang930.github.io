@@ -1,17 +1,15 @@
 ---
-title: "视频播放技术基础原理"
+title: "Video Basics"
 date: 2024-04-22T14:32:16+08:00
 categories:
-- stream
 - video
 tags:
-- stream
 - video
 keywords:
 - video
 #thumbnailImage: //example.com/image.jpg
 ---
-视频播放技术基础原理概述
+This article introduces video basics
 <!--more-->
 
 

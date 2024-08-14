@@ -46,3 +46,7 @@ DispatchTable -right-> Template: entry
 
 ```
 
+# reference
+
+[byte code interpreter](https://openjdk.org/groups/hotspot/docs/RuntimeOverview.html#Interpreter|outline)
+

@@ -2,11 +2,10 @@
 title: "RTMP protocol analysis"
 date: 2024-07-07T17:09:33+08:00
 categories:
-- stream
 - video
 tags:
-- stream
 - video
+- rtmp
 keywords:
 - rtmp
 #thumbnailImage: //example.com/image.jpg

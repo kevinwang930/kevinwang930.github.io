@@ -1,21 +1,19 @@
 ---
-title: "FFMPEG功能介绍"
+title: "FFMPEG And It's Java Binding JavaCV"
 date: 2024-04-22T13:11:20+08:00
 categories:
-- stream
 - video
 - ffmpeg
 tags:
-- stream
 - video
 - ffmpeg
 keywords:
 - ffmpeg
 #thumbnailImage: //example.com/image.jpg
 ---
-FFMPEG 流行的多媒体处理框架，提供了编解码、转码 、混流、解混、流传输、过滤和播放等功能，支持格式广， 可移植性高。 
+This Article introduces ffmpeg and it's java binding JavaCV
 
-
+# Concept and Structure
 
 ``` plantuml
 title: transcoding process
@@ -62,6 +60,11 @@ graph --> output0
 graph --> output1
 ```
 
+
+
+
+
+
 # command line
 ```
 ffmpeg [global_options] {[input_file_options] -i input_url} ... {[output_file_options] output_url} ...
@@ -69,12 +72,12 @@ ffmpeg [global_options] {[input_file_options] -i input_url} ... {[output_file_op
 
 
 
-## input
+## input/output
 ```
 ffmpeg -i input.avi output.mp4
 ```
 
-## output
+
 
 ## stream selection
 ffmpeg provides the `-map` option for manual control of the stream selection in each output file. if no map options are set, ffmpeg select streams automatically.
