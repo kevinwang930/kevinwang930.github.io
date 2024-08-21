@@ -11,7 +11,7 @@ keywords:
 - forkJoin
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录java并发编程- fork join framework 的设计与实现
+This Article describes fork join framework design and implementation
 <!--more-->
 
 Fork join Framework supports a style of parallel programming in which Problems are solved by (recursively) splitting them into subtasks that are solved in parallel, waiting for them to complete, and then composing results.
@@ -49,7 +49,13 @@ The heart of Fork/Join framework lies in its lightweight scheduling mechanics.
 
 ## Implementation
 
-
+`ctl` bits and masks and bounds are packed with 4 16 bit subfields
+```
+    1. RC Number of released workers
+    2. TC Number of total workers
+    3. SS version count and status of top waiting thread
+    4. ID poolIndex of top of Treiber stack of waiters
+```
 ```plantuml
 
 interface Future<V> {
@@ -111,18 +117,21 @@ class ForkJoinPool extends AbstractExecutorService {
     ForkJoinWorkerThread owner
     ForkJoinTask<?>[] array
     int base
-    final int config
     int top 
+    final int config
     int phase
     int stackPred
     volatile int source
     int nsteals
     volatile int parking
+
+    ForkJoinTask<?> poll(ForkJoinPool pool)
+    void push(ForkJoinTask<?> task, ForkJoinPool pool,
+                        boolean internal)
+    ForkJoinTask<?> nextLocalTask()
  }
 
  ForkJoinPool o-- WorkQueue
  WorkQueue o-- ForkJoinTask
 ForkJoinTask *-- Aux
-
-
 ```

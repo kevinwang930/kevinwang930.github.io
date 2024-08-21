@@ -136,10 +136,6 @@ signal:
 ```
 
 
-
-
-
-
 ```plantuml
 
 interface Condition {
@@ -284,6 +280,11 @@ Semaphore uses the synchronization state to hold the current count. It  defines 
 
 ## CountDownlatch 
 `CountDownLatch` uses the synchronization state to represent the count.All acquires pass when it reaches zero.
+
+
+## CyclicBarrier
+A synchronization aid that allows a set of threads to all wait for each other to reach a common barrier point. It 
+
 
 
 ## FutureTask

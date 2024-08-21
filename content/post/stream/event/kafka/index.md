@@ -247,8 +247,12 @@ Metadata <|-right-  ProducerMetadata
 
 # Server
 
+## SharedServer
+`SharedServer` manages the components which are shared between the BrokerServer and ControllerServer. 
+The shared components include the Raft manager, snapshot generator, and metadata loader.
+A KRaft server running in combined mode as both a broker and a controller will still contain only a single SharedServer instance. 
 
-
+## BrokerServer
 
 
 ```plantuml
@@ -278,6 +282,21 @@ class BrokerServer {
   KafkaScheduler kafkaScheduler
   KRaftMetadataCache metadataCache
 }
+
+class SharedServer {
+  KafkaConfig brokerConfig
+  KafkaConfig controllerConfig
+  MetadataLoader loader
+  SnapshotEmitter snapshotEmitter
+  SnapshotGenerator snapshotGenerator
+}
+
+class ControllerServer {
+  
+}
+KafaRaftServer *-- BrokerServer
+KafaRaftServer *-- SharedServer
+
 ```
 
 # security
