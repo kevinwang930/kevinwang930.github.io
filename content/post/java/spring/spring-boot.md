@@ -12,10 +12,28 @@ mermaid: true
 本文介绍springBoot架构与实现
 <!--more-->
 
+Spring boot makes it easy to create stand-alone production-grade Spring based Applications 
 
-# 1. Bootstrap 
+* Create stand-alone Spring applications
+* Embed Tomcat,Jetty directly(no need to deploy WAR files)
+* Provide opinionated 'starter' dependencies to simplify build configuration
+* Automatically configure Spring and 3rd party libraries.
+* Provide Production-ready features such as metrics, health checks, and externalized configuration
+* Absolutely no code generation and no requirement for XML configuration.
 
 
+# Automatic Configuration
+
+Spring boot achieves auto config mainly through various annotations and config class.
+
+```plantuml
+interface Configuration
+interface SpringBootConfiguration extends Configuration
+
+```
+
+
+# Bootstrap process 
 
 
 ## SpringApplication

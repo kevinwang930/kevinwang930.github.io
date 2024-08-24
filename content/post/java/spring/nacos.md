@@ -1,5 +1,5 @@
 ---
-title: "Nacos"
+title: "NACOS - service and configuration management"
 date: 2024-06-10T17:45:28+08:00
 categories:
 - java
@@ -11,11 +11,17 @@ keywords:
 - nacos
 #thumbnailImage: //example.com/image.jpg
 ---
-本文介绍Nacos
+This Article introduces NACOS 
 
 <!--more-->
 
-# Config
+# Dynamic Configuration Management
+
+NACOS allows user to manage the configuration of all applications and services in a centralized , externalized and dynamic manner across all environments
+
+
+
+
 
 ```plantuml
 
@@ -39,7 +45,7 @@ NacosConfigBootstrapConfiguration --> NacosPropertySourceLocator: create
 
 ```
 
-## nacos
+## API
 Naming and Configuration Service
 
 Service registration
