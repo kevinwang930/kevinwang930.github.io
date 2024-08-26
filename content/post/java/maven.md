@@ -64,7 +64,21 @@ Core plugins:
 A build phase is made up of plugin goals.
 In pom declaring the plugin goals bound to the build phase to carry out the responsibility
 
+* show all goals of a plugin
+    ```
+    mvn help:describe -Dplugin=versions
+    ```
+
 
 ## Maven Dependency plugin
 
 The dependency plugin provides the capability to manipulate artifacts
+
+## Versions Maven Plugin
+
+manage the versions of artifacts in a project's POM
+
+* update project version
+    ```
+    mvn build-helper:parse-version versions:set -DnewVersion=\${parsedVersion.majorVersion}.\${parsedVersion.minorVersion}.\${parsedVersion.nextIncrementalVersion} versions:commit
+    ```

@@ -1,5 +1,5 @@
 ---
-title: "Spring微服务架构与实现"
+title: "Spring MVC"
 date: 2024-03-27T14:39:29+08:00
 categories:
 - java
@@ -12,7 +12,7 @@ keywords:
 - mvc
 #thumbnailImage: //example.com/image.jpg
 ---
-本文记录spring微服务架构与实现细节
+This article describes Spring MVC
 <!--more-->
 
 

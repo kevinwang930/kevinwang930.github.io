@@ -15,23 +15,27 @@ keywords:
 <!--more-->
 
 # Concept
-Aspect-oriented Programming provides another way of thinking about program structure.
+`Aspect-oriented Programming (AOP)` is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.
 
-Aspect A modularization of a concern that cuts across multiple classes. Example : Transaction management
+`Aspect` A modularization of a concern that cuts across multiple classes. Example : Transaction management
 
-Joint point A point during the execution of a program.
+`Joinpoint` represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.
 
-Advice Action taken by an aspect at a particular join point
-
-Pointcut  A predicate that matches join points. Advice is associated with a pointcut expression that runs at any join point matched by the pointcut.
-
-AOP proxy An object created by the AOP framework in order to implement the aspect contracts
+`Advice` Action taken by an aspect at a particular joinpoint
 
 Advice types:
     1. before
     2. after
     3. finally
     4. around
+
+`Advisor` interface holding AOP `advice` and a filter determing the applicability of the advice(such as a `pointcut`)
+
+`Pointcut`  A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any `Joinpoint` matched by the `pointcut`.
+
+`Proxy` An object created by the AOP framework in order to implement the aspect contracts
+
+
 
 ```plantuml
 top to bottom direction
@@ -144,4 +148,32 @@ class ProxyProcessorSupport {
 
 AspectJAutoProxyRegistrar  -right-> AnnotationAwareAspectJAutoProxyCreator:register
 
+```
+
+
+# Target Source
+
+
+`TargetClassAware` Minimal interface for exposing the target class behind a proxy
+
+`TargetSource` is used to obtain the current target of the AOP invocation, which will be invoked via reflection if no around advice chooses to end the interceptor chain itself
+
+```plantuml
+interface TargetClassAware {
+    Class<?> getTargetClass()
+}
+
+interface TargetSource extends TargetClassAware {
+    Object getTarget()
+    void releaseTarget(Object target)
+}
+
+abstract class AbstractBeanFactoryBasedTargetSource implements TargetSource, BeanFactoryAware {
+    String targetBeanName
+    Class<?> targetClass
+    BeanFactory beanFactory
+    void setBeanFactory(BeanFactory beanFactory)
+}
+
+class SimpleBeanTargetSource extends AbstractBeanFactoryBasedTargetSource
 ```

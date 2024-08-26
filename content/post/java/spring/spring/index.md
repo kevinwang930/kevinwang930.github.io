@@ -44,7 +44,8 @@ interface AnnotatedBeanDefinition extends BeanDefinition {
     MethodMetadata getFactoryMethodMetadata()
 }
 abstract class AbstractBeanDefinition implements BeanDefinition {
- 
+    Object beanClass
+    String[] dependsOn
 }
 class GenericBeanDefinition extends AbstractBeanDefinition
 class RootBeanDefinition extends AbstractBeanDefinition
@@ -97,6 +98,10 @@ abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport implements
 abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFactory implements AutowireCapableBeanFactory
 ```
 
+## FactoryBean
+Interface to be implemented by objects used within a `BeanFactory` which are themselves factories for individual objects. 
+A bean that implements this interface cannot be used as normal bean.
+
 
 ## BeanFactoryPostProcessor
 
@@ -132,8 +137,8 @@ interface MergedBeanDefinitionPostProcessor extends BeanPostProcessor  {
     void postProcessMergedBeanDefinition()
 }
 interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
-    default Object postProcessBeforeInstantiation()
-    default boolean postProcessAfterInstantiation()
+    default Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName)
+    default boolean postProcessAfterInstantiation(Object bean, String beanName)
     default PropertyValues postProcessProperties()
 }
 interface SmartInstantiationAwareBeanPostProcessor extends InstantiationAwareBeanPostProcessor
@@ -268,8 +273,6 @@ MutablePropertySources o--      PropertySource
 
 # Context
 
-
-
 ## ApplicationContext
 
 `ApplicationContext` central interface to provide configuration for an application
@@ -338,6 +341,8 @@ AnnotationConfigRegistry <|-- ServletWebServerApplicationContext
 ## Event
  
 `ApplicationListener` can generically declare the event type that it is interested in. When registered with a Spring `ApplicationContext`, event will be filtered accordingly, with the listener getting invoked for matching event objects.
+
+`ApplicationListener` can be defined in `spring.factories`, it can also be added by `ClassPathBeanDefinitionScanner` by invoking `AbstractApplicationContext.registerListeners()`
 
 `ApplicationEventMulticaster` Interface to be implemented by objects that can manage a number of `Applicationlistener` objects and publish events to them.
 
@@ -520,23 +525,44 @@ AbstractApplicationContext --> BeanFactory:preInstantiateSingletons
 
 ```plantuml
 DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingletons
+activate DefaultListableBeanFactory
 
+DefaultListableBeanFactory --> DefaultListableBeanFactory:getMergedLocalBeanDefinition
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingleton
+
+activate DefaultListableBeanFactory
+DefaultListableBeanFactory --> DefaultListableBeanFactory:instantiateSingleton
+
+activate DefaultListableBeanFactory
 DefaultListableBeanFactory --> DefaultListableBeanFactory:getBean
 
+activate DefaultListableBeanFactory
 DefaultListableBeanFactory --> DefaultListableBeanFactory: createBean
+
+activate DefaultListableBeanFactory
 DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeanClass
+
 alt proxy
 DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeforeInstantiation
+note right: InstantiationAwareBeanPostProcessor
+
 end
 
 DefaultListableBeanFactory --> DefaultListableBeanFactory: createBeanInstance
+
+
+activate DefaultListableBeanFactory
+
 alt instanceSupplier
 DefaultListableBeanFactory --> DefaultListableBeanFactory: obtainFromSupplier
 end
+
 DefaultListableBeanFactory --> BeanDefinition: getFactoryMethodName
 alt factoryMethod
 DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateUsingFactoryMethod
 end
+
 
 alt autowireNecesary
 DefaultListableBeanFactory --> DefaultListableBeanFactory: autowireConstructor
@@ -553,13 +579,30 @@ ConstructorResolver --> DefaultListableBeanFactory:beanWrapper
 else 
 DefaultListableBeanFactory --> DefaultListableBeanFactory:instantiateBean
 end
+
+deactivate 
+
+
+
+
+
+
+
+
+
+
+
+
 DefaultListableBeanFactory --> DefaultListableBeanFactory:applyMergedBeanDefinitionPostProcessors
-DefaultListableBeanFactory --> DefaultListableBeanFactory:populateBean : properties
+DefaultListableBeanFactory --> DefaultListableBeanFactory:populateBean 
+note right: autowire Beans and handle properties
 DefaultListableBeanFactory --> DefaultListableBeanFactory:initializeBean
 
 DefaultListableBeanFactory --> DefaultListableBeanFactory: getSingleton
+
+DefaultListableBeanFactory --> DefaultListableBeanFactory: registerDisposableBeanIfNecessary
 ```
 
-
+# AOP
 
 
