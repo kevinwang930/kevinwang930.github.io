@@ -26,16 +26,6 @@ NACOS allows user to manage the configuration of all applications and services i
 
 `NacosContextRefresher` add nacos listeners to all application level dataIds, when there is a change in the data, listeners will refresh configurations.
 
-```plantuml
-class NacosPropertySource extends MapPropertySource {
-    String group
-    String dataId
-    boolean isRefreshable
-}
-
-```
-
-
 
 ```plantuml
 
