@@ -8,11 +8,11 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>spring aop 架构与实现</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-01T12:44:12+08:00>April 1, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录 spring aop 架构与实现</p><h1 id=concept>Concept</h1><p>Aspect-oriented Programming provides another way of thinking about program structure.</p><p>Aspect A modularization of a concern that cuts across multiple classes. Example : Transaction management</p><p>Joint point A point during the execution of a program.</p><p>Advice Action taken by an aspect at a particular join point</p><p>Pointcut A predicate that matches join points. Advice is associated with a pointcut expression that runs at any join point matched by the pointcut.</p><p>AOP proxy An object created by the AOP framework in order to implement the aspect contracts</p><p>Advice types:
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录 spring aop 架构与实现</p><h1 id=concept>Concept</h1><p><code>Aspect-oriented Programming (AOP)</code> is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.</p><p><code>Aspect</code> A modularization of a concern that cuts across multiple classes. Example : Transaction management</p><p><code>Joinpoint</code> represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.</p><p><code>Advice</code> Action taken by an aspect at a particular joinpoint</p><p>Advice types:
 1. before
 2. after
 3. finally
-4. around</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+4. around</p><p><code>Advisor</code> interface holding AOP <code>advice</code> and a filter determing the applicability of the advice(such as a <code>pointcut</code>)</p><p><code>Pointcut</code> A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any <code>Joinpoint</code> matched by the <code>pointcut</code>.</p><p><code>Proxy</code> An object created by the AOP framework in order to implement the aspect contracts</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
 title: transaction advisor 
 interface Advisor {
     Advice getAdvice()
@@ -111,6 +111,23 @@ class ProxyProcessorSupport {
 }
 
 AspectJAutoProxyRegistrar  -right-&gt; AnnotationAwareAspectJAutoProxyCreator:register
+</code></pre><h1 id=target-source>Target Source</h1><p><code>TargetClassAware</code> Minimal interface for exposing the target class behind a proxy</p><p><code>TargetSource</code> is used to obtain the current target of the AOP invocation, which will be invoked via reflection if no around advice chooses to end the interceptor chain itself</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface TargetClassAware {
+    Class&lt;?&gt; getTargetClass()
+}
+
+interface TargetSource extends TargetClassAware {
+    Object getTarget()
+    void releaseTarget(Object target)
+}
+
+abstract class AbstractBeanFactoryBasedTargetSource implements TargetSource, BeanFactoryAware {
+    String targetBeanName
+    Class&lt;?&gt; targetClass
+    BeanFactory beanFactory
+    void setBeanFactory(BeanFactory beanFactory)
+}
+
+class SimpleBeanTargetSource extends AbstractBeanFactoryBasedTargetSource
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/aop/>aop</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip=Security aria-label="NEXT: Security"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="PREVIOUS: go Syntax"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
