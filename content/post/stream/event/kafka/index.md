@@ -17,21 +17,21 @@ Kafka is an open-source distributed event streaming platform
 <!--more-->
 # Concept
 
-Servers     Kafka is run as a cluster of one or more services that can span multiple data centers or cloud regions.
+`Servers`     Kafka is run as a cluster of one or more services that can span multiple data centers or cloud regions.
 
-Brokers     one type of server, form the storage layer, store partitions 
+`Brokers`     one type of server, form the storage layer, store partitions 
 
-Clients     allow one to read, write and process streams of events
+`Clients`     allow one to read, write and process streams of events
 
-Event       records the fact that something happened
+`Event`       records the fact that something happened
 
-Producer    Client application that publish(write) events to kafka
+`Producer`    Client application that publish(write) events to kafka
 
-Consumer    client applications that subscribe to (read and process) these events.
+`Consumer`    client applications that subscribe to (read and process) these events.
 
-Topics      Events are organized and durably stored in topics.
+`Topics`      Events are organized and durably stored in topics.
 
-Partition   Topics are partitioned, spread over a number of buckets located on different kafka brokers
+`Partition`   Topics are partitioned, spread over a number of buckets located on different kafka brokers
 
 ![partition](images/image.png)
 
@@ -247,13 +247,6 @@ Metadata <|-right-  ProducerMetadata
 
 # Server
 
-## SharedServer
-`SharedServer` manages the components which are shared between the BrokerServer and ControllerServer. 
-The shared components include the Raft manager, snapshot generator, and metadata loader.
-A KRaft server running in combined mode as both a broker and a controller will still contain only a single SharedServer instance. 
-
-## BrokerServer
-
 
 ```plantuml
 class KafaRaftServer {
@@ -292,12 +285,152 @@ class SharedServer {
 }
 
 class ControllerServer {
+  SharedServer
+  KafkaConfigSchema
+  BootstrapMetadata
   
+
 }
+
+class SocketServer {
+  dataPlaneAcceptors
+  dataPlaneRequestChannel
+  memoryPool
+  controlPlaneAcceptorOpt
+  connectionQuotas
+} 
+
+
 KafaRaftServer *-- BrokerServer
 KafaRaftServer *-- SharedServer
+KafaRaftServer *-- ControllerServer
+BrokerServer *-- SocketServer
+
 
 ```
+
+## SharedServer
+`SharedServer` manages the components which are shared between the BrokerServer and ControllerServer. 
+The shared components include the Raft manager, snapshot generator, and metadata loader.
+A KRaft server running in combined mode as both a broker and a controller will still contain only a single SharedServer instance. 
+
+## BrokerServer
+A broker is responsible for
+* Storing message data
+* serving producer and consumer requests
+* managing partitions and replicas
+
+### SocketServer
+Handles new connections, requests and responses to and from broker.
+
+* data-plane
+  * handles requests from clients and other brokers in the cluster
+  * thread model
+    * 1 Acceptor thread per listener, multiple listeners can be configured in kafkaConfig
+    * Acceptor has N processor threads that each have their own selector and read requests from sockets. M handler threads that handle requests and produce responses back to the processor threads for writing.
+* control-plane
+  * handles requests from controller. This is optional and can be configured by specifying `controller.listener.name` 
+  * thread model
+    * 1 Acceptor thread handles new connection
+    * Acceptor has 1 processor thread that has its own selector and read requests from the socket
+    * 1 Handler thread that handles requests and produces responses back to the processor thread for writing.
+
+```plantuml
+abstract class Acceptor extends Runnable {
+  socketServer
+  nioSelector
+  serverChannel
+  thread
+  processors
+  run()
+}
+
+class SocketServer {
+  dataPlaneAcceptors
+  controlPlaneAcceptorOpt
+}
+
+
+class DataPlaneAcceptor extends Acceptor {
+
+}
+class controlPlaneAcceptorOpt extends Acceptor
+
+class Processor {
+  thread
+  selector
+  requestChannel
+  newConnections
+  responseQueue
+  accept(socketChannel)
+
+}
+
+class Selector {
+  nioSelector
+  completedReceives
+  completedSends
+  channels
+}
+
+class  KafkaChannel {
+  NetworkReceive receive
+  NetworkSend send
+  TransportLayer transportLayer
+}
+
+class RequestChannel {
+  requestQueue
+  processors
+  callbackQueue
+}
+
+class BrokerServer {
+  dataPlaneRequestHandlerPool
+  groupCoordinator
+  socketServer
+  KafkaApis dataPlaneRequestProcessor
+}
+
+class KafkaRequestHandlerPool {
+  requestChannel
+}
+
+class KafkaRequestHandler extends Runnable {
+  requestChannel
+  ApiRequestHandler apis
+  void run()
+}
+
+class KafkaApis extends ApiRequestHandler {
+
+}
+
+SocketServer o-- DataPlaneAcceptor
+SocketServer *-- controlPlaneAcceptorOpt
+Acceptor *-- Processor
+Processor *-- Selector
+Selector *-- KafkaChannel
+SocketServer *-- RequestChannel
+BrokerServer *-- SocketServer
+BrokerServer *-- KafkaRequestHandlerPool
+KafkaRequestHandlerPool o-- KafkaRequestHandler
+KafkaRequestHandler *-- RequestChannel
+Processor *-- RequestChannel
+KafkaRequestHandler *-- ApiRequestHandler
+```
+
+
+
+## ControllerServer
+Controller server is responsible for:
+* Managing the overall state of the kafka cluster
+* Electing partition leaders
+* Handling administrative operations
+
+
+
+
 
 # security
 
