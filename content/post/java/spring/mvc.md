@@ -174,12 +174,20 @@ GenericServlet <|-- HttpServlet
 HttpServlet<|-- HttpServletBean
 ```
 
-# RestController
+# Request Handling
+
+url and form-data parameters will transformed to parameters of request, and binds to the Controller method args.
+Request body will read by the converters, and convert to controller args.
+
+## parameter handling
+`@RequestBody` indicates a method parameter should be bound to the body of web request.
+
+`@RequestParam` indicates a method parameter should be bound to a web request parameter in url or form-data.
+
+`@ModelAttribute` binds a method parameter or method return value to a named model attribute.
 
 
-## Annotation
-
-`PathVariable` indicates that a method parameter should be bound to a URI template variable.
+`@PathVariable` indicates that a method parameter should be bound to a URI template variable.
 ```
 @GetMapping("/hello/{name}/{age}")
 

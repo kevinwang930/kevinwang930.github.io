@@ -610,7 +610,15 @@ NioEndpoint           -[#000082,plain]-^  AbstractJsseEndpoint
 
 
 # Servlet
-A servlet is a small java program that runs within a web server.Servlets receive and respond to requests from web clients.
+
+Tomcat use Jakarta servlet API.
+Jakarta servlet defines a server-side  API for handling HTTP requests and responses.
+
+`servlet` is a small Java program that runs within a Web server. Servlets receive and respond to requests from Web clients, usually across HTTP, the HyperText Transfer Protocol.
+
+`ServletRequest` is an object to provide client request information to a servlet. The servlet container creates a `ServletRequest` object and passes it as an argument to the servlet's `service` method.
+`ServletRequest` object provides data including parameter name and values, attributes, and an inputstream.
+
 
 ```plantuml
 package Tomcat {
@@ -638,12 +646,31 @@ package Tomcat {
     + void service(ServletRequest,ServletResponse)
     }
 
-    interface ServletRequest {}
+    interface ServletRequest {
+        Object getAttribute(String name)
+        int getContentLength()
+        String getContentType()
+        ServletInputStream getInputStream()
+        String getParameter(String name)
+        String getRemoteAddr()
+        RequestDispatcher getRequestDispatcher(String path)
+    }
     interface HttpServletRequest extends ServletRequest
 
-    interface ServletResponse {}
+    interface ServletResponse {
+        ServletOutputStream getOutputStream()
+
+    }
     interface HttpServletResponse extends ServletResponse
 
+    class Request implements HttpServletRequest {
+        byte[] postData
+        ParameterMap<String,String[]> parameterMap
+        Collection<Part> parts
+        HttpServletRequest applicationRequest
+        Connector connector
+        RequestFacade facade
+    }
 }
 Servlet <|.. GenericServlet
 ServletConfig <|.. GenericServlet

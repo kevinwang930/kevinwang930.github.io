@@ -29,7 +29,7 @@ HTTP post sends data to the server. The type of the body is indicated by the `Co
 ## content type
 
 
-### form
+### form-data
 An HTML form on a web page is a convenient way to configure an HTTP request to send data to server.
 content of http form in packet:
 ```
@@ -45,7 +45,7 @@ Content-Length: 13
 say=Hi&to=Mom
 ```
 
-### multipart
+### multipart form-data
 one or more different sets of data are combined in a single body, a "multipart" Content-Type must appear in the entity's header.
 
 ```
