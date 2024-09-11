@@ -300,7 +300,9 @@ ConcurrentNavigableMap
 
 ### ConcurrentHashMap
 
-`ConcurrentHashMap`使用java类`Unsafe`提供的原子操作和`Synchronized`对象锁保证线程安全。
+`ConcurrentHashMap` putVal
+1. if target Node is empty try cas first
+2. use lock of the target Node to guard thread safety.
 
 map val节点 使用`volatile`保证修改内容的可见性
 
