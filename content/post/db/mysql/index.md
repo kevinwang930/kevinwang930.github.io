@@ -28,6 +28,23 @@ Mysql provides different APIs for different languages.
 * JDBC Api for Java relational db connection
 * ODBC Api
 
+
+# Server
+
+
+
+
+
+## Mysqld
+
+Configs
+* `--defaults-file=#` read defaults options from the given file
+* `--datadir=#` path to the database root directory 
+* `--init-file=name` Read SQL commands from this file at startup
+* `--open_files_limit=#`   number of file descriptors available to `mysqld`
+* `--max-connections=#` max number of simultaneous client connections
+* `--thread-cache-size=#` number of threads the server should cache for reuse
+
 # admin
 
 ```
