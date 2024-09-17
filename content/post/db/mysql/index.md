@@ -92,6 +92,21 @@ The data dictionary schema stores dictionary data in transactional(InnoDB) table
 Data dictionary tables are located in the `mysql` database together with non-data dictionary system tables.
 Data dictionary tables are created in a single `InnoDB` tablespace named `mysql.ibd`, which resides in the MySql data directory.
 
+Basic Data Dictionary Tables
+* `catalogs` catalog information
+* `schemata` information about schemata
+* `tablespaces` active tablespaces
+* `tables` tables in databases
+* `columns` columns in tables
+* `indexes` information about table indexes
+
+
+Many Data Dictionary tables are exposed in `INFORMATION_SCHEMA` as table views.
+
+
+
+
+
 
 ## 2.3. Connection
 
@@ -114,7 +129,10 @@ Data dictionary tables are created in a single `InnoDB` tablespace named `mysql.
 * Durability    Mysql software features interacting with particular hardware configuration.
 
 #### MVCC
-`InnoDB` is a multi-version storage engine. It keeps information about old versions of changed rows to support transactional features such as concurrency and rollback. This info is stored in undo tablespaces ina data structure called a rollback segment. InnoDB uses the information in the rollback segment to perform the undo operations needed in a transaction rollback. It also uses the info to build earlier versions of a row for a consistent read.
+
+`Multi-version Concurrency Control` A concurrency control method used by `InnoDB` to handle simultaneous transactions without locking the entire table. 
+
+Old versions of changed rows are stored in undo tablespaces in a data structure called a rollback segment. InnoDB uses the information in the rollback segment to perform the undo operations needed in a transaction rollback. It also uses the info to build earlier versions of a row for a consistent read.
 
 Internally `InnoDB` adds three fields to each row stored in the database:
 * `DB_TRX_ID` indicates the transaction identifier for the last transaction that inserted or updated the row.
@@ -127,6 +145,9 @@ Internally `InnoDB` adds three fields to each row stored in the database:
 
 `Buffer pool` is an area in main memory where `InnoDB` caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory
 
+#### On Disk Structure
+
+A `file-per-table` tablespace contains data and indexes for a single `InnoDB` table, and is stored on the file system in a single data file.
 
 
 ## 2.5. Bin log
