@@ -19,16 +19,71 @@ source code dir:
 * `libmysql`    generate `libmysqlclient.so`
 * `sql`         main codebase 
   * `dd`        Data dictionary
+  * `server_component` server component
 
 
+## 1.1. ACID
+
+
+* Atomicity     transaction management
+* Consistency   protect from Crashes
+* Isolation     transaction Isolation level
+* Durability    Mysql software features interacting with particular hardware configuration.
 
 
 # 2. Server
 
+
+## 2.1. Network
+
 Mysql Server maintains a one thread per connection model. 
 
+```plantuml
 
-## 2.1. Service
+actor Client
+
+participant "Event Loop" as EL
+participant "Per Thread Connection Handler" as CH
+participant "Protocol" as Protocol
+participant "sql_parse.cc" as DC
+
+
+== Establishing Connection ==
+Client -> EL : Initiate Connection
+activate EL
+EL -> CH : add_connection(channel_info)
+activate CH  
+CH -> CH : handle_connection (THD)
+deactivate EL
+
+== Processing Commands ==
+loop Handle Multiple Commands
+    Client -> CH : Send SQL Command
+    CH -> DC : do_command(thd)
+    activate DC
+    DC -> Protocol : get_command(&com_data, &command)
+    activate Protocol
+    Protocol --> DC : com_data & command
+    deactivate Protocol
+    DC -> DC : dispatch_command(thd, command)
+    DC --> Protocol : Execution Result
+    deactivate DC 
+    Protocol -> Client : Send Command Result
+end
+
+== Terminating Connection ==
+Client -> CH : Disconnect
+CH -> Client : Close Connection
+deactivate CH
+
+
+```
+
+## 2.2. Parser
+
+## 2.3. optimizer
+
+## 2.4. Service
 
 A `Service` is a struct of C function pointers
 The server has all `service` structs defined and initialized so that the function pointers point to a actual `service` implementation functions
@@ -84,7 +139,7 @@ The big picture of plugin services
 
 ```
 
-## 2.2. Data Dictionary
+## 2.5. Data Dictionary
 
 ![dd](images/dd.png)
 Mysql Server incorporates a transactional data dictionary that stores information about database objects. 
@@ -104,31 +159,17 @@ Basic Data Dictionary Tables
 Many Data Dictionary tables are exposed in `INFORMATION_SCHEMA` as table views.
 
 
+## 2.6. Storage Engine
 
-
-
-
-## 2.3. Connection
-
-
-
-## 2.4. Storage Engine
-
-### 2.4.1. InnoDB
+### 2.6.1. InnoDB
 `InnoDB` is a general-purpose storage engine that balances reliability and high performance. `InnoDB` is the default MySQL storage Engine.
 
 ![innodb-arch](images/innode-arch.png)
 
 
-#### 2.4.1.1. ACID
 
 
-* Atomicity     transaction management
-* Consistency   protect from Crashes
-* Isolation     transaction Isolation level
-* Durability    Mysql software features interacting with particular hardware configuration.
-
-#### MVCC
+#### 2.6.1.1. MVCC
 
 `Multi-version Concurrency Control` A concurrency control method used by `InnoDB` to handle simultaneous transactions without locking the entire table. 
 
@@ -141,22 +182,22 @@ Internally `InnoDB` adds three fields to each row stored in the database:
 
 
 
-#### In Memory Structure
+#### 2.6.1.2. In Memory Structure
 
 `Buffer pool` is an area in main memory where `InnoDB` caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory
 
-#### On Disk Structure
+#### 2.6.1.3. On Disk Structure
 
 A `file-per-table` tablespace contains data and indexes for a single `InnoDB` table, and is stored on the file system in a single data file.
 
 
-## 2.5. Bin log
+## 2.7. Bin log
 
-## 2.6. Parser
 
-## 2.7. optimizer
 
-## 2.8. Mysqld
+
+
+## 2.8. Config
 
 Configs
 * `--defaults-file=#` read defaults options from the given file
