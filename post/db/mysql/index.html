@@ -1,4 +1,4 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003ethis article introduce Mysql internals\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/db\/mysql\/","keywords":"[mysql]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.134.2 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql"><meta name=description content="this article introduce Mysql internals"><meta property="og:description" content="this article introduce Mysql internals"><meta property="og:type" content="article"><meta property="og:title" content="Mysql internals"><meta name=twitter:title content="Mysql internals"><meta property="og:url" content="https://kevinwang930.github.io/post/db/mysql/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/db/mysql/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="this article introduce Mysql internals"><meta name=twitter:description content="this article introduce Mysql internals"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-09-13T18:07:46"><meta property="article:modified_time" content="2024-09-13T18:07:46"><meta property="article:section" content="database"><meta property="article:section" content="mysql"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql internals</title>
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003ethis article introduce Mysql internals\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/db\/mysql\/","keywords":"[mysql]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.134.3 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql"><meta name=description content="this article introduce Mysql internals"><meta property="og:description" content="this article introduce Mysql internals"><meta property="og:type" content="article"><meta property="og:title" content="Mysql internals"><meta name=twitter:title content="Mysql internals"><meta property="og:url" content="https://kevinwang930.github.io/post/db/mysql/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/db/mysql/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="this article introduce Mysql internals"><meta name=twitter:description content="this article introduce Mysql internals"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-09-13T18:07:46"><meta property="article:modified_time" content="2024-09-13T18:07:46"><meta property="article:section" content="database"><meta property="article:section" content="mysql"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql internals</title>
 <link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/db/mysql/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
 <span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
 <span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
@@ -27,7 +27,7 @@ deactivate EL
 
 == Processing Commands ==
 loop Handle Multiple Commands
-    Client -&gt; CH : Send SQL Command
+    Client -&gt; Protocol : Send SQL Command
     CH -&gt; DC : do_command(thd)
     activate DC
     DC -&gt; Protocol : get_command(&amp;com_data, &amp;command)
@@ -43,8 +43,140 @@ end
 == Terminating Connection ==
 Client -&gt; CH : Disconnect
 CH -&gt; Client : Close Connection
-deactivate CH
-</code></pre><h2 id=22-parser>2.2. Parser</h2><h2 id=23-optimizer>2.3. optimizer</h2><h2 id=24-service>2.4. Service</h2><p>A <code>Service</code> is a struct of C function pointers
+</code></pre><h2 id=22-parser>2.2. Parser</h2><ul><li><code>Query_expression</code> one query block or several query blocks combined with UNION</li><li><code>Query_term</code> tree structure.
+Five node types:<ul><li><code>Query_block</code></li><li><code>Query_term_unary</code></li><li><code>Query_term_intersect</code></li><li><code>Query_term_except</code></li><li><code>Query_term_union</code></li></ul></li><li><code>Sql_cmd</code> representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate Sql_cmd to represent a SQL statement in teh parsed tree. The <code>execute()</code> method in the derived classes of <code>Sql_cmd</code> contains the runtime implementation.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+class THD {
+  Thd_mem_cnt m_mem_cnt
+  MDL_context mdl_context
+  LEX *lex
+  LEX_CSTRING m_query_string
+  LEX_CSTRING m_catalog
+  LEX_CSTRING m_db
+
+  Prepared_statement_map stmt_map
+  const char *thread_stack
+
+  Protocol *m_protocol
+  Query_plan query_plan
+  char *m_trans_log_file
+  NET net
+}
+
+class LEX &lt;&lt; (S,#FF7700) &gt;&gt; {
+  THD *thd
+  Query_expression *unit
+  Table_ref *insert_table
+  enum_tx_isolation tx_isolation
+  LEX_STRING create_view_query_block
+  Sql_cmd *m_sql_cmd
+  make_sql_cmd(Parse_tree_root *parse_tree)
+}
+
+class Query_expression {
+  Query_expression *next
+  Query_expression **prev
+  Query_block *master
+  Query_block *slave
+  Query_term *m_query_term
+  bool prepared
+  bool executed
+  Query_result *m_query_result
+}
+
+class Query_term {
+  Query_term_set_op *m_parent
+
+}
+
+class Query_block extends Query_term
+
+class Sql_cmd {
+  Prepared_statement *m_owner
+
+  bool execute(THD *thd)
+} 
+
+THD *-- LEX
+
+LEX *-right- Query_expression
+LEX --&gt; Sql_cmd: make
+Query_expression *-right- Query_block
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title parse procedure
+
+participant &#34;sql_parse.cc&#34; as SP
+
+SP --&gt; SP : dispatch_command()
+activate SP
+SP --&gt; SP :dispatch_sql_command()
+activate SP
+SP --&gt; SP: parse_sql
+activate SP
+SP --&gt; THD : sql_parser()
+activate THD
+THD--&gt; YACC :my_sql_parser_parse
+THD --&gt; LEX : make_sql_cmd(*parse_tree)
+LEX --&gt; Parse_Tree: make_cmd(thd) 
+SP --&gt; SP: mysql_execute_command
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+
+title Top level Sql Statements Structure
+
+class Parse_tree_root {
+  +virtual Sql_cmd *make_cmd(THD *thd) = 0
+}
+
+class PT_select_stmt {
+  +enum_sql_command m_sql_command
+  +PT_query_expression_body *m_qe
+  +PT_into_destination *m_into
+  +Sql_cmd *make_cmd(THD *thd)
+}
+
+class PT_insert
+class PT_update
+class PT_delete
+class PT_explain
+class PT_table_ddl_stmt_base
+class PT_show_base
+
+
+class PT_show_engine_base
+class PT_show_engine_status
+
+Parse_tree_root &lt;|-- PT_select_stmt
+Parse_tree_root &lt;|-- PT_insert
+Parse_tree_root &lt;|-- PT_update
+Parse_tree_root &lt;|-- PT_delete
+Parse_tree_root &lt;|-- PT_explain
+Parse_tree_root &lt;|-- PT_table_ddl_stmt_base
+Parse_tree_root &lt;|-- PT_show_base
+
+
+
+PT_show_base &lt;|-- PT_show_engine_base
+PT_show_engine_base &lt;|-- PT_show_engine_status
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+title Top level  ddl statements 
+
+Parse_tree_root &lt;|-- PT_table_ddl_stmt_base
+class PT_table_ddl_stmt_base {
+  Alter_info m_alter_info
+}
+PT_table_ddl_stmt_base &lt;|-- PT_create_table_stmt
+PT_table_ddl_stmt_base &lt;|-- PT_alter_table_stmt
+PT_table_ddl_stmt_base &lt;|-- PT_create_index_stmt
+PT_table_ddl_stmt_base &lt;|-- PT_drop_index_stmt
+PT_table_ddl_stmt_base &lt;|-- PT_show_create_table
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title Parse Tree nodes
+class Parse_tree_node {
+  Parse_context context_t
+  bool contextualized
+  {abstract} bool contextualize(Parse_context *pc)
+
+}
+
+class PT_query_expression extends Parse_tree_node
+</code></pre><h2 id=23-optimizer>2.3. optimizer</h2><h2 id=24-service>2.4. Service</h2><p>A <code>Service</code> is a struct of C function pointers
 The server has all <code>service</code> structs defined and initialized so that the function pointers point to a actual <code>service</code> implementation functions</p><p>The big picture of plugin services</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 
   actor &#34;SQL client&#34; as client
@@ -94,7 +226,7 @@ Data dictionary tables are located in the <code>mysql</code> database together w
 Data dictionary tables are created in a single <code>InnoDB</code> tablespace named <code>mysql.ibd</code>, which resides in the MySql data directory.</p><p>Basic Data Dictionary Tables</p><ul><li><code>catalogs</code> catalog information</li><li><code>schemata</code> information about schemata</li><li><code>tablespaces</code> active tablespaces</li><li><code>tables</code> tables in databases</li><li><code>columns</code> columns in tables</li><li><code>indexes</code> information about table indexes</li></ul><p>Many Data Dictionary tables are exposed in <code>INFORMATION_SCHEMA</code> as table views.</p><h2 id=26-storage-engine>2.6. Storage Engine</h2><h3 id=261-innodb>2.6.1. InnoDB</h3><p><code>InnoDB</code> is a general-purpose storage engine that balances reliability and high performance. <code>InnoDB</code> is the default MySQL storage Engine.</p><p><img src=images/innode-arch.png alt=innodb-arch></p><h4 id=2611-mvcc>2.6.1.1. MVCC</h4><p><code>Multi-version Concurrency Control</code> A concurrency control method used by <code>InnoDB</code> to handle simultaneous transactions without locking the entire table.</p><p>Old versions of changed rows are stored in undo tablespaces in a data structure called a rollback segment. InnoDB uses the information in the rollback segment to perform the undo operations needed in a transaction rollback. It also uses the info to build earlier versions of a row for a consistent read.</p><p>Internally <code>InnoDB</code> adds three fields to each row stored in the database:</p><ul><li><code>DB_TRX_ID</code> indicates the transaction identifier for the last transaction that inserted or updated the row.</li><li><code>DB_ROLL_PTR</code> roll pointer points to an undo log record written to the rollback segment. if the row was updated, the undo log record contains the information necessary to rebuild the content of the row before it was updated.</li><li><code>DB_ROW_ID</code> contains a row ID that increases monotonically as new rows are inserted.</li></ul><h4 id=2612-in-memory-structure>2.6.1.2. In Memory Structure</h4><p><code>Buffer pool</code> is an area in main memory where <code>InnoDB</code> caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory</p><h4 id=2613-on-disk-structure>2.6.1.3. On Disk Structure</h4><p>A <code>file-per-table</code> tablespace contains data and indexes for a single <code>InnoDB</code> table, and is stored on the file system in a single data file.</p><h2 id=27-bin-log>2.7. Bin log</h2><h2 id=28-config>2.8. Config</h2><p>Configs</p><ul><li><code>--defaults-file=#</code> read defaults options from the given file</li><li><code>--datadir=#</code> path to the database root directory</li><li><code>--init-file=name</code> Read SQL commands from this file at startup</li><li><code>--open_files_limit=#</code> number of file descriptors available to <code>mysqld</code></li><li><code>--max-connections=#</code> max number of simultaneous client connections</li><li><code>--thread-cache-size=#</code> number of threads the server should cache for reuse</li></ul><h1 id=3-admin>3. admin</h1><pre tabindex=0><code>show [full] processlist                      display the current running threads
 SELECT * FROM performance_schema.threads    
 show status like &#39;%thread%&#39;
-</code></pre><h1 id=4-reference>4. Reference</h1><ul><li><a href=https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf>mysql源码解析</a></li><li><a href=https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/>Mysql limitations</a></li><li><a href=http://mysql.taobao.org/monthly/2021/08/02>MySQL · 源码分析 · 详解 Data Dictionary</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/mysql/>mysql</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+</code></pre><h1 id=4-reference>4. Reference</h1><ul><li><a href=https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf>mysql源码解析</a></li><li><a href=https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/>Mysql limitations</a></li><li><a href=http://mysql.taobao.org/monthly/2021/08/02>MySQL · 源码分析 · 详解 Data Dictionary</a></li><li><a href=https://blog.jcole.us/innodb/>InnoDB internals</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/mysql/>mysql</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/data/elasticsearch/ data-tooltip="Elasticsearch Internals" aria-label="PREVIOUS: Elasticsearch Internals"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/db/mysql/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/db/mysql/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/db/mysql/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/db/mysql/",this.page.identifier="/post/db/mysql/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="hugo-tranquilpeak-theme",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2024 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior=4><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/data/elasticsearch/ data-tooltip="Elasticsearch Internals" aria-label="PREVIOUS: Elasticsearch Internals"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
