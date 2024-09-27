@@ -58,7 +58,7 @@ deactivate EL
 
 == Processing Commands ==
 loop Handle Multiple Commands
-    Client -> CH : Send SQL Command
+    Client -> Protocol : Send SQL Command
     CH -> DC : do_command(thd)
     activate DC
     DC -> Protocol : get_command(&com_data, &command)
@@ -74,12 +74,171 @@ end
 == Terminating Connection ==
 Client -> CH : Disconnect
 CH -> Client : Close Connection
-deactivate CH
 
 
 ```
 
 ## 2.2. Parser
+* `Query_expression` one query block or several query blocks combined with UNION
+* `Query_term` tree structure. 
+  Five node types:
+  * `Query_block`
+  * `Query_term_unary`
+  * `Query_term_intersect`
+  * `Query_term_except`
+  * `Query_term_union`
+* `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate Sql_cmd to represent a SQL statement in teh parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
+
+```plantuml
+
+class THD {
+  Thd_mem_cnt m_mem_cnt
+  MDL_context mdl_context
+  LEX *lex
+  LEX_CSTRING m_query_string
+  LEX_CSTRING m_catalog
+  LEX_CSTRING m_db
+
+  Prepared_statement_map stmt_map
+  const char *thread_stack
+
+  Protocol *m_protocol
+  Query_plan query_plan
+  char *m_trans_log_file
+  NET net
+}
+
+class LEX << (S,#FF7700) >> {
+  THD *thd
+  Query_expression *unit
+  Table_ref *insert_table
+  enum_tx_isolation tx_isolation
+  LEX_STRING create_view_query_block
+  Sql_cmd *m_sql_cmd
+  make_sql_cmd(Parse_tree_root *parse_tree)
+}
+
+class Query_expression {
+  Query_expression *next
+  Query_expression **prev
+  Query_block *master
+  Query_block *slave
+  Query_term *m_query_term
+  bool prepared
+  bool executed
+  Query_result *m_query_result
+}
+
+class Query_term {
+  Query_term_set_op *m_parent
+
+}
+
+class Query_block extends Query_term
+
+class Sql_cmd {
+  Prepared_statement *m_owner
+
+  bool execute(THD *thd)
+} 
+
+THD *-- LEX
+
+LEX *-right- Query_expression
+LEX --> Sql_cmd: make
+Query_expression *-right- Query_block
+
+```
+
+
+```plantuml
+title parse procedure
+
+participant "sql_parse.cc" as SP
+
+SP --> SP : dispatch_command()
+activate SP
+SP --> SP :dispatch_sql_command()
+activate SP
+SP --> SP: parse_sql
+activate SP
+SP --> THD : sql_parser()
+activate THD
+THD--> YACC :my_sql_parser_parse
+THD --> LEX : make_sql_cmd(*parse_tree)
+LEX --> Parse_Tree: make_cmd(thd) 
+SP --> SP: mysql_execute_command
+```
+
+
+```plantuml
+
+
+title Top level Sql Statements Structure
+
+class Parse_tree_root {
+  +virtual Sql_cmd *make_cmd(THD *thd) = 0
+}
+
+class PT_select_stmt {
+  +enum_sql_command m_sql_command
+  +PT_query_expression_body *m_qe
+  +PT_into_destination *m_into
+  +Sql_cmd *make_cmd(THD *thd)
+}
+
+class PT_insert
+class PT_update
+class PT_delete
+class PT_explain
+class PT_table_ddl_stmt_base
+class PT_show_base
+
+
+class PT_show_engine_base
+class PT_show_engine_status
+
+Parse_tree_root <|-- PT_select_stmt
+Parse_tree_root <|-- PT_insert
+Parse_tree_root <|-- PT_update
+Parse_tree_root <|-- PT_delete
+Parse_tree_root <|-- PT_explain
+Parse_tree_root <|-- PT_table_ddl_stmt_base
+Parse_tree_root <|-- PT_show_base
+
+
+
+PT_show_base <|-- PT_show_engine_base
+PT_show_engine_base <|-- PT_show_engine_status
+
+
+```
+
+```plantuml
+
+title Top level  ddl statements 
+
+Parse_tree_root <|-- PT_table_ddl_stmt_base
+class PT_table_ddl_stmt_base {
+  Alter_info m_alter_info
+}
+PT_table_ddl_stmt_base <|-- PT_create_table_stmt
+PT_table_ddl_stmt_base <|-- PT_alter_table_stmt
+PT_table_ddl_stmt_base <|-- PT_create_index_stmt
+PT_table_ddl_stmt_base <|-- PT_drop_index_stmt
+PT_table_ddl_stmt_base <|-- PT_show_create_table
+```
+```plantuml
+title Parse Tree nodes
+class Parse_tree_node {
+  Parse_context context_t
+  bool contextualized
+  {abstract} bool contextualize(Parse_context *pc)
+
+}
+
+class PT_query_expression extends Parse_tree_node
+```
 
 ## 2.3. optimizer
 
@@ -168,7 +327,6 @@ Many Data Dictionary tables are exposed in `INFORMATION_SCHEMA` as table views.
 
 
 
-
 #### 2.6.1.1. MVCC
 
 `Multi-version Concurrency Control` A concurrency control method used by `InnoDB` to handle simultaneous transactions without locking the entire table. 
@@ -221,3 +379,4 @@ show status like '%thread%'
 * [mysql源码解析](https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf)
 * [Mysql limitations](https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/)
 * [MySQL · 源码分析 · 详解 Data Dictionary](http://mysql.taobao.org/monthly/2021/08/02)
+* [InnoDB internals](https://blog.jcole.us/innodb/)
