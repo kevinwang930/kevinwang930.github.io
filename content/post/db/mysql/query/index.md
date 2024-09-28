@@ -24,11 +24,10 @@ source code dir:
 
 ## 1.1. ACID
 
-
-* Atomicity     transaction management
-* Consistency   protect from Crashes
-* Isolation     transaction Isolation level
-* Durability    Mysql software features interacting with particular hardware configuration.
+* `Atomicity`     transaction management
+* `Consistency`   protect from Crashes
+* `Isolation`     transaction Isolation level
+* `Durability`    Mysql software features interacting with particular hardware configuration.
 
 
 # 2. Server
@@ -78,7 +77,13 @@ CH -> Client : Close Connection
 
 ```
 
-## 2.2. Parser
+## 2.2. Query Execution
+
+1. `MySql` YACC parser parses `select` statement to one kind of `Parse_tree_root`
+2. `Parse_tree_root` calls `make_cmd()` method to generate `Sql_cmd`, In this method, `contextualize` of `Parse_tree_node` called to generate `Query_expression` in `LEX`
+3. `Sql_cmd` calls its `execute()` to generate result
+
+
 * `Query_expression` one query block or several query blocks combined with UNION
 * `Query_term` tree structure. 
   Five node types:
@@ -87,6 +92,7 @@ CH -> Client : Close Connection
   * `Query_term_intersect`
   * `Query_term_except`
   * `Query_term_union`
+* `Query_block` a query specification, which is a query consisting of a `SELECT` keyword
 * `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate Sql_cmd to represent a SQL statement in teh parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
 
 ```plantuml
@@ -131,16 +137,36 @@ class Query_expression {
 
 class Query_term {
   Query_term_set_op *m_parent
-
 }
 
-class Query_block extends Query_term
+class Query_block extends Query_term {
+  mem_root_deque<Item *> fields
+  List<Window> m_windows
+  List<Item_func_match> *ftfunc_list
+  mem_root_deque<Table_ref *> sj_nests
+  SQL_I_List<Table_ref> m_table_list
+  SQL_I_List<ORDER> order_list
+  SQL_I_List<ORDER> group_list
+  LEX *parent_lex
+  table_map select_list_tables
+  Table_ref *leaf_tables
+}
 
 class Sql_cmd {
   Prepared_statement *m_owner
 
-  bool execute(THD *thd)
+  virtual bool prepare(THD *)
+  virtual bool execute(THD *thd)
 } 
+
+
+class Sql_cmd_dml extends Sql_cmd {
+  LEX *lex
+  Query_result *result
+}
+class Sql_cmd_select extends Sql_cmd_dml {
+  
+}
 
 THD *-- LEX
 
@@ -181,10 +207,6 @@ class Parse_tree_root {
 }
 
 class PT_select_stmt {
-  +enum_sql_command m_sql_command
-  +PT_query_expression_body *m_qe
-  +PT_into_destination *m_into
-  +Sql_cmd *make_cmd(THD *thd)
 }
 
 class PT_insert
@@ -214,6 +236,7 @@ PT_show_engine_base <|-- PT_show_engine_status
 
 ```
 
+
 ```plantuml
 
 title Top level  ddl statements 
@@ -228,77 +251,65 @@ PT_table_ddl_stmt_base <|-- PT_create_index_stmt
 PT_table_ddl_stmt_base <|-- PT_drop_index_stmt
 PT_table_ddl_stmt_base <|-- PT_show_create_table
 ```
+
 ```plantuml
-title Parse Tree nodes
+skinparam linetype ortho
+title select parse tree
+class PT_select_stmt {
+  +enum_sql_command m_sql_command
+  +PT_query_expression_body *m_qe
+  +PT_into_destination *m_into
+  +Sql_cmd *make_cmd(THD *thd)
+}
+
+
+
 class Parse_tree_node {
   Parse_context context_t
   bool contextualized
   {abstract} bool contextualize(Parse_context *pc)
+  {abstract} bool do_contextualize(Parse_context *pc)
 
 }
 
-class PT_query_expression extends Parse_tree_node
+class Parse_context {
+  THD *const thd
+  MEM_ROOT *mem_root
+  Query_block *select
+  mem_root_deque<QueryLevel> m_stack
+}
+
+
+class PT_query_specification {
+  PT_item_list *item_list
+  Mem_root_array_YY<PT_table_reference *> from_clause
+  Item *opt_where_clause
+}
+Parse_tree_node <|-left- PT_query_expression_body  
+class PT_query_primary extends PT_query_expression_body
+
+
+PT_query_primary <|-left-  PT_query_specification  
+class PT_query_expression  {
+   PT_query_expression_body *m_body
+   PT_order *m_order
+   PT_limit_clause *m_limit
+}
+
+PT_query_expression_body <|-left- PT_query_expression
+
+PT_select_stmt -down-> PT_query_expression: m_qe
+
+Parse_tree_node --> Parse_context: contextualize
+PT_query_expression -down-> PT_query_specification: m_body
+
 ```
+
+
 
 ## 2.3. optimizer
 
-## 2.4. Service
-
-A `Service` is a struct of C function pointers
-The server has all `service` structs defined and initialized so that the function pointers point to a actual `service` implementation functions
-
-
-
-The big picture of plugin services
-
-
-```plantuml
-
-
-  actor "SQL client" as client
-  box "MySQL Server" #LightBlue
-    participant "Server Code" as server
-    participant "Plugin" as plugin
-  endbox
-
-  == INSTALL PLUGIN ==
-  server -> plugin : initialize
-  activate plugin
-
-  loop zero or many
-    plugin -> server : service API call
-    server --> plugin : service API result
-  end
-  plugin --> server : initialization done
-
-  == CLIENT SESSION ==
-  loop many
-    client -> server : SQL command
-    server -> server : Add reference for Plugin if absent
-    loop one or many
-      server -> plugin : plugin API call
-      loop zero or many
-        plugin -> server : service API call
-        server --> plugin : service API result
-      end
-      plugin --> server : plugin API call result
-    end
-    server -> server : Optionally release reference for Plugin
-    server --> client : SQL command reply
-  end
-
-  == UNINSTALL PLUGIN ==
-  server -> plugin : deinitialize
-  loop zero or many
-    plugin -> server : service API call
-    server --> plugin : service API result
-  end
-  plugin --> server : deinitialization done
-  deactivate plugin
-
-```
-
-## 2.5. Data Dictionary
+## 2.4. Data Dictionary
 
 ![dd](images/dd.png)
 Mysql Server incorporates a transactional data dictionary that stores information about database objects. 
@@ -318,16 +329,16 @@ Basic Data Dictionary Tables
 Many Data Dictionary tables are exposed in `INFORMATION_SCHEMA` as table views.
 
 
-## 2.6. Storage Engine
+## 2.5. Storage Engine
 
-### 2.6.1. InnoDB
+### 2.5.1. InnoDB
 `InnoDB` is a general-purpose storage engine that balances reliability and high performance. `InnoDB` is the default MySQL storage Engine.
 
 ![innodb-arch](images/innode-arch.png)
 
 
 
-#### 2.6.1.1. MVCC
+#### 2.5.1.1. MVCC
 
 `Multi-version Concurrency Control` A concurrency control method used by `InnoDB` to handle simultaneous transactions without locking the entire table. 
 
@@ -340,22 +351,22 @@ Internally `InnoDB` adds three fields to each row stored in the database:
 
 
 
-#### 2.6.1.2. In Memory Structure
+#### 2.5.1.2. In Memory Structure
 
 `Buffer pool` is an area in main memory where `InnoDB` caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory
 
-#### 2.6.1.3. On Disk Structure
+#### 2.5.1.3. On Disk Structure
 
 A `file-per-table` tablespace contains data and indexes for a single `InnoDB` table, and is stored on the file system in a single data file.
 
 
-## 2.7. Bin log
+## 2.6. Bin log
 
 
 
 
 
-## 2.8. Config
+## 2.7. Config
 
 Configs
 * `--defaults-file=#` read defaults options from the given file
@@ -373,10 +384,11 @@ SELECT * FROM performance_schema.threads
 show status like '%thread%'
 ```
 
-
 # 4. Reference
-
-* [mysql源码解析](https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf)
+* [mysql源码解读cnblog](https://www.cnblogs.com/jkin)
+* [阿里云开发者mysql解析](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzIzOTU0NTQ0MA==&action=getalbum&album_id=1970265915745239045&scene=173&subscene=&sessionid=svr_19b6b9d1b73&enterid=1727505362&from_msgid=2247504340&from_itemidx=1&count=3&nolastread=1#wechat_redirect)
+* [mysql源码解析github](https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf)
 * [Mysql limitations](https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/)
 * [MySQL · 源码分析 · 详解 Data Dictionary](http://mysql.taobao.org/monthly/2021/08/02)
 * [InnoDB internals](https://blog.jcole.us/innodb/)
+* [understanding mysql internals](https://theswissbay.ch/pdf/Gentoomen%20Library/Databases/mysql/O%27Reilly%20Understanding%20MySQL%20Internals.pdf)
