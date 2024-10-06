@@ -1,11 +1,11 @@
 ---
-title: "数据结构-树"
+title: "Data Structure- tree"
 date: 2024-02-25T23:56:03+08:00
 categories:
-- 数据结构
+- Data Structure
 tags:
-- 数据结构
-- 树
+- Data Structure
+- tree
 
 #thumbnailImage: //example.com/image.jpg
 ---
