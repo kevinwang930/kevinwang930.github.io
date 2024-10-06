@@ -20,15 +20,7 @@ java.util.concurrent.BlockingDeque
 java.util.NavigableMap
 java.util.concurrent.ConcurrentMap
 java.util.concurrent.ConcurrentNavigableMap
-</code></pre></li></ol><h2 id=queue>Queue</h2><p>Insert Operation
-* add throw IllegalStateException if no space
-* offer return fail if no space
-Remove Operation
-* remove() throw NoSuchElementException if no element
-* poll() return null if no element
-Examine Operation
-* element() throw NoSuchElementException if no element
-* peek() return null if no element</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title:collection
+</code></pre></li></ol><h2 id=queue>Queue</h2><p><code>Insert</code> Operation</p><ul><li>add throw IllegalStateException if no space</li><li>offer return fail if no space</li></ul><p><code>Remove</code> Operation</p><ul><li>remove() throw NoSuchElementException if no element</li><li>poll() return null if no element</li></ul><p><code>Examine</code> Operation</p><ul><li>element() throw NoSuchElementException if no element</li><li>peek() return null if no element</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title:collection
 interface Collection&lt;E&gt; {
     int size()
     boolean isEmpty()
