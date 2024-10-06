@@ -3,9 +3,9 @@ title: "NACOS - service and configuration management"
 date: 2024-06-10T17:45:28+08:00
 categories:
 - java
-- spring
+- spring-cloud
 tags:
-- spring
+- spring-cloud
 - nacos
 keywords:
 - nacos
