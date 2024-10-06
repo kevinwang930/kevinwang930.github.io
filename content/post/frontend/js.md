@@ -1,14 +1,15 @@
 ---
 title: "JavaScript语言概述"
 date: 2024-04-14T16:48:11+08:00
+draft: true
 categories:
-- category
-- subcategory
+- frontend
+- js
 tags:
-- tag1
-- tag2
+- frontend
+- js
 keywords:
-- tech
+- js
 #thumbnailImage: //example.com/image.jpg
 ---
 作为后端开发，习惯了规范的静态语法规则，常常诧异于JavaScript的随意与混乱。

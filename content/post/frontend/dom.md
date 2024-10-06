@@ -1,14 +1,14 @@
 ---
-title: "网页文档编程接口 - DOM"
+title: "Document Object Model - DOM"
 date: 2024-04-14T12:40:20+08:00
 categories:
-- category
-- subcategory
+- frontend
+- dom
 tags:
-- tag1
-- tag2
+- frontend
+- dom
 keywords:
-- tech
+- dom
 #thumbnailImage: //example.com/image.jpg
 ---
 Document Object Model 作为网页文档编程接口标准，不管是在原生JS，react或者是vue中对网页的修改最终都是通过浏览器的DOM接口完成的。
