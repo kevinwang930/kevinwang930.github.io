@@ -1,5 +1,5 @@
 ---
-title: "Spring"
+title: "Spring Core Container"
 date: 2024-06-08T18:30:11+08:00
 categories:
 - java
@@ -11,7 +11,7 @@ keywords:
 - spring
 #thumbnailImage: //example.com/image.jpg
 ---
-本文介绍spring架构
+本文介绍spring Core Container
 <!--more-->
 
 ![alt text]( images/image.png)
