@@ -3,10 +3,10 @@ title: "java collections internals"
 date: 2024-02-24T19:16:25+08:00
 categories:
 - java
-- 数据结构
+- data structure
 tags:
 - java
-- 数据结构
+- data structure
 #thumbnailImage: //example.com/image.jpg
 ---
 

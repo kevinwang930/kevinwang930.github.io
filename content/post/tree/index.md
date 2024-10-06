@@ -2,9 +2,9 @@
 title: "Data Structure- tree"
 date: 2024-02-25T23:56:03+08:00
 categories:
-- Data Structure
+- data structure
 tags:
-- Data Structure
+- data structure
 - tree
 
 #thumbnailImage: //example.com/image.jpg
