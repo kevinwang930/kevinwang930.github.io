@@ -359,9 +359,9 @@ ConcurrentHashMap o-- Node
 
 ### CopyOnWriteArrayList/CopyOnWriteArraySet
 
-CopyOnWriteArrayList A thread-safe variant of ArrayList in which all mutative operations (add, set, and so on) are implemented by making a fresh copy of the underlying array.
+`CopyOnWriteArrayList` A thread-safe variant of ArrayList in which all mutative operations (add, set, and so on) are implemented by making a fresh copy of the underlying array.
 
-CopyOnWriteArraySet use CopyOnWriteArrayList internally
+`CopyOnWriteArraySet` use CopyOnWriteArrayList internally
 
 ```plantuml
 class CopyOnWriteArrayList {
@@ -381,13 +381,11 @@ CopyOnWriteArraySet *-- CopyOnWriteArrayList
 ```
 
 ### other concurrent collections
-DelayQueue
-SynchronousQueue
-LinkedBlockingDeque
-LinkedTransferQueue
-ConcurrentSkipListSet
-ConcurrentHashMap
-ConcurrentSkipListMap
+* DelayQueue 
+* SynchronousQueue 
+* LinkedTransferQueue
+* ConcurrentSkipListSet
+* ConcurrentSkipListMap
 
 
 
