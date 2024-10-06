@@ -1,5 +1,5 @@
 ---
-title: "Synchronization"
+title: "Concurrency Synchronization"
 date: 2024-04-06T21:48:25+08:00
 categories:
 - concurrency

@@ -1,5 +1,5 @@
 ---
-title: "Security"
+title: "Spring Security"
 date: 2024-04-02T12:25:39+08:00
 categories:
 - java
