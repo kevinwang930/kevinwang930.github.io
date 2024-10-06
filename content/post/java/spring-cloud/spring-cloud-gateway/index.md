@@ -3,12 +3,12 @@ title: "Spring Cloud Gateway"
 date: 2024-05-29T18:17:39+08:00
 categories:
 - java
-- spring
+- spring-cloud
 tags:
-- spring
-- gateway
+- spring-cloud
+- spring-cloud-gateway
 keywords:
-- gateway
+- spring-cloud-gateway
 #thumbnailImage: //example.com/image.jpg
 ---
 
