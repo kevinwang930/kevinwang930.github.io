@@ -1,18 +1,1 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Ffmpeg on Kevin wang's blog</title><link>https://kevinwang930.github.io/categories/ffmpeg/</link><description>Recent content in Ffmpeg on Kevin wang's blog</description><generator>Hugo</generator><language>en-us</language><lastBuildDate>Mon, 22 Apr 2024 13:11:20 +0800</lastBuildDate><atom:link href="https://kevinwang930.github.io/categories/ffmpeg/index.xml" rel="self" type="application/rss+xml"/><item><title>FFMPEG And It's Java Binding JavaCV</title><link>https://kevinwang930.github.io/post/video/ffmpeg/</link><pubDate>Mon, 22 Apr 2024 13:11:20 +0800</pubDate><guid>https://kevinwang930.github.io/post/video/ffmpeg/</guid><description>&lt;p>This Article introduces ffmpeg and it&amp;rsquo;s java binding JavaCV&lt;/p>
-&lt;h1 id="concept-and-structure">Concept and Structure&lt;/h1>
-&lt;pre tabindex="0">&lt;code class="language-plantuml" data-lang="plantuml">title: transcoding process
-rectangle &amp;#34;input file&amp;#34; as input
-rectangle encoded [encoded data
-packets]
-rectangle decoded [decoded
-frames]
-rectangle encoded_data [encoded data
-packets]
-rectangle output [output 
-file]
-input -right-&amp;gt; encoded: demuxer
-encoded-right-&amp;gt; decoded: decoder
-decoded -down-&amp;gt; encoded_data: encoder
-encoded_data -left-&amp;gt; output: muxer
-&lt;/code>&lt;/pre>&lt;h2 id="library">library&lt;/h2>
-&lt;p>&lt;code>libavformat&lt;/code> library provides a generic framework for multiplexing and demultiplexing (muxing and demuxing) audio,video and subtitle streams. It encompasses multiple muxers and demuxers for multimedia container formats.&lt;/p></description></item></channel></rss>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Ffmpeg on Kevin wang's blog</title><link>https://kevinwang930.github.io/categories/ffmpeg/</link><description>Recent content in Ffmpeg on Kevin wang's blog</description><generator>Hugo</generator><language>en-us</language><lastBuildDate>Mon, 22 Apr 2024 13:11:20 +0800</lastBuildDate><atom:link href="https://kevinwang930.github.io/categories/ffmpeg/index.xml" rel="self" type="application/rss+xml"/><item><title>FFMPEG And It's Java Binding JavaCV</title><link>https://kevinwang930.github.io/post/video/ffmpeg/</link><pubDate>Mon, 22 Apr 2024 13:11:20 +0800</pubDate><guid>https://kevinwang930.github.io/post/video/ffmpeg/</guid><description>&lt;p>This Article introduces ffmpeg and it&amp;rsquo;s java binding JavaCV&lt;/p></description></item></channel></rss>
