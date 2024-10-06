@@ -10,8 +10,9 @@ tags:
 keywords:
 - ffmpeg
 #thumbnailImage: //example.com/image.jpg
-This Article introduces ffmpeg and it's java binding JavaCV
 ---
+This Article introduces ffmpeg and it's java binding JavaCV
+<!--more-->
 
 # Concept and Structure
 
