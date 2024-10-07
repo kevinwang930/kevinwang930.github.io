@@ -1,5 +1,5 @@
 ---
-title: "Netty架构与实现"
+title: "Netty Internals"
 date: 2024-08-02T13:54:59+08:00
 categories:
 - java

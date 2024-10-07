@@ -1,5 +1,5 @@
 ---
-title: "Socket"
+title: "Socket Programming Introduction"
 date: 2024-08-02T13:48:50+08:00
 categories:
 - network
