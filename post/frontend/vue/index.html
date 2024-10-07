@@ -21,9 +21,7 @@
 本文通过介绍vue一窥前端开发。</p><h1 id=declarative-rendering>Declarative rendering</h1><p>Single-File Component(SFC) is a reusable self-contained block of code that encapsulates HTML, CSS and javascript that belong together, written inside a <code>.vue</code> file.</p><p><em>Declarative rendering</em> using a template syntax that extends HTML.
 Template be rendered based on JavaScript state, when state changes, the html updates automatically.
 State that trigger updates when changed is considered reactive,
-vue&rsquo;s reactive api:
-1 .reactive() implemented use JavaScript Proxies
-2 .ref() take any value type and create an object that exposes the inner value under a <code>.value</code> property</p><h2 id=template>Template</h2><p>mustaches are only used for text interpolation.
+vue&rsquo;s reactive api:</p><ul><li><code>.reactive()</code> implemented use JavaScript Proxies</li><li><code>.ref()</code> take any value type and create an object that exposes the inner value under a <code>.value</code> property</li></ul><h2 id=template>Template</h2><p>mustaches are only used for text interpolation.
 content inside template mustaches can be any valid JavaScript expression.</p><h3 id=directive>Directive</h3><p>A directive is a special attribute that starts with <code>v-</code> prefix. directive values are JS expressions that have access to the component&rsquo;s state</p><h4 id=attribute-binding>Attribute binding</h4><p>To bind an attribute to a dynamic value, use <code>v-bind</code> directive
 <code>v-bind</code> can be ignored.</p><pre tabindex=0><code>&lt;div [v-bind]:name=&#34;argument&#34;&gt;&lt;/div&gt;
 </code></pre><h4 id=event-listeners>Event listeners</h4><p>listen to dom events using the <code>v-on</code> directive.</p><pre tabindex=0><code>&lt;button (v-on:|@)click=&#34;increment&#34;&gt;{{ count }}&lt;/button&gt;
