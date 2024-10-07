@@ -26,8 +26,8 @@ Single-File Component(SFC) is a reusable self-contained block of code that encap
 Template be rendered based on JavaScript state, when state changes, the html updates automatically.
 State that trigger updates when changed is considered reactive,
 vue's reactive api:
-    1 .reactive()     implemented use JavaScript Proxies 
-    2 .ref()             take any value type and create an object that exposes the inner value under a `.value` property
+* `.reactive()`     implemented use JavaScript Proxies 
+* `.ref()`             take any value type and create an object that exposes the inner value under a `.value` property
 
 
 ## Template
