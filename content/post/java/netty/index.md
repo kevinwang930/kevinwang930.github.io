@@ -41,8 +41,10 @@ The data that flows through a network always has the same type: bytes. How these
   * the `ChannelPipeline` which handles all I/O events and requests associated with the channel
 
 `ChannelFuture` The result of an asynchronous `Channel` I/O operation.
+
 `ServerChannel` A `Channel` that accepts an incoming connection attempt and creates its child `Channel`s by accepting them. 
 All I/O operations in Netty are asynchronous. A `ChannelFuture` instance will be returned which gives you the information of about the result or status of I/O operation.
+
 `ChannelPromise` special `ChannelFuture` which is writable.
 `ChannelFutureListener` callback function which can be added to the `ChannelFuture`.
 
