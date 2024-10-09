@@ -4,8 +4,7 @@ date: 2024-04-30T18:03:51+08:00
 draft: true
 categories:
 - java
-- spring
-- cloud
+- springCloud
 tags:
 - springCloud
 keywords:

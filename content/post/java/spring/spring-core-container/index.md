@@ -5,7 +5,6 @@ categories:
 - java
 - spring
 tags:
-- java
 - spring
 keywords:
 - spring
