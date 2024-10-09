@@ -7,7 +7,6 @@ categories:
 tags:
 - java
 - concurrency
-- lock
 
 #thumbnailImage: //example.com/image.jpg
 ---

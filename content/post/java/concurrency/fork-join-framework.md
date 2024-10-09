@@ -5,6 +5,7 @@ categories:
 - java
 - concurrency
 tags:
+- java
 - concurrency
 - forkJoin
 keywords:

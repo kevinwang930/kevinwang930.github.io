@@ -12,5 +12,5 @@ keywords:
 - spring-boot
 #thumbnailImage: //example.com/image.jpg
 ---
-
+Spring Boot auto-configuration attempts to automatically configure your Spring application based on the jars in the classPath. 
 <!--more-->

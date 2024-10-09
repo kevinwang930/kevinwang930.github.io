@@ -5,6 +5,7 @@ categories:
 - java
 - synchronizer
 tags:
+- java
 - synchronizer
 - concurrency
 keywords:
