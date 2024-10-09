@@ -21,11 +21,7 @@ if (state permit a blocked thread to acquire)
 HotspotJVM uses a pthread condvar</li></ol><h2 id=queues>Queues</h2><p>The heart of the framework is maintenance of queues of blocked threads, which are restricted to FIFO queues.
 The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
 CLH(lock queue) have been used only in spinlocks.
-AQS made modification to the CLH locks to support blocking,cancellation and timeouts.
-1. CLH node with <code>prev</code> node link can deal with timeouts and cancellation
-2. CLH node with <code>next</code> node link to support blocking and waking up (park/unpark)
-3. <code>status</code> field kept in each node for purposes of controlling blocking.
-4. garbage collection of nodes relies on GC</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+AQS made modification to the CLH locks to support blocking,cancellation and timeouts.</p><ol><li>CLH node with <code>prev</code> node link can deal with timeouts and cancellation</li><li>CLH node with <code>next</code> node link to support blocking and waking up (park/unpark)</li><li><code>status</code> field kept in each node for purposes of controlling blocking.</li><li>garbage collection of nodes relies on GC</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 abstract class AbstractOwnableSynchronizer {
     transient Thread exclusiveOwnerThread
 }
