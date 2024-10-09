@@ -89,10 +89,10 @@ The heart of the framework is maintenance of queues of blocked threads, which ar
 The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
 CLH(lock queue) have been used only in spinlocks.
 AQS made modification to the CLH locks to support blocking,cancellation and timeouts.
-    1. CLH node with `prev` node link can deal with timeouts and cancellation
-    2. CLH node with `next` node link to support blocking and waking up (park/unpark)
-    3. `status` field kept in each node for purposes of controlling blocking.
-    4. garbage collection of nodes relies on GC
+1. CLH node with `prev` node link can deal with timeouts and cancellation
+2. CLH node with `next` node link to support blocking and waking up (park/unpark)
+3. `status` field kept in each node for purposes of controlling blocking.
+4. garbage collection of nodes relies on GC
 
 
 ```plantuml
