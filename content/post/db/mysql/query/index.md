@@ -93,7 +93,7 @@ CH -> Client : Close Connection
   * `Query_term_except`
   * `Query_term_union`
 * `Query_block` a query specification, which is a query consisting of a `SELECT` keyword
-* `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate Sql_cmd to represent a SQL statement in teh parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
+* `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate `Sql_cmd` to represent a SQL statement in the parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
 
 ```plantuml
 
@@ -194,6 +194,11 @@ THD--> YACC :my_sql_parser_parse
 THD --> LEX : make_sql_cmd(*parse_tree)
 LEX --> Parse_Tree: make_cmd(thd) 
 SP --> SP: mysql_execute_command
+activate SP
+SP --> Sql_cmd: execute(thd)
+activate Sql_cmd
+Sql_cmd --> Sql_cmd: prepare(thd)
+Sql_cmd --> Sql_cmd: execute_inner(thd)
 ```
 
 
@@ -309,36 +314,17 @@ PT_query_expression -down-> PT_query_specification: m_body
 
 ## 2.3. optimizer
 
-## 2.4. Data Dictionary
 
-![dd](images/dd.png)
-Mysql Server incorporates a transactional data dictionary that stores information about database objects. 
-The data dictionary schema stores dictionary data in transactional(InnoDB) tables. Data. 
-Data dictionary tables are located in the `mysql` database together with non-data dictionary system tables.
-Data dictionary tables are created in a single `InnoDB` tablespace named `mysql.ibd`, which resides in the MySql data directory.
+## 2.4. Storage Engine
 
-Basic Data Dictionary Tables
-* `catalogs` catalog information
-* `schemata` information about schemata
-* `tablespaces` active tablespaces
-* `tables` tables in databases
-* `columns` columns in tables
-* `indexes` information about table indexes
-
-
-Many Data Dictionary tables are exposed in `INFORMATION_SCHEMA` as table views.
-
-
-## 2.5. Storage Engine
-
-### 2.5.1. InnoDB
+### 2.4.1. InnoDB
 `InnoDB` is a general-purpose storage engine that balances reliability and high performance. `InnoDB` is the default MySQL storage Engine.
 
 ![innodb-arch](images/innode-arch.png)
 
 
 
-#### 2.5.1.1. MVCC
+#### 2.4.1.1. MVCC
 
 `Multi-version Concurrency Control` A concurrency control method used by `InnoDB` to handle simultaneous transactions without locking the entire table. 
 
@@ -351,22 +337,22 @@ Internally `InnoDB` adds three fields to each row stored in the database:
 
 
 
-#### 2.5.1.2. In Memory Structure
+#### 2.4.1.2. In Memory Structure
 
 `Buffer pool` is an area in main memory where `InnoDB` caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory
 
-#### 2.5.1.3. On Disk Structure
+#### 2.4.1.3. On Disk Structure
 
 A `file-per-table` tablespace contains data and indexes for a single `InnoDB` table, and is stored on the file system in a single data file.
 
 
-## 2.6. Bin log
+## 2.5. Bin log
 
 
 
 
 
-## 2.7. Config
+## 2.6. Config
 
 Configs
 * `--defaults-file=#` read defaults options from the given file
