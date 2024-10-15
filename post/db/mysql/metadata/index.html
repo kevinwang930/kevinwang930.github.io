@@ -8,11 +8,84 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior=4 class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Mysql Metadata</h1><div class="postShorten-meta post-meta"><time datetime=2024-10-13T18:50:37+08:00>October 13, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/database>database</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/mysql>mysql</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article introduces Mysql Metadata</p><p>Mysql <code>Metadata</code> is anything that describes the database as opposed to being the contents of the database.</p><h1 id=1-data-dictionary>1. Data Dictionary</h1><p><img src=images/dd.png alt=dd>
+<a class=category-link href=https://kevinwang930.github.io/categories/mysql>mysql</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article introduces Mysql Metadata</p><p>Mysql <code>Metadata</code> is anything that describes the database as opposed to being the contents of the database.
+<code>Metadata</code> is comprised of 2 parts:</p><ul><li>Data Dictionary</li><li>System tables</li></ul><h1 id=1-data-dictionary>1. Data Dictionary</h1><p><img src=images/dd.png alt=dd>
 Mysql Server incorporates a transactional data dictionary that stores information about database objects.
-The data dictionary schema stores dictionary data in transactional(InnoDB) tables. Data.
-Data dictionary tables are located in the <code>mysql</code> database together with non-data dictionary system tables.
-Data dictionary tables are created in a single <code>InnoDB</code> tablespace named <code>mysql.ibd</code>, which resides in the MySql data directory.</p><p>Basic Data Dictionary Tables</p><ul><li><code>catalogs</code> catalog information</li><li><code>schemata</code> information about schemata</li><li><code>tablespaces</code> active tablespaces</li><li><code>tables</code> tables in databases</li><li><code>columns</code> columns in tables</li><li><code>indexes</code> information about table indexes</li></ul><p>Many Data Dictionary tables are exposed in <code>INFORMATION_SCHEMA</code> as table views.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/database/>database</a>
+The data dictionary schema stores dictionary data in transactional(InnoDB) tables.
+Data dictionary tables are located in the <code>mysql</code> database.
+Data dictionary tables are created in a single <code>InnoDB</code> tablespace named <code>mysql.ibd</code>, which resides in the MySql data directory.</p><p>Basic Data Dictionary Tables</p><ul><li><code>catalogs</code> catalog information</li><li><code>schemata</code> information about schemata</li><li><code>tablespaces</code> active tablespaces</li><li><code>tables</code> tables in databases</li><li><code>columns</code> columns in tables</li><li><code>indexes</code> information about table indexes</li></ul><p><code>information_schema</code> is now implemented as views over dictionary tables, requires no extra disc accesses, no creation of temporary tables.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title: database object representation 
+class Table_ref  {
+    char *db
+    char *table_name
+    LEX_CSTRING target_tablespace_name
+    table_map m_map
+    table_map sj_inner_tables
+    Table_ref *natural_join
+    List&lt;Natural_join_column&gt; *join_columns
+    TABLE *table
+
+    ST_SCHEMA_TABLE *schema_table
+    Query_block *schema_query_block
+
+    Query_block *query_block
+
+
+    MDL_request mdl_request
+}
+
+class Weak_object &lt;&lt;virtual&gt;&gt;  {
+
+}
+
+class Entity_object&lt;&lt;virtual&gt;&gt; extends Weak_object {
+    Object_id id()
+    void set_name(name)
+}
+
+class Entity_object_impl implements Entity_object {
+    Object_id m_id
+    String_type m_name
+}
+
+class Abstract_table&lt;&lt;virtual&gt;&gt; extends Entity_object 
+
+class Table&lt;&lt;virtual&gt;&gt; extends Abstract_table
+
+class Abstract_table_impl extends Entity_object_impl,Abstract_table {
+    Column_collection m_columns
+    Object_id m_schema_id
+}
+
+class Table_impl extends Abstract_table_impl,Table {
+    String_type m_engine
+    String_type m_comment
+    enum_row_format m_row_format
+    enum_partition_type m_partition_type
+
+    Index_collection m_indexes
+    Partition_collection m_partitions
+
+    Object_id m_collation_id
+    Object_id m_tablespace_id
+}
+
+Table_ref --&gt; Table
+</code></pre><h2 id=11-dd-cache-and-persistance>1.1 DD Cache and persistance</h2><p><code>Storage_adapter</code> handling of access to persistent storage.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+class Storage_adapter {
+    Object_registry m_core_registry
+    mysql_mutex_t m_lock
+
+    void core_get(K &amp;key, T **object)
+    void core_store(THD *thd, T *object)
+    bool core_sync(THD *thd, K &amp;key, T *object)
+
+    bool get(THD *thd, K &amp;key, isolation,bypass_registry, T *object)
+    bool store(THD *thd, T *object)
+    bool drop(THD *thd, T *object)
+
+
+}
+</code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/database/>database</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/mysql/>mysql</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/metadata/>metadata</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/db/mysql/service/ data-tooltip="Mysql Service" aria-label="PREVIOUS: Mysql Service"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
