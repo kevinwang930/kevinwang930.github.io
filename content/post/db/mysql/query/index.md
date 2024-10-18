@@ -15,6 +15,7 @@ this article introduce Mysql internals
 # 1. Architecture
 ![architecture](images/arch.png)
 
+
 source code dir:
 * `libmysql`    generate `libmysqlclient.so`
 * `sql`         main codebase 
