@@ -45,7 +45,7 @@ canonifyurls = true
 # ------
 # Author
 # ------
-[author]
+[params.author]
   name = "Kevin Wang"
   bio = "Email: kevinwang930@hotmail.com"
   job = "software developer"
