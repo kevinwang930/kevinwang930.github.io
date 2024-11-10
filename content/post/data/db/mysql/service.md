@@ -2,9 +2,12 @@
 title: "Mysql Service"
 date: 2024-09-28T16:15:37+08:00
 categories:
-- database
+- data
+- db
 - mysql
 tags:
+- data
+- db
 - mysql
 keywords:
 - mysql

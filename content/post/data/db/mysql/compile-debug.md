@@ -2,12 +2,15 @@
 title: "Mysql Source Code Compile and Debug"
 date: 2024-10-17T23:49:24+08:00
 categories:
-- database
+- data
+- db
 - mysql
 tags:
+- data
+- db
 - mysql
-- debug
 keywords:
+- mysql
 - debug
 #thumbnailImage: //example.com/image.jpg
 ---

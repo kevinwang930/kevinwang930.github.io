@@ -2,9 +2,12 @@
 title: "Mysql internals"
 date: 2024-09-13T18:07:46+08:00
 categories:
-- database
+- data
+- db
 - mysql
 tags:
+- data
+- db
 - mysql
 keywords:
 - mysql

@@ -3,15 +3,12 @@ title: "Netty Internals"
 date: 2024-08-02T13:54:59+08:00
 categories:
 - java
-- netty
-tags:
-- netty
 - concurrency
-- nio
+tags:
+- concurrency
 keywords:
 - netty
 - concurrency
-- nio
 #thumbnailImage: //example.com/image.jpg
 ---
 本文记录Netty架构与实现

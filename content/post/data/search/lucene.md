@@ -5,7 +5,8 @@ categories:
 - data
 - search
 tags:
-- lucene
+- data
+- search
 keywords:
 - lucene
 #thumbnailImage: //example.com/image.jpg

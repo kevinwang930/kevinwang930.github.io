@@ -2,10 +2,11 @@
 title: "kafka introduction"
 date: 2024-06-27T19:16:55+08:00
 categories:
-- stream
+- data
 - event
 tags:
-- event stream
+- data
+- event
 - kafka
 keywords:
 - event stream

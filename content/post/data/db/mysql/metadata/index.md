@@ -2,12 +2,13 @@
 title: "Mysql Metadata"
 date: 2024-10-13T18:50:37+08:00
 categories:
-- database
+- data
+- db
 - mysql
 tags:
-- database
+- data
+- db
 - mysql
-- metadata
 keywords:
 - mysql
 - metadata
