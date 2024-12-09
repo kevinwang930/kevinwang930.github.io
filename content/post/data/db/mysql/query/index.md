@@ -83,9 +83,17 @@ CH -> Client : Close Connection
 
 ## 2.2. Query Execution
 
-1. `MySql` YACC parser parses `select` statement to one kind of `Parse_tree_root`
-2. `Parse_tree_root` calls `make_cmd()` method to generate `Sql_cmd`, In this method, `contextualize` of `Parse_tree_node` called to generate `Query_expression` in `LEX`
-3. `Sql_cmd` calls its `execute()` to generate result
+
+* `THD` for each client connection, a separate thread with THD created serving as thread/connection descriptor.
+* `LEX` parse and resolve statement, using as a working area, serves different purposes:
+  * contains some universal properties of `Sql_cmd`
+  * contains some execution state variables  like `m_exec_started`
+    (set to true when execution is started), `plugins` (list of `plugins` used
+    by `statement`), `insert_update_values_map` (a map of objects used by certain
+    INSERT statements), etc.
+  * contains a number of members that should be local to subclasses of
+    `Sql_cmd`, like `purge_value_list` (for the PURGE command), `kill_value_list`
+    (for the KILL command).
 
 
 * `Query_expression` one query block or several query blocks combined with UNION
@@ -98,6 +106,15 @@ CH -> Client : Close Connection
   * `Query_term_union`
 * `Query_block` a query specification, which is a query consisting of a `SELECT` keyword
 * `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate `Sql_cmd` to represent a SQL statement in the parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
+
+procedure:
+
+1. YACC parser parses `select` statement to one kind of `Parse_tree_root`
+2. `Parse_tree_root` calls `make_cmd()` method to generate `Sql_cmd`, In this method, `contextualize` of `Parse_tree_node` called to generate `Query_expression` in `LEX`
+3. `Sql_cmd` calls its `execute()` to generate result
+
+
+
 
 ```plantuml
 

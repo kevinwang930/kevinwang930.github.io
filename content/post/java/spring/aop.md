@@ -24,10 +24,10 @@ keywords:
 `Advice` Action taken by an aspect at a particular joinpoint
 
 Advice types:
-    1. before
-    2. after
-    3. finally
-    4. around
+1. before
+2. after
+3. finally
+4. around
 
 `Advisor` interface holding AOP `advice` and a filter determing the applicability of the advice(such as a `pointcut`)
 
@@ -63,9 +63,9 @@ class BeanFactoryTransactionAttributeSourceAdvisor extends AbstractBeanFactoryPo
 # Mechanism
 
 AOP uses either JDK dynamic proxies or CGLIB to create proxy
-dynamicProxy only works when proxied object  implements at least one  interface
+`dynamicProxy` only works when proxied object  implements at least one  interface
 
-ProxyCreator implements PostProcessor interface, when `postProcessAfterInitialization` get invoked, a prxy object is created with the target advisor  incapsulated, the proxy object will replace the origial bean.
+`ProxyCreator` implements `PostProcessor` interface, when `postProcessAfterInitialization` get invoked, a prxy object is created with the target advisor  incapsulated, the proxy object will replace the origial bean.
 
 
 ```plantuml

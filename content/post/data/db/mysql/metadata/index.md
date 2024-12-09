@@ -41,6 +41,31 @@ Basic Data Dictionary Tables
 
 `information_schema` is now implemented as views over dictionary tables, requires no extra disc accesses, no creation of temporary tables.
 
+## 1.1 Data Dictionary Cache
+
+`Dictionary_client` provides a unified interface to accessing dictionary objects. The main task of the client is to access a shared cache to retrive dictionary objects. The shared cache in its turn, will access dictionary tables if there is a cache miss.
+
+```plantuml
+class Dictionary_client {
+    std::vector<Entity_object *> m_uncached_objects
+  Object_registry m_registry_committed
+  Object_registry m_registry_uncommitted
+  Object_registry m_registry_dropped
+  THD *m_thd                      
+  Auto_releaser m_default_releaser
+  Auto_releaser *m_current_releaser
+
+  bool acquire(&key, **object,...)
+  void acquire_uncommitted(&key, **object)
+  size_t release(Object_registry *registry)
+  bool fetch_schema_components(*schema, Const_ptr_vec<T> *coll)
+  bool fetch_global_components(Const_ptr_vec<T> *coll)
+  bool store(T *object)
+  update(T *new_object)
+  bool drop(const T *object)
+}
+```
+
 
 
 ```plantuml
@@ -105,6 +130,10 @@ Table_ref --> Table
 ```
 
 ## 1.1 DD Cache and persistance
+
+
+
+
 `Storage_adapter` handling of access to persistent storage.
 
 ```plantuml
