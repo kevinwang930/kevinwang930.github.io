@@ -1,89 +1,118 @@
 {{ partial "head.html" . }}
-  <body>
-    <div id="blog">
-      {{ partial "header.html" . }}
-      {{ partial "sidebar.html" . }}
-      {{ partial "post/header-cover.html" . }}
-      
 
-      <div id="main" data-behavior="{{ .Scratch.Get "sidebarBehavior" }}"
-        class="{{ with .Params.coverimage }}hasCover{{ end }}
-               {{ if eq .Params.covermeta "out" }}hasCoverMetaOut{{ else }}hasCoverMetaIn{{ end }}
-               {{ with .Params.coverCaption }}hasCoverCaption{{ end }}">
-        <article class="post" id="top">
-          {{ with .Params.covercaption }}
-            <span class="post-header-cover-caption caption">{{ . | markdownify }}</span>
-          {{ end }}
-          {{ if or (not .Params.coverimage) (eq .Params.covermeta "out") }}
-            {{ partial "post/header.html" . }}
-          {{ end }}
-          <div class="post-content markdown">
-            <div class="main-content-wrap">
-              {{ .Content }}
-              {{ partial "post/gallery.html" . }}
-              
-            </div>
+<body>
+  <div id="blog">
+    {{ partial "header.html" . }}
+    {{ partial "sidebar.html" . }}
+    {{ partial "post/header-cover.html" . }}
+
+
+    <div id="main" data-behavior="{{ .Scratch.Get " sidebarBehavior" }}" class="{{ with .Params.coverimage }}hasCover{{ end }}
+               {{ if eq .Params.covermeta " out" }}hasCoverMetaOut{{ else }}hasCoverMetaIn{{ end }} {{ with
+      .Params.coverCaption }}hasCoverCaption{{ end }}">
+      <article class="post" id="top">
+        {{ with .Params.covercaption }}
+        <span class="post-header-cover-caption caption">{{ . | markdownify }}</span>
+        {{ end }}
+        {{ if or (not .Params.coverimage) (eq .Params.covermeta "out") }}
+        {{ partial "post/header.html" . }}
+        {{ end }}
+        <div class="post-content markdown">
+          <div class="main-content-wrap">
+            {{ .Content }}
+            {{ partial "post/gallery.html" . }}
+
           </div>
-          <div id="post-footer" class="post-footer main-content-wrap">
-            {{ if (not (eq .Params.showTags false)) }}
-              {{ with .Params.tags }}
-                {{ $tagsLength := len . }}
-                {{ if gt $tagsLength 0 }}
-                  <div class="post-footer-tags">
-                    <span class="text-color-light text-small">{{ i18n "post.tagged_in" }}</span><br/>
-                    {{ partial "post/tag.html" $ }}
-                  </div>
-                {{ end }}
-              {{ end }}
-            {{ end }}
-            {{ partial "post/actions.html" . }}
-            {{ partial "post/comment.html" . }}
+        </div>
+        <div id="post-footer" class="post-footer main-content-wrap">
+          {{ if (not (eq .Params.showTags false)) }}
+          {{ with .Params.tags }}
+          {{ $tagsLength := len . }}
+          {{ if gt $tagsLength 0 }}
+          <div class="post-footer-tags">
+            <span class="text-color-light text-small">{{ i18n "post.tagged_in" }}</span><br />
+            {{ partial "post/tag.html" $ }}
           </div>
-        </article>
-        {{ partial "footer.html" . }}
-      </div>
-      <div id="bottom-bar" class="post-bottom-bar" data-behavior="{{ .Scratch.Get "sidebarBehavior" }}">
-        {{ partial "post/actions.html" . }}
-      </div>
-      {{ partial "post/share-options.html" . }}
+          {{ end }}
+          {{ end }}
+          {{ end }}
+          {{ partial "post/actions.html" . }}
+          {{ partial "post/comment.html" . }}
+        </div>
+      </article>
+      {{ partial "footer.html" . }}
     </div>
-    <!-- mermaid -->  
-    {{ partial "mermaid.html" . }}
-    <script>
-      const loadScript = (url, onloadFunction) => {
-    var newScript = document.createElement("script");
-    newScript.onerror =  (oError) => {
-      throw new URIError("The script " + oError.target.src + " didn't load correctly.");
-    };
-    if (onloadFunction) { newScript.onload = onloadFunction; }
-    document.head.insertAdjacentElement('beforeend', newScript);
-    newScript.src = url;
-  }
+    <div id="bottom-bar" class="post-bottom-bar" data-behavior="{{ .Scratch.Get " sidebarBehavior" }}">
+      {{ partial "post/actions.html" . }}
+    </div>
+    {{ partial "post/share-options.html" . }}
+  </div>
+  <!-- mermaid -->
+  {{ partial "mermaid.html" . }}
+  <script>
+    const loadScript = (url, onloadFunction) => {
+      var newScript = document.createElement("script");
+      newScript.onerror = (oError) => {
+        throw new URIError("The script " + oError.target.src + " didn't load correctly.");
+      };
+      if (onloadFunction) { newScript.onload = onloadFunction; }
+      document.head.insertAdjacentElement('beforeend', newScript);
+      newScript.src = url;
+    }
 
     const loadPlantUMLOnNeed = () => {
-    let plantumlPrefix = "language-plantuml";
+      let plantumlPrefix = "language-plantuml";
 
-    if (document.querySelectorAll("[class^=" + plantumlPrefix + "]").length > 0) {
-      loadScript('https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js', () => {
-        (function(){
-          Array.prototype.forEach.call(document.querySelectorAll("[class^=" + plantumlPrefix + "]"), function(code){
-            let image = document.createElement("IMG");
-            image.loading = 'lazy'; // Lazy loading
-            image.src = 'http://www.plantuml.com/plantuml/svg/~1' + plantumlEncoder.encode(code.innerText);
-            code.parentNode.insertBefore(image, code);
-            code.style.display = 'none';
-          });
-        })();
+      if (document.querySelectorAll("[class^=" + plantumlPrefix + "]").length > 0) {
+        loadScript('https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js', () => {
+          (function () {
+            Array.prototype.forEach.call(document.querySelectorAll("[class^=" + plantumlPrefix + "]"), function (code) {
+              let image = document.createElement("IMG");
+              image.loading = 'lazy'; // Lazy loading
+              image.src = 'http://www.plantuml.com/plantuml/svg/~1' + plantumlEncoder.encode(code.innerText);
+              code.parentNode.insertBefore(image, code);
+              code.style.display = 'none';
+            });
+          })();
 
-        console.log("PlantUML init done");
-      })
+          console.log("PlantUML init done");
+        })
+      }
     }
-  }
 
-  window.addEventListener('load', function(event) {
-    // load PlantUML
-    loadPlantUMLOnNeed();
-  })
-    </script>
+    const loadMathJaxIfNeeded = () => {
+      // Check for both inline and display math
+      if (document.body.textContent.includes('$')) {
+        // More precise check to avoid false positives
+        const hasMath = /\$[^\$]+\$/.test(document.body.textContent) ||
+          /\$\$[^\$]+\$\$/.test(document.body.textContent);
 
-{{ partial "foot.html" . }}
+        if (hasMath) {
+          loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML', () => {
+            MathJax.Hub.Config({
+              tex2jax: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: true,
+                processEnvironments: true,
+              },
+              displayAlign: 'center',
+              "HTML-CSS": {
+                styles: { '.MathJax_Display': { "margin": 0 } },
+                linebreaks: { automatic: true }
+              }
+            });
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub]);
+          });
+        }
+      }
+    }
+
+    window.addEventListener('load', function (event) {
+      // load PlantUML
+      loadPlantUMLOnNeed();
+      loadMathJaxIfNeeded();
+    })
+  </script>
+
+  {{ partial "foot.html" . }}
