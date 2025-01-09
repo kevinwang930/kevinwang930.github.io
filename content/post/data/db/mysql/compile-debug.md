@@ -31,7 +31,7 @@ cmake --build debug --target mysqld
 ```
 mysqld  --defaults-file=./debug/my.cnf --initialize  // generate random root password
 
-mysqld  --defaults-file=/code/git/mysql/debug/my.cnf 
+mysqld  --defaults-file=/code/git/mysql/debug/my.cnf  // start mysql server
 
 mysql --socket=/code/git/mysql/debug/mysqlx.sock -u root -p
 
@@ -39,6 +39,8 @@ mysql --socket=/code/git/mysql/debug/mysqlx.sock -u root -p
 ALTER USER 'root'@'localhost' IDENTIFIED BY '123456'
 
 UPDATE mysql.user SET Host='%' WHERE User='root' AND Host='localhost'    // set login ip
+
+mysql -h 127.0.0.1 -P 3310 -u root -p
 ```
 
 conf file content 
