@@ -506,7 +506,30 @@ ComponentScanAnnotationParser --> ClassPathBeanDefinitionScanner:scan
 4. init all Singleton Beans
 
 ```plantuml
-title : application context initialization
+title: Application context initialization
+
+participant SpringApplication
+
+group create 
+SpringApplication -> DefaultApplicationContextFactory: createContext
+activate DefaultApplicationContextFactory
+DefaultApplicationContextFactory <- SpringFactoriesLoader: load ApplicationContextFactories
+loop ApplicationContextFactories
+DefaultApplicationContextFactory -> DefaultApplicationContextFactory: create
+end
+opt context is null
+DefaultApplicationContextFactory -> DefaultApplicationContextFactory: create GenericApplicationContext
+
+end
+DefaultApplicationContextFactory -> SpringApplication: AnnotationConfigApplicationContext
+end
+deactivate DefaultApplicationContextFactory
+
+
+```
+
+```plantuml
+title : bean factory initialization
 AbstractApplicationContext--> AbstractApplicationContext:refresh
 AbstractApplicationContext --> BeanFactory: create
 BeanFactory --> BeanFactory:loadBeanDefinitions
@@ -602,6 +625,5 @@ DefaultListableBeanFactory --> DefaultListableBeanFactory: getSingleton
 DefaultListableBeanFactory --> DefaultListableBeanFactory: registerDisposableBeanIfNecessary
 ```
 
-# AOP
 
 

@@ -24,6 +24,7 @@ tags:
     java.util.Set
     java.util.SortedSet
     java.util.NavigableSet
+    java.util.List
     java.util.Queue
     java.util.concurrent.BlockingQueue
     java.util.concurrent.TransferQueue
