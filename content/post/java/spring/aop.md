@@ -14,9 +14,10 @@ keywords:
 本文记录 spring aop 架构与实现
 <!--more-->
 
-# Concept
+
 `Aspect-oriented Programming (AOP)` is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.
 
+# AOP Interfaces
 `Aspect` A modularization of a concern that cuts across multiple classes. Example : Transaction management
 
 `Joinpoint` represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.
@@ -33,39 +34,14 @@ Advice types:
 
 `Pointcut`  A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any `Joinpoint` matched by the `pointcut`.
 
-`Proxy` An object created by the AOP framework in order to implement the aspect contracts
+`Proxy` An object created by the AOP framework in order to implement the aspect contracts.
 
-
-
-```plantuml
-top to bottom direction
-title: transaction advisor 
-interface Advisor {
-    Advice getAdvice()
-}
-interface PointcutAdvisor extends Advisor {
-    Pointcut getPointcut()
-}
-abstract class AbstractPointcutAdvisor implements PointcutAdvisor {
-    String adviceBeanName
-    BeanFactory beanFactory
-    transient volatile Advice advice
-
-}
-abstract class AbstractBeanFactoryPointcutAdvisor extends AbstractPointcutAdvisor {
-
-}
-class BeanFactoryTransactionAttributeSourceAdvisor extends AbstractBeanFactoryPointcutAdvisor {
-    TransactionAttributeSourcePointcut pointcut = new TransactionAttributeSourcePointcut()
-}
-```
-
-# Mechanism
-
+# AOP during Bean creation
 AOP uses either JDK dynamic proxies or CGLIB to create proxy
 `dynamicProxy` only works when proxied object  implements at least one  interface
 
-`ProxyCreator` implements `PostProcessor` interface, when `postProcessAfterInitialization` get invoked, a prxy object is created with the target advisor  incapsulated, the proxy object will replace the origial bean.
+`ProxyCreator` implements `PostProcessor` interface, when `postProcessAfterInitialization` get invoked, a proxy object is created with the target advisor encapsulated, the proxy object will replace the origial bean.
+
 
 
 ```plantuml
@@ -146,6 +122,8 @@ class ProxyProcessorSupport {
 # boolean isInternalLanguageInterface(Class<?>)
 }
 
+interface AopProxy
+
 AspectJAutoProxyRegistrar  -right-> AnnotationAwareAspectJAutoProxyCreator:register
 
 ```
@@ -176,4 +154,55 @@ abstract class AbstractBeanFactoryBasedTargetSource implements TargetSource, Bea
 }
 
 class SimpleBeanTargetSource extends AbstractBeanFactoryBasedTargetSource
+```
+
+# Transactional AOP
+`ProxyTransactionManagementConfiguration` a `@Configuration` class that registers the spring Infrastructure beans necessary to enable proxy-based annotation-driven transaction management.
+`BeanFactoryTransactionAttributeSourceAdvisor`  Advisor used to include a transactional advice bean for method that are transactional
+
+```plantuml
+top to bottom direction
+title: transactional AOP
+interface Advisor {
+    Advice getAdvice()
+}
+interface PointcutAdvisor extends Advisor {
+    Pointcut getPointcut()
+}
+abstract class AbstractPointcutAdvisor implements PointcutAdvisor {
+    String adviceBeanName
+    BeanFactory beanFactory
+    transient volatile Advice advice
+
+}
+abstract class AbstractBeanFactoryPointcutAdvisor extends AbstractPointcutAdvisor {
+
+}
+class BeanFactoryTransactionAttributeSourceAdvisor extends AbstractBeanFactoryPointcutAdvisor {
+    TransactionAttributeSourcePointcut pointcut
+    Advice TransactionInterceptor
+}
+
+
+
+class ProxyTransactionManagementConfiguration {
+
+}
+
+
+interface Advice 
+interface BeanFactoryAware 
+interface Interceptor  extends Advice
+interface MethodInterceptor  extends Interceptor {
+    Object invoke(invocation) throws Throwable
+}
+class TransactionAspectSupport implements BeanFactoryAware
+class TransactionInterceptor extends TransactionAspectSupport implements MethodInterceptor
+
+
+
+
+ProxyTransactionManagementConfiguration -> BeanFactoryTransactionAttributeSourceAdvisor:createBean
+ProxyTransactionManagementConfiguration -down> TransactionInterceptor:createBean
+BeanFactoryTransactionAttributeSourceAdvisor *-- TransactionInterceptor
 ```
