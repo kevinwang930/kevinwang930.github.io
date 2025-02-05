@@ -1,4 +1,4 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文记录 spring aop 架构与实现\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring\/aop\/","keywords":"[aop]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.142.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="aop"><meta name=description content="本文记录 spring aop 架构与实现"><meta property="og:description" content="本文记录 spring aop 架构与实现"><meta property="og:type" content="article"><meta property="og:title" content="spring aop 架构与实现"><meta name=twitter:title content="spring aop 架构与实现"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring/aop/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring/aop/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录 spring aop 架构与实现"><meta name=twitter:description content="本文记录 spring aop 架构与实现"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-04-01T12:44:12"><meta property="article:modified_time" content="2024-04-01T12:44:12"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="spring"><meta property="article:tag" content="aop"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>spring aop 架构与实现</title>
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文记录 spring aop 架构与实现\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring\/aop\/","keywords":"[aop]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.143.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="aop"><meta name=description content="本文记录 spring aop 架构与实现"><meta property="og:description" content="本文记录 spring aop 架构与实现"><meta property="og:type" content="article"><meta property="og:title" content="spring aop 架构与实现"><meta name=twitter:title content="spring aop 架构与实现"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring/aop/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring/aop/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录 spring aop 架构与实现"><meta name=twitter:description content="本文记录 spring aop 架构与实现"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-04-01T12:44:12"><meta property="article:modified_time" content="2024-04-01T12:44:12"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="spring"><meta property="article:tag" content="aop"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>spring aop 架构与实现</title>
 <link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/spring/aop/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
 <span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
 <span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
@@ -8,28 +8,8 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>spring aop 架构与实现</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-01T12:44:12+08:00>April 1, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录 spring aop 架构与实现</p><h1 id=concept>Concept</h1><p><code>Aspect-oriented Programming (AOP)</code> is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.</p><p><code>Aspect</code> A modularization of a concern that cuts across multiple classes. Example : Transaction management</p><p><code>Joinpoint</code> represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.</p><p><code>Advice</code> Action taken by an aspect at a particular joinpoint</p><p>Advice types:</p><ol><li>before</li><li>after</li><li>finally</li><li>around</li></ol><p><code>Advisor</code> interface holding AOP <code>advice</code> and a filter determing the applicability of the advice(such as a <code>pointcut</code>)</p><p><code>Pointcut</code> A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any <code>Joinpoint</code> matched by the <code>pointcut</code>.</p><p><code>Proxy</code> An object created by the AOP framework in order to implement the aspect contracts</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
-title: transaction advisor 
-interface Advisor {
-    Advice getAdvice()
-}
-interface PointcutAdvisor extends Advisor {
-    Pointcut getPointcut()
-}
-abstract class AbstractPointcutAdvisor implements PointcutAdvisor {
-    String adviceBeanName
-    BeanFactory beanFactory
-    transient volatile Advice advice
-
-}
-abstract class AbstractBeanFactoryPointcutAdvisor extends AbstractPointcutAdvisor {
-
-}
-class BeanFactoryTransactionAttributeSourceAdvisor extends AbstractBeanFactoryPointcutAdvisor {
-    TransactionAttributeSourcePointcut pointcut = new TransactionAttributeSourcePointcut()
-}
-</code></pre><h1 id=mechanism>Mechanism</h1><p>AOP uses either JDK dynamic proxies or CGLIB to create proxy
-<code>dynamicProxy</code> only works when proxied object implements at least one interface</p><p><code>ProxyCreator</code> implements <code>PostProcessor</code> interface, when <code>postProcessAfterInitialization</code> get invoked, a prxy object is created with the target advisor incapsulated, the proxy object will replace the origial bean.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface ImportBeanDefinitionRegistrar {
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录 spring aop 架构与实现</p><p><code>Aspect-oriented Programming (AOP)</code> is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.</p><h1 id=aop-interfaces>AOP Interfaces</h1><p><code>Aspect</code> A modularization of a concern that cuts across multiple classes. Example : Transaction management</p><p><code>Joinpoint</code> represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.</p><p><code>Advice</code> Action taken by an aspect at a particular joinpoint</p><p>Advice types:</p><ol><li>before</li><li>after</li><li>finally</li><li>around</li></ol><p><code>Advisor</code> interface holding AOP <code>advice</code> and a filter determing the applicability of the advice(such as a <code>pointcut</code>)</p><p><code>Pointcut</code> A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any <code>Joinpoint</code> matched by the <code>pointcut</code>.</p><p><code>Proxy</code> An object created by the AOP framework in order to implement the aspect contracts.</p><h1 id=aop-during-bean-creation>AOP during Bean creation</h1><p>AOP uses either JDK dynamic proxies or CGLIB to create proxy
+<code>dynamicProxy</code> only works when proxied object implements at least one interface</p><p><code>ProxyCreator</code> implements <code>PostProcessor</code> interface, when <code>postProcessAfterInitialization</code> get invoked, a proxy object is created with the target advisor encapsulated, the proxy object will replace the origial bean.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface ImportBeanDefinitionRegistrar {
 + void registerBeanDefinitions()
 }
 
@@ -106,6 +86,8 @@ class ProxyProcessorSupport {
 # boolean isInternalLanguageInterface(Class&lt;?&gt;)
 }
 
+interface AopProxy
+
 AspectJAutoProxyRegistrar  -right-&gt; AnnotationAwareAspectJAutoProxyCreator:register
 </code></pre><h1 id=target-source>Target Source</h1><p><code>TargetClassAware</code> Minimal interface for exposing the target class behind a proxy</p><p><code>TargetSource</code> is used to obtain the current target of the AOP invocation, which will be invoked via reflection if no around advice chooses to end the interceptor chain itself</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface TargetClassAware {
     Class&lt;?&gt; getTargetClass()
@@ -124,6 +106,51 @@ abstract class AbstractBeanFactoryBasedTargetSource implements TargetSource, Bea
 }
 
 class SimpleBeanTargetSource extends AbstractBeanFactoryBasedTargetSource
+</code></pre><h1 id=transactional-aop>Transactional AOP</h1><p><code>ProxyTransactionManagementConfiguration</code> a <code>@Configuration</code> class that registers the spring Infrastructure beans necessary to enable proxy-based annotation-driven transaction management.
+<code>BeanFactoryTransactionAttributeSourceAdvisor</code> Advisor used to include a transactional advice bean for method that are transactional</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+title: transactional AOP
+interface Advisor {
+    Advice getAdvice()
+}
+interface PointcutAdvisor extends Advisor {
+    Pointcut getPointcut()
+}
+abstract class AbstractPointcutAdvisor implements PointcutAdvisor {
+    String adviceBeanName
+    BeanFactory beanFactory
+    transient volatile Advice advice
+
+}
+abstract class AbstractBeanFactoryPointcutAdvisor extends AbstractPointcutAdvisor {
+
+}
+class BeanFactoryTransactionAttributeSourceAdvisor extends AbstractBeanFactoryPointcutAdvisor {
+    TransactionAttributeSourcePointcut pointcut
+    Advice TransactionInterceptor
+}
+
+
+
+class ProxyTransactionManagementConfiguration {
+
+}
+
+
+interface Advice 
+interface BeanFactoryAware 
+interface Interceptor  extends Advice
+interface MethodInterceptor  extends Interceptor {
+    Object invoke(invocation) throws Throwable
+}
+class TransactionAspectSupport implements BeanFactoryAware
+class TransactionInterceptor extends TransactionAspectSupport implements MethodInterceptor
+
+
+
+
+ProxyTransactionManagementConfiguration -&gt; BeanFactoryTransactionAttributeSourceAdvisor:createBean
+ProxyTransactionManagementConfiguration -down&gt; TransactionInterceptor:createBean
+BeanFactoryTransactionAttributeSourceAdvisor *-- TransactionInterceptor
 </code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/aop/>aop</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip="Spring Security" aria-label="NEXT: Spring Security"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="PREVIOUS: go Syntax"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
