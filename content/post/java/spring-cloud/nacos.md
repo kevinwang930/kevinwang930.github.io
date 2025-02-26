@@ -15,12 +15,22 @@ This Article introduces NACOS
 
 <!--more-->
 
-# Starter
-
-
-## Config
 
 NACOS allows user to manage the configuration of all applications and services in a centralized , externalized and dynamic manner across all environments
+
+
+# Nacos In Spring
+
+There are 2  ways integrating NACOS to spring
+1. nacos-spring-boot-starter
+2. spring-cloud-starter-alibaba-nacos
+
+## SpringBoot integration
+
+
+
+## Spring cloud integration
+
 
 `NacosPropertySource` represents nacos config with unique dataId in group
 
@@ -102,7 +112,7 @@ ConfigRpcTransportClient -->  RpcClientFactory: get
 
 
 
-# Bootstrap
+### Bootstrap
 ```plantuml
 
 interface BootstrapConfiguration 
@@ -125,7 +135,7 @@ NacosConfigBootstrapConfiguration --> NacosPropertySourceLocator: create
 
 ```
 
-## API
+# API
 Naming and Configuration Service
 
 Service registration

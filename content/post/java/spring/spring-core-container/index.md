@@ -240,8 +240,6 @@ Examples include `java.util.Properties` objects,`java.uti.Map` objects,`ServletC
 ```plantuml
 @startuml
 
-!theme plain
-top to bottom direction
 skinparam linetype ortho
 
 interface Iterable<PropertySource> << interface >>
@@ -262,8 +260,8 @@ abstract class PropertySource<T> {
     T getSource()
 }
 
-MutablePropertySources  -[#008200,dashed]-^  PropertySources        
-PropertySources         -[#008200,plain]-^  Iterable    
+PropertySources          -|> Iterable    
+MutablePropertySources  -|>  PropertySources        
 MutablePropertySources o--      PropertySource      
 @enduml
 
@@ -426,7 +424,11 @@ SimpleApplicationEventMulticaster    -[#000082,plain]-^  AbstractApplicationEven
 ```
 
 
-## Annotation
+## Configuration
+`@Configuration` annotation can be used to indicates that a class 's primary purpose as a source of bean definitions,thus allow user to inject property sources, bean definitions in a much flexible way. 
+Spring uses `ConfigurationClassPostProcessor` to bootstrap `Configuration` class internally.
+
+### Annotation
 
 `@Configuration` indicates that a class declares one more `@Bean` methods
 

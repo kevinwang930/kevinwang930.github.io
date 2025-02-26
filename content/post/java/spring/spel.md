@@ -195,3 +195,10 @@ The common practice for delimit evaluation blocks is `#{ }`
 ```
 @Value("#{systemProperties['pop3.port'] ?: 25}")
 ```
+
+## Spring property placeHolder
+spring uses `${}` for placeHolder of properties which is not a standard SPEL.
+```
+@Value("${config.a:default}")
+private String test;
+```
