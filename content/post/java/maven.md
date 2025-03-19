@@ -42,8 +42,8 @@ The `default` build lifecycle:
 10. test
 11. package
 12. verify
-13. install
-14. deploy
+13. install   install hte built artifact into local repo
+14. deploy      deploy the built artifact into remote repo
 
 
 
