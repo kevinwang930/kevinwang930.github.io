@@ -19,9 +19,9 @@ title = "Kevin wang's blog"
 theme = "hugo-tranquilpeak-theme"
 disqusShortname = "blog-kevinwang930"
 # googleAnalytics = "UA-123-45"
-paginate = 7
 canonifyurls = true
-
+[pagination]
+  pagerSize = 7
 [module]
 
 [permalinks]
