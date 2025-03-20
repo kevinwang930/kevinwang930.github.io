@@ -1,5 +1,5 @@
 ---
-title: "Build and debug JVM"
+title: "OpenJDK build and debug"
 date: 2025-03-12T01:22:42+07:00
 categories:
 - java
@@ -10,7 +10,7 @@ keywords:
 - jvm
 #thumbnailImage: //example.com/image.jpg
 ---
-This article introduces how to build and debug JVM
+This article introduces how to build and debug OpenJDK source code
 <!--more-->
 
 # Build
