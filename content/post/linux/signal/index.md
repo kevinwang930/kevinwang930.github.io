@@ -36,13 +36,13 @@ Kernel performs necessary preparatory steps for the execution of signal handlers
 # Common Signal Types
 
 
-| Signal  | Description                           | Number |
-| ------- | ------------------------------------- | ------ |
-| SIGINT  | Interrupt from keyboard               | 2      |
-| SIGKILL | Kill signal, terminate immediately    | 9      |
-| SIGSEGV | Segmentation fault                    | 11     |
-| SIGTERM | Terminate gracefully,allowing cleanup | 15     |
-| SIGSTOP | Stop process                          | 19     |
+| Signal  | Description                                       | Number |
+| ------- | ------------------------------------------------- | ------ |
+| SIGINT  | Interrupt from keyboard                           | 2      |
+| SIGKILL | Kill signal, terminate immediately                | 9      |
+| SIGSEGV | Segmentation fault                                | 11     |
+| SIGTERM | Terminate gracefully,allowing handlers to cleanup | 15     |
+| SIGSTOP | Stop process                                      | 19     |
 
 
 The signals `SIGKILL` and `SIGSTOP` cannot be caught, blocked, or ignored.
