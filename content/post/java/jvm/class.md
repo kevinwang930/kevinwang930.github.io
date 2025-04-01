@@ -1,5 +1,5 @@
 ---
-title: "JAVA Class and Reflection"
+title: "JAVA Class File and Reflection"
 date: 2025-03-30T00:41:18+07:00
 categories:
 - java
@@ -18,7 +18,7 @@ This article introduces  Java Class and  Class File format.
 Instances of the class `Class` represents classes and interfaces in running java application.
 An enum class is a kind of class.
 An Annotation interface is a kind of interface.
-The primitive Java types the keyword void are also represented as `Class` object
+The primitive Java types and the keyword `void` are also represented as `Class` object
 
 
 ## Reflection
