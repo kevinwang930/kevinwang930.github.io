@@ -14,6 +14,37 @@ keywords:
 Spring Expression Language ("SpEL for short") is a powerful expression language that support querying and manipulating an object graph at runtime.
 <!--more-->
 
+
+# Spring Value Resolve
+
+Spring Context supports resolving Place Holder `${}` and Spring Expression `#{}` out of box.
+`StringValueResolver` Strategy interface for resolving a String value. 
+`BeanExpressionResolver` Strategy interface for resolving a value by evaluating it as an expression
+`StandardBeanExpressionResolver` standard implementation of `BeanExpressionResolver`, parsing and evaluating spring EL using spring's expression module.
+
+
+```plantuml
+interface BeanExpressionResolver {
+  Object evaluate(value,  beanExpressionContext)
+}
+
+interface  StringValueResolver  {
+  String resolveStringValue(String strVal)
+}
+
+abstract class AbstractBeanFactory {
+  BeanExpressionResolver beanExpressionResolver
+  List<StringValueResolver> embeddedValueResolvers
+}
+
+class StandardBeanExpressionResolver implements BeanExpressionResolver
+
+
+AbstractBeanFactory o-- StringValueResolver:  place holder 
+AbstractBeanFactory *-- BeanExpressionResolver:  EL 
+```
+
+
 # Language Reference
 The expression language supports the following functionality:
 
