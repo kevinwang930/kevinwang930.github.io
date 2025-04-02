@@ -8,7 +8,28 @@
 <span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring Expression Language</h1><div class="postShorten-meta post-meta"><time datetime=2025-01-22T21:09:34+07:00>January 22, 2025
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>Spring Expression Language (&ldquo;SpEL for short&rdquo;) is a powerful expression language that support querying and manipulating an object graph at runtime.</p><h1 id=language-reference>Language Reference</h1><p>The expression language supports the following functionality:</p><ul><li>Literal expressions</li><li>Accessing properties, arrays, lists, and maps</li><li>Inline lists</li><li>Inline maps</li><li>Array construction</li><li>Relational operators</li><li>Regular expressions</li><li>Logical operators</li><li>String operators</li><li>Mathematical operators</li><li>Assignment</li><li>Type expressions</li><li>Method invocation</li><li>Constructor invocation</li><li>Variables</li><li>User-defined functions</li><li>Bean references</li><li>Ternary, Elvis, and safe-navigation operators</li><li>Collection projection</li><li>Collection selection</li><li>Templated expressions</li></ul><h2 id=literal>Literal</h2><ul><li>String delimited by <code>'</code> or <code>"</code></li><li>Number<ul><li>Integer <code>int</code> or <code>long</code></li><li>Hexadecimal <code>int</code> or <code>long</code></li><li>Real <code>float</code> or <code>double</code></li></ul></li><li>Boolean <code>true</code> or <code>false</code></li><li>Null <code>null</code></li></ul><h2 id=property>property</h2><p>Using a period (<code>.</code>) to indicate a nested property value.</p><pre tabindex=0><code>birthdate.year + 1990
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>Spring Expression Language (&ldquo;SpEL for short&rdquo;) is a powerful expression language that support querying and manipulating an object graph at runtime.</p><h1 id=spring-value-resolve>Spring Value Resolve</h1><p>Spring Context supports resolving Place Holder <code>${}</code> and Spring Expression <code>#{}</code> out of box.
+<code>StringValueResolver</code> Strategy interface for resolving a String value.
+<code>BeanExpressionResolver</code> Strategy interface for resolving a value by evaluating it as an expression
+<code>StandardBeanExpressionResolver</code> standard implementation of <code>BeanExpressionResolver</code>, parsing and evaluating spring EL using spring&rsquo;s expression module.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface BeanExpressionResolver {
+  Object evaluate(value,  beanExpressionContext)
+}
+
+interface  StringValueResolver  {
+  String resolveStringValue(String strVal)
+}
+
+abstract class AbstractBeanFactory {
+  BeanExpressionResolver beanExpressionResolver
+  List&lt;StringValueResolver&gt; embeddedValueResolvers
+}
+
+class StandardBeanExpressionResolver implements BeanExpressionResolver
+
+
+AbstractBeanFactory o-- StringValueResolver:  place holder 
+AbstractBeanFactory *-- BeanExpressionResolver:  EL 
+</code></pre><h1 id=language-reference>Language Reference</h1><p>The expression language supports the following functionality:</p><ul><li>Literal expressions</li><li>Accessing properties, arrays, lists, and maps</li><li>Inline lists</li><li>Inline maps</li><li>Array construction</li><li>Relational operators</li><li>Regular expressions</li><li>Logical operators</li><li>String operators</li><li>Mathematical operators</li><li>Assignment</li><li>Type expressions</li><li>Method invocation</li><li>Constructor invocation</li><li>Variables</li><li>User-defined functions</li><li>Bean references</li><li>Ternary, Elvis, and safe-navigation operators</li><li>Collection projection</li><li>Collection selection</li><li>Templated expressions</li></ul><h2 id=literal>Literal</h2><ul><li>String delimited by <code>'</code> or <code>"</code></li><li>Number<ul><li>Integer <code>int</code> or <code>long</code></li><li>Hexadecimal <code>int</code> or <code>long</code></li><li>Real <code>float</code> or <code>double</code></li></ul></li><li>Boolean <code>true</code> or <code>false</code></li><li>Null <code>null</code></li></ul><h2 id=property>property</h2><p>Using a period (<code>.</code>) to indicate a nested property value.</p><pre tabindex=0><code>birthdate.year + 1990
 </code></pre><h2 id=array-and-collection-index>Array and collection Index</h2><p>Using square bracket notation to index array or collection
 String can also be regarded as a character array thus be indexed.
 Map can also be indexed using key within square bracket.
