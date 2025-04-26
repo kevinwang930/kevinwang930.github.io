@@ -156,14 +156,19 @@ class CompletableFuture<T> implements Future, CompletionStage {
     Completion stack
 }
 
-abstract class Completion extends ForkJoinTask<Void> implements Runnable,AsynchronousCompletionTask {
-    Completion next
-        }
-
 abstract class ForkJoinTask<V> implements Future {
     int status
     Aux aux
 }
+abstract class Completion extends ForkJoinTask<Void> implements Runnable,AsynchronousCompletionTask {
+    Completion next
+        }
+
+abstract  class UniCompletion<T,V> extends Completion {
+    CompletableFuture<V> dep
+    CompletableFuture<T> src
+}
+
 
 CompletableFuture *-down- Completion
 ```

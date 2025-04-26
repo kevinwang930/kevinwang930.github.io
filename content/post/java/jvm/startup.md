@@ -19,7 +19,8 @@ keywords:
 
 
 ```plantuml
-main.c-->main.c:main(int argc, char **argv)
+os -> main.c: main
+activate main.c
 main.c-->java.c:JLI_Launch(...)
 java.c-->java_md.c:CreateExecutionEnvironment
 java.c-->java_md.c:LoadJavaVM
