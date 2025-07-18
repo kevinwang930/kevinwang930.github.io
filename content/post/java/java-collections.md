@@ -124,6 +124,9 @@ interface Deque<E> extends Queue, SequencedCollection {
 }
 ```
 
+### PriorityQueue
+
+
 ```plantuml
 title: map
 interface Map<K, V> {

@@ -20,6 +20,32 @@ An enum class is a kind of class.
 An Annotation interface is a kind of interface.
 The primitive Java types and the keyword `void` are also represented as `Class` object
 
+## class loading
+
+```plantuml
+
+
+abstract class ClassLoader {
+    ClassLoader parent
+    Class<?> loadClass(String name)
+}
+class SecureClassLoader extends ClassLoader
+class BuiltinClassLoader extends SecureClassLoader {
+    BuiltinClassLoader parent
+    URLClassPath ucp
+}
+
+class PlatformClassLoader extends BuiltinClassLoader
+class AppClassLoader extends BuiltinClassLoader
+class BootClassLoader extends BuiltinClassLoader
+AppClassLoader -right-> PlatformClassLoader: parent
+PlatformClassLoader -right->BootClassLoader : parent
+
+
+
+
+```
+
 
 ## Reflection
 

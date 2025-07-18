@@ -30,6 +30,132 @@ Netty is an asynchronous event-driven network application framework for rapid de
 ## Transport 
 The data that flows through a network always has the same type: bytes. How these bytes are moved around depends mostly on what we refer to as the network transport, a concept that helps us to abstract away the underlying mechanics of data transfer.
 
+
+
+## Event
+
+* `ScheduledExecutorService` an `ExecutorService` that can schedule commands to run after a given delay.
+* `EventExecutorGroup` provides the `EventExecutor` to use via its method `next()`. It also provides method of life-cycle management and shutting them down in global fashion.
+* `EventExecutor` is a special `EventExecutorGroup` whose `next()` is itself.
+* `EventLoopGroup` special `EventExecutorGroup` which allows registering `Channel`s that get processed for later selection during the event loop 
+* `EventLoop` will handle all the I/O operations for a `Channel` once registered.
+* `IoHandler` handles I/O dispatching for an `ThreadAwareExecutor`
+
+```plantuml
+@startuml
+
+top to bottom direction
+
+
+interface AutoCloseable 
+interface Executor {
+  void execute(Runnable command)
+}
+interface ThreadAwareExecutor extends Executor {
+  boolean isExecutorThread(Thread thread)
+}
+interface ExecutorService extends Executor,AutoCloseable {
+  Future<T> submit(Callable<T> task)
+  void shutdown()
+}
+
+interface ScheduledExecutorService extends ExecutorService  {
+  ScheduledFuture<?> schedule(Runnable command,long delay, TimeUnit unit)
+}
+interface EventExecutorGroup  extends ScheduledExecutorService {
+    EventExecutor next()
+    Future<?> shutdownGracefully()
+}
+class AbstractEventExecutorGroup implements EventExecutorGroup
+
+interface EventExecutor extends EventExecutorGroup,ThreadAwareExecutor {
+  EventExecutorGroup parent()
+  boolean inEventLoop(Thread thread)
+
+  
+}
+interface EventLoopGroup extends EventExecutorGroup {
+    EventLoop next()
+    ChannelFuture register(Channel channel)
+}
+
+interface OrderedEventExecutor extends EventExecutor
+interface EventLoop extends OrderedEventExecutor,EventLoopGroup {
+  EventLoopGroup parent()
+}
+
+
+class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
+    EventExecutor[] children
+    Set<EventExecutor> readonlyChildren
+    AtomicInteger terminatedChildren
+    Promise<?> terminationFuture
+    EventExecutorChooser chooser
+    EventExecutor next()
+    {abstract} EventExecutor newChild(Executor executor, args)
+}
+class MultithreadEventLoopGroup extends MultithreadEventExecutorGroup implements EventLoopGroup
+class NioEventLoopGroup extends MultithreadEventLoopGroup {
+    EventLoop newChild(Executor executor, Object... args)
+}
+
+abstract class SingleThreadEventExecutor extends AbstractScheduledEventExecutor implements EventExecutor {
+  Queue<Runnable> taskQueue
+  Thread thread
+  ThreadProperties threadProperties
+  Executor executor
+  CountDownLatch threadLock
+  Set<Runnable> shutdownHooks
+  RejectedExecutionHandler rejectedExecutionHandler
+  Promise<?> terminationFuture
+  void execute(Runnable task)
+  -void startThread()
+  void run()
+}
+
+class ThreadPerTaskExecutor implements Executor {
+  ThreadFactory threadFactory
+}
+
+class NioEventLoop extends SingleThreadEventLoop {
+  Selector selector
+  Selector unwrappedSelector
+  SelectedSelectionKeySet selectedKeys
+  SelectorProvider provider
+  SelectStrategy selectStrategy
+}
+abstract class SingleThreadEventLoop extends SingleThreadEventExecutor implements EventLoop {
+  Queue<Runnable> tailTasks
+}
+interface IoEventLoopGroup extends EventLoopGroup {
+  IoEventLoop next()
+  Future<IoRegistration> register(IoHandle handle)
+}
+interface IoEventLoop extends EventLoop, IoEventLoopGroup
+class SingleThreadIoEventLoop extends SingleThreadEventLoop implements IoEventLoop {
+  IoHandler ioHandler
+}
+
+interface IoHandler {
+  IoRegistration register(IoHandle handle)
+  int run(IoHandlerContext context)
+}
+
+class NioIoHandler implements IoHandler {
+  Selector selector
+  SelectorProvider provider
+}
+
+SingleThreadIoEventLoop *-- IoHandler
+
+SingleThreadEventExecutor *-left- ThreadPerTaskExecutor
+
+@enduml
+
+```
+
+
+
 ### Channel
 `Channel`  A nexus to a network socket or a component which is capable of I/O operations such as read,write,connect and bind.
   A channel provides a user:
@@ -136,73 +262,6 @@ class ChannelInboundHandlerAdapter extends ChannelHandlerAdapter implements Chan
 class ChannelOutboundHandlerAdapter extends ChannelHandlerAdapter implements ChannelOutboundHandler
 ```
 
-## Event
-
-* `ScheduledExecutorService` an `ExecutorService` that can schedule commands to run after a given delay.
-* `EventExecutorGroup` provides the `EventExecutor` to use via its method `next()`. It also provides method of life-cycle management and shutting them down in global fashion.
-* `EventExecutor` is a special `EventExecutorGroup` whose `next()` is itself.
-* `EventLoopGroup` special `EventExecutorGroup` which allows registering `Channel`s that get processed for later selection during the event loop 
-* `EventLoop` will handle all the I/O operations for a `Channel` once registered.
-
-```plantuml
-@startuml
-
-top to bottom direction
-
-
-class AbstractEventExecutorGroup implements EventExecutorGroup
-interface AutoCloseable 
-interface EventExecutorGroup  extends ScheduledExecutorService {
-    EventExecutor next()
-}
-
-interface EventLoopGroup extends EventExecutorGroup {
-    ChannelFuture register(Channel channel)
-}
-interface EventExecutor extends EventExecutorGroup
-interface EventLoop extends EventLoopGroup
-
-interface Executor 
-interface ExecutorService extends Executor, AutoCloseable
-class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
-    EventExecutor[] children
-    Set<EventExecutor> readonlyChildren
-    AtomicInteger terminatedChildren
-    Promise<?> terminationFuture
-    EventExecutorChooser chooser
-    EventExecutor next()
-    {abstract} EventExecutor newChild(Executor executor, args)
-}
-class MultithreadEventLoopGroup extends MultithreadEventExecutorGroup implements EventLoopGroup
-class NioEventLoopGroup extends MultithreadEventLoopGroup {
-    EventLoop newChild(Executor executor, Object... args)
-}
-interface ScheduledExecutorService extends ExecutorService  
-abstract class SingleThreadEventExecutor extends AbstractScheduledEventExecutor implements EventExecutor {
-  Queue<Runnable> taskQueue
-  Thread thread
-  ThreadProperties threadProperties
-  Executor executor
-  CountDownLatch threadLock
-  Set<Runnable> shutdownHooks
-  RejectedExecutionHandler rejectedExecutionHandler
-  Promise<?> terminationFuture
-}
-class NioEventLoop extends SingleThreadEventLoop {
-  Selector selector
-  Selector unwrappedSelector
-  SelectedSelectionKeySet selectedKeys
-  SelectorProvider provider
-  SelectStrategy selectStrategy
-}
-abstract class SingleThreadEventLoop extends SingleThreadEventExecutor implements EventLoop {
-  Queue<Runnable> tailTasks
-}
-
-NioEventLoopGroup -right-> NioEventLoop: new
-@enduml
-
-```
 
 
 # BootStrap

@@ -57,16 +57,15 @@ interface Executor {
 }
 interface ExecutorService extends Executor, AutoCloseable {
     void shutdown()
-    List<Runnable> shutdownNow()
-    boolean isShutdown()
-    boolean isTerminated()
     boolean awaitTermination(long timeout, TimeUnit unit)
     <T> Future<T> submit(Callable<T> task)
     <T> List<Future<T>> invokeAll(tasks, timeout, unit)
     <T> T invokeAny(tasks)
     default void close()
 }
-abstract class AbstractExecutorService implements ExecutorService
+abstract class AbstractExecutorService implements ExecutorService {
+    + Future<?> submit(Runnable task)
+}
 
 interface Future<V> {
     boolean cancel(boolean mayInterruptIfRunning)
