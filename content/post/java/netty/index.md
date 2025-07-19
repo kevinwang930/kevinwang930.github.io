@@ -32,7 +32,9 @@ The data that flows through a network always has the same type: bytes. How these
 
 
 
-## Event
+## EventLoop and Threading model
+
+`EventLoop` is used to handle all the I/O operations for the channels registered, multiple `Channel`s can be assigned to one `EventLoop`. Each `EventLoop` is powered by exactly one `Thread` that never changes.
 
 * `ScheduledExecutorService` an `ExecutorService` that can schedule commands to run after a given delay.
 * `EventExecutorGroup` provides the `EventExecutor` to use via its method `next()`. It also provides method of life-cycle management and shutting them down in global fashion.
