@@ -3,12 +3,11 @@ title: "Netty Internals"
 date: 2024-08-02T13:54:59+08:00
 categories:
 - java
-- concurrency
+- netty
 tags:
-- concurrency
+- netty
 keywords:
 - netty
-- concurrency
 #thumbnailImage: //example.com/image.jpg
 ---
 本文记录Netty架构与实现
