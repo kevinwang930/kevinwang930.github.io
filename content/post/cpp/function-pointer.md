@@ -1,6 +1,7 @@
 ---
 title: "C++ Function Pointer"
 date: 2024-03-23T22:27:40+08:00
+draft: true
 categories:
 - c++
 tags:

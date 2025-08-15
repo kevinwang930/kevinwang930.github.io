@@ -1,6 +1,7 @@
 ---
 title: "Introduction to Cmake"
 date: 2024-10-17T22:02:30+08:00
+draft: true
 categories:
 - c++
 - cmake
