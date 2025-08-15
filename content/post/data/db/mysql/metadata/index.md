@@ -1,5 +1,5 @@
 ---
-title: "Mysql Metadata"
+title: "Mysql internals - Metadata"
 date: 2024-10-13T18:50:37+08:00
 categories:
 - data
@@ -41,7 +41,128 @@ Basic Data Dictionary Tables
 
 `information_schema` is now implemented as views over dictionary tables, requires no extra disc accesses, no creation of temporary tables.
 
-## 1.1 Data Dictionary Cache
+
+## 1.1. 1.1 Meta Data Lock
+
+* `MDL_context` context of the owner of metadata locks
+* `MDL_ticket` a granted meta data lock
+* 
+```plantuml
+class THD {
+    MDL_context mdl_context
+}
+
+class Table_ref  {
+    char *db
+    char *table_name
+    LEX_CSTRING target_tablespace_name
+    table_map m_map
+    table_map sj_inner_tables
+    Table_ref *natural_join
+    List<Natural_join_column> *join_columns
+    TABLE *table
+
+    ST_SCHEMA_TABLE *schema_table
+    Query_block *schema_query_block
+
+    Query_block *query_block
+
+
+    MDL_request mdl_request
+}
+
+class MDL_context {
+    MDL_context_owner *m_owner
+    enum_mdl_type type
+    MDL_ticket_store m_ticket_store
+
+    acquire_locks(*mdl_request)
+
+}
+
+class  MDL_request {
+    MDL_request *next_in_list
+    MDL_request **prev_in_list
+    MDL_ticket *ticket
+    MDL_key key
+}
+
+class MDL_ticket  {
+    MDL_context *m_ctx
+    MDL_lock *m_lock
+}
+
+class MDL_key
+
+class MDL_map {
+    LF_HASH m_locks
+    MDL_lock *m_global_lock
+    MDL_lock *m_commit_lock
+    MDL_lock *m_acl_cache_lock
+    MDL_lock *m_backup_lock
+}
+
+class MDL_lock {
+    {static} MDL_map mdl_locks
+}
+
+Table_ref *-- MDL_request
+MDL_request *-- MDL_key
+MDL_request -> MDL_context: require
+THD *-- MDL_context
+MDL_context *-- MDL_ticket
+MDL_request *-- MDL_ticket
+MDL_map o-- MDL_lock
+MDL_ticket *- MDL_lock
+
+
+
+```
+
+## 1.2.  Table_cache
+
+`Table_cache` cache for opened tables
+`Table_cache_manager` container class for all the `Table_cache` instances in the system
+`Table_cache_element` Element that represents the table in the specific table cache
+
+```plantuml
+class Table_cache_manager {
+    Table_cache m_table_cache[MAX_TABLE_CACHES]
+}
+
+class Table_cache {
+    TABLE *m_unused_tables
+    map<string, Table_cache_element > m_cache
+}
+
+class Table_cache_element {
+    TABLE_list used_tables
+    TABLE_list free_tables_slim
+    TABLE_SHARE *share
+}
+
+struct Table {
+    THD *in_use
+    Field **field
+    TABLE_SHARE *s
+    handler *file
+    TABLE *next
+    TABLE *prev
+    TABLE *cache_next
+    TABLE **cache_prev
+    partition_info *part_info
+}
+
+
+Table_cache_manager o-- Table_cache
+Table_cache o-- Table_cache_element
+Table_cache_element o- Table
+
+```
+
+
+
+## 1.3.  Data Dictionary Cache
 
 `Dictionary_client` provides a unified interface to accessing dictionary objects. The main task of the client is to access a shared cache to retrive dictionary objects. The shared cache in its turn, will access dictionary tables if there is a cache miss.
 
@@ -65,6 +186,9 @@ class Dictionary_client {
   bool drop(const T *object)
 }
 ```
+
+
+
 
 
 
@@ -129,7 +253,7 @@ Table_ref --> Table
 
 ```
 
-## 1.1 DD Cache and persistance
+## 1.4. 1.1 DD Cache and persistance
 
 
 

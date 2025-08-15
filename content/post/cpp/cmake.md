@@ -24,5 +24,9 @@ cmake [options] -S <path-to-source> -B <path-to-build>
 options:
 
 ```
+-S <path-to-source>          = Explicitly specify a source directory.
+-B <path-to-build>           = Explicitly specify a build directory.
+
+
 --build Build a CMake-generated project binary tree
 ```
