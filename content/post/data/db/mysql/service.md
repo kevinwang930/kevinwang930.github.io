@@ -1,6 +1,7 @@
 ---
 title: "Mysql Service"
 date: 2024-09-28T16:15:37+08:00
+draft: true
 categories:
 - data
 - db

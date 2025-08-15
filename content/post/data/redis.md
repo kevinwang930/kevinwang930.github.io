@@ -1,6 +1,7 @@
 ---
 title: "Redis"
 date: 2025-01-26T10:38:29+07:00
+draft: true
 categories:
 - data
 - redis
