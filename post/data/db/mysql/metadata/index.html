@@ -1,10 +1,10 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThis article introduces Mysql Metadata\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/metadata\/","keywords":"[mysql, metadata]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.148.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql,metadata"><meta name=description content="This article introduces Mysql Metadata"><meta property="og:description" content="This article introduces Mysql Metadata"><meta property="og:type" content="article"><meta property="og:title" content="Mysql Metadata"><meta name=twitter:title content="Mysql Metadata"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/metadata/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/metadata/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="This article introduces Mysql Metadata"><meta name=twitter:description content="This article introduces Mysql Metadata"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-10-13T18:50:37"><meta property="article:modified_time" content="2024-10-13T18:50:37"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql Metadata</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/metadata/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThis article introduces Mysql Metadata\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/metadata\/","keywords":"[mysql, metadata]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.148.2 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql,metadata"><meta name=description content="This article introduces Mysql Metadata"><meta property="og:description" content="This article introduces Mysql Metadata"><meta property="og:type" content="article"><meta property="og:title" content="Mysql internals - Metadata"><meta name=twitter:title content="Mysql internals - Metadata"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/metadata/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/metadata/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="This article introduces Mysql Metadata"><meta name=twitter:description content="This article introduces Mysql Metadata"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-10-13T18:50:37"><meta property="article:modified_time" content="2024-10-13T18:50:37"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql internals - Metadata</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/metadata/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
 <span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
 <span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
 <span class=sidebar-button-desc>Tags</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/archives title=Archives><i class="sidebar-button-icon fas fa-lg fa-archive" aria-hidden=true></i>
 <span class=sidebar-button-desc>Archives</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/#about title=About><i class="sidebar-button-icon fas fa-lg fa-question" aria-hidden=true></i>
 <span class=sidebar-button-desc>About</span></a></li></ul><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://github.com/kevinwang930 target=_blank rel=noopener title=GitHub><i class="sidebar-button-icon fab fa-lg fa-github" aria-hidden=true></i>
-<span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Mysql Metadata</h1><div class="postShorten-meta post-meta"><time datetime=2024-10-13T18:50:37+08:00>October 13, 2024
+<span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Mysql internals - Metadata</h1><div class="postShorten-meta post-meta"><time datetime=2024-10-13T18:50:37+08:00>October 13, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/db>db</a>,
@@ -13,7 +13,106 @@
 Mysql Server incorporates a transactional data dictionary that stores information about database objects.
 The data dictionary schema stores dictionary data in transactional(InnoDB) tables.
 Data dictionary tables are located in the <code>mysql</code> database.
-Data dictionary tables are created in a single <code>InnoDB</code> tablespace named <code>mysql.ibd</code>, which resides in the MySql data directory.</p><p>Basic Data Dictionary Tables</p><ul><li><code>catalogs</code> catalog information</li><li><code>schemata</code> information about schemata</li><li><code>tablespaces</code> active tablespaces</li><li><code>tables</code> tables in databases</li><li><code>columns</code> columns in tables</li><li><code>indexes</code> information about table indexes</li></ul><p><code>information_schema</code> is now implemented as views over dictionary tables, requires no extra disc accesses, no creation of temporary tables.</p><h2 id=11-data-dictionary-cache>1.1 Data Dictionary Cache</h2><p><code>Dictionary_client</code> provides a unified interface to accessing dictionary objects. The main task of the client is to access a shared cache to retrive dictionary objects. The shared cache in its turn, will access dictionary tables if there is a cache miss.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class Dictionary_client {
+Data dictionary tables are created in a single <code>InnoDB</code> tablespace named <code>mysql.ibd</code>, which resides in the MySql data directory.</p><p>Basic Data Dictionary Tables</p><ul><li><code>catalogs</code> catalog information</li><li><code>schemata</code> information about schemata</li><li><code>tablespaces</code> active tablespaces</li><li><code>tables</code> tables in databases</li><li><code>columns</code> columns in tables</li><li><code>indexes</code> information about table indexes</li></ul><p><code>information_schema</code> is now implemented as views over dictionary tables, requires no extra disc accesses, no creation of temporary tables.</p><h2 id=11-11-meta-data-lock>1.1. 1.1 Meta Data Lock</h2><ul><li><code>MDL_context</code> context of the owner of metadata locks</li><li><code>MDL_ticket</code> a granted meta data lock</li><li></li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class THD {
+    MDL_context mdl_context
+}
+
+class Table_ref  {
+    char *db
+    char *table_name
+    LEX_CSTRING target_tablespace_name
+    table_map m_map
+    table_map sj_inner_tables
+    Table_ref *natural_join
+    List&lt;Natural_join_column&gt; *join_columns
+    TABLE *table
+
+    ST_SCHEMA_TABLE *schema_table
+    Query_block *schema_query_block
+
+    Query_block *query_block
+
+
+    MDL_request mdl_request
+}
+
+class MDL_context {
+    MDL_context_owner *m_owner
+    enum_mdl_type type
+    MDL_ticket_store m_ticket_store
+
+    acquire_locks(*mdl_request)
+
+}
+
+class  MDL_request {
+    MDL_request *next_in_list
+    MDL_request **prev_in_list
+    MDL_ticket *ticket
+    MDL_key key
+}
+
+class MDL_ticket  {
+    MDL_context *m_ctx
+    MDL_lock *m_lock
+}
+
+class MDL_key
+
+class MDL_map {
+    LF_HASH m_locks
+    MDL_lock *m_global_lock
+    MDL_lock *m_commit_lock
+    MDL_lock *m_acl_cache_lock
+    MDL_lock *m_backup_lock
+}
+
+class MDL_lock {
+    {static} MDL_map mdl_locks
+}
+
+Table_ref *-- MDL_request
+MDL_request *-- MDL_key
+MDL_request -&gt; MDL_context: require
+THD *-- MDL_context
+MDL_context *-- MDL_ticket
+MDL_request *-- MDL_ticket
+MDL_map o-- MDL_lock
+MDL_ticket *- MDL_lock
+</code></pre><h2 id=12--table_cache>1.2. Table_cache</h2><p><code>Table_cache</code> cache for opened tables
+<code>Table_cache_manager</code> container class for all the <code>Table_cache</code> instances in the system
+<code>Table_cache_element</code> Element that represents the table in the specific table cache</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class Table_cache_manager {
+    Table_cache m_table_cache[MAX_TABLE_CACHES]
+}
+
+class Table_cache {
+    TABLE *m_unused_tables
+    map&lt;string, Table_cache_element &gt; m_cache
+}
+
+class Table_cache_element {
+    TABLE_list used_tables
+    TABLE_list free_tables_slim
+    TABLE_SHARE *share
+}
+
+struct Table {
+    THD *in_use
+    Field **field
+    TABLE_SHARE *s
+    handler *file
+    TABLE *next
+    TABLE *prev
+    TABLE *cache_next
+    TABLE **cache_prev
+    partition_info *part_info
+}
+
+
+Table_cache_manager o-- Table_cache
+Table_cache o-- Table_cache_element
+Table_cache_element o- Table
+</code></pre><h2 id=13--data-dictionary-cache>1.3. Data Dictionary Cache</h2><p><code>Dictionary_client</code> provides a unified interface to accessing dictionary objects. The main task of the client is to access a shared cache to retrive dictionary objects. The shared cache in its turn, will access dictionary tables if there is a cache miss.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class Dictionary_client {
     std::vector&lt;Entity_object *&gt; m_uncached_objects
   Object_registry m_registry_committed
   Object_registry m_registry_uncommitted
@@ -88,7 +187,7 @@ class Table_impl extends Abstract_table_impl,Table {
 }
 
 Table_ref --&gt; Table
-</code></pre><h2 id=11-dd-cache-and-persistance>1.1 DD Cache and persistance</h2><p><code>Storage_adapter</code> handling of access to persistent storage.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+</code></pre><h2 id=14-11-dd-cache-and-persistance>1.4. 1.1 DD Cache and persistance</h2><p><code>Storage_adapter</code> handling of access to persistent storage.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 class Storage_adapter {
     Object_registry m_core_registry
     mysql_mutex_t m_lock

@@ -1,4 +1,4 @@
-<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003ethis article introduce Mysql internals\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/query\/","keywords":"[mysql]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.148.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql"><meta name=description content="this article introduce Mysql internals"><meta property="og:description" content="this article introduce Mysql internals"><meta property="og:type" content="article"><meta property="og:title" content="Mysql internals"><meta name=twitter:title content="Mysql internals"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/query/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/query/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="this article introduce Mysql internals"><meta name=twitter:description content="this article introduce Mysql internals"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-09-13T18:07:46"><meta property="article:modified_time" content="2024-09-13T18:07:46"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql internals</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/query/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
+<!doctype html><html lang=en-us><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003ethis article introduce Mysql internals\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/query\/","keywords":"[mysql]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.148.2 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql"><meta name=description content="this article introduce Mysql internals"><meta property="og:description" content="this article introduce Mysql internals"><meta property="og:type" content="article"><meta property="og:title" content="Mysql internals"><meta name=twitter:title content="Mysql internals"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/query/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/query/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="this article introduce Mysql internals"><meta name=twitter:description content="this article introduce Mysql internals"><meta property="og:locale" content="en-us"><meta property="article:published_time" content="2024-09-13T18:07:46"><meta property="article:modified_time" content="2024-09-13T18:07:46"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Mysql internals</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/query/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
 <span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
 <span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
 <span class=sidebar-button-desc>Tags</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/archives title=Archives><i class="sidebar-button-icon fas fa-lg fa-archive" aria-hidden=true></i>
@@ -43,14 +43,25 @@ end
 == Terminating Connection ==
 Client -&gt; CH : Disconnect
 CH -&gt; Client : Close Connection
-</code></pre><h2 id=22-query-execution>2.2. Query Execution</h2><ul><li><p><code>THD</code> for each client connection, a separate thread with THD created serving as thread/connection descriptor.</p></li><li><p><code>LEX</code> parse and resolve statement, using as a working area, serves different purposes:</p><ul><li>contains some universal properties of <code>Sql_cmd</code></li><li>contains some execution state variables like <code>m_exec_started</code>
+</code></pre><h2 id=22-sql-processing>2.2. SQL processing</h2><ul><li><code>THD</code> for each client connection, a separate thread with THD created serving as thread/connection descriptor.</li><li><code>LEX</code> parse and resolve statement, using as a working area, serves different purposes:<ul><li>contains some universal properties of <code>Sql_cmd</code></li><li>contains some execution state variables like <code>m_exec_started</code>
 (set to true when execution is started), <code>plugins</code> (list of <code>plugins</code> used
 by <code>statement</code>), <code>insert_update_values_map</code> (a map of objects used by certain
 INSERT statements), etc.</li><li>contains a number of members that should be local to subclasses of
 <code>Sql_cmd</code>, like <code>purge_value_list</code> (for the PURGE command), <code>kill_value_list</code>
-(for the KILL command).</li></ul></li><li><p><code>Query_expression</code> one query block or several query blocks combined with UNION</p></li><li><p><code>Query_term</code> tree structure.
-Five node types:</p><ul><li><code>Query_block</code></li><li><code>Query_term_unary</code></li><li><code>Query_term_intersect</code></li><li><code>Query_term_except</code></li><li><code>Query_term_union</code></li></ul></li><li><p><code>Query_block</code> a query specification, which is a query consisting of a <code>SELECT</code> keyword</p></li><li><p><code>Sql_cmd</code> representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate <code>Sql_cmd</code> to represent a SQL statement in the parsed tree. The <code>execute()</code> method in the derived classes of <code>Sql_cmd</code> contains the runtime implementation.</p></li></ul><p>procedure:</p><ol><li>YACC parser parses <code>select</code> statement to one kind of <code>Parse_tree_root</code></li><li><code>Parse_tree_root</code> calls <code>make_cmd()</code> method to generate <code>Sql_cmd</code>, In this method, <code>contextualize</code> of <code>Parse_tree_node</code> called to generate <code>Query_expression</code> in <code>LEX</code></li><li><code>Sql_cmd</code> calls its <code>execute()</code> to generate result</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
-class THD {
+(for the KILL command).</li></ul></li></ul><p>procedure:</p><ol><li>YACC parser parses <code>select</code> statement to one kind of <code>Parse_tree_root</code></li><li><code>Parse_tree_root</code> calls <code>make_cmd()</code> method to generate <code>Sql_cmd</code>, In this method, <code>contextualize</code> of <code>Parse_tree_node</code> called to generate <code>Query_expression</code> in <code>LEX</code></li><li><code>Sql_cmd</code> calls its <code>execute()</code> to generate result</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+class Query_arena {
+  Item *m_item_list
+  MEM_ROOT *mem_root
+}
+
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+class THD extends Query_arena,Open_tables_state {
   Thd_mem_cnt m_mem_cnt
   MDL_context mdl_context
   LEX *lex
@@ -59,7 +70,15 @@ class THD {
   LEX_CSTRING m_db
 
   Prepared_statement_map stmt_map
+  Transaction_ctx m_transaction
+
   const char *thread_stack
+
+
+  System_variables variables
+  System_status_var status_var
+
+  Cost_model_server m_cost_model
 
   Protocol *m_protocol
   Query_plan query_plan
@@ -67,13 +86,19 @@ class THD {
   NET net
 }
 
-class LEX &lt;&lt; (S,#FF7700) &gt;&gt; {
+class Query_tables_list {
+  enum_sql_command sql_command
+  Table_ref *query_tables
+  Table_ref **query_tables_last
+}
+
+class LEX &lt;&lt; (S,#FF7700) &gt;&gt; extends Query_tables_list{
   THD *thd
   Query_expression *unit
-  Table_ref *insert_table
-  enum_tx_isolation tx_isolation
-  LEX_STRING create_view_query_block
-  Sql_cmd *m_sql_cmd
+  Query_block *query_block
+  Query_result *result
+  Query_block *all_query_blocks_list
+  Query_block *m_current_query_block
   make_sql_cmd(Parse_tree_root *parse_tree)
 }
 
@@ -129,6 +154,10 @@ Query_expression *-right- Query_block
 </code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>title parse procedure
 
 participant &#34;sql_parse.cc&#34; as SP
+participant THD
+participant YACC
+participant LEX
+participant Parse_Tree
 
 SP --&gt; SP : dispatch_command()
 activate SP
@@ -139,15 +168,18 @@ activate SP
 SP --&gt; THD : sql_parser()
 activate THD
 THD--&gt; YACC :my_sql_parser_parse
-THD --&gt; LEX : make_sql_cmd(*parse_tree)
+activate Parse_Tree
+THD --&gt; LEX : make_sql_cmd(Parse_tree_root *root)
 LEX --&gt; Parse_Tree: make_cmd(thd) 
+Parse_Tree --&gt; Parse_Tree:contextualize
+deactivate Parse_Tree
 SP --&gt; SP: mysql_execute_command
 activate SP
 SP --&gt; Sql_cmd: execute(thd)
 activate Sql_cmd
 Sql_cmd --&gt; Sql_cmd: prepare(thd)
 Sql_cmd --&gt; Sql_cmd: execute_inner(thd)
-</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+</code></pre><h3 id=221-parse>2.2.1 Parse</h3><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 
 title Top level Sql Statements Structure
 
@@ -193,7 +225,7 @@ PT_table_ddl_stmt_base &lt;|-- PT_alter_table_stmt
 PT_table_ddl_stmt_base &lt;|-- PT_create_index_stmt
 PT_table_ddl_stmt_base &lt;|-- PT_drop_index_stmt
 PT_table_ddl_stmt_base &lt;|-- PT_show_create_table
-</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>skinparam linetype ortho
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 title select parse tree
 class PT_select_stmt {
   +enum_sql_command m_sql_command
@@ -217,32 +249,617 @@ class Parse_context {
   MEM_ROOT *mem_root
   Query_block *select
   mem_root_deque&lt;QueryLevel&gt; m_stack
+  Show_parse_tree m_show_parse_tree
 }
 
 
-class PT_query_specification {
-  PT_item_list *item_list
-  Mem_root_array_YY&lt;PT_table_reference *&gt; from_clause
-  Item *opt_where_clause
-}
-Parse_tree_node &lt;|-left- PT_query_expression_body  
+class PT_query_expression_body extends Parse_tree_node
 class PT_query_primary extends PT_query_expression_body
+class PT_query_specification extends PT_query_primary {
+  PT_hint_list *opt_hints
+  Query_options options
+  PT_item_list *item_list
+  PT_into_destination *opt_into1
+  const bool m_is_from_clause_implicit
+  Mem_root_array_YY&lt;PT_table_reference *&gt; from_clause  
+  Item *opt_where_clause
+  PT_group *opt_group_clause
+  Item *opt_having_clause
+  PT_window_list *opt_window_clause
+  Item *opt_qualify_clause
+}
 
 
-PT_query_primary &lt;|-left-  PT_query_specification  
-class PT_query_expression  {
+
+
+class PT_query_expression  extends PT_query_expression_body {
    PT_query_expression_body *m_body
    PT_order *m_order
    PT_limit_clause *m_limit
+   PT_with_clause *m_with_clause
 }
 
-PT_query_expression_body &lt;|-left- PT_query_expression
+class Item extends  Parse_tree_node
 
-PT_select_stmt -down-&gt; PT_query_expression: m_qe
+class Parse_tree_item extends  Item
 
-Parse_tree_node --&gt; Parse_context: contextualize
-PT_query_expression -down-&gt; PT_query_specification: m_body
-</code></pre><h2 id=23-optimizer>2.3. optimizer</h2><h2 id=24-storage-engine>2.4. Storage Engine</h2><h3 id=241-innodb>2.4.1. InnoDB</h3><p><code>InnoDB</code> is a general-purpose storage engine that balances reliability and high performance. <code>InnoDB</code> is the default MySQL storage Engine.</p><p><img src=images/innode-arch.png alt=innodb-arch></p><h4 id=2411-mvcc>2.4.1.1. MVCC</h4><p><code>Multi-version Concurrency Control</code> A concurrency control method used by <code>InnoDB</code> to handle simultaneous transactions without locking the entire table.</p><p>Old versions of changed rows are stored in undo tablespaces in a data structure called a rollback segment. InnoDB uses the information in the rollback segment to perform the undo operations needed in a transaction rollback. It also uses the info to build earlier versions of a row for a consistent read.</p><p>Internally <code>InnoDB</code> adds three fields to each row stored in the database:</p><ul><li><code>DB_TRX_ID</code> indicates the transaction identifier for the last transaction that inserted or updated the row.</li><li><code>DB_ROLL_PTR</code> roll pointer points to an undo log record written to the rollback segment. if the row was updated, the undo log record contains the information necessary to rebuild the content of the row before it was updated.</li><li><code>DB_ROW_ID</code> contains a row ID that increases monotonically as new rows are inserted.</li></ul><h4 id=2412-in-memory-structure>2.4.1.2. In Memory Structure</h4><p><code>Buffer pool</code> is an area in main memory where <code>InnoDB</code> caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory</p><h4 id=2413-on-disk-structure>2.4.1.3. On Disk Structure</h4><p>A <code>file-per-table</code> tablespace contains data and indexes for a single <code>InnoDB</code> table, and is stored on the file system in a single data file.</p><h2 id=25-bin-log>2.5. Bin log</h2><h2 id=26-config>2.6. Config</h2><p>Configs</p><ul><li><code>--defaults-file=#</code> read defaults options from the given file</li><li><code>--datadir=#</code> path to the database root directory</li><li><code>--init-file=name</code> Read SQL commands from this file at startup</li><li><code>--open_files_limit=#</code> number of file descriptors available to <code>mysqld</code></li><li><code>--max-connections=#</code> max number of simultaneous client connections</li><li><code>--thread-cache-size=#</code> number of threads the server should cache for reuse</li></ul><h1 id=3-admin>3. admin</h1><pre tabindex=0><code>show [full] processlist                      display the current running threads
+class PTI_context extends  Parse_tree_item {
+  Item *expr
+  enum_parsing_context m_parsing_place
+}
+
+class PTI_where extends PTI_context {
+
+}
+
+class Item_ident extends  Item {
+  Name_resolution_context *context
+  char *db_name
+  char *table_name
+  char *field_name
+  Table_ref *m_table_ref
+}
+
+class Item_field extends Item_ident {
+  Field *field
+  Field *result_field
+  uint16 field_index
+  Item_multi_eq *item_equal_all_join_nests
+}
+
+class PTI_comp_op extends Parse_tree_item {
+  Item *left
+  chooser_compare_func_creator boolfunc2creator
+  Item *right
+}
+
+PT_select_stmt *-- PT_query_expression_body
+
+Parse_tree_node *-- Parse_context: contextualize
+PT_query_specification *-- PTI_where
+
+PTI_where *-- PTI_comp_op
+</code></pre><h3 id=222-query-block>2.2.2 Query block</h3><p>During <code>contextualization</code>, inside <code>Parse_context</code>, <code>Parse_tree_root</code> is transformed into <code>Query_block</code></p><ul><li><code>Query_term</code> tree structure.
+Five node types:<ul><li><code>Query_block</code></li><li><code>Query_term_unary</code></li><li><code>Query_term_intersect</code></li><li><code>Query_term_except</code></li><li><code>Query_term_union</code></li></ul></li><li><code>Query_block</code> a query specification, which is a query consisting of a <code>SELECT</code> keyword</li><li><code>Query_expression</code> one query block or several query blocks combined with UNION</li><li><code>AccessPath</code> query planing structure of <code>Query_expression</code></li><li><code>RowIterator</code> an interface class for operating through a single table</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class Query_term {
+  Query_term_set_op *m_parent
+  uint m_sibling_idx
+  Query_result *m_setop_query_result
+  bool m_owning_operand
+  Table_ref *m_result_table
+  mem_root_deque&lt;Item *&gt; *m_fields
+}
+class Query_block extends Query_term {
+  mem_root_deque&lt;Item *&gt; fields
+  Item *m_where_cond
+  Item *m_having_cond
+  List&lt;Window&gt; m_windows
+  SQL_I_List&lt;Table_ref&gt; m_table_list
+  SQL_I_List&lt;ORDER&gt; order_list
+  SQL_I_List&lt;ORDER&gt; group_list
+  char *db
+  LEX *parent_lex
+  table_map select_list_tables
+  mem_root_deque&lt;Table_ref *&gt; *m_current_table_nest
+  table_map outer_join
+  Name_resolution_context context
+  JOIN *join
+  Item *select_limit
+  Item *offset_limit
+  Item::cond_result cond_value
+  Item::cond_result having_value
+  prepare()
+  optimize()
+}
+
+class Table_ref {
+
+}
+
+class Parse_context {
+  THD *const thd
+  MEM_ROOT *mem_root
+  Query_block *select
+  mem_root_deque&lt;QueryLevel&gt; m_stack
+  Show_parse_tree m_show_parse_tree
+}
+
+class  Query_expression {
+  Query_expression *next
+  Query_expression **prev
+  Query_block *master
+  Query_block *slave
+  Query_term *m_query_term
+  AccessPath *m_root_access_path
+  RowIterator m_root_iterator
+}
+
+struct AccessPath {
+ Type type
+ RowIterator *iterator
+}
+
+class RowIterator {
+  THD *const m_thd
+}
+
+class TableRowIterator extends RowIterator
+
+class FilterIterator extends RowIterator
+class TableScanIterator extends TableRowIterator
+class IndexScanIterator extends TableRowIterator
+class SortingIterator extends RowIterator
+
+
+Query_expression *-- RowIterator
+
+
+
+Query_expression *- AccessPath
+
+class Query_term {
+
+}
+
+class Item extends  Parse_tree_node {
+  uint8 m_data_type
+}
+class Item_ident extends  Item {
+  Name_resolution_context *context
+  char *db_name
+  char *table_name
+  char *field_name
+  Table_ref *m_table_ref
+}
+
+class Item_field extends Item_ident {
+  Field *field
+  Field *result_field
+  uint16 field_index
+  Item_multi_eq *item_equal_all_join_nests
+}
+
+class Item_result_field extends Item {
+  Field *result_field
+}
+
+class Item_func extends Item_result_field {
+  Item **args
+  Item *m_embedded_arguments[]
+  uint arg_count
+}
+
+Parse_context *-- Query_block
+Query_expression *-- Query_block
+Query_block *-- Table_ref
+Query_block *-- Item
+</code></pre><h3 id=223-sql_cmd>2.2.3 Sql_cmd</h3><ul><li><code>Sql_cmd</code> representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate <code>Sql_cmd</code> to represent a SQL statement in the parsed tree. The <code>execute()</code> method in the derived classes of <code>Sql_cmd</code> contains the runtime implementation.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>class Sql_cmd {
+  Prepared_statement *m_owner
+
+}
+class Sql_cmd_dml extends Sql_cmd {
+  LEX *lex
+  Query_result *result
+}
+class Sql_cmd_select extends Sql_cmd_dml {
+
+}
+
+class Query_tables_list {
+  enum_sql_command sql_command
+  Table_ref *query_tables
+  Table_ref **query_tables_last
+}
+
+class LEX &lt;&lt; (S,#FF7700) &gt;&gt; extends Query_tables_list{
+  THD *thd
+  Query_expression *unit
+  Query_block *query_block
+  Sql_cmd *m_sql_cmd
+  Query_result *result
+  Query_block *all_query_blocks_list
+  Query_block *m_current_query_block
+  make_sql_cmd(Parse_tree_root *parse_tree)
+}
+LEX *- Sql_cmd
+</code></pre><h3 id=224-table>2.2.4 Table</h3><ul><li><code>Table_ref</code> table reference in the from clause</li><li><code>Table</code> struct that represents a single open instance of table within a connection or query execution.</li><li><code>Table_share</code> shared between table objects, there is one instance of <code>Table_share</code> per one table in the database.</li><li><code>Table_cache</code> cache for opened tables</li><li><code>Table_cache_manager</code> container class for all the <code>Table_cache</code> instances in the system</li><li><code>Table_cache_element</code> Element that represents the table in the specific table cache</li><li><code>KEY</code> represents <code>Table</code>&rsquo;s indexes on server layer</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+class THD extends Query_arena,Open_tables_state {
+  MDL_context mdl_context
+  Locked_tables_list locked_tables_list
+}
+
+
+
+struct Table {
+    THD *in_use
+    Field **field
+    TABLE_SHARE *s
+    handler *file
+    TABLE *next
+    TABLE *prev
+    TABLE *cache_next
+    TABLE **cache_prev
+    partition_info *part_info
+    char *alias
+    Table_ref *pos_in_table_list
+    Table_ref *pos_in_locked_tables
+    MY_BITMAP *read_set
+    MY_BITMAP *write_set
+    reginfo
+    KEY *key_info
+}
+
+struct reginfo {
+  thr_lock_type lock_type
+}
+
+struct TABLE_SHARE {
+  long m_version
+  Field **field
+
+}
+
+class KEY {
+  KEY_PART_INFO *key_part
+  TABLE *table
+  ha_key_alg algorithm
+}
+
+class KEY_PART_INFO {
+  Field *field
+  uint offset
+}
+
+class Table_cache_manager {
+    Table_cache m_table_cache[MAX_TABLE_CACHES]
+}
+
+class Table_cache {
+    TABLE *m_unused_tables
+    map&lt;string, Table_cache_element &gt; m_cache
+}
+
+class Table_cache_element {
+    TABLE_list used_tables
+    TABLE_list free_tables_slim
+    TABLE_SHARE *share
+}
+
+class Table_ref {
+  TABLE *table
+}
+
+class Sql_cmd {
+  Prepared_statement *m_owner
+
+}
+class Sql_cmd_dml extends Sql_cmd {
+  LEX *lex
+  Query_result *result
+}
+
+class Query_tables_list {
+  enum_sql_command sql_command
+  Table_ref *query_tables
+  Table_ref **query_tables_last
+}
+
+struct LEX  extends Query_tables_list{
+  THD *thd
+  Query_expression *unit
+  Query_block *query_block
+  Query_result *result
+  Query_block *all_query_blocks_list
+  Query_block *m_current_query_block
+  make_sql_cmd(Parse_tree_root *parse_tree)
+}
+
+class Field {
+  TABLE *table
+  char **table_name, 
+  char *field_name
+  Key_map part_of_key
+}
+
+class Field_num extends Field
+
+class Field_str extends Field
+
+class Field_blob extends Field
+
+
+
+THD o- Table
+Table *- TABLE_SHARE
+Table *-- reginfo
+Table_cache_manager o-- Table_cache
+Table_cache o-- Table_cache_element
+Table_cache_element o-- Table
+Table_ref o-- Table
+Sql_cmd_dml *-- LEX
+LEX o-- Table_ref
+Table *-- Field
+Table O-- KEY
+KEY O-- KEY_PART_INFO
+</code></pre><h3 id=225-table-lock>2.2.5 Table lock</h3><pre tabindex=0><code class=language-plantuml data-lang=plantuml>struct MYSQL_LOCK {
+  TABLE **table
+  uint table_count 
+  unit lock_count
+  THR_LOCK_DATA **locks
+}
+
+struct THR_LOCK_DATA {
+  THR_LOCK_INFO *owner
+  THR_LOCK_DATA *next
+  THR_LOCK_DATA **prev
+  THR_LOCK *lock
+  mysql_cond_t *cond
+  thr_lock_type type
+}
+
+MYSQL_LOCK o-- THR_LOCK_DATA
+</code></pre><h4 id=refrence>Refrence</h4><ol><li><a href=https://kernelmaker.github.io/MySQL_Lock>https://kernelmaker.github.io/MySQL_Lock</a></li></ol><h3 id=224-query-execution>2.2.4 Query Execution</h3><pre tabindex=0><code class=language-plantuml data-lang=plantuml>participant sql_parse
+participant Sql_cmd_select
+participant sql_base.cc
+participant Query_block
+participant Item
+participant lock.cc
+participant ha_innodb.cc
+participant TrxInInnoDB
+participant Query_expression
+participant Query_result
+
+
+
+sql_parse --&gt; Sql_cmd_select: mysql_execute_command
+
+Sql_cmd_select --&gt; Sql_cmd_select: execute
+activate Sql_cmd_select
+Sql_cmd_select --&gt; Sql_cmd_select: prepare
+
+activate Sql_cmd_select
+Sql_cmd_select --&gt; sql_base.cc: open_tables_for_query
+activate sql_base.cc
+sql_base.cc --&gt; sql_base.cc: open_tables
+deactivate 
+Sql_cmd_select --&gt; Query_block: prepare
+Query_block --&gt; Item: fix_field
+deactivate Sql_cmd_select
+Sql_cmd_select --&gt; sql_base.cc: lock_tables
+sql_base.cc --&gt; lock.cc: mysql_lock_tables
+activate lock.cc
+lock.cc --&gt; ha_innodb.cc: store_lock
+lock.cc --&gt; lock.cc: lock_external
+activate lock.cc
+lock.cc --&gt; ha_innodb.cc: external_lock
+ha_innodb.cc --&gt; TrxInInnoDB: begin_stmt
+deactivate lock.cc
+deactivate lock.cc
+Sql_cmd_select --&gt; Sql_cmd_select: execute_inner
+activate Sql_cmd_select
+Sql_cmd_select --&gt; Query_expression: optimize
+Sql_cmd_select --&gt; Query_expression: create_iterators
+Sql_cmd_select --&gt; Query_expression: execute
+activate Query_expression
+Query_expression --&gt; Query_expression: ExecuteIteratorQuery
+Query_expression --&gt; Query_result: start_execution
+loop 
+  Query_expression --&gt; RowIterator: read
+  Query_expression --&gt; Query_result: send_data
+  Query_expression --&gt; Query_result: send_eof
+end
+</code></pre><h2 id=23-optimizer>2.3. optimizer</h2><h2 id=24-storage-engine>2.4. Storage Engine</h2><p>Storage Engine refers to the code that actually stores and retrieves the data.</p><ul><li><code>handler</code> class is the interface for accessing data in dynamically loadable storage engines.</li><li><code>handlerton</code> is a singleton structure -one instance per storage engine, to provide access to storage engine functionality that works on global level.</li><li><code>Transaction_ctx</code> server layer transaction coordinator for <code>THD</code> (session)</li><li><code>Ha_trx_info</code> transaction related thread-specific storage engine data</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+struct Table {
+  handler *file
+}
+
+class handler {
+  TABLE_SHARE *table_share
+  TABLE *table
+  handlerton *ht
+  uchar *ref
+  uchar *dup_ref
+  Table_flags cached_table_flags
+  uint active_index
+  store_lock()
+}
+struct handlerton {
+uint slot
+}
+
+
+
+
+
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+
+
+class THD extends Query_arena,Open_tables_state {
+  MDL_context mdl_context
+  Locked_tables_list locked_tables_list
+  Ha_data[] ha_data
+  Transaction_ctx m_transaction
+}
+
+struct  Ha_data {
+  void *ha_ptr
+  Ha_trx_info ha_info[2]
+}
+
+
+
+
+class Transaction_ctx {
+  SAVEPOINT *m_savepoints
+  THD_TRANS m_scope_info[]
+  int64 sequence_number
+}
+
+
+struct THD_TRANS {
+  Ha_trx_info *m_ha_list
+}
+
+class Ha_trx_info {
+  Ha_trx_info *m_next
+  handlerton *m_ht
+
+}
+
+
+THD o-- Table
+THD o- Ha_data
+THD *-- Transaction_ctx
+
+Table *-- handler
+handler *- handlerton
+
+Transaction_ctx *-- THD_TRANS
+THD_TRANS *-- Ha_trx_info
+</code></pre><h3 id=241-innodb>2.4.1. InnoDB</h3><p><code>InnoDB</code> is a general-purpose storage engine that balances reliability and high performance. <code>InnoDB</code> is the default MySQL storage Engine.</p><p><img src=images/innode-arch.png alt=innodb-arch></p><ul><li><code>innodb_session_t</code> InnoDB private data that is cached in THD</li><li><code>ha_innobase</code> a handle to an InnoDB table</li><li><code>dict_table_t</code> Data structure for a database table</li><li><code>dict_index_t</code> Data Structure for an index</li><li><code>dtuple_t</code> Structure for an SQL data tuple of fields (logical record)</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+struct Table {
+  handler *file
+}
+
+class handler {
+  TABLE_SHARE *table_share
+  TABLE *table
+  handlerton *ht
+  uchar *ref
+  uchar *dup_ref
+  Table_flags cached_table_flags
+  uint active_index
+  Record_buffer *m_record_buffer
+  store_lock()
+}
+struct handlerton {
+uint slot
+}
+
+class ha_innobase extends handler {
+  row_prebuilt_t *m_prebuilt
+  THD *m_user_thd
+  INNOBASE_SHARE *m_share
+}
+
+
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+
+
+class THD extends Query_arena,Open_tables_state {
+  MDL_context mdl_context
+  Locked_tables_list locked_tables_list
+  Ha_data[] ha_data
+  Transaction_ctx m_transaction
+}
+
+struct  Ha_data {
+  void *ha_ptr
+  Ha_trx_info ha_info[2]
+}
+
+class innodb_session_t {
+ trx_t *m_trx
+ table_cache_t m_open_tables
+ Tablespace *m_usr_temp_tblsp
+ Tablespace *m_intrinsic_temp_tblsp
+}
+
+struct  row_prebuilt_t {
+  dict_table_t *table
+  dict_index_t *index
+  trx_t *trx
+  dtuple_t *search_tuple
+  dtuple_t *m_stop_tuple
+  ulint select_lock_type
+  mysql_row_templ_t *mysql_template
+  ins_node_t *ins_node
+}
+
+
+struct trx_t {
+  trx_id_t id
+  trx_state_t state
+  ReadView *read_view
+  ut_list_node trx_list
+  trx_lock_t lock
+  isolation_level_t isolation_level
+  THD *mysql_thd
+  trx_savept_t last_sql_stat_start
+  trx_mod_tables_t mod_tables
+}
+
+
+
+class Transaction_ctx {
+  SAVEPOINT *m_savepoints
+  THD_TRANS m_scope_info[]
+  int64 sequence_number
+}
+
+
+struct THD_TRANS {
+  Ha_trx_info *m_ha_list
+}
+
+class Ha_trx_info {
+  Ha_trx_info *m_next
+  handlerton *m_ht
+
+}
+struct dict_table_t {
+  mem_heap_t *heap
+  table_name_t name
+  char *data_dir_path
+  id_name_t tablespace
+  dict_col_t *cols
+  List&lt;dict_index_t&gt; indexes
+}
+
+struct dict_index_t {
+space_index_t id
+mem_heap_t *heap
+id_name_t name
+dict_table_t *table
+dict_field_t *fields
+}
+
+
+
+
+THD o-- Table
+THD o-- Ha_data
+THD *-- Transaction_ctx
+Ha_data *-- innodb_session_t
+innodb_session_t *-- trx_t
+Table *-- handler
+handler *- handlerton
+ha_innobase *-- row_prebuilt_t
+row_prebuilt_t *-- dict_table_t
+row_prebuilt_t *-- dict_index_t
+row_prebuilt_t *-- trx_t
+dict_table_t o- dict_index_t
+Transaction_ctx *-- THD_TRANS
+THD_TRANS *-- Ha_trx_info
+</code></pre><h4 id=2411-mvcc>2.4.1.1. MVCC</h4><p><code>Multi-version Concurrency Control</code> A concurrency control method used by <code>InnoDB</code> to handle simultaneous transactions without locking the entire table.</p><p>Old versions of changed rows are stored in undo tablespaces in a data structure called a rollback segment. InnoDB uses the information in the rollback segment to perform the undo operations needed in a transaction rollback. It also uses the info to build earlier versions of a row for a consistent read.</p><p>Internally <code>InnoDB</code> adds three fields to each row stored in the database:</p><ul><li><code>DB_TRX_ID</code> indicates the transaction identifier for the last transaction that inserted or updated the row.</li><li><code>DB_ROLL_PTR</code> roll pointer points to an undo log record written to the rollback segment. if the row was updated, the undo log record contains the information necessary to rebuild the content of the row before it was updated.</li><li><code>DB_ROW_ID</code> contains a row ID that increases monotonically as new rows are inserted.</li></ul><h4 id=2412-in-memory-structure>2.4.1.2. In Memory Structure</h4><p><code>Buffer pool</code> is an area in main memory where <code>InnoDB</code> caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory</p><h4 id=2413-on-disk-structure>2.4.1.3. On Disk Structure</h4><p>A <code>file-per-table</code> tablespace contains data and indexes for a single <code>InnoDB</code> table, and is stored on the file system in a single data file.</p><h2 id=25-bin-log>2.5. Bin log</h2><h2 id=26-config>2.6. Config</h2><p>Configs</p><ul><li><code>--defaults-file=#</code> read defaults options from the given file</li><li><code>--datadir=#</code> path to the database root directory</li><li><code>--init-file=name</code> Read SQL commands from this file at startup</li><li><code>--open_files_limit=#</code> number of file descriptors available to <code>mysqld</code></li><li><code>--max-connections=#</code> max number of simultaneous client connections</li><li><code>--thread-cache-size=#</code> number of threads the server should cache for reuse</li></ul><h1 id=3-admin>3. admin</h1><pre tabindex=0><code>show [full] processlist                      display the current running threads
 SELECT * FROM performance_schema.threads    
 show status like &#39;%thread%&#39;
 </code></pre><h1 id=4-reference>4. Reference</h1><ul><li><a href=https://www.cnblogs.com/jkin>mysql源码解读cnblog</a></li><li><a href="https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzIzOTU0NTQ0MA==&amp;action=getalbum&amp;album_id=1970265915745239045&amp;scene=173&amp;subscene=&amp;sessionid=svr_19b6b9d1b73&amp;enterid=1727505362&amp;from_msgid=2247504340&amp;from_itemidx=1&amp;count=3&amp;nolastread=1#wechat_redirect">阿里云开发者mysql解析</a></li><li><a href=https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf>mysql源码解析github</a></li><li><a href=https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/>Mysql limitations</a></li><li><a href=http://mysql.taobao.org/monthly/2021/08/02>MySQL · 源码分析 · 详解 Data Dictionary</a></li><li><a href=https://blog.jcole.us/innodb/>InnoDB internals</a></li><li><a href=https://theswissbay.ch/pdf/Gentoomen%20Library/Databases/mysql/O%27Reilly%20Understanding%20MySQL%20Internals.pdf>understanding mysql internals</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
