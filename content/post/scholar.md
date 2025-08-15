@@ -1,6 +1,7 @@
 ---
 title: "Scholar"
 date: 2024-04-06T01:13:33+08:00
+draft: true
 categories:
 - program
 - scholar

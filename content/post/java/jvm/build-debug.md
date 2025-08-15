@@ -1,6 +1,7 @@
 ---
 title: "OpenJDK build and debug"
 date: 2025-03-12T01:22:42+07:00
+draft: true
 categories:
 - java
 - jvm

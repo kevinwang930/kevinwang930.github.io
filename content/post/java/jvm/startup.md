@@ -1,6 +1,7 @@
 ---
 title: "JVM startup"
 date: 2024-03-20T00:46:56+08:00
+draft: true
 categories:
 - java
 - jvm

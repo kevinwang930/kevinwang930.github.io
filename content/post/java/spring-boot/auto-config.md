@@ -2,6 +2,7 @@
 title: "Spring Boot Auto Config"
 date: 2024-10-07T17:50:38+08:00
 draft: true
+draft: true
 categories:
 - java
 - spring

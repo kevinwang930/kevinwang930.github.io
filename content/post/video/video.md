@@ -1,6 +1,7 @@
 ---
 title: "Video Basics"
 date: 2024-04-22T14:32:16+08:00
+draft: true
 categories:
 - video
 tags:

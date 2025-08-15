@@ -1,6 +1,7 @@
 ---
 title: "Java native interface"
 date: 2024-08-11T15:58:33+08:00
+draft: true
 categories:
 - java
 - jvm

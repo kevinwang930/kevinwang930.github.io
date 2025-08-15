@@ -1,6 +1,7 @@
 ---
 title: "Linux Bash Config"
 date: 2024-03-24T21:52:14+08:00
+draft: true
 categories:
 - linux
 tags:

@@ -1,6 +1,7 @@
 ---
 title: "Spring Data"
 date: 2025-01-13T22:57:46+07:00
+draft: true
 categories:
 - spring
 - data
