@@ -125,7 +125,13 @@ THD_TRANS *-- Ha_trx_info
 * `ha_innobase` a handle to an InnoDB table
 * `dict_table_t` Data structure for a database table
 * `dict_index_t` Data Structure for an index
+* `row_prebuilt_t` per-table, per-open table cached Structure that InnoDB prebuilds to speed up row operations.
 * `dtuple_t` Structure for an SQL data tuple of fields (logical record)
+* `btr_pcur_t` the persistent B-Tree cursor structure
+
+
+
+
 ```plantuml
 
 struct Table {
@@ -188,6 +194,7 @@ struct  row_prebuilt_t {
   dict_table_t *table
   dict_index_t *index
   trx_t *trx
+  ha_innobase *m_mysql_handler
   dtuple_t *search_tuple
   dtuple_t *m_stop_tuple
   ulint select_lock_type
@@ -200,6 +207,8 @@ struct btr_pcur_t {
   btr_cur_t m_btr_cur
   
 }
+row_prebuilt_t *-- btr_pcur_t
+
 
 
 struct trx_t {
@@ -283,7 +292,32 @@ Internally `InnoDB` adds three fields to each row stored in the database:
 * `DB_ROLL_PTR` roll pointer points to an undo log record written to the rollback segment. if the row was updated, the undo log record contains the information necessary to rebuild the content of the row before it was updated.
 * `DB_ROW_ID` contains a row ID that increases monotonically as new rows are inserted.
 
+```plantuml
+struct trx_t {
+  trx_id_t id
+  trx_state_t state
+  ReadView *read_view
+  ut_list_node trx_list
+  trx_lock_t lock
+  isolation_level_t isolation_level
+  THD *mysql_thd
+  trx_savept_t last_sql_stat_start
+  trx_mod_tables_t mod_tables
+}
 
+class ReadView {
+  ids_t m_ids
+  node_t m_view_list
+  trx_id_t m_low_limit_id
+  trx_id_t m_up_limit_id
+  trx_id_t m_creator_trx_id
+}
+
+trx_t *-- ReadView
+
+
+
+```
 
 ### In Memory Structure
 
