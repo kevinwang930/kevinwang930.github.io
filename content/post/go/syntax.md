@@ -15,6 +15,11 @@ keywords:
 - [Notation](#notation)
 - [source code](#source-code)
   - [characters](#characters)
+- [Identifiers](#identifiers)
+- [keyword](#keyword)
+- [Variable](#variable)
+  - [variable  declaration](#variable-declaration)
+    - [short variable declaration](#short-variable-declaration)
 - [type](#type)
   - [Array type](#array-type)
   - [struct types](#struct-types)
@@ -25,8 +30,6 @@ keywords:
   - [Channel type](#channel-type)
 - [blocks](#blocks)
 - [declaraton and scope](#declaraton-and-scope)
-  - [variable  declaration](#variable--declaration)
-    - [short variable declaration](#short-variable-declaration)
     - [Const declaration](#const-declaration)
     - [zero value](#zero-value)
   - [type declaration](#type-declaration)
@@ -77,9 +80,35 @@ unicode_digit  = /* a Unicode code point categorized as "Number, decimal digit" 
 ```
 
 
+# Identifiers
 
+Identifiers name program entities such as variables and types.
+```
+identifier = letter { letter | unicode_digit } .
+```
+# keyword
+Keywords are reserved and may not be used as identifier.
+```
+break        default      func         interface    select
+case         defer        go           map          struct
+chan         else         goto         package      switch
+const        fallthrough  if           range        type
+continue     for          import       return       var
+```
 
+# Variable
+Variable is a storage location for a value, the set of permissible values is determined by the variable's type.
 
+## variable  declaration
+varaible declaration create one or more variables.
+
+    VarDecl     = "var" ( VarSpec | "(" { VarSpec ";" } ")" ) .
+    VarSpec     = IdentifierList ( Type [ "=" ExpressionList ] | "=" ExpressionList ) .
+
+### short variable declaration
+a shorthand for regular variable declaration with initializer expression but no types
+    ShortVarDecl = IdentifierList ":=" ExpressionList .
+    
 # type
 A type determines a set of values together with operations and methods specific to those values.
 
@@ -148,20 +177,14 @@ A block is possibly empty sequence of declrations and statements within matching
     Declaration   = ConstDecl | TypeDecl | VarDecl .
     TopLevelDecl  = Declaration | FunctionDecl | MethodDecl .
 
-## variable  declaration
-varaible declaration create one or more variables.
 
-    VarDecl     = "var" ( VarSpec | "(" { VarSpec ";" } ")" ) .
-    VarSpec     = IdentifierList ( Type [ "=" ExpressionList ] | "=" ExpressionList ) .
-
-### short variable declaration
-
-    ShortVarDecl = IdentifierList ":=" ExpressionList .
 ### Const declaration
     ConstDecl      = "const" ( ConstSpec | "(" { ConstSpec ";" } ")" ) .
     ConstSpec      = IdentifierList [ [ Type ] "=" ExpressionList ] .
     IdentifierList = identifier { "," identifier } .
     ExpressionList = Expression { "," Expression } .
+
+
 ### zero value
 Variables declared without an explicit initial value are given their zero value.
 1. 0 for numeric types

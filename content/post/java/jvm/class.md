@@ -21,6 +21,9 @@ An Annotation interface is a kind of interface.
 The primitive Java types and the keyword `void` are also represented as `Class` object
 
 ## class loading
+* `BootClassLoader` native bootstrap class loader loads the `java.base` module
+* `platformClassLoader` java level class loader loads other java library modules
+* `AppClassLoader` loads application level class 
 
 ```plantuml
 

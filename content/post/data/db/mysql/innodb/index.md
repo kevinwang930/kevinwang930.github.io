@@ -121,6 +121,27 @@ THD_TRANS *-- Ha_trx_info
 
 ![innodb-arch](images/innode-arch.png)
 
+
+### On Disk Strctures
+
+#### table space
+
+##### file-per-table table space
+Each `InnoDB` file-per-table tablespace contains data and indexes for a single `InnoDB` table,   and stored on the file system in a single `.idb` file.
+
+
+#### Clustered Index
+`InnoDB` table itself is a  clustered index that stores row data in the leaf pages of B+ tree ordered by the primary key. If no primary key defined, `InnoDB` creates a hidden one.
+
+#### secondary Index
+Indexes other than cluster index are known as secondary indexes. Each secondary index has its own B+ tree. Each record in a secondary index contains the primary key columns for the row, as well as the columns specified for the secondary indexes. `InnoDB` uses this primary key value to search for the row in the clustered index. 
+
+##### Undo table space
+Undo tables space contains undo logs which are collections of records containing information about how to undo the lastest change by a transaction to a clustered index record.
+
+##### Undo logs
+An undo log is a collection of undo log records associated with a single read-write transaction. 
+
 * `innodb_session_t` InnoDB private data that is cached in THD
 * `ha_innobase` a handle to an InnoDB table
 * `dict_table_t` Data structure for a database table
@@ -256,6 +277,7 @@ mem_heap_t *heap
 id_name_t name
 dict_table_t *table
 dict_field_t *fields
+rw_lock_t lock
 }
 
 
@@ -313,16 +335,43 @@ class ReadView {
   trx_id_t m_creator_trx_id
 }
 
-trx_t *-- ReadView
+struct trx_sys_t {
+  MVCC *mvcc
+  trx_id_t next_trx_id_or_no
+  Trx_shard shards[TRX_SHARDS_N]
+  trx_ids_t rw_trx_ids
+}
 
+
+struct  row_prebuilt_t {
+  dict_table_t *table
+  dict_index_t *index
+  trx_t *trx
+  ha_innobase *m_mysql_handler
+  dtuple_t *search_tuple
+  dtuple_t *m_stop_tuple
+  ulint select_lock_type
+  mysql_row_templ_t *mysql_template
+  ins_node_t *ins_node
+  btr_pcur_t *pcur
+}
+
+struct btr_pcur_t {
+  btr_cur_t m_btr_cur
+  
+}
+struct btr_cur_t {
+dict_index_t *index
+page_cur_t page_cur
+}
+
+row_prebuilt_t *-- btr_pcur_t
+btr_pcur_t *-- btr_cur_t
+
+row_prebuilt_t *-- trx_t
+trx_t *-- ReadView
+trx_sys_t -> trx_t
 
 
 ```
 
-### In Memory Structure
-
-`Buffer pool` is an area in main memory where `InnoDB` caches table and index data as it is accessed. The buffer pool permits frequently used data to be accessed directly from memory
-
-### On Disk Structure
-
-A `file-per-table` tablespace contains data and indexes for a single `InnoDB` table, and is stored on the file system in a single data file.
