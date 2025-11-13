@@ -13,8 +13,8 @@ keywords:
 本文记录go 语法
 <!--more-->
 - [Notation](#notation)
-- [source code](#source-code)
-  - [characters](#characters)
+- [characters](#characters)
+- [String Literals](#string-literals)
 - [Identifiers](#identifiers)
 - [keyword](#keyword)
 - [Variable](#variable)
@@ -34,12 +34,19 @@ keywords:
     - [zero value](#zero-value)
   - [type declaration](#type-declaration)
     - [type definition](#type-definition)
-    - [](#)
+    - [type conversion](#type-conversion)
 - [Expressions](#expressions)
+  - [Operands](#operands)
+    - [Composite Literals](#composite-literals)
+  - [Type Assertion](#type-assertion)
+  - [Type conversion](#type-conversion-1)
 - [statements](#statements)
   - [for statement](#for-statement)
+    - [range clause](#range-clause)
   - [if statement](#if-statement)
   - [Switch statement](#switch-statement)
+  - [Type Switch](#type-switch)
+  - [Select Statement](#select-statement)
 - [Assignment](#assignment)
 
 
@@ -69,16 +76,31 @@ Repetition  = "{" Expression "}" .
     []  option (0 or 1 times)
     {}  repetition (0 to n times)
     ```
-# source code
 
-## characters
+# characters
 ```
 newline        = /* the Unicode code point U+000A */ .
 unicode_char   = /* an arbitrary Unicode code point except newline */ .
 unicode_letter = /* a Unicode code point categorized as "Letter" */ .
 unicode_digit  = /* a Unicode code point categorized as "Number, decimal digit" */ .
 ```
+example 
+```
+"日本語"                                 // UTF-8 input text
+`日本語`                                 // UTF-8 input text as a raw literal
+"\u65e5\u672c\u8a9e"                    // the explicit Unicode code points
+"\U000065e5\U0000672c\U00008a9e"        // the explicit Unicode code points
+"\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"  // the explicit UTF-8 bytes
+```
 
+# String Literals
+
+String literals represents a string constant obtained from concatenating a sequence of characters. 
+```
+string_lit             = raw_string_lit | interpreted_string_lit .
+raw_string_lit         = "`" { unicode_char | newline } "`" .
+interpreted_string_lit = `"` { unicode_value | byte_value } `"` .
+```
 
 # Identifiers
 
@@ -146,6 +168,8 @@ A struct is a sequence of named elements, called fields, each of which has a nam
     ParameterList  = ParameterDecl { "," ParameterDecl } .
     ParameterDecl  = [ IdentifierList ] [ "..." ] Type .
 
+
+
 ## interface Type
     InterfaceType  = "interface" "{" { InterfaceElem ";" } "}" .
     InterfaceElem  = MethodElem | TypeElem .
@@ -163,12 +187,14 @@ unordered group of elements of one type
 
 ## Channel type
 A Channel provides a mechanism for concurrently executing functions to communicate by sending and reciving values of s specified element type
-    ChannelType = ( "chan" | "chan" "<-" | "<-" "chan" ) ElementType .
-
+```
+ChannelType = ( "chan" | "chan" "<-" | "<-" "chan" ) ElementType .
+```
 
 
 # blocks
 A block is possibly empty sequence of declrations and statements within matching brace brackets.
+
     Block = "{" StatementList "}" .
     StatementList = { Statement ";" } .
 
@@ -207,12 +233,54 @@ a type definition creates a new , distinct type and binds an identifier to it
 
     TypeDef = identifier [ TypeParameters ] Type .
 
-###
+
+
+### type conversion
+
+```
+Conversion = Type "(" Expression [ "," ] ")" .
+```
 
 # Expressions
 An expression specifies the computation of a value by applying operators and functions to operands.
 
+## Operands
+Operands denote the elementary values in an expression. 
+```
+Operand     = Literal | OperandName [ TypeArgs ] | "(" Expression ")" .
+Literal     = BasicLit | CompositeLit | FunctionLit .
+BasicLit    = int_lit | float_lit | imaginary_lit | rune_lit | string_lit .
+OperandName = identifier | QualifiedIdent .
+```
 
+### Composite Literals
+Composite literals construct new values for structs, arrays, slices, and maps each time they are evaluated. They consist of the type of the literal followed by a brace-bound list of elements. Each element may optionally be preceded by a corresponding key.
+```
+CompositeLit = LiteralType LiteralValue .
+LiteralType  = StructType | ArrayType | "[" "..." "]" ElementType |
+               SliceType | MapType | TypeName [ TypeArgs ] .
+LiteralValue = "{" [ ElementList [ "," ] ] "}" .
+ElementList  = KeyedElement { "," KeyedElement } .
+KeyedElement = [ Key ":" ] Element .
+Key          = FieldName | Expression | LiteralValue .
+FieldName    = identifier .
+Element      = Expression | LiteralValue .
+```
+## Type Assertion
+
+For an expression x of interface type, but not a type parameter, and a type T, the primary expression
+```
+x.(T)
+v, ok = x.(T)
+```
+asserts that x is not nil and the value stored in x is of type T
+Type assertion can be used in assignment statement
+
+## Type conversion
+
+```
+Conversion = Type "(" Expression [ "," ] ")" .
+```
 
 # statements
 Statement control execution.
@@ -233,6 +301,11 @@ Statement control execution.
     PostStmt = SimpleStmt .
     RangeClause = [ ExpressionList "=" | IdentifierList ":=" ] "range" Expression .
 
+### range clause
+for statement with range clause iterates through all entries of an array, slice, map, string ,  value received from channel, integer values from zero to upper limit, or values passed to an iterators yield function. For each entry it assigns iteration values to corresponding iteration variables if present and then executes the block. 
+
+
+
 ## if statement
     IfStmt = "if" [ SimpleStmt ";" ] Expression Block [ "else" ( IfStmt | Block ) ] .
 
@@ -247,6 +320,21 @@ Statement control execution.
     TypeCaseClause  = TypeSwitchCase ":" StatementList .
     TypeSwitchCase  = "case" TypeList | "default" .
 
+
+## Type Switch 
+Type switch is a special syntax, where type can be used as a value in switch case
+
+## Select Statement
+Select statement chooses which of a set of possible send or receive operations will proceed
+```
+SelectStmt = "select" "{" { CommClause } "}" .
+CommClause = CommCase ":" StatementList .
+CommCase   = "case" ( SendStmt | RecvStmt ) | "default" .
+RecvStmt   = [ ExpressionList "=" | IdentifierList ":=" ] RecvExpr .
+RecvExpr   = Expression .
+SendStmt = Channel "<-" Expression .
+Channel  = Expression .
+```
 
 # Assignment
 
