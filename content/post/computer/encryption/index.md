@@ -51,6 +51,9 @@ The first stage begins with the message-digest values initialized using consecut
 Each stage include four message-digest passes.
 The final value computed from the last block becomes the MD5 digest.
 
+## SHA
+secure hash algorithm similar with MD5
+
 ## RSA
 RSA(Rivest-Shamir-Adleman) is a public-key cryptosystem, one of the oldest widely used for secure data transmission, published in 1977.
 

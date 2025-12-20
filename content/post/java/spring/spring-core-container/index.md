@@ -108,7 +108,7 @@ Factory hook that allows for custom modification of an application context'bean 
 
 An `ApplicationContext` auto-detects `BeanFactoryPostProcessor` beans in its bean definitions and applies them before any other beans get created.
 
-`ConfigurationClassPostProcessor` A `BeanFactoryPostProcessor` used for bootstrapping processing of `@Configuration` class
+`ConfigurationClassPostProcessor` A `BeanFactoryPostProcessor` used for bootstrapping processing of `@Configuration` class. In SpringBoot, `ConfigurationClassPostProcessor` loaded when creating spring context
 
 
 ```plantuml

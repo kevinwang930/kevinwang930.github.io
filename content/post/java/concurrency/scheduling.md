@@ -161,6 +161,7 @@ abstract class ForkJoinTask<V> implements Future {
 }
 abstract class Completion extends ForkJoinTask<Void> implements Runnable,AsynchronousCompletionTask {
     Completion next
+    abstract CompletableFuture<?> tryFire(int mode)
         }
 
 abstract  class UniCompletion<T,V> extends Completion {
