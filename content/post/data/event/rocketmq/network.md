@@ -1,9 +1,11 @@
 ---
-title: "RocketMQ Network implementation"
+title: "RocketMQ Client Network implementation"
 date: 2025-06-18T21:07:39+07:00
 categories:
 - data
 - event
+- rocketmq
+draft: true
 tags:
 - data
 - event
@@ -12,7 +14,7 @@ keywords:
 - rocketmq
 #thumbnailImage: //example.com/image.jpg
 ---
-This Article introduces RocketMQ network implementation
+This Article introduces RocketMQ client network implementation
 
 <!--more-->
 

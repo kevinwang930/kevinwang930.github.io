@@ -126,6 +126,14 @@ interface Deque<E> extends Queue, SequencedCollection {
 
 ### PriorityQueue
 
+```plantuml
+class PriorityQueue<E> {
+    Object[] queue
+}
+
+```
+
+### Map
 
 ```plantuml
 title: map
@@ -310,8 +318,6 @@ ConcurrentNavigableMap
 1. if target Node is empty try cas first
 2. use lock of the target Node to guard thread safety.
 
-map val节点 使用`volatile`保证修改内容的可见性
-
 ```plantuml
 class ConcurrentHashMap {
     transient volatile Node<K,V>[] table
@@ -332,7 +338,21 @@ class Node<K,V> {
         volatile V value;
         volatile Node<K,V> next;
     } 
+class TreeNode<k,v> extends Node {
+    TreeNode<K,V> parent  
+        TreeNode<K,V> left
+        TreeNode<K,V> right
+        TreeNode<K,V> prev     
+        boolean red
+}
+class TreeBin<k,v> extends Node {
+    TreeNode<K,V> root
+        volatile TreeNode<K,V> first
+        volatile Thread waiter
+        volatile int lockState
+}
 ConcurrentHashMap o-- Node
+TreeBin o-right- TreeNode
 ```
 
 ###  BlockingQueue

@@ -111,8 +111,14 @@ class ThreadPoolExecutor extends AbstractExecutorService {
 
 }
 
+class worker extends AbstractQueuedSynchronizer, Runnable {
+    Thread thread
+    Runnable firstTask
+}
+
 Callable -right-> ThreadPoolExecutor: submit
 ThreadPoolExecutor -right-> FutureTask
+ThreadPoolExecutor --> worker
 
 ```
 

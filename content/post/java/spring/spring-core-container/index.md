@@ -318,19 +318,31 @@ interface ApplicationContext extends EnvironmentCapable,MessageSource, Applicati
 interface WebApplicationContext  extends ApplicationContext
 class AnnotationConfigApplicationContext extends GenericApplicationContext implements AnnotationConfigRegistry
 
+
+class AnnotatedBeanDefinitionReader
+class ClassPathBeanDefinitionScanner 
+
 package SpringBoot {
     
     interface WebServerApplicationContext 
     interface ConfigurableWebServerApplicationContext extends  WebServerApplicationContext
 
     class ServletWebServerApplicationContext implements ConfigurableWebServerApplicationContext
-    class AnnotationConfigServletWebServerApplicationContext extends ServletWebServerApplicationContext 
+    class AnnotationConfigServletWebServerApplicationContext extends ServletWebServerApplicationContext {
+        AnnotatedBeanDefinitionReader reader
+        ClassPathBeanDefinitionScanner scanner
+        Set<Class<?>> annotatedClasses
+        String[] basePackages
+    }
 }
   
 ApplicationContext <|-------- WebServerApplicationContext
 GenericWebApplicationContext <|-- ServletWebServerApplicationContext
 ConfigurableApplicationContext <|-- ConfigurableWebServerApplicationContext
 AnnotationConfigRegistry <|-- ServletWebServerApplicationContext
+AnnotationConfigServletWebServerApplicationContext o-- ClassPathBeanDefinitionScanner
+AnnotationConfigServletWebServerApplicationContext o-- AnnotatedBeanDefinitionReader
+
 @enduml
 
 ```

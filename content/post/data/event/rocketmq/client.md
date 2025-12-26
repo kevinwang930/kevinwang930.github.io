@@ -5,6 +5,7 @@ draft: false
 categories:
 - data
 - event
+- rocketmq
 tags:
 - data
 - event
