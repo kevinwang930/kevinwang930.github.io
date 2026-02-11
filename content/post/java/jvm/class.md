@@ -77,6 +77,7 @@ interface Type {
 class Class<T> implements GenericDeclaration,Type, AnnotatedElement, Constable {
     Field[] getFields()
     Method[] getMethods()
+    Class[] getInterfaces()
 }
 class AccessibleObject implements AnnotatedElement
 class Field extends AccessibleObject implements Member {
