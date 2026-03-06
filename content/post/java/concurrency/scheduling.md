@@ -164,6 +164,7 @@ class CompletableFuture<T> implements Future, CompletionStage {
 abstract class ForkJoinTask<V> implements Future {
     int status
     Aux aux
+    abstract boolean exec()
 }
 abstract class Completion extends ForkJoinTask<Void> implements Runnable,AsynchronousCompletionTask {
     Completion next
@@ -171,6 +172,7 @@ abstract class Completion extends ForkJoinTask<Void> implements Runnable,Asynchr
         }
 
 abstract  class UniCompletion<T,V> extends Completion {
+    Executor executor
     CompletableFuture<V> dep
     CompletableFuture<T> src
 }
