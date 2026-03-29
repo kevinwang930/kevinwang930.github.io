@@ -451,6 +451,12 @@ class Query_block extends Query_term {
   optimize()
 }
 
+class JOIN {
+  Query_block * query_block
+  THD * thd
+  mem_root_deque<Item *> *fields
+}
+
 class Table_ref {
 
 }
@@ -471,6 +477,19 @@ class  Query_expression {
   Query_term *m_query_term
   AccessPath *m_root_access_path
   RowIterator m_root_iterator
+  Query_result *m_query_result
+}
+
+class Query_result {
+  Query_expression *unit
+  ha_rows estimated_rowcount
+  double estimated_cost
+}
+
+class Query_result_send extends Query_result {
+  bool send_data(...)
+  bool send_eof(...)
+  void cleanup()
 }
 
 struct AccessPath {
@@ -482,18 +501,20 @@ class RowIterator {
   THD *const m_thd
 }
 
-class TableRowIterator extends RowIterator
+class TableRowIterator extends RowIterator {
+TABLE * m_table
+}
 
 class FilterIterator extends RowIterator
-class TableScanIterator extends TableRowIterator
+class TableScanIterator extends TableRowIterator {
+  
+}
 class IndexScanIterator extends TableRowIterator
 class SortingIterator extends RowIterator
 
 
+Query_expression *-- Query_result
 Query_expression *-- RowIterator
-
-
-
 Query_expression *- AccessPath
 
 class Query_term {
@@ -532,6 +553,9 @@ Parse_context *-- Query_block
 Query_expression *-- Query_block
 Query_block *-- Table_ref
 Query_block *-- Item
+Query_block *-- JOIN
+JOIN *-- Item
+
 
 
 

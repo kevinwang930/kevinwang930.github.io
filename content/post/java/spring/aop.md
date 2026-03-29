@@ -32,7 +32,10 @@ Advice types:
 
 `Advisor` interface holding AOP `advice` and a filter determing the applicability of the advice(such as a `pointcut`)
 
-`Pointcut`  A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any `Joinpoint` matched by the `pointcut`.
+`Pointcut`  A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any `Joinpoint` matched by the `pointcut`. Spring AOP supports several AspectJ pointcut designators
+* execution
+* within
+* @annotation
 
 `Proxy` An object created by the AOP framework in order to implement the aspect contracts.
 

@@ -57,7 +57,9 @@ uint slot
 }
 
 
-
+class ha_innobase extends handler {
+  
+}
 
 
 class Open_tables_state {

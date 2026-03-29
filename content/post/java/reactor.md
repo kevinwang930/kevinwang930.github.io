@@ -34,15 +34,16 @@ Reactive Streams is a standard and specification for Stream-oriented libraries f
 
 `Publisher` is a provider of a potentially unbounded number of sequences elements, publishing them according to the demand received from its Subscribers.
 
-In response to a call to `Publisher.subscribe(Subscriber)` the possible invocation sequences for methods on the `Subscriber` are give by the following protocol:
+In response to a call to `Publisher.subscribe(Subscriber)` the possible invocation sequences for methods on the `Subscriber` are given by the following protocol:
 ```
 onSubscribe onNext* (onError | onComplete)?
 ```
 This means that `onSubscribe` is always signaled, followed by a possibly unbounded number of `onNext` signals(as requested by `Subscriber`) followed by an `onError` signal if there is a failure, or an `onComplete` signal when no more elements are available 
 
+`Subscriber` will receive call to `onSubscribe(Subscription)` once after passing an instance of `Subscriber` to `Publisher.subscribe(Subscriber)`
 
 
-# Reactor API
+
 
 ## Mono
 A Reactive Streams Publisher with basic rx operations that emits at most one item via `onNext` signal then terminates with `onComplete` signal, or only emits `onError` signal.

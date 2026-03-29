@@ -81,20 +81,33 @@ On shutdown of a bean factory:
 
 ```plantuml
 
-interface BeanFactory 
+interface BeanFactory  {
+    Object getBean(...)
+}
 interface ListableBeanFactory extends BeanFactory
 interface HierarchicalBeanFactory extends BeanFactory
 interface ConfigurableBeanFactory extends HierarchicalBeanFactory, SingletonBeanRegistry {
     void registerScope(String scopeName, Scope scope)
 }
 interface ConfigurableListableBeanFactory extends ListableBeanFactory, AutowireCapableBeanFactory, ConfigurableBeanFactory
-class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFactory implements ConfigurableListableBeanFactory, BeanDefinitionRegistry
-
-abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport implements ConfigurableBeanFactory {
-    Map<String, Scope> scopes
+class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFactory implements ConfigurableListableBeanFactory, BeanDefinitionRegistry {
+    Map<String, BeanDefinition> beanDefinitionMap
+    Map<Class<?>, String[]> allBeanNamesByType
+    Map<Class<?>, String[]> singletonBeanNamesByType
 }
 
-abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFactory implements AutowireCapableBeanFactory
+abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport implements ConfigurableBeanFactory {
+    BeanFactory parentBeanFactory
+    List<BeanPostProcessor> beanPostProcessors
+    Map<String, RootBeanDefinition> mergedBeanDefinitions
+    Set<String> alreadyCreated
+    Map<String, Scope> scopes
+
+}
+
+abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFactory implements AutowireCapableBeanFactory {
+    InstantiationStrategy instantiationStrategy
+}
 ```
 
 ## FactoryBean
@@ -150,7 +163,11 @@ class AutowiredAnnotationBeanPostProcessor implements SmartInstantiationAwareBea
 
 ## Scope
 
-Strategy interface used by `ConfigurableBeanFactory` representing a target scope to hold bean instances in.
+Strategy interface used by `ConfigurableBeanFactory` representing a target scope to hold bean instances in. common scope
+* singleton 
+* prototype
+* request
+* session
 
 ```plantuml
 
@@ -299,11 +316,14 @@ class DefaultResourceLoader implements ResourceLoader
 interface EnvironmentCapable << interface >>
 class GenericApplicationContext extends AbstractApplicationContext implements BeanDefinitionRegistry {
     DefaultListableBeanFactory beanFactory
+    ResourceLoader resourceLoader
 }
 
 
 
-class GenericWebApplicationContext extends GenericApplicationContext implements ConfigurableWebApplicationContext
+class GenericWebApplicationContext extends GenericApplicationContext implements ConfigurableWebApplicationContext {
+    ServletContext servletContext
+}
 interface Lifecycle << interface >>
 interface ResourceLoader << interface >>
 interface ResourcePatternResolver extends ResourceLoader
