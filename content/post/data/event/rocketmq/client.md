@@ -4,11 +4,9 @@ date: 2024-11-10T11:03:55+08:00
 draft: false
 categories:
 - data
-- event
 - rocketmq
 tags:
 - data
-- event
 - rocketmq
 keywords:
 - rocketmq

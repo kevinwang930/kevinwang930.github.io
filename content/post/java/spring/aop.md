@@ -39,6 +39,16 @@ Advice types:
 
 `Proxy` An object created by the AOP framework in order to implement the aspect contracts.
 
+
+```plantuml
+
+interface JoinPoint {
+    
+}
+interface ProceedingJoinPoint extends JoinPoint
+
+```
+
 # AOP during Bean creation
 AOP uses either JDK dynamic proxies or CGLIB to create proxy
 `dynamicProxy` only works when proxied object  implements at least one  interface

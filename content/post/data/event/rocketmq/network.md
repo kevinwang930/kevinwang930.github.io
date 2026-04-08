@@ -3,12 +3,10 @@ title: "RocketMQ Client Network implementation"
 date: 2025-06-18T21:07:39+07:00
 categories:
 - data
-- event
 - rocketmq
 draft: true
 tags:
 - data
-- event
 - rocketmq
 keywords:
 - rocketmq
