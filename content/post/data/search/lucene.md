@@ -17,6 +17,12 @@ This article introduces Lucene internals
 
 Apache Lucene is a java full-text search engine. Lucene provide its core library and API that can easily be used to add search capabilities to applications.
 
+# Concept
+* `Document`  a sequence of fields
+* `Field` a named sequence of terms
+* `Term` a string
+* `Inverted Index` The index stores statistics about terms in order to make term-based search more efficient. The index can list, for a term the documents contain it which is the inverse of the natural relationship, in which documents list terms.
+
 
 # API
 Lucene is divided into several packages:
