@@ -60,13 +60,6 @@ sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown $USER ~/.kube/config
 ```
 
-**Verify installation:**
-```bash
-kubectl cluster-info
-kubectl get nodes
-```
-
-## Quick Start
 
 **Check cluster:**
 ```bash
@@ -102,92 +95,17 @@ sudo systemctl enable k3s  # auto-start on reboot
 sudo /usr/local/bin/k3s-uninstall.sh
 ```
 
-## K3s vs Minikube
 
-| Feature | K3s | Minikube |
-|---------|-----|----------|
-| Size | ~40-50MB | 100MB+ |
-| Memory | 512MB min | 2GB+ recommended |
-| Setup | Single command | CLI + drivers |
-| Persistence | Native support | Via mounts |
-| Use case | Edge, prod-like | Local dev/testing |
-| Start speed | Fast | Moderate |
+## Persistent storage (PV & PVC)
 
-**Use K3s for:** production-like testing, low-resource dev, edge simulation.  
-**Use Minikube for:** learning, isolated local testing.
+**Concepts:**
 
-## Local Dev Setup on Fedora
+- **PersistentVolume (PV):** Cluster-scoped resource representing actual storage (hostPath, NFS, CSI, etc.). Key fields: `spec.capacity`, `spec.accessModes`, `spec.persistentVolumeReclaimPolicy` (`Retain` keeps data after PVC deletion; `Delete` removes it), and volume source (e.g., `hostPath`).
 
-**Create data directory:**
-```bash
-mkdir -p ~/k3s-data
-sudo chown -R 1000:1000 ~/k3s-data
-sudo semanage fcontext -a -t svirt_sandbox_file_t "$HOME/k3s-data(/.*)?"
-sudo restorecon -Rv ~/k3s-data
-```
+- **PersistentVolumeClaim (PVC):** Namespace-scoped request for storage. Specifies required `storage` size and `accessModes`. A PVC binds to a matching PV; pods consume storage by referencing a PVC by name.
 
-**Configure kubeconfig:**
-```bash
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-```
+- **Binding:** PVC → PV. When PVC is deleted, the PV's `persistentVolumeReclaimPolicy` determines what happens to backing storage.
 
-**Persistent storage with hostPath:**
-```bash
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: fedora-pv
-spec:
-  capacity:
-    storage: 1Gi
-  accessModes:
-    - ReadWriteOnce
-  hostPath:
-    path: $HOME/k3s-data
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: fedora-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-EOF
-```
-
-**Deploy with persistent volume:**
-```bash
-kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: dev-app
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: dev-app
-  template:
-    metadata:
-      labels:
-        app: dev-app
-    spec:
-      containers:
-      - name: app
-        image: nginx:stable
-        volumeMounts:
-        - name: data
-          mountPath: /usr/share/nginx/html
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: fedora-pvc
-EOF
-```
 
 **Monitor:**
 ```bash
@@ -202,5 +120,4 @@ kubectl describe pod <pod-name>
 - K3s removes alpha APIs; standard Kubernetes may be needed for them.
 - Use port-forward or LoadBalancer service to expose apps locally.
 - K3s embedded etcd is suitable for dev; use external etcd for HA.
-- Run `sudo systemctl enable k3s` to auto-start on reboot.
 - Run `sudo systemctl enable k3s` to auto-start on reboot.
