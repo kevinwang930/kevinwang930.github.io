@@ -14,7 +14,7 @@ keywords:
 
 Minikube runs Kubernetes locally in a VM or container. It’s fast, lightweight, and ideal for dev, testing, and learning. 
 
-
+<!--more-->
 
 
 ## Quick Start

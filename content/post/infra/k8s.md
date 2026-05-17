@@ -13,10 +13,10 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-<!--more-->
+
 
 Kubernetes (k8s) is a container orchestration system that automates deployment, scaling, and management of containerized applications.
-
+<!--more-->
 ## Architecture Overview
 
 - **Control Plane**: manages cluster state and scheduling.
