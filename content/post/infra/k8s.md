@@ -1,5 +1,5 @@
 ---
-title: "K8s generals"
+title: "Kubernetes generals"
 date: 2026-05-17T12:58:16+02:00
 categories:
 - infra
@@ -42,10 +42,22 @@ Kubernetes (k8s) is a container orchestration system that automates deployment, 
 - **ConfigMap / Secret**: configuration and sensitive data.
 - **PersistentVolume (PV) / PersistentVolumeClaim (PVC)**: storage abstraction.
 - **Namespace**: virtual cluster partitioning.
+- **Context**: a context is a set of access parameters that tells kubectl which cluster to talk to, which user to authenticate as, and which namespace to use by default
 
-## Basic Usage (cheat sheet)
+## Basic Usage 
 
 ```bash
+# contexts (view and switch)
+kubectl config get-contexts                # list contexts
+kubectl config current-context             # show current context
+kubectl config use-context <context-name>  # switch context
+
+# namespaces
+kubectl get namespaces                      # list namespaces
+kubectl create namespace <name>             # create namespace
+kubectl delete namespace <name>             # delete namespace
+kubectl config set-context --current --namespace=<name>  # set default namespace for current context
+
 # see cluster state
 kubectl cluster-info
 kubectl get nodes
@@ -93,11 +105,36 @@ spec:
 EOF
 ```
 
-## Recommendations
+## Helm (package manager)
 
-- Use declarative manifests (`kubectl apply -f`) and store them in git.
-- Prefer `readinessProbes` and `livenessProbes` for production workloads.
-- Use namespaces to separate environments (dev/stage/prod).
-- Monitor cluster health (metrics-server, Prometheus) and logs.
+- Helm is the Kubernetes package manager. Charts package and templatize manifests so apps deploy reproducibly.
 
-If you want, I can add diagrams, sample manifests for a full app (Service+Deployment+PVC), or a short troubleshooting checklist.
+Install on Fedora:
+
+```bash
+# install from Fedora repos (preferred)
+sudo dnf install -y helm
+
+
+Quick commands:
+
+```bash
+# add a chart repo and update
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+# search and install
+helm search repo nginx
+helm install my-nginx bitnami/nginx -f values.yaml
+
+# manage releases
+helm list
+helm upgrade my-nginx bitnami/nginx -f values.yaml
+helm rollback my-nginx 1
+helm uninstall my-nginx
+
+# inspect and render
+helm get values my-nginx
+helm template my-nginx bitnami/nginx
+helm lint ./chart
+```
