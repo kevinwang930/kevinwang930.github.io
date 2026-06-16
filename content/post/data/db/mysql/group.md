@@ -1,5 +1,5 @@
 ---
-title: "My sql query internals- Group By"
+title: "MySQL query internals- Group By"
 date: 2026-06-16T22:58:03+02:00
 categories:
 - data
