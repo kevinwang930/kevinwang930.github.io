@@ -14,12 +14,17 @@
 
 baseURL = "https://kevinwang930.github.io/"
 locale = "en-us"
-defaultContentLanguage = "en-us"
 title = "Kevin wang's blog"
 theme = "hugo-tranquilpeak-theme"
 disqusShortname = "blog-kevinwang930"
-# googleAnalytics = "UA-123-45"
 canonifyurls = true
+defaultContentLanguage = "en"
+
+# Multilingual configuration
+[languages]
+  [languages.en]
+    label = "English"
+    locale = "en-US"
 [pagination]
   pagerSize = 7
 [module]
