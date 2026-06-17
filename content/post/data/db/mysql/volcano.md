@@ -1,5 +1,5 @@
 ---
-title: "MySQL query Internals Volcano model"
+title: "MySQL query Internals - Volcano model"
 date: 2026-06-17T19:06:44+02:00
 categories:
 - data
@@ -14,16 +14,14 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-<!--more-->
-
-
 For many years, MySQL executed SQL queries using a deeply nested, monolithic executor loop. Functions like `JOIN::exec()` and `evaluate_join_record()` were responsible for traversing tables, checking search conditions, handling joins, and aggregating results. While functional, this monolithic architecture was notoriously difficult to maintain, optimize, or extend.
 
 In MySQL 8.0, the engineering team undertook a massive architectural refactoring: **migrating the query execution engine to the Volcano Iterator Model** (also known as the Pipeline or Iterator Model, pioneered by Goetz Graefe in 1994).
 
 In this post, we will explore the architecture and implementation of MySQL’s Volcano Iterator Model, look at how the query execution tree is built, and trace a concrete SQL query down to the C++ source code level.
+<!--more-->
 
----
+
 
 ## 1. The Volcano Iterator Architecture
 
