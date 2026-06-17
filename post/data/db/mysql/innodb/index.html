@@ -1,0 +1,309 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThis article introduces the internal architecture and implementation details of MySQL\u0026rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/innodb\/","keywords":"[InnoDB]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.163.2 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="InnoDB"><meta name=description content="This article introduces the internal architecture and implementation details of MySQL&rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules."><meta property="og:description" content="This article introduces the internal architecture and implementation details of MySQL&rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules."><meta property="og:type" content="article"><meta property="og:title" content="MySQL Storage Engine Internals - InnoDB"><meta name=twitter:title content="MySQL Storage Engine Internals - InnoDB"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/innodb/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/innodb/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="This article introduces the internal architecture and implementation details of MySQL&rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules."><meta name=twitter:description content="This article introduces the internal architecture and implementation details of MySQL&rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules."><meta property="og:locale" content="en"><meta property="article:published_time" content="2025-08-17T19:17:35"><meta property="article:modified_time" content="2025-08-17T19:17:35"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>MySQL Storage Engine Internals - InnoDB</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/innodb/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
+<span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
+<span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
+<span class=sidebar-button-desc>Tags</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/archives title=Archives><i class="sidebar-button-icon fas fa-lg fa-archive" aria-hidden=true></i>
+<span class=sidebar-button-desc>Archives</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/#about title=About><i class="sidebar-button-icon fas fa-lg fa-question" aria-hidden=true></i>
+<span class=sidebar-button-desc>About</span></a></li></ul><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://github.com/kevinwang930 target=_blank rel=noopener title=GitHub><i class="sidebar-button-icon fab fa-lg fa-github" aria-hidden=true></i>
+<span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>MySQL Storage Engine Internals - InnoDB</h1><div class="postShorten-meta post-meta"><time datetime=2025-08-17T19:17:35+07:00>August 17, 2025
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/db>db</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/mysql>mysql</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article introduces the internal architecture and implementation details of MySQL&rsquo;s default storage engine, InnoDB, exploring its memory structures, on-disk storage layouts, physical row formats, and Multi-Version Concurrency Control (MVCC) visibility rules.</p><p>In MySQL&rsquo;s pluggable architecture, the <strong>Storage Engine</strong> is the component responsible for the physical storage, indexing, retrieval, and lock management of relational data.</p><ul><li><strong><code>handler</code> Class</strong>: The primary abstract C++ interface through which the SQL Server layer communicates with storage engines. Specific engine drivers inherit from it (e.g., <code>ha_innobase</code> for InnoDB). It defines interface methods like <code>ha_rnd_next()</code> (scan next row) and <code>index_read()</code> (lookup index).</li><li><strong><code>handlerton</code></strong>: A singleton structure—one instance per storage engine—providing global hook registration for engine startup, shutdown, transaction coordination, and log flushes.</li><li><strong><code>Transaction_ctx</code></strong>: Server-layer transaction coordinator associated with a thread/session&rsquo;s <code>THD</code>.</li><li><strong><code>Ha_trx_info</code></strong>: Thread-specific transaction state structures registering an active storage engine inside a transaction.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+struct Table {
+  handler *file
+}
+
+class handler {
+  TABLE_SHARE *table_share
+  TABLE *table
+  handlerton *ht
+  uchar *ref
+  uchar *dup_ref
+  Table_flags cached_table_flags
+  uint active_index
+  store_lock()
+  ha_rnd_next()
+}
+struct handlerton {
+uint slot
+}
+
+
+class ha_innobase extends handler {
+  
+}
+
+
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+
+
+class THD extends Query_arena,Open_tables_state {
+  MDL_context mdl_context
+  Locked_tables_list locked_tables_list
+  Ha_data[] ha_data
+  Transaction_ctx m_transaction
+}
+
+struct  Ha_data {
+  void *ha_ptr
+  Ha_trx_info ha_info[2]
+}
+
+
+
+
+class Transaction_ctx {
+  SAVEPOINT *m_savepoints
+  THD_TRANS m_scope_info[]
+  int64 sequence_number
+}
+
+
+struct THD_TRANS {
+  Ha_trx_info *m_ha_list
+}
+
+class Ha_trx_info {
+  Ha_trx_info *m_next
+  handlerton *m_ht
+
+}
+
+
+THD o-- Table
+THD o- Ha_data
+THD *-- Transaction_ctx
+
+Table *-- handler
+handler *- handlerton
+
+Transaction_ctx *-- THD_TRANS
+THD_TRANS *-- Ha_trx_info
+</code></pre><hr><h2 id=innodb-architecture-overview>InnoDB Architecture Overview</h2><p>InnoDB is a general-purpose transactional storage engine that balances high reliability with peak execution performance. It is the default storage engine in modern MySQL.</p><p><img src=https://kevinwang930.github.io/post/data/db/mysql/innodb/images/innodb-structures.svg alt="InnoDB Architecture"></p><hr><h2 id=1-in-memory-structures>1. In-Memory Structures</h2><p>To minimize latency caused by slow disk I/O, InnoDB operates a large, highly structured pool of memory:</p><h3 id=a-the-buffer-pool>A. The Buffer Pool</h3><p>The <strong>Buffer Pool</strong> is the heart of InnoDB. It caches table and index pages (with a default page size of 16KB) directly in memory, allowing read and write operations to happen at RAM speeds. It is managed via three primary linked lists:</p><ul><li><strong>Free List</strong>: Keeps track of unused/empty memory pages ready to be allocated.</li><li><strong>Flush List</strong>: Tracks &ldquo;dirty pages&rdquo; (pages modified in-memory whose changes have not yet been written to the physical tablespace files).</li><li><strong>LRU (Least Recently Used) List</strong>: Implements the page eviction policy when the buffer pool becomes full.<ul><li><em>Midpoint Insertion Strategy</em>: To prevent large, sequential table scans (e.g., <code>SELECT * FROM table</code>) from completely flushing out hot/frequently accessed pages, InnoDB splits the LRU list into two sublists: <strong>New (Young)</strong> (5/8 of the list) and <strong>Old</strong> (3/8 of the list).</li><li>Newly fetched pages are initially inserted at the &ldquo;midpoint&rdquo; (the boundary between old and young). A page is only promoted to the Young sublist if it is accessed again after a configurable time duration (<code>innodb_old_blocks_time</code>), effectively buffering hot pages from sequential scan pollution.</li></ul></li></ul><h3 id=b-the-change-buffer>B. The Change Buffer</h3><p>Caches insert, update, and delete changes to <strong>secondary indexes</strong> when the corresponding index pages are not currently cached in the Buffer Pool. This avoids expensive random disk reads.</p><ul><li>When secondary index pages are eventually read into the Buffer Pool for subsequent queries, the cached changes are physically merged.</li><li>The Change Buffer is itself a physical B+ Tree stored inside the System Tablespace.</li></ul><h3 id=c-the-adaptive-hash-index-ahi>C. The Adaptive Hash Index (AHI)</h3><p>InnoDB monitors search profiles on index B+ Trees. If it detects that certain leaf pages are queried repeatedly with exact matches (point lookups), it automatically builds a memory-based hash table on top of those leaf nodes.</p><ul><li>This shifts point lookup speeds from $O(\log N)$ B-Tree traversals to direct $O(1)$ memory hash retrievals.</li></ul><h3 id=d-the-log-buffer>D. The Log Buffer</h3><p>Stores transactional log records (<strong>Redo Logs</strong>) in memory before flushing them to disk tablespace logs.</p><ul><li>Its flushing behavior is governed by the critical parameter <strong><code>innodb_flush_log_at_trx_commit</code></strong>:<ul><li><code>1</code> (Default): Redo log is written to files and flushed/synced to disk at every transaction commit. Guaranteed ACID durability.</li><li><code>0</code>: Redo log is written and synced to disk once per second. High speed, but up to 1 second of transaction data can be lost in a crash.</li><li><code>2</code>: Redo log is written to the OS file cache at commit, but flushed/synced to disk once per second. Safely survives a <code>mysqld</code> crash, but data can be lost during an OS/power failure.</li></ul></li></ul><hr><h2 id=2-on-disk-structures>2. On-Disk Structures</h2><hr><h3 id=21-tablespaces--storage-units>2.1. Tablespaces & Storage Units</h3><p>Relational data inside InnoDB is organized into logical tablespace structures containing pages, extents, and segments:</p><ul><li><strong>System Tablespace</strong>: Stores the doublewrite buffer pages, change buffer pages, and historical system data.</li><li><strong>File-Per-Table Tablespaces</strong>: If <code>innodb_file_per_table</code> is enabled (default), each table and its associated indexes are stored on the file system in an independent <code>.ibd</code> file.</li><li><strong>Undo Tablespaces</strong>: Houses Undo logs, which store previous versions of modified records to facilitate rolling back transactions and providing MVCC reads.</li><li><strong>Temporary Tablespaces</strong>: Dedicated tablespace files utilized for temporary tables generated during complex aggregations (like <code>TemptableAggregateIterator</code> outputs).</li></ul><hr><h3 id=22-index-structures--physical-storage>2.2. Index Structures & Physical Storage</h3><p>InnoDB tables are stored as <strong>Index-Organized Tables</strong> using B+ Trees:</p><ul><li><strong>Clustered Index</strong>: The table itself. Relational row data is stored physically inside the <strong>leaf pages</strong> of the B+ Tree, sorted by the <strong>Primary Key</strong>. If no primary key is defined, InnoDB automatically allocates a hidden 6-byte row ID (<code>DB_ROW_ID</code>) to organize the cluster index.</li></ul><p><img src=https://kevinwang930.github.io/post/data/db/mysql/innodb/images/clustered-index.svg alt="Clustered Index Structure"></p><ul><li><strong>Secondary Index</strong>: Auxiliary B+ Trees built on non-primary columns. Unlike clustered indexes, secondary index leaf pages do <strong>not</strong> store actual data rows; instead, they store the value of the indexed columns along with the corresponding <strong>Primary Key</strong> value. Finding a row via a secondary index requires a secondary lookup (bookmark lookup) in the clustered index.</li></ul><p><img src=https://kevinwang930.github.io/post/data/db/mysql/innodb/images/secondary-index.svg alt="Secondary Index Lookup"></p><ul><li><strong>Redo Logs</strong>: A Write-Ahead Log (WAL) structure ensuring transactional durability (D of ACID). It resides physically on disk as circular ring files (<code>ib_logfile0</code>, <code>ib_logfile1</code>). The circular buffer operates using a Checkpoint pointer (representing page changes already flushed from RAM to disk tablespace blocks) and a Write pointer (the current active logging head). The active space between checkpoint and write pointers represents logs that must not be overwritten.</li></ul><p><img src=https://kevinwang930.github.io/post/data/db/mysql/innodb/images/redo-log.svg alt="Redo Log Circular Buffer"></p><hr><h3 id=23-key-innodb-source-code-descriptors>2.3. Key InnoDB Source Code Descriptors</h3><p>At the C++ source code level, InnoDB structures are represented by these key classes:</p><ul><li><strong><code>ha_innobase</code></strong>: The primary C++ handler class implementing the server&rsquo;s abstract <code>handler</code> interface for InnoDB operations.</li><li><strong><code>innodb_session_t</code></strong>: Stores session-specific cached transactional states inside <code>THD</code> connection descriptors.</li><li><strong><code>row_prebuilt_t</code></strong>: A highly cached, per-open table structure prebuilt by InnoDB to accelerate repeated index lookups and row cursoring.</li><li><strong><code>dict_table_t</code></strong> & <strong><code>dict_index_t</code></strong>: Logical descriptors representing tables and index schemas.</li><li><strong><code>dtuple_t</code></strong>: Represents a logical database row tuple.</li><li><strong><code>btr_pcur_t</code></strong>: A persistent B-Tree cursor used to hold positions on index leaf nodes across transactional operations.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+struct Table {
+  handler *file
+}
+
+class handler {
+  TABLE_SHARE *table_share
+  TABLE *table
+  handlerton *ht
+  uchar *ref
+  uchar *dup_ref
+  Table_flags cached_table_flags
+  uint active_index
+  Record_buffer *m_record_buffer
+  store_lock()
+  ha_rnd_next()
+}
+struct handlerton {
+uint slot
+}
+
+class ha_innobase extends handler {
+  row_prebuilt_t *m_prebuilt
+  THD *m_user_thd
+  INNOBASE_SHARE *m_share
+  rnd_next()
+}
+
+
+class Open_tables_state {
+  TABLE *open_tables
+  TABLE *temporary_tables
+  MYSQL_LOCK *lock
+  MYSQL_LOCK *extra_lock
+}
+
+
+
+class THD extends Query_arena,Open_tables_state {
+  MDL_context mdl_context
+  Locked_tables_list locked_tables_list
+  Ha_data[] ha_data
+  Transaction_ctx m_transaction
+}
+
+struct  Ha_data {
+  void *ha_ptr
+  Ha_trx_info ha_info[2]
+}
+
+class innodb_session_t {
+ trx_t *m_trx
+ table_cache_t m_open_tables
+ Tablespace *m_usr_temp_tblsp
+ Tablespace *m_intrinsic_temp_tblsp
+}
+
+struct  row_prebuilt_t {
+  dict_table_t *table
+  dict_index_t *index
+  trx_t *trx
+  ha_innobase *m_mysql_handler
+  dtuple_t *search_tuple
+  dtuple_t *m_stop_tuple
+  ulint select_lock_type
+  mysql_row_templ_t *mysql_template
+  ins_node_t *ins_node
+  btr_pcur_t *pcur
+}
+
+struct btr_pcur_t {
+  btr_cur_t m_btr_cur
+  
+}
+row_prebuilt_t *-- btr_pcur_t
+
+
+
+struct trx_t {
+  trx_id_t id
+  trx_state_t state
+  ReadView *read_view
+  ut_list_node trx_list
+  trx_lock_t lock
+  isolation_level_t isolation_level
+  THD *mysql_thd
+  trx_savept_t last_sql_stat_start
+  trx_mod_tables_t mod_tables
+}
+
+
+
+class Transaction_ctx {
+  SAVEPOINT *m_savepoints
+  THD_TRANS m_scope_info[]
+  int64 sequence_number
+}
+
+
+struct THD_TRANS {
+  Ha_trx_info *m_ha_list
+}
+
+class Ha_trx_info {
+  Ha_trx_info *m_next
+  handlerton *m_ht
+
+}
+struct dict_table_t {
+  mem_heap_t *heap
+  table_name_t name
+  char *data_dir_path
+  id_name_t tablespace
+  dict_col_t *cols
+  List&lt;dict_index_t&gt; indexes
+}
+
+struct dict_index_t {
+space_index_t id
+mem_heap_t *heap
+id_name_t name
+dict_table_t *table
+dict_field_t *fields
+rw_lock_t lock
+}
+
+
+
+
+THD o-- Table
+THD o-- Ha_data
+THD *-- Transaction_ctx
+Ha_data *-- innodb_session_t
+innodb_session_t *-- trx_t
+Table *-- handler
+handler *- handlerton
+ha_innobase *-- row_prebuilt_t
+row_prebuilt_t *-- dict_table_t
+row_prebuilt_t *-- dict_index_t
+row_prebuilt_t *-- trx_t
+dict_table_t o- dict_index_t
+Transaction_ctx *-- THD_TRANS
+THD_TRANS *-- Ha_trx_info
+</code></pre><hr><h2 id=3-physical-row-formats--blob-off-page-storage>3. Physical Row Formats & BLOB Off-Page Storage</h2><p>InnoDB supports multiple physical row storage formats: <code>Compact</code>, <code>Redundant</code>, <code>Dynamic</code>, and <code>Compressed</code>.
+In modern MySQL, the default format is <strong>Dynamic</strong>.</p><h3 id=the-dynamic-row-format--off-page-storage>The Dynamic Row Format & Off-Page Storage</h3><p>When columns are exceptionally large (such as text, large <code>VARCHAR</code>, or binary <code>BLOB</code> fields), storing them inline inside a B+ Tree leaf page can severely reduce index density, forcing more page splits and increasing the B+ Tree height.</p><ul><li>To combat this, the <strong>Dynamic</strong> row format uses <strong>Off-Page Storage</strong>:<ul><li>If a row&rsquo;s size exceeds physical page restrictions, InnoDB stores only a <strong>20-byte pointer</strong> inline inside the leaf node.</li><li>This 20-byte descriptor contains the <strong>Tablespace ID</strong>, <strong>Page Number</strong>, and <strong>Offset</strong> pointing directly to external off-page tablespace allocation blocks containing the raw BLOB data.</li><li>This ensures that B+ Tree leaf pages remain densely populated, keeping search times for key columns exceptionally fast.</li></ul></li></ul><hr><h2 id=4-multi-version-concurrency-control-mvcc>4. Multi-Version Concurrency Control (MVCC)</h2><p><strong>MVCC</strong> is the architectural framework used by InnoDB to handle simultaneous, high-throughput transactions without the massive performance penalty of locking entire tables (non-blocking reads).</p><p>To implement MVCC, InnoDB appends three hidden metadata fields to every clustered index record:</p><ol><li><strong><code>DB_TRX_ID</code></strong> (6 bytes): Tracks the transaction identifier of the last transaction that modified (inserted or updated) this row.</li><li><strong><code>DB_ROLL_PTR</code></strong> (7 bytes): The rollback pointer. Points directly to the undo log record containing the previous state of the row.</li><li><strong><code>DB_ROW_ID</code></strong> (6 bytes): The row ID used to uniquely organize clustered records if no primary key was specified.</li></ol><p><img src=https://kevinwang930.github.io/post/data/db/mysql/innodb/images/undo-log.svg alt="Undo Log Version Chain"></p><h3 id=the-readview-visibility-logic>The ReadView Visibility Logic</h3><p>When a transaction starts a consistent read query (under <code>REPEATABLE READ</code> or <code>READ COMMITTED</code> isolation levels), InnoDB instantiates a <strong><code>ReadView</code></strong> descriptor. The <code>ReadView</code> is a snapshot of the transaction landscape at a precise point in time.</p><p>The <code>ReadView</code> contains four critical variables:</p><ul><li><strong><code>m_ids</code></strong>: A list of all active (running, uncommitted) transaction IDs at the time of view creation.</li><li><strong><code>m_up_limit_id</code></strong>: The lower bound of active transactions. Any transaction with <code>trx_id &lt; m_up_limit_id</code> was already committed before the <code>ReadView</code> was created and is always visible.</li><li><strong><code>m_low_limit_id</code></strong>: The upper limit of allocated transaction IDs. Any transaction with <code>trx_id >= m_low_limit_id</code> started after the <code>ReadView</code> was created and is always invisible.</li><li><strong><code>m_creator_trx_id</code></strong>: The ID of the transaction that created this view. Modifications made by the creator transaction are always visible to itself.</li></ul><h4 id=the-transaction-visibility-algorithm>The Transaction Visibility Algorithm:</h4><p>For any record in the clustered index with metadata <code>DB_TRX_ID = trx_id</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>               ReadView Created (Landscape snapshot)
+</span></span><span style=display:flex><span>  ───────────┼─────────────────────────────────────────────┼───────────&gt;
+</span></span><span style=display:flex><span>             │             Active List [m_ids]             │
+</span></span><span style=display:flex><span>   trx_id &lt;  │                                             │  trx_id &gt;=
+</span></span><span style=display:flex><span>m_up_limit_id│       m_up_limit_id &lt;= trx_id &lt;             │m_low_limit_id
+</span></span><span style=display:flex><span>             │             m_low_limit_id                  │
+</span></span><span style=display:flex><span>             │                                             │
+</span></span><span style=display:flex><span>   VISIBLE   │   In m_ids? ──► YES ──&gt; INVISIBLE           │  INVISIBLE
+</span></span><span style=display:flex><span>             │             └──► NO  ──&gt; VISIBLE            │
+</span></span></code></pre></div><ol><li><strong>Self-Visibility</strong>: If <code>trx_id == m_creator_trx_id</code>, the change is <strong>visible</strong>.</li><li><strong>Committed Before ReadView</strong>: If <code>trx_id &lt; m_up_limit_id</code>, the transaction was committed before this view was created. The change is <strong>visible</strong>.</li><li><strong>Started After ReadView</strong>: If <code>trx_id >= m_low_limit_id</code>, the transaction started after the view&rsquo;s creation. The change is <strong>invisible</strong>.</li><li><strong>Active Transaction Window</strong>: If <code>m_up_limit_id &lt;= trx_id &lt; m_low_limit_id</code>:<ul><li>If <code>trx_id</code> is present in the active list <code>m_ids</code>, the transaction was still running and had not committed when the view was created. The change is <strong>invisible</strong>.</li><li>Otherwise, the transaction committed before the view was created. The change is <strong>visible</strong>.</li></ul></li></ol><h4 id=reconstructing-historical-row-states>Reconstructing Historical Row States</h4><p>If the visibility algorithm determines that a record version is <strong>invisible</strong>, InnoDB follows the rollback pointer <code>DB_ROLL_PTR</code> to locate the corresponding undo log block. It reconstructs the previous version of the row, retrieves its <code>DB_TRX_ID</code>, and runs the visibility evaluation again.</p><p>This recursive reconstruction continues down the undo log chain until a visible version of the row is located. If it reaches the end of the undo chain (meaning the row did not exist yet when the <code>ReadView</code> was created), the record is treated as non-existent (filtered out of the query result).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>struct trx_t {
+  trx_id_t id
+  trx_state_t state
+  ReadView *read_view
+  ut_list_node trx_list
+  trx_lock_t lock
+  isolation_level_t isolation_level
+  THD *mysql_thd
+  trx_savept_t last_sql_stat_start
+  trx_mod_tables_t mod_tables
+}
+
+class ReadView {
+  ids_t m_ids
+  node_t m_view_list
+  trx_id_t m_low_limit_id
+  trx_id_t m_up_limit_id
+  trx_id_t m_creator_trx_id
+}
+
+struct trx_sys_t {
+  MVCC *mvcc
+  trx_id_t next_trx_id_or_no
+  Trx_shard shards[TRX_SHARDS_N]
+  trx_ids_t rw_trx_ids
+}
+
+
+struct  row_prebuilt_t {
+  dict_table_t *table
+  dict_index_t *index
+  trx_t *trx
+  ha_innobase *m_mysql_handler
+  dtuple_t *search_tuple
+  dtuple_t *m_stop_tuple
+  ulint select_lock_type
+  mysql_row_templ_t *mysql_template
+  ins_node_t *ins_node
+  btr_pcur_t *pcur
+}
+
+struct btr_pcur_t {
+  btr_cur_t m_btr_cur
+  
+}
+struct btr_cur_t {
+dict_index_t *index
+page_cur_t page_cur
+}
+
+row_prebuilt_t *-- btr_pcur_t
+btr_pcur_t *-- btr_cur_t
+
+row_prebuilt_t *-- trx_t
+trx_t *-- ReadView
+trx_sys_t -&gt; trx_t
+</code></pre><hr><h2 id=5-end-to-end-sql-write-lifecycle>5. End-to-End SQL Write Lifecycle</h2><p>To see how InnoDB coordinates clustered indexes, secondary indexes, undo logs, redo logs, and the Buffer Pool in a single unified flow, let’s trace the execution of a concrete SQL query:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> employees <span style=color:#66d9ef>SET</span> salary <span style=color:#f92672>=</span> <span style=color:#ae81ff>75000</span> <span style=color:#66d9ef>WHERE</span> name <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;Charlie&#39;</span>;
+</span></span></code></pre></div><p>When this statement is processed under transaction <code>Tx 202</code>, InnoDB coordinates across its subcomponents through the following step-by-step lifecycle:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span> 1. Index Lookup ──&gt; 2. Bookmark Lookup ──&gt; 3. Create Undo Record ──&gt; 4. Redo Log (WAL)
+</span></span><span style=display:flex><span> (Name=&#39;Charlie&#39;)     (Get ID=10 Row)        (Save Salary=70000)      (Log modifications)
+</span></span><span style=display:flex><span>                                                                             │
+</span></span><span style=display:flex><span> 8. Async Flush   &lt;── 7. Commit &amp; Redo  &lt;── 6. Modify Memory  &lt;── 5. Lock &amp; Update view
+</span></span><span style=display:flex><span> (Checkpoint LSN)      (ib_logfile Write)   (Mark page Dirty)         (DB_TRX_ID, ROLL_PTR)
+</span></span></code></pre></div><ol><li><strong>Secondary Index Lookup</strong>:<ul><li>The optimizer recognizes that <code>name</code> has a secondary index. InnoDB traverses the secondary B+ Tree index on <code>name</code> for <code>'Charlie'</code>.</li><li>It finds the secondary index leaf entry containing the key value <code>'Charlie'</code> and retrieves the primary key value: <strong><code>ID = 10</code></strong>.</li></ul></li><li><strong>Clustered Index Bookmark Lookup</strong>:<ul><li>Using <code>ID = 10</code>, InnoDB queries its <strong>Clustered Index</strong>. It traverses the main table B+ Tree to find the leaf page holding the actual row record for <code>ID = 10</code>.</li><li>If the target leaf page is not in the <strong>Buffer Pool</strong> memory, it issues a synchronous disk read to load the page from the <code>.ibd</code> tablespace file, placing it inside the Buffer Pool LRU list.</li></ul></li><li><strong>Generate Undo Log Record (MVCC Setup)</strong>:<ul><li>Before updating the row, InnoDB must back up the current state of the row. It constructs an <strong>Undo Log Record</strong> containing the column state to be overwritten (<code>Salary = 70000</code>).</li><li>It writes this record to the Undo log buffer/tablespace at page offset <code>0x7f03</code>.</li></ul></li><li><strong>Write Redo Log (Write-Ahead Logging)</strong>:<ul><li>InnoDB writes a physical <strong>Redo Log record</strong> to the <strong>Log Buffer</strong> in memory, describing the exact byte modifications about to be made on the physical Clustered index leaf page (securing Durability).</li></ul></li><li><strong>Modify Record Inline (Buffer Pool Update)</strong>:<ul><li>In the Buffer Pool memory, InnoDB updates the record&rsquo;s user column: <strong><code>Salary = 75000</code></strong>.</li><li>It updates the record&rsquo;s hidden metadata columns:<ul><li>Sets <strong><code>DB_TRX_ID = 202</code></strong> (flagging this active transaction).</li><li>Sets <strong><code>DB_ROLL_PTR = 0x7f03</code></strong> (linking the active record to the Undo Log version chain).</li></ul></li><li>The leaf page is now flagged as <strong>Dirty</strong> and linked to the Buffer Pool <strong>Flush List</strong>.</li></ul></li><li><strong>Transaction Commit & Redo Flush</strong>:<ul><li>When the client issues <code>COMMIT</code>, the SQL layer executes the two-phase commit.</li><li>Under Phase 2, the <strong>Log Buffer</strong> contents representing the page write are flushed and synchronized to disk <code>ib_logfile0</code> or <code>ib_logfile1</code> (governed by <code>innodb_flush_log_at_trx_commit = 1</code>), advancing the <strong><code>Write LSN</code></strong>. The transaction is now legally durable.</li></ul></li><li><strong>Asynchronous Dirty Page Flushing (Page Sync)</strong>:<ul><li>Later, an asynchronous InnoDB background thread sweeps the <strong>Flush List</strong>. It writes the dirty page containing <code>Salary = 75000</code> to the physical <code>.ibd</code> file on disk.</li><li>Once the dirty page is safely flushed, InnoDB pushes the <strong><code>Checkpoint LSN</code></strong> forward in the Redo circular ring, reclaiming that log sector as overwriteable <strong>Free Space</strong>.</li></ul></li></ol></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/db/>db</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/mysql/>mysql</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/event/rocketmq/server/ data-tooltip="RocketMq Server Implementation" aria-label="NEXT: RocketMq Server Implementation"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/jvm/class/ data-tooltip="JAVA Class File and Reflection" aria-label="PREVIOUS: JAVA Class File and Reflection"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/data/db/mysql/innodb/",this.page.identifier="/post/data/db/mysql/innodb/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/event/rocketmq/server/ data-tooltip="RocketMq Server Implementation" aria-label="NEXT: RocketMq Server Implementation"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/jvm/class/ data-tooltip="JAVA Class File and Reflection" aria-label="PREVIOUS: JAVA Class File and Reflection"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/mysql/innodb/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Finnodb%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Finnodb%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Finnodb%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})},loadMathJaxIfNeeded=()=>{if(document.body.textContent.includes("$")){const e=/\$[^$]+\$/.test(document.body.textContent)||/\$\$[^$]+\$\$/.test(document.body.textContent);e&&loadScript("https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",()=>{MathJax.Hub.Config({tex2jax:{inlineMath:[["$","$"]],displayMath:[["$$","$$"]],processEscapes:!0,processEnvironments:!0},displayAlign:"center","HTML-CSS":{styles:{".MathJax_Display":{margin:0}},linebreaks:{automatic:!0}}}),MathJax.Hub.Queue(["Typeset",MathJax.Hub])})}};window.addEventListener("load",function(){loadPlantUMLOnNeed(),loadMathJaxIfNeeded()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script></body></html>
