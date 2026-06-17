@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <!-- Definitions for arrows and filters -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#37474f" />
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.1" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="450" fill="#fcfcfc" rx="8" />
+
+  <!-- Header -->
+  <text x="400" y="30" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#2c3e50">InnoDB Secondary Index Lookup (Bookmark Lookup)</text>
+
+  <!-- Left Side: Secondary Index B+ Tree (built on Name) -->
+  <g transform="translate(30, 60)" filter="url(#shadow)">
+    <rect width="320" height="360" fill="#ffffff" stroke="#37474f" stroke-width="2" rx="6" />
+    <rect width="320" height="35" fill="#37474f" rx="6" />
+    <text x="160" y="22" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff">Secondary Index B+ Tree (Key: Name)</text>
+
+    <!-- Root Node -->
+    <rect x="110" y="55" width="100" height="30" fill="#f5f5f5" stroke="#37474f" stroke-width="1.5" rx="3" />
+    <text x="160" y="74" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">Root Page</text>
+
+    <!-- Non-Leaf Node -->
+    <rect x="110" y="115" width="100" height="30" fill="#f5f5f5" stroke="#37474f" stroke-width="1.5" rx="3" />
+    <text x="160" y="134" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">Internal Page ('A'-'M')</text>
+
+    <!-- Connections -->
+    <path d="M 160 85 L 160 115" stroke="#37474f" stroke-width="1.2" marker-end="url(#arrow)" />
+
+    <!-- Leaf Page Zoom Detail -->
+    <g transform="translate(15, 175)">
+      <rect width="290" height="160" fill="#eceff1" stroke="#37474f" stroke-width="1.5" rx="4" />
+      <rect width="290" height="25" fill="#455a64" rx="4" />
+      <text x="145" y="16" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">Leaf Page (Stores Index Entries)</text>
+
+      <!-- Secondary Index Entries -->
+      <!-- Header Row -->
+      <rect x="10" y="35" width="130" height="20" fill="#37474f" rx="2" />
+      <text x="75" y="48" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff">Indexed Column (Name)</text>
+
+      <rect x="150" y="35" width="130" height="20" fill="#1a237e" rx="2" />
+      <text x="215" y="48" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff">Associated Primary Key (ID)</text>
+
+      <!-- Entry 1 -->
+      <rect x="10" y="60" width="130" height="20" fill="#ffffff" stroke="#90a4ae" rx="2" />
+      <text x="75" y="73" text-anchor="middle" font-family="monospace" font-size="9" fill="#37474f">'Alice'</text>
+
+      <rect x="150" y="60" width="130" height="20" fill="#e8eaf6" stroke="#1a237e" rx="2" />
+      <text x="215" y="73" text-anchor="middle" font-family="monospace" font-size="9" font-weight="bold" fill="#1a237e">4</text>
+
+      <!-- Entry 2 (Our Target) -->
+      <rect x="10" y="85" width="130" height="25" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5" rx="2" />
+      <text x="75" y="101" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="#c2185b">'Charlie'</text>
+
+      <rect x="150" y="85" width="130" height="25" fill="#e8eaf6" stroke="#c2185b" stroke-width="1.5" rx="2" />
+      <text x="215" y="101" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="#1a237e">10</text>
+
+      <!-- Entry 3 -->
+      <rect x="10" y="115" width="130" height="20" fill="#ffffff" stroke="#90a4ae" rx="2" />
+      <text x="75" y="128" text-anchor="middle" font-family="monospace" font-size="9" fill="#37474f">'David'</text>
+
+      <rect x="150" y="115" width="130" height="20" fill="#e8eaf6" stroke="#1a237e" rx="2" />
+      <text x="215" y="128" text-anchor="middle" font-family="monospace" font-size="9" font-weight="bold" fill="#1a237e">12</text>
+    </g>
+
+    <path d="M 160 145 L 160 175" stroke="#37474f" stroke-width="1.2" marker-end="url(#arrow)" />
+  </g>
+
+  <!-- Right Side: Clustered Index Traversal (Bookmark Lookup) -->
+  <g transform="translate(450, 60)" filter="url(#shadow)">
+    <rect width="320" height="360" fill="#ffffff" stroke="#5d4037" stroke-width="2" rx="6" />
+    <rect width="320" height="35" fill="#5d4037" rx="6" />
+    <text x="160" y="22" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff">Clustered Index B+ Tree Lookup</text>
+
+    <!-- Steps of lookup -->
+    <!-- Root -->
+    <rect x="100" y="55" width="120" height="30" fill="#efebe9" stroke="#5d4037" stroke-dasharray="3,2" rx="3" />
+    <text x="160" y="73" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">1. Traverse Root (ID: 10)</text>
+
+    <!-- Non-Leaf -->
+    <rect x="100" y="125" width="120" height="30" fill="#efebe9" stroke="#5d4037" stroke-dasharray="3,2" rx="3" />
+    <text x="160" y="143" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">2. Traverse Internal Page</text>
+
+    <!-- Leaf Node containing the full record -->
+    <g transform="translate(15, 195)">
+      <rect width="290" height="140" fill="#fffde7" stroke="#fbc02d" stroke-width="2" rx="4" />
+      <rect width="290" height="25" fill="#f57f17" rx="4" />
+      <text x="145" y="16" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">3. Leaf Page: Clustered Record Found!</text>
+
+      <!-- Found Record Values -->
+      <g transform="translate(10, 35)">
+        <rect width="270" height="95" fill="#ffffff" stroke="#fbc02d" stroke-dasharray="2,2" rx="3" />
+        
+        <text x="15" y="25" font-family="monospace" font-size="9" fill="#1a237e" font-weight="bold">ID (Primary Key): </text>
+        <text x="155" y="25" font-family="monospace" font-size="9" fill="#2c3e50" font-weight="bold">10</text>
+
+        <text x="15" y="48" font-family="monospace" font-size="9" fill="#1a237e" font-weight="bold">Name Column:      </text>
+        <text x="155" y="48" font-family="monospace" font-size="9" fill="#2c3e50">'Charlie'</text>
+
+        <text x="15" y="71" font-family="monospace" font-size="9" fill="#1a237e" font-weight="bold">Salary Column:    </text>
+        <text x="155" y="71" font-family="monospace" font-size="9" fill="#2c3e50">75000 (FULL ROW RETRIEVED)</text>
+      </g>
+    </g>
+
+    <path d="M 160 85 L 160 125" stroke="#5d4037" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#arrow)" />
+    <path d="M 160 155 L 160 195" stroke="#5d4037" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#arrow)" />
+  </g>
+
+  <!-- Big Connective Arrow from Secondary Index ID Pointer to Clustered Index Leaf Page -->
+  <path d="M 255 255 C 335 255, 335 140, 440 140" fill="none" stroke="#c2185b" stroke-width="2" marker-end="url(#arrow)" />
+  <rect x="300" y="170" width="100" height="30" rx="3" fill="#fce4ec" stroke="#c2185b" stroke-width="0.5" />
+  <text x="350" y="183" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#c2185b">Retrieve PK (ID: 10)</text>
+  <text x="350" y="193" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#c2185b">and query Cluster</text>
+</svg>

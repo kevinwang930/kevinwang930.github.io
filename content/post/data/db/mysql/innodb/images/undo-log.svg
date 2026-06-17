@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <!-- Definitions for arrows and filters -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#37474f" />
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.1" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="450" fill="#fcfcfc" rx="8" />
+
+  <!-- Header -->
+  <text x="400" y="30" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#2c3e50">InnoDB MVCC: Undo Log Version Chain</text>
+
+  <!-- Clustered Index Leaf Record (Current State in DB) -->
+  <g transform="translate(60, 55)" filter="url(#shadow)">
+    <rect width="680" height="90" fill="#fffde7" stroke="#fbc02d" stroke-width="2" rx="6" />
+    <rect width="680" height="25" fill="#f57f17" rx="6" />
+    <text x="340" y="17" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">Clustered Index Record (Current State inside leaf page)</text>
+
+    <!-- Fields of row -->
+    <g transform="translate(15, 35)">
+      <!-- User Columns -->
+      <rect x="0" y="0" width="80" height="42" fill="#e8eaf6" stroke="#1a237e" rx="3" />
+      <text x="40" y="15" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#1a237e">ID (PK)</text>
+      <text x="40" y="32" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="#1a237e">10</text>
+
+      <rect x="95" y="0" width="100" height="42" fill="#e8eaf6" stroke="#1a237e" rx="3" />
+      <text x="145" y="15" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#1a237e">Name</text>
+      <text x="145" y="32" text-anchor="middle" font-family="monospace" font-size="10" fill="#2c3e50">'Charlie'</text>
+
+      <rect x="210" y="0" width="90" height="42" fill="#e8eaf6" stroke="#1a237e" rx="3" />
+      <text x="255" y="15" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#1a237e">Salary</text>
+      <text x="255" y="32" text-anchor="middle" font-family="monospace" font-size="10" fill="#2c3e50">75000</text>
+
+      <!-- Hidden Metadata Columns -->
+      <rect x="330" y="0" width="140" height="42" fill="#fce4ec" stroke="#880e4f" rx="3" />
+      <text x="400" y="15" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#880e4f">DB_TRX_ID (Last Mod)</text>
+      <text x="400" y="32" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="#880e4f">202 (Active/Current)</text>
+
+      <rect x="485" y="0" width="165" height="42" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5" rx="3" />
+      <text x="567.5" y="15" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#c2185b">DB_ROLL_PTR (Undo Link)</text>
+      <text x="567.5" y="32" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="#c62828">0x7f03 (Points to Undo Chain)</text>
+    </g>
+  </g>
+
+  <!-- The Undo Log Version Chain (In Undo Tablespaces) -->
+  <g transform="translate(180, 185)" filter="url(#shadow)">
+    <text x="-30" y="-12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#c62828">Rollback Segment Undo Pages</text>
+
+    <!-- Undo Record 1 (Tx 198) -->
+    <g transform="translate(0, 0)">
+      <rect width="440" height="65" fill="#fafafa" stroke="#37474f" stroke-dasharray="3,2" rx="4" />
+      <!-- Label -->
+      <rect width="440" height="18" fill="#37474f" rx="4" />
+      <text x="10" y="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff">Undo Record at Page Offset [0x7f03]</text>
+
+      <text x="12" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#2c3e50" font-weight="bold">TX 198: UPDATE Salary from 70000 to 75000</text>
+      <text x="12" y="48" font-family="monospace" font-size="8" fill="#757575">Stored Diff: Salary = 70000</text>
+      <text x="240" y="48" font-family="monospace" font-size="8" fill="#c62828" font-weight="bold">Prev ROLL_PTR: 0x7b01</text>
+    </g>
+
+    <!-- Undo Record 2 (Tx 150) -->
+    <g transform="translate(0, 85)">
+      <rect width="440" height="65" fill="#fafafa" stroke="#37474f" stroke-dasharray="3,2" rx="4" />
+      <!-- Label -->
+      <rect width="440" height="18" fill="#37474f" rx="4" />
+      <text x="10" y="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff">Undo Record at Page Offset [0x7b01]</text>
+
+      <text x="12" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#2c3e50" font-weight="bold">TX 150: UPDATE Name from 'Chuck' to 'Charlie'</text>
+      <text x="12" y="48" font-family="monospace" font-size="8" fill="#757575">Stored Diff: Name = 'Chuck'</text>
+      <text x="240" y="48" font-family="monospace" font-size="8" fill="#c62828" font-weight="bold">Prev ROLL_PTR: 0x6a05</text>
+    </g>
+
+    <!-- Undo Record 3 (Tx 110 - Insert) -->
+    <g transform="translate(0, 170)">
+      <rect width="440" height="65" fill="#f1f8e9" stroke="#33691e" stroke-dasharray="3,2" rx="4" />
+      <!-- Label -->
+      <rect width="440" height="18" fill="#33691e" rx="4" />
+      <text x="10" y="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff">Undo Record at Page Offset [0x6a05] (Original Insert)</text>
+
+      <text x="12" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#33691e" font-weight="bold">TX 110: INSERT row (ID: 10, Name: 'Chuck', Salary: 65000)</text>
+      <text x="12" y="48" font-family="monospace" font-size="8" fill="#757575">Original Insertion Record</text>
+      <text x="240" y="48" font-family="monospace" font-size="8" fill="#0288d1" font-weight="bold">Prev ROLL_PTR: NULL (Start of Row)</text>
+    </g>
+  </g>
+
+  <!-- Downward Pointers linking the chain -->
+  <!-- DB_ROLL_PTR to Undo Rec 1 -->
+  <path d="M 627.5 129 L 627.5 170 C 627.5 210, 480 200, 410 200" fill="none" stroke="#c62828" stroke-width="1.8" marker-end="url(#arrow)" />
+  
+  <!-- Undo Rec 1 ROLL_PTR to Undo Rec 2 -->
+  <path d="M 400 242 Q 430 255, 400 270" fill="none" stroke="#c62828" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <!-- Undo Rec 2 ROLL_PTR to Undo Rec 3 -->
+  <path d="M 400 327 Q 430 340, 400 355" fill="none" stroke="#c62828" stroke-width="1.5" marker-end="url(#arrow)" />
+</svg>

@@ -1,5 +1,5 @@
 ---
-title: "Mysql internals"
+title: "MySQL Query Processing Internals"
 date: 2024-09-13T18:07:46+08:00
 categories:
 - data
@@ -13,33 +13,45 @@ keywords:
 - mysql
 #thumbnailImage: //example.com/image.jpg
 ---
-this article introduce Mysql internals
+
+This article provides an in-depth dive into MySQL query processing internals, tracing the lifecycle of a query from the network connection to parsing, logical resolution, table open, locking, physical optimization, execution, and transaction commit.
+
 <!--more-->
+
 # 1. Architecture
+
+MySQL is designed around a multi-layered, client-server architecture where the SQL server layer coordinates query parsing, optimization, and transaction management, delegating the physical storage and indexing of data to pluggable storage engines (like InnoDB).
+
 ![architecture](images/arch.png)
 
+### Key Source Code Directories
+*   **`libmysql`**: Contains the client library implementation responsible for generating the client-side library `libmysqlclient.so` and handling client-server network protocol handshakes.
+*   **`sql`**: The main codebase of the MySQL server (`mysqld`), coordinating connection handshakes, parser rules, AST creation, the query optimizer, and execution loops.
+    *   **`sql/dd`**: The modern Data Dictionary component (introduced in 8.0), storing database metadata in specialized system tables rather than raw files.
+    *   **`sql/server_component`**: Represents the server components architecture that defines modular plugins and extensions.
 
-source code dir:
-* `libmysql`    generate `libmysqlclient.so`
-* `sql`         main codebase 
-  * `dd`        Data dictionary
-  * `server_component` server component
+---
 
+## 1.1. ACID & Transactional Foundation
 
-## 1.1. ACID
+To guarantee relational reliability, the SQL layer and the storage engine cooperate to enforce ACID properties:
 
-* `Atomicity`     transaction management
-* `Consistency`   protect from Crashes
-* `Isolation`     transaction Isolation level
-* `Durability`    Mysql software features interacting with particular hardware configuration.
+*   **Atomicity**: Managed using the transaction coordinator (`trx_sys_t` and undo logs in InnoDB). It ensures that either all DML changes in a statement succeed or they are completely rolled back.
+*   **Consistency**: Maintained by protecting tables and indices from crashes using the Doublewrite Buffer, Redo log, and strict page-level checksum validations.
+*   **Isolation**: Implemented via locks (Record locks, Gap locks, Next-Key locks) and Multi-Version Concurrency Control (MVCC) read views in InnoDB, supporting Read Committed, Repeatable Read, etc.
+*   **Durability**: Ensured by physical log flush policies (`innodb_flush_log_at_trx_commit` and `sync_binlog`) interacting with underlying hardware disk controller caches.
 
+---
 
-# 2. Server
+# 2. Server Internals
 
+---
 
-## 2.1. Network
+## 2.1. Network & Connection Management
 
-Mysql Server maintains a one thread per connection model. 
+MySQL Server maintains a **One-Thread-Per-Connection** model under normal operation (though modern alternative implementations or enterprise pools can use thread pool plugins). 
+
+The connection loop starts at the socket event listener, which calls `add_connection()` to wrap the socket connection in a connection handler. A dedicated `THD` object (the thread/connection descriptor) is allocated, and the thread enters a command loop calling `do_command()` repeatedly.
 
 ```plantuml
 
@@ -81,30 +93,19 @@ CH -> Client : Close Connection
 
 ```
 
-## 2.2. SQL processing
+---
 
+## 2.2. SQL Processing Architecture
 
-* `THD` for each client connection, a separate thread with THD created serving as thread/connection descriptor.
-* `LEX` parse and resolve statement, using as a working area, serves different purposes:
-  * contains some universal properties of `Sql_cmd`
-  * contains some execution state variables  like `m_exec_started`
-    (set to true when execution is started), `plugins` (list of `plugins` used
-    by `statement`), `insert_update_values_map` (a map of objects used by certain
-    INSERT statements), etc.
-  * contains a number of members that should be local to subclasses of
-    `Sql_cmd`, like `purge_value_list` (for the PURGE command), `kill_value_list`
-    (for the KILL command).
+Every active connection and statement processing state centers around two primary descriptors:
 
+*   **`THD`**: Represents a physical client connection. It acts as the ultimate context descriptor, storing the current thread’s query string, active memory pool (`mem_root`), catalog, database settings, transaction context (`Transaction_ctx`), performance monitoring flags, and network protocol hooks.
+*   **`LEX`**: The lexical analyzer and working memory area for parsing and resolving a statement. It contains parsed structures, local variables needed by the current SQL command, and points to the root of the query blocks.
 
-
-procedure:
-
-1. YACC parser parses `select` statement to one kind of `Parse_tree_root`
-2. `Parse_tree_root` calls `make_cmd()` method to generate `Sql_cmd`, In this method, `contextualize` of `Parse_tree_node` called to generate `Query_expression` in `LEX`
-3. `Sql_cmd` calls its `execute()` to generate result
-
-
-
+### The General Processing Sequence:
+1.  **YACC Parser Step**: The Bison-based parser reads the query and constructs a concrete tree inheriting from **`Parse_tree_root`** (e.g., `PT_select_stmt`).
+2.  **Contextualization Step**: The parser root invokes its **`make_cmd()`** method. This contextualizes the AST, generating a hierarchy of **`Query_expression`** and **`Query_block`** objects stored in the `LEX` object, and yields a corresponding **`Sql_cmd`** subclass.
+3.  **Statement Execution Step**: The executor invokes the `execute()` method on the resulting `Sql_cmd` instance, driving the runtime query optimization and iterator processing.
 
 ```plantuml
 
@@ -213,6 +214,9 @@ Query_expression *-right- Query_block
 
 ```
 
+### Statement Parsing Sequence
+
+The high-level sequence from `dispatch_command()` down to `Sql_cmd::execute()` is shown below:
 
 ```plantuml
 title parse procedure
@@ -244,7 +248,12 @@ activate Sql_cmd
 Sql_cmd --> Sql_cmd: prepare(thd)
 Sql_cmd --> Sql_cmd: execute_inner(thd)
 ```
-### 2.2.1 Parse
+
+---
+
+### 2.2.1 Parsing & AST Construction
+
+The Bison parser builds a tree of **`Parse_tree_node`** objects representing elements like select statements, expression clauses, lists, and function calls.
 
 ```plantuml
 
@@ -285,7 +294,8 @@ PT_show_engine_base <|-- PT_show_engine_status
 
 ```
 
-
+#### DDL Statement Parsing
+For Data Definition Language (DDL) queries, parser roots inherit from `PT_table_ddl_stmt_base`, encapsulating metadata mutations like tablespace changes, indexing structures, and tablespace operations:
 
 ```plantuml
 
@@ -301,6 +311,9 @@ PT_table_ddl_stmt_base <|-- PT_create_index_stmt
 PT_table_ddl_stmt_base <|-- PT_drop_index_stmt
 PT_table_ddl_stmt_base <|-- PT_show_create_table
 ```
+
+#### DML Expression Representation (`Item` Class)
+During the parsing of SQL expressions (like constants, fields, or function evaluations), the parser instantiates nodes inheriting from **`Item`**. The `Item` hierarchy represents all typed evaluation formulas within the database, including fields (`Item_field`), functions (`Item_func`), and comparison operators (`PTI_comp_op`).
 
 ```plantuml
 
@@ -401,23 +414,17 @@ PTI_where *-- PTI_comp_op
 
 ```
 
-### 2.2.2 Query block
+---
 
-During `contextualization`, inside `Parse_context`, `Parse_tree_root` is transformed into `Query_block`
+### 2.2.2 Query Expressions, Blocks, & Iterator Compilation
 
+During the `contextualization` step (`make_cmd()`), abstract syntax nodes are transformed into structured query scopes:
 
-* `Query_term` tree structure. 
-  Five node types:
-  * `Query_block`
-  * `Query_term_unary`
-  * `Query_term_intersect`
-  * `Query_term_except`
-  * `Query_term_union`
-* `Query_block` a query specification, which is a query consisting of a `SELECT` keyword
-* `Query_expression` one query block or several query blocks combined with UNION
-* `AccessPath` query planing structure of `Query_expression`
-* `RowIterator` an interface class for operating through a single table
-
+*   **`Query_term`**: Abstract base representing operations like `Query_block` or set operations (`Query_term_union`, `Query_term_except`).
+*   **`Query_block`**: Corresponds to a single, distinct SQL query block (a query block with a single `SELECT` keyword, `WHERE` clause, and local grouping parameters).
+*   **`Query_expression`**: Represents one or more query blocks nested or chained via `UNION` operations.
+*   **`AccessPath`**: The modern physical query plan generated by the optimizer.
+*   **`RowIterator`**: The compiled Volcano pipeline iterator. `CreateIteratorFromAccessPath()` maps paths directly to physical iterators.
 
 ```plantuml
 class Query_term {
@@ -561,8 +568,11 @@ JOIN *-- Item
 
 ```
 
-### 2.2.3 Sql_cmd
-* `Sql_cmd` representation of an SQL command, an interface between the parser and the runtime. The parser builds the appropriate `Sql_cmd` to represent a SQL statement in the parsed tree. The `execute()` method in the derived classes of `Sql_cmd` contains the runtime implementation.
+---
+
+### 2.2.3 Sql_cmd Representation
+
+An abstract statement representation that encapsulates both definition rules and the runtime execute loop:
 
 ```plantuml
 class Sql_cmd {
@@ -597,14 +607,17 @@ LEX *- Sql_cmd
 
 ```
 
-### 2.2.4 Table
-* `Table_ref` table reference in the from clause
-* `Table` struct that represents a single open instance of table within a connection or query execution.
-* `Table_share` shared between table objects, there is one instance of `Table_share` per one table in the database.
-* `Table_cache` cache for opened tables
-* `Table_cache_manager` container class for all the `Table_cache` instances in the system
-* `Table_cache_element` Element that represents the table in the specific table cache
-* `KEY` represents `Table`'s indexes on server layer
+---
+
+### 2.2.4 Table Representations & Cache Management
+
+Opening and managing physical tables is managed via a set of coordinating structs:
+
+*   **`Table_ref`**: A logical reference representing a table in the `FROM` clause.
+*   **`TABLE`**: Represents a physical instance of an open table for the current thread/connection. It owns record buffers (`record[0]`, `record[1]`) and pointers to storage engine abstraction drivers (`handler *file`).
+*   **`TABLE_SHARE`**: Stores shared metadata (such as schema definitions, field types, primary keys, and sizes) common across all connections, loaded from the system's Data Dictionary (`sql/dd`).
+*   **`Table_cache`** / **`Table_cache_manager`**: Maintains pools of open `TABLE` instances to avoid the severe performance penalty of constantly opening and parsing file systems or data dictionary schemas.
+*   **`KEY`** & **`KEY_PART_INFO`**: Describes indices on the tables and correlates fields directly.
 
 ```plantuml
 
@@ -735,8 +748,12 @@ Table O-- KEY
 KEY O-- KEY_PART_INFO
 ```
 
+---
 
-### 2.2.5 Table lock
+### 2.2.5 Table Locking Structures
+
+The SQL layer coordinates table locking using `MYSQL_LOCK` and underlying engine locking locks (`THR_LOCK_DATA`) to synchronize concurrent access on the server level:
+
 ```plantuml
 struct MYSQL_LOCK {
   TABLE **table
@@ -757,10 +774,12 @@ struct THR_LOCK_DATA {
 MYSQL_LOCK o-- THR_LOCK_DATA
 
 ```
-#### Refrence
-1. https://kernelmaker.github.io/MySQL_Lock
 
-### 2.2.6 Query Execution
+---
+
+### 2.2.6 Detailed Query Execution Sequence
+
+The complete runtime lifecycle of a read statement spans parsing, table opening, locking, preparation/type resolution, physical path selection, compiling, and data streaming:
 
 ```plantuml
 participant sql_parse
@@ -819,38 +838,127 @@ end
 
 ```
 
+#### Step-by-Step Breakdown of Execution:
+1.  **Metadata Acquisition (`open_tables()`)**: Evaluates `Table_ref` metadata and acquires `TABLE` instances from `Table_cache`.
+2.  **Type Resolution (`fix_fields()`)**: Resolves columns, aggregates, and functions across the `Item` expression trees, performing static type coercion.
+3.  **Acquire Locks (`mysql_lock_tables()`)**: Acquires server-layer locks, then issues `external_lock()` to instruct storage engines to start active statement contexts (calling InnoDB's `begin_stmt()`).
+4.  **Logical & Physical Path Generation (`optimize()`)**: Prepares costs, picks indices, join orders, and outputs physical `AccessPath` plans.
+5.  **Compile to Iterator Tree (`create_iterators()`)**: Maps compiled `AccessPath` trees to native Volcano `RowIterator` networks.
+6.  **Volcano Execution Loop (`ExecuteIteratorQuery()`)**: Pulls rows sequentially using `RowIterator::Read()`, loading the matching data inside table row buffers and streaming them to client sockets using `Query_result_send::send_data()`.
 
+---
 
+### 2.2.7 Physical Execution of Window Functions (`WindowIterator` & `BufferingWindowIterator`)
 
-## 2.5. Bin log
+*   **Location**: `sql/iterators/window_iterators.h` & `window_iterators.cc`
 
+In modern MySQL, Window Functions (like `ROW_NUMBER()`, `RANK()`, `SUM() OVER ()`, or `LEAD()`) are executed using specialized physical iterators that operate on partition boundaries. Depending on the window's requirements, MySQL selects one of two physical operators:
 
-
-
-
-## 2.6. Config
-
-Configs
-* `--defaults-file=#` read defaults options from the given file
-* `--datadir=#` path to the database root directory 
-* `--init-file=name` Read SQL commands from this file at startup
-* `--open_files_limit=#`   number of file descriptors available to `mysqld`
-* `--max-connections=#` max number of simultaneous client connections
-* `--thread-cache-size=#` number of threads the server should cache for reuse
-
-# 3. admin
-
+```text
+                  [ Query_expression::m_root_iterator ]
+                                   │
+                 ┌─────────────────┴─────────────────┐
+                 ▼                                   ▼
+        [ WindowIterator ]               [ BufferingWindowIterator ]
+        - No buffering needed            - Buffers partition rows
+        - Evaluates WFs on-the-fly       - Operates a frame-buffer table
+        - O(1) memory overhead           - Compiles complex sliding frames
 ```
-show [full] processlist                      display the current running threads
-SELECT * FROM performance_schema.threads    
-show status like '%thread%'
+
+#### A. The On-The-Fly Operator: `WindowIterator`
+Used when the window attached to the query does not require buffering (e.g., simple cumulative calculations where rows are already returned in the correct sort order and no sliding lookahead frame is defined).
+*   During `DoRead()`, it reads a row directly from its source iterator.
+*   Calls `copy_funcs(CFT_HAS_NO_WF)` to evaluate non-window expressions.
+*   Calls `m_window->check_partition_boundary()` to detect partition changes.
+*   Directly evaluates the window function via `copy_funcs(CFT_WF)` and passes the result up the iterator chain with zero extra buffering, keeping memory overhead to $O(1)$.
+
+#### B. The Buffered Operator: `BufferingWindowIterator`
+Used when window functions require lookahead or lookbehind (e.g., sliding frames like `ROWS BETWEEN 1 PRECEDING AND 3 FOLLOWING`, `LEAD()`, `LAG()`, or `NTILE()` which requires knowing total partition cardinality).
+*   **The Accumulator Loop**: During `DoRead()`, it continuously pulls records from its child iterator and copies them into an internal **Frame-Buffer Temporary Table** (`Window::frame_buffer()`) using `buffer_windowing_record()`.
+*   **Partition Boundaries**: It monitors partition changes during buffering. If a partition boundary or EOF is hit, it pauses buffering to process and finalize the completed partition.
+*   **Evaluation & Sliding Frames**: It delegates evaluation to **`process_buffered_windowing_record()`**, which moves the frame cursor. It evaluates sliding frames using one of two strategies:
+    1.  *Naive Strategy*: Scans all rows in the active frame for each output row, leading to $O(N \times M)$ complexity.
+    2.  *Optimized Inversion Strategy*: Reuses the previous aggregate state and applies the *inverse* function (e.g., subtracting rows leaving the frame and adding rows entering), reducing complexity to a highly efficient $O(N)$.
+*   **Data Retrieval**: Once window functions are fully computed, `bring_back_frame_row()` reverses the field copies, loading the finalized values back into output table record buffers to be streamed to the user.
+
+---
+
+## 2.5. Binary Logging & Two-Phase Commit (2PC)
+
+To guarantee exact consistency between the database storage engine data page structures (specifically, the InnoDB Redo Log) and the replication/recovery trail (the Binary Log), MySQL utilizes a highly coordinated **Two-Phase Commit (2PC)** protocol.
+
+The Binary Log serves as a chronological append-only audit trail of DDL/DML state changes. When a transaction modifies database pages, logging and page committing are split into a structured protocol across `sql/binlog.cc` and `sql/handler.cc`:
+
+```text
+       SQL Server Layer                            Storage Engine (InnoDB)
+   ┌──────────────────────┐                       ┌──────────────────────┐
+   │                      │                       │                      │
+   │  1. Initiate commit  │                       │                      │
+   │     ───────────────┼─┼──────────────────────>│  2. Prepare Phase    │
+   │                      │                       │     - Write Redo Log │
+   │                      │                       │     - Mark PREPARED  │
+   │                      │                       │     - Flush to disk  │
+   │                      │<──────────────────────┼────────┘             │
+   │  3. Write & Sync     │                       │                      │
+   │     Binary Log       │                       │                      │
+   │     - Flush to disk  │                       │                      │
+   │     ───────────────┼─┼──────────────────────>│  4. Commit Phase     │
+   │                      │                       │     - Mark COMMITTED │
+   │                      │                       │     - Release locks  │
+   │                      │                       │     - Flush logs     │
+   └──────────────────────┘                       └──────────────────────┘
 ```
 
-# 4. Reference
-* [mysql源码解读cnblog](https://www.cnblogs.com/jkin)
-* [阿里云开发者mysql解析](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzIzOTU0NTQ0MA==&action=getalbum&album_id=1970265915745239045&scene=173&subscene=&sessionid=svr_19b6b9d1b73&enterid=1727505362&from_msgid=2247504340&from_itemidx=1&count=3&nolastread=1#wechat_redirect)
-* [mysql源码解析github](https://github.com/Jeanhwea/mysql-source-course/blob/master/slides/p04-mysql-startup.pdf)
-* [Mysql limitations](https://www.percona.com/blog/mysql-limitations-part-1-single-threaded-replication/)
-* [MySQL · 源码分析 · 详解 Data Dictionary](http://mysql.taobao.org/monthly/2021/08/02)
-* [InnoDB internals](https://blog.jcole.us/innodb/)
-* [understanding mysql internals](https://theswissbay.ch/pdf/Gentoomen%20Library/Databases/mysql/O%27Reilly%20Understanding%20MySQL%20Internals.pdf)
+### Detailed Two-Phase Commit Steps:
+
+1.  **The Prepare Phase (Phase 1)**:
+    *   The SQL layer initiates the commit via `ha_prepare_low()`, notifying InnoDB of the upcoming transaction commit.
+    *   InnoDB processes the prepare command inside `innobase_prepare()`, flushing the dirty memory data changes to the physical transactional log (Redo Log) and changing the transaction state descriptor inside memory to `TRX_PREPARED`.
+    *   This guarantees that all redo records needed to recreate or rollback the transaction are safely persisted on disk.
+2.  **Write and Sync Binary Log (Phase 2 - Part A)**:
+    *   The SQL layer takes the query cache buffer contents and writes them directly into the physical binary log file on disk via `MYSQL_BIN_LOG::write_cache()`.
+    *   Based on system settings (specifically `sync_binlog = 1`), the binlog file descriptor is forced to synchronize using physical disk flushes.
+    *   *Crucial Logic:* Once the transaction's changes are committed to the Binary Log file on disk, **the transaction is considered legally committed** by the database server. Even if the server crashes right after this step, the crash recovery coordinator will detect that the transaction was written to the binlog and force InnoDB to roll it forward.
+3.  **The Commit Phase (Phase 2 - Part B)**:
+    *   The SQL layer completes the transaction commit via `ha_commit_low()`, calling the physical storage engine commit function `innobase_commit()`.
+    *   InnoDB changes the transaction state flag from `TRX_PREPARED` to `TRX_COMMITTED` in its transactional coordinator headers, releases row locks, and schedules internal undo log purges.
+
+---
+
+## 2.6. Essential Server Configuration Variables
+
+Key configurations that control connection pools, data directories, and execution performance limits on the SQL layer:
+
+*   `--defaults-file=<path>`: Specifies the exact local path to read the server options from.
+*   `--datadir=<path>`: Sets the physical database root directory path where InnoDB tablespaces reside.
+*   `--init-file=<path>`: Specifies an SQL file to execute statements sequentially immediately at server startup.
+*   `--open_files_limit=<num>`: Controls the maximum number of physical file descriptors available to `mysqld` on the OS level.
+*   `--max-connections=<num>`: The maximum number of simultaneous, active client connection threads allowed.
+*   `--thread_cache_size=<num>`: Controls how many connection threads the server caches for reuse instead of creating new threads on connection arrivals.
+
+---
+
+# 3. Administration & Thread Monitoring
+
+Administrators can inspect active client connection handler threads, execution contexts, and lock waits using standard commands:
+
+```sql
+-- Display the current running connection handler threads and statements
+SHOW FULL PROCESSLIST;
+
+-- Query detailed thread states directly from the Performance Schema
+SELECT * FROM performance_schema.threads;
+
+-- Check active caching of threads and connection counts
+SHOW STATUS LIKE '%thread%';
+```
+
+---
+
+# 4. References & Deep Dive Resources
+
+*   [MySQL Source Code Analysis on Cnblogs](https://www.cnblogs.com/jkin)
+*   [Alibaba Cloud DB Team: MySQL Deep Dives](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzIzOTU0NTQ0MA==)
+*   [MySQL Startup and Parser Lifecycle Course](https://github.com/Jeanhwea/mysql-source-course)
+*   [Jeremy Cole's InnoDB Internals Deep Dive Series](https://blog.jcole.us/innodb/)
+*   [O'Reilly: Understanding MySQL Internals Reference Manual](https://theswissbay.ch/pdf/Gentoomen%20Library/Databases/mysql/)
