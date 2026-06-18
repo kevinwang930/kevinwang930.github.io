@@ -1,23 +1,37 @@
 <!-- mermaid.html -->
 
-{{ if .Params.mermaid }}  <!-- 判断是否开启 -->
-<script type="module">  
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'; 
-    mermaid.initialize({ startOnLoad: true });  
-</script>  
-<script>  
-    // Replace mermaid pre.code to div  
-    Array.from(document.getElementsByClassName("language-mermaid")).forEach(  
-        (el) => {  
-            el.parentElement.outerHTML = `<div class="mermaid">${el.innerHTML}</div>`;  
-        }  
-    );  
-</script>  
-<style>  
-    /* Set svg to center */  
-    .mermaid svg {  
-        display: block;  
-        margin: auto;  
-    }  
-</style>  
+{{ if or .Params.mermaid (or (in .RawContent "```mermaid") (in .RawContent "``` mermaid")) }}
+<script type="module">
+    // Replace mermaid pre.code to div safely
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    // Import and initialize mermaid
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false });
+    
+    // Explicitly trigger rendering of the diagrams
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll('.mermaid')
+        });
+    } catch (err) {
+        console.error('Mermaid rendering failed:', err);
+    }
+</script>
+<style>
+    /* Set svg to center */
+    .mermaid svg {
+        display: block;
+        margin: auto;
+    }
+</style>
 {{ end }}

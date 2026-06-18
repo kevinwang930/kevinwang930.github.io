@@ -1,0 +1,54 @@
+/* Custom CSS to improve layout width responsiveness */
+
+:root {
+  --sidebar-width: 0px;
+  --main-content-width: 100%;
+}
+
+/* Tablet screen width (768px to 1023px) */
+@media only screen and (min-width: 768px) {
+  :root {
+    --sidebar-width: 75px;
+    --main-content-width: 800px;
+  }
+}
+
+/* Standard desktop screen width (1024px to 1279px) */
+@media only screen and (min-width: 1024px) {
+  :root {
+    --sidebar-width: 250px;
+    --main-content-width: 960px;
+  }
+}
+
+/* Widescreen desktop screen width (1280px and up) */
+@media only screen and (min-width: 1280px) {
+  :root {
+    --sidebar-width: 500px;
+    --main-content-width: 1140px;
+  }
+}
+
+/* Apply dynamic width to main content wrapper */
+.main-content-wrap {
+  max-width: var(--main-content-width) !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Ensure code blocks scale correctly and scroll horizontally on overflow */
+.codeblock .code pre,
+figure.highlight .code pre {
+  max-width: min(calc(var(--main-content-width) - 50px), calc(100vw - var(--sidebar-width) - 90px)) !important;
+}
+
+/* Ensure modals match the content width */
+.modal {
+  max-width: var(--main-content-width) !important;
+}
+
+/* Ensure post cover titles and metadata match the content width */
+.post-header-cover .post-header .post-title,
+.post-header-cover .post-header .post-meta {
+  max-width: var(--main-content-width) !important;
+}
