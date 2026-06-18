@@ -12,29 +12,21 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-本文介绍 spring cloud gateway的架构与实现
+Spring Cloud Gateway aims to provide a simple, yet effective way to route to APIs and provide cross cutting concerns to them such as : Security, monitoring/metrics, and resiliency.
 
 <!--more-->
 
-Spring Cloud Gateway aims to provide a simple, yet effective way to route to APIs and provide cross cutting concerns to them such as : Security, monitoring/metrics, and resiliency.
 
-two flavors of Spring Cloud Gateway: Server and Proxy Exchange.
-
-* Server variant is a full featured api gateway that can be standalone or embedded in a Spring Boot application.
-* Proxy Exchange variant is exclusively for use in annotation based WebFlux or MVC applications.
-
-
-
-
-
-# Reactive Server
 
 Clients make requests to gateway, Gateway Handler Mapping matches request to a route, then request is sent to Gateway Web Handler. Handler runs the request through pre and post filter chains that are specific to the request. 
+
+
 ![alt text](images/image.png)
 
----
 
-# Reactor Netty Transmission in Spring Cloud Gateway
+
+
+# Reactor Netty Transmission 
 
 Spring Cloud Gateway is built on top of Spring WebFlux and utilizes **Reactor Netty** as its default network communication engine. Under the hood, Reactor Netty acts as both the **Inbound HTTP Server** and the **Outbound HTTP Client**, providing fully non-blocking, event-driven, and backpressure-aware request forwarding.
 
