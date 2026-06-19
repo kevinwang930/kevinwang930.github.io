@@ -1,0 +1,380 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eSpring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative \u003ccode\u003e@Transactional\u003c\/code\u003e or the programmatic \u003ccode\u003eTransactionTemplate\u003c\/code\u003e, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.\u003c\/p\u003e\n\u003cp\u003eThis post dissects the inner workings of Spring transactions across four dimensions: \u003cstrong\u003earchitectural design\u003c\/strong\u003e, \u003cstrong\u003ecore components\u003c\/strong\u003e, \u003cstrong\u003etransaction execution lifecycle\u003c\/strong\u003e, and the \u003cstrong\u003elow-level source code implementation of nested transactions\u003c\/strong\u003e.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring\/transaction\/","keywords":"[spring-tx, transaction, nested, savepoint, aop]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.163.3 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="spring-tx,transaction,nested,savepoint,aop"><meta name=description content="Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative @Transactional or the programmatic TransactionTemplate, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.
+This post dissects the inner workings of Spring transactions across four dimensions: architectural design, core components, transaction execution lifecycle, and the low-level source code implementation of nested transactions."><meta property="og:description" content="Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative @Transactional or the programmatic TransactionTemplate, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.
+This post dissects the inner workings of Spring transactions across four dimensions: architectural design, core components, transaction execution lifecycle, and the low-level source code implementation of nested transactions."><meta property="og:type" content="article"><meta property="og:title" content="Deep Dive into Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics"><meta name=twitter:title content="Deep Dive into Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring/transaction/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring/transaction/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative @Transactional or the programmatic TransactionTemplate, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.
+This post dissects the inner workings of Spring transactions across four dimensions: architectural design, core components, transaction execution lifecycle, and the low-level source code implementation of nested transactions."><meta name=twitter:description content="Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative @Transactional or the programmatic TransactionTemplate, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.
+This post dissects the inner workings of Spring transactions across four dimensions: architectural design, core components, transaction execution lifecycle, and the low-level source code implementation of nested transactions."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-06-19T17:41:02"><meta property="article:modified_time" content="2026-06-19T17:41:02"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="spring"><meta property="article:tag" content="java"><meta property="article:tag" content="transaction"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Deep Dive into Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/spring/transaction/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><header id=header data-behavior=4><i id=btn-open-sidebar class="fa fa-lg fa-bars"></i><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/ aria-label="Go to homepage">Kevin wang's blog</a></div><a class=header-right-picture href=https://kevinwang930.github.io/#about aria-label="Open the link: /#about"><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a></header><nav id=sidebar data-behavior=4><div class=sidebar-container><div class=sidebar-profile><a href=https://kevinwang930.github.io/#about aria-label="Read more about the author"><img class=sidebar-profile-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"></a><h4 class=sidebar-profile-name>Kevin Wang</h4><h5 class=sidebar-profile-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></h5></div><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/ title=Home><i class="sidebar-button-icon fas fa-lg fa-home" aria-hidden=true></i>
+<span class=sidebar-button-desc>Home</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/categories title=Categories><i class="sidebar-button-icon fas fa-lg fa-bookmark" aria-hidden=true></i>
+<span class=sidebar-button-desc>Categories</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/tags title=Tags><i class="sidebar-button-icon fas fa-lg fa-tags" aria-hidden=true></i>
+<span class=sidebar-button-desc>Tags</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/archives title=Archives><i class="sidebar-button-icon fas fa-lg fa-archive" aria-hidden=true></i>
+<span class=sidebar-button-desc>Archives</span></a></li><li class=sidebar-button><a class=sidebar-button-link href=https://kevinwang930.github.io/#about title=About><i class="sidebar-button-icon fas fa-lg fa-question" aria-hidden=true></i>
+<span class=sidebar-button-desc>About</span></a></li></ul><ul class=sidebar-buttons><li class=sidebar-button><a class=sidebar-button-link href=https://github.com/kevinwang930 target=_blank rel=noopener title=GitHub><i class="sidebar-button-icon fab fa-lg fa-github" aria-hidden=true></i>
+<span class=sidebar-button-desc>GitHub</span></a></li></ul><ul class=sidebar-buttons></ul></div></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Deep Dive into Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics</h1><div class="postShorten-meta post-meta"><time datetime=2026-06-19T17:41:02+02:00>June 19, 2026
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative <code>@Transactional</code> or the programmatic <code>TransactionTemplate</code>, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.</p><p>This post dissects the inner workings of Spring transactions across four dimensions: <strong>architectural design</strong>, <strong>core components</strong>, <strong>transaction execution lifecycle</strong>, and the <strong>low-level source code implementation of nested transactions</strong>.</p><hr><h2 id=1-architectural-design--core-components>1. Architectural Design & Core Components</h2><p>Spring&rsquo;s transaction management is built on the philosophy of <strong>decoupling transaction definitions from specific transactional resources</strong> (such as JDBC <code>Connection</code>, Hibernate <code>Session</code>, or JPA <code>EntityManager</code>). Regardless of the underlying data access technology, developers interact with a unified transaction abstraction.</p><h3 id=11-core-components-class-diagram>1.1 Core Components Class Diagram</h3><p>The following class diagram shows the collaboration and inheritance structure of the key classes and interfaces in Spring Transactions:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+!option handwritten true
+skinparam monochrome false
+skinparam class {
+    BackgroundColor White
+    ArrowColor Black
+    BorderColor Black
+}
+
+interface TransactionManager
+
+interface PlatformTransactionManager {
+    +getTransaction(TransactionDefinition) : TransactionStatus
+    +commit(TransactionStatus)
+    +rollback(TransactionStatus)
+}
+
+abstract class AbstractPlatformTransactionManager {
+    +getTransaction(TransactionDefinition)
+    +commit(TransactionStatus)
+    +rollback(TransactionStatus)
+    #doGetTransaction() : Object
+    #doBegin(Object, TransactionDefinition)
+    #doCommit(DefaultTransactionStatus)
+    #doRollback(DefaultTransactionStatus)
+    #doSuspend(Object) : Object
+    #doResume(Object, Object)
+}
+
+class DataSourceTransactionManager {
+    #doBegin(Object, TransactionDefinition)
+    #doCommit(DefaultTransactionStatus)
+    #doRollback(DefaultTransactionStatus)
+}
+
+interface TransactionStatus {
+    +isNewTransaction() : boolean
+    +hasSavepoint() : boolean
+    +setRollbackOnly()
+    +isRollbackOnly() : boolean
+}
+
+interface SavepointManager {
+    +createSavepoint() : Object
+    +rollbackToSavepoint(Object)
+    +releaseSavepoint(Object)
+}
+
+abstract class AbstractTransactionStatus
+class DefaultTransactionStatus
+
+abstract class TransactionAspectSupport {
+    +invokeWithinTransaction(Method, Class, InvocationCallback) : Object
+}
+
+class TransactionInterceptor {
+    +invoke(MethodInvocation) : Object
+}
+
+class TransactionSynchronizationManager {
+    -resources : ThreadLocal
+    -synchronizations : ThreadLocal
+    +bindResource(Object, Object)
+    +unbindResource(Object) : Object
+    +getResource(Object) : Object
+}
+
+TransactionManager &lt;|-- PlatformTransactionManager
+PlatformTransactionManager &lt;|.. AbstractPlatformTransactionManager
+AbstractPlatformTransactionManager &lt;|-- DataSourceTransactionManager
+SavepointManager &lt;|-- TransactionStatus
+TransactionStatus &lt;|.. AbstractTransactionStatus
+AbstractTransactionStatus &lt;|-- DefaultTransactionStatus
+
+TransactionInterceptor --|&gt; TransactionAspectSupport
+TransactionAspectSupport ..&gt; PlatformTransactionManager : delegates to
+TransactionAspectSupport ..&gt; TransactionSynchronizationManager : accesses
+DataSourceTransactionManager ..&gt; TransactionSynchronizationManager : binds connections
+@enduml
+</code></pre><h3 id=12-core-component-responsibilities>1.2 Core Component Responsibilities</h3><ol><li><strong><code>PlatformTransactionManager</code></strong>:
+The core strategy interface of Spring&rsquo;s imperative transaction infrastructure. It defines the central contracts to fetch transaction status (<code>getTransaction</code>), commit (<code>commit</code>), and roll back (<code>rollback</code>).</li><li><strong><code>AbstractPlatformTransactionManager</code></strong>:
+An abstract base class that implements the <strong>Template Method Pattern</strong>. It handles propagation behavior, transaction suspension/resumption, and synchronization management, while delegating actual resource operations (e.g., opening a connection, setting <code>autoCommit</code> to false, committing the connection) to concrete subclasses.</li><li><strong><code>DataSourceTransactionManager</code></strong>:
+The classic implementation for single data sources (JDBC/MyBatis). It manages a single JDBC <code>Connection</code> bound to the current thread.</li><li><strong><code>TransactionDefinition</code></strong>:
+An interface describing transaction attributes, including propagation behavior, isolation level, timeout, read-only status, and the transaction name.</li><li><strong><code>TransactionStatus</code> & <code>SavepointManager</code></strong>:
+<code>TransactionStatus</code> represents the state of the current transaction (such as whether it is new, has a savepoint, or is rollback-only). It extends <code>SavepointManager</code>, which exposes savepoint operations to the transaction manager to support nested transactions.</li><li><strong><code>TransactionSynchronizationManager</code></strong>:
+A central delegate managing thread-bound resources (like <code>DataSource</code> -> <code>ConnectionHolder</code> mapping stored via <code>ThreadLocal</code>) and transaction synchronizations (callbacks invoked before/after commit or rollback).</li></ol><hr><h2 id=2-declarative-transaction-execution-lifecycle-sequence-flow>2. Declarative Transaction Execution Lifecycle (Sequence Flow)</h2><p>When a method annotated with <code>@Transactional</code> is invoked, Spring uses AOP proxies to intercept the invocation. The sequential flow of execution is shown below:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+!option handwritten true
+autonumber
+actor Client
+participant TransactionInterceptor
+participant TransactionAspectSupport
+participant PlatformTransactionManager
+participant TransactionSynchronizationManager
+database Connection as &#34;DB Connection&#34;
+participant TargetService as &#34;Target Service Method&#34;
+
+Client -&gt; TransactionInterceptor : Invoke transactional method
+TransactionInterceptor -&gt; TransactionAspectSupport : invokeWithinTransaction()
+TransactionAspectSupport -&gt; PlatformTransactionManager : 1. getTransaction(def)
+
+group Start physical transaction (e.g. PROPAGATION_REQUIRED)
+    PlatformTransactionManager -&gt; Connection : Open connection, setAutoCommit(false)
+    PlatformTransactionManager -&gt; TransactionSynchronizationManager : bindResource(DataSource, ConnectionHolder)
+end
+
+TransactionAspectSupport -&gt; TargetService : 2. Execute target method proceedWithInvocation()
+
+alt Method returns successfully
+    TargetService --&gt; TransactionAspectSupport : Return result
+    TransactionAspectSupport -&gt; PlatformTransactionManager : 3. commit(status)
+    PlatformTransactionManager -&gt; Connection : Commit physically connection.commit()
+    PlatformTransactionManager -&gt; TransactionSynchronizationManager : Clean ThreadLocal unbindResource()
+    PlatformTransactionManager -&gt; Connection : Reset connection &amp; close / return to pool
+else Method throws exception
+    TargetService --&gt; TransactionAspectSupport : Throw Throwable (e.g. RuntimeException)
+    TransactionAspectSupport -&gt; PlatformTransactionManager : 3. rollback(status)
+    PlatformTransactionManager -&gt; Connection : Roll back physically connection.rollback()
+    PlatformTransactionManager -&gt; TransactionSynchronizationManager : Clean ThreadLocal unbindResource()
+    PlatformTransactionManager -&gt; Connection : Reset connection &amp; close / return to pool
+    TransactionAspectSupport --&gt; Client : Propagate exception
+end
+@enduml
+</code></pre><h3 id=21-the-entry-point-transactionaspectsupport>2.1 The Entry Point: <code>TransactionAspectSupport</code></h3><p>The core entry point of declarative transaction execution is <code>TransactionInterceptor.invoke()</code>, which delegates to its parent method <code>TransactionAspectSupport.invokeWithinTransaction(...)</code>.</p><p>Here is the simplified skeleton code of this method:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From TransactionAspectSupport.java</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> Object <span style=color:#a6e22e>invokeWithinTransaction</span>(Method method, <span style=color:#a6e22e>@Nullable</span> Class<span style=color:#f92672>&lt;?&gt;</span> targetClass,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> InvocationCallback invocation) <span style=color:#66d9ef>throws</span> Throwable {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Fetch transaction attributes and determine the transaction manager</span>
+</span></span><span style=display:flex><span>    TransactionAttributeSource tas <span style=color:#f92672>=</span> getTransactionAttributeSource();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> TransactionAttribute txAttr <span style=color:#f92672>=</span> (tas <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> tas.<span style=color:#a6e22e>getTransactionAttribute</span>(method, targetClass) : <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> TransactionManager tm <span style=color:#f92672>=</span> determineTransactionManager(txAttr, targetClass);
+</span></span><span style=display:flex><span>    PlatformTransactionManager ptm <span style=color:#f92672>=</span> asPlatformTransactionManager(tm);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> String joinpointIdentification <span style=color:#f92672>=</span> methodIdentification(method, targetClass, txAttr);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (txAttr <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>(ptm <span style=color:#66d9ef>instanceof</span> CallbackPreferringPlatformTransactionManager)) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// 2. Create the transaction if necessary (calls ptm.getTransaction())</span>
+</span></span><span style=display:flex><span>        TransactionInfo txInfo <span style=color:#f92672>=</span> createTransactionIfNecessary(ptm, txAttr, joinpointIdentification);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        Object retVal;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 3. Invoke the target business method (next interceptor in the chain)</span>
+</span></span><span style=display:flex><span>            retVal <span style=color:#f92672>=</span> invocation.<span style=color:#a6e22e>proceedWithInvocation</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>catch</span> (Throwable ex) {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 4. Exception caught: complete the transaction (rollback or commit depending on rules)</span>
+</span></span><span style=display:flex><span>            completeTransactionAfterThrowing(txInfo, invocation, ex);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> ex;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 5. Restore the previous TransactionInfo thread-local</span>
+</span></span><span style=display:flex><span>            cleanupTransactionInfo(txInfo);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// 6. Normal return: commit the transaction</span>
+</span></span><span style=display:flex><span>        commitTransactionAfterReturning(txInfo);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> retVal;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... handling for CallbackPreferringPlatformTransactionManager is omitted</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><hr><h2 id=3-comparison-of-core-transaction-propagation-behaviors>3. Comparison of Core Transaction Propagation Behaviors</h2><p>When transactional methods invoke other transactional methods, the <strong>propagation behavior</strong> determines how they share or isolate physical database connections. We focus on comparing <code>REQUIRED</code>, <code>REQUIRES_NEW</code>, and <code>NESTED</code>.</p><h3 id=31-propagation-matrix>3.1 Propagation Matrix</h3><table><thead><tr><th style=text-align:left>Propagation</th><th style=text-align:left>Physical Connections</th><th style=text-align:left>Independent Commit / Rollback</th><th style=text-align:left>Exception Impact & Rollback Scope</th><th style=text-align:left>Underlying Technical Mechanism</th></tr></thead><tbody><tr><td style=text-align:left><strong><code>REQUIRED</code></strong> (Default)</td><td style=text-align:left><code>1</code> (Shared connection)</td><td style=text-align:left><strong>No</strong></td><td style=text-align:left>If the inner transaction fails, it marks the global transaction as <code>rollback-only</code>. Even if the outer method catches the exception, the final commit fails, throwing an <code>UnexpectedRollbackException</code> and rolling back everything.</td><td style=text-align:left><code>ThreadLocal</code> resource sharing</td></tr><tr><td style=text-align:left><strong><code>REQUIRES_NEW</code></strong></td><td style=text-align:left><code>2</code> (Outer suspended, inner uses new connection)</td><td style=text-align:left><strong>Yes</strong></td><td style=text-align:left>The inner transaction commits or rolls back independently. If the outer method catches the inner method&rsquo;s exception, the outer transaction can still commit successfully.</td><td style=text-align:left>Suspension and resumption of Connection Holders</td></tr><tr><td style=text-align:left><strong><code>NESTED</code></strong></td><td style=text-align:left><code>1</code> (Shared connection)</td><td style=text-align:left><strong>Yes (Inner rollback only)</strong></td><td style=text-align:left>The inner transaction rolls back to a savepoint without affecting the outer transaction&rsquo;s progress. However, if the outer transaction rolls back, all changes (including the nested transaction) are rolled back.</td><td style=text-align:left><strong>JDBC Savepoint</strong></td></tr></tbody></table><hr><h2 id=4-nested-transactions-propagation_nested-internal-mechanics>4. Nested Transactions (<code>PROPAGATION_NESTED</code>) Internal Mechanics</h2><p><code>PROPAGATION_NESTED</code> allows you to create isolated &ldquo;sub-transactions&rdquo; inside <strong>a single physical database connection</strong>. If a sub-transaction fails, it rolls back only to the savepoint created at its start, leaving the outer transaction active.</p><h3 id=41-nested-transaction-code-example>4.1 Nested Transaction Code Example</h3><p>Consider two transactional services:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Service</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OuterService</span> {
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Autowired</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>private</span> InnerService innerService;
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Transactional</span>(propagation <span style=color:#f92672>=</span> Propagation.<span style=color:#a6e22e>REQUIRED</span>)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>executeOuter</span>() {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// 1. Write operation in outer scope</span>
+</span></span><span style=display:flex><span>        jdbcTemplate.<span style=color:#a6e22e>update</span>(<span style=color:#e6db74>&#34;INSERT INTO outer_table (name) VALUES (&#39;outer&#39;)&#34;</span>);
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 2. Nested transaction call</span>
+</span></span><span style=display:flex><span>            innerService.<span style=color:#a6e22e>executeNested</span>();
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>catch</span> (RuntimeException e) {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 3. Catch the exception and continue outer logic</span>
+</span></span><span style=display:flex><span>            System.<span style=color:#a6e22e>out</span>.<span style=color:#a6e22e>println</span>(<span style=color:#e6db74>&#34;Inner transaction failed, but Outer can proceed!&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// 4. Final write operation in outer scope</span>
+</span></span><span style=display:flex><span>        jdbcTemplate.<span style=color:#a6e22e>update</span>(<span style=color:#e6db74>&#34;INSERT INTO outer_table (name) VALUES (&#39;outer-final&#39;)&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Service</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>class</span> <span style=color:#a6e22e>InnerService</span> {
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Transactional</span>(propagation <span style=color:#f92672>=</span> Propagation.<span style=color:#a6e22e>NESTED</span>)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>executeNested</span>() {
+</span></span><span style=display:flex><span>        jdbcTemplate.<span style=color:#a6e22e>update</span>(<span style=color:#e6db74>&#34;INSERT INTO inner_table (name) VALUES (&#39;nested&#39;)&#34;</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> RuntimeException(<span style=color:#e6db74>&#34;Force nested rollback!&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Execution Result:</strong></p><ul><li>The insert statement in <code>InnerService</code> is rolled back (no records in <code>inner_table</code>).</li><li>The outer writes (<code>'outer'</code> and <code>'outer-final'</code>) in <code>OuterService</code> are <strong>successfully committed</strong> to <code>outer_table</code>.</li></ul><p><strong>What if <code>InnerService</code> used <code>REQUIRED</code> instead of <code>NESTED</code>?</strong>
+Even though <code>OuterService</code> wraps the inner call in a try-catch block, Spring marks the global connection holder as <code>rollback-only</code>. At the end of <code>executeOuter()</code>, Spring throws an <code>UnexpectedRollbackException: Transaction silently rolled back because it has been marked as rollback-only</code>, rolling back all inserts in both tables.</p><hr><h3 id=42-step-by-step-source-code-trace-of-nested-transactions>4.2 Step-by-Step Source Code Trace of Nested Transactions</h3><p>How does Spring manage these savepoints using a single JDBC connection? Let&rsquo;s trace the source code of <code>AbstractPlatformTransactionManager</code> and <code>JdbcTransactionObjectSupport</code>.</p><h4 id=step-1-starting-the-nested-transaction-creating-a-savepoint>Step 1: Starting the Nested Transaction (Creating a Savepoint)</h4><p>When <code>getTransaction</code> detects an existing transaction and the propagation behavior is <code>NESTED</code>, it executes the following path:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From AbstractPlatformTransactionManager.java (handleExistingTransaction method)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (definition.<span style=color:#a6e22e>getPropagationBehavior</span>() <span style=color:#f92672>==</span> TransactionDefinition.<span style=color:#a6e22e>PROPAGATION_NESTED</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isNestedTransactionAllowed()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> NestedTransactionNotSupportedException(
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;Transaction manager does not allow nested transactions by default - &#34;</span> <span style=color:#f92672>+</span>
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;specify &#39;nestedTransactionAllowed&#39; property with value &#39;true&#39;&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (debugEnabled) {
+</span></span><span style=display:flex><span>        logger.<span style=color:#a6e22e>debug</span>(<span style=color:#e6db74>&#34;Creating nested transaction with name [&#34;</span> <span style=color:#f92672>+</span> definition.<span style=color:#a6e22e>getName</span>() <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;]&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// useSavepointForNestedTransaction() returns true for DataSourceTransactionManager</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (useSavepointForNestedTransaction()) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Create a DefaultTransactionStatus instance</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Arguments: newTransaction = false, newSynchronization = false, nested = true</span>
+</span></span><span style=display:flex><span>        DefaultTransactionStatus status <span style=color:#f92672>=</span> newTransactionStatus(
+</span></span><span style=display:flex><span>                definition, transaction, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>true</span>, debugEnabled, <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>beforeBegin</span>(status));
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Core: Create and hold a savepoint in this transaction status object</span>
+</span></span><span style=display:flex><span>            status.<span style=color:#a6e22e>createAndHoldSavepoint</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>catch</span> (RuntimeException <span style=color:#f92672>|</span> Error ex) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>afterBegin</span>(status, ex));
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> ex;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>afterBegin</span>(status, <span style=color:#66d9ef>null</span>));
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> status;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Fall back to nested begin/commit calls (typically JTA environments)</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> startTransaction(definition, transaction, <span style=color:#66d9ef>true</span>, debugEnabled, <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Digging into <code>status.createAndHoldSavepoint()</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From AbstractTransactionStatus.java </span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>createAndHoldSavepoint</span>() <span style=color:#66d9ef>throws</span> TransactionException {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Fetch the SavepointManager (which is the DataSourceTransactionObject)</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. Delegate to the savepoint manager to create a savepoint</span>
+</span></span><span style=display:flex><span>    Object savepoint <span style=color:#f92672>=</span> getSavepointManager().<span style=color:#a6e22e>createSavepoint</span>();
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 3. Trigger synchronizations</span>
+</span></span><span style=display:flex><span>    TransactionSynchronizationUtils.<span style=color:#a6e22e>triggerSavepoint</span>(savepoint);
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 4. Save the savepoint reference locally</span>
+</span></span><span style=display:flex><span>    setSavepoint(savepoint);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>In <code>JdbcTransactionObjectSupport.java</code>, <code>createSavepoint</code> translates this to a raw JDBC call:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From JdbcTransactionObjectSupport.java</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Object <span style=color:#a6e22e>createSavepoint</span>() <span style=color:#66d9ef>throws</span> TransactionException {
+</span></span><span style=display:flex><span>    ConnectionHolder conHolder <span style=color:#f92672>=</span> getConnectionHolderForSavepoint();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>conHolder.<span style=color:#a6e22e>supportsSavepoints</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> NestedTransactionNotSupportedException(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Cannot create a nested transaction because savepoints are not supported by your JDBC driver&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (conHolder.<span style=color:#a6e22e>isRollbackOnly</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CannotCreateTransactionException(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Cannot create savepoint for transaction which is already marked as rollback-only&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Physical JDBC Call: connection.setSavepoint()</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> conHolder.<span style=color:#a6e22e>createSavepoint</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (SQLException ex) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CannotCreateTransactionException(<span style=color:#e6db74>&#34;Could not create JDBC savepoint&#34;</span>, ex);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=step-2-rolling-back-the-nested-transaction-rolling-back-to-the-savepoint>Step 2: Rolling Back the Nested Transaction (Rolling Back to the Savepoint)</h4><p>If the nested method throws an exception, the AOP interceptor catches it and calls <code>processRollback</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From AbstractPlatformTransactionManager.java</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>processRollback</span>(DefaultTransactionStatus status, <span style=color:#66d9ef>boolean</span> unexpected) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> unexpectedRollback <span style=color:#f92672>=</span> unexpected;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> rollbackListenerInvoked <span style=color:#f92672>=</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            triggerBeforeCompletion(status);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// If the transaction status holds a savepoint</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>hasSavepoint</span>()) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>isDebug</span>()) {
+</span></span><span style=display:flex><span>                    logger.<span style=color:#a6e22e>debug</span>(<span style=color:#e6db74>&#34;Rolling back transaction to savepoint&#34;</span>);
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>beforeRollback</span>(status));
+</span></span><span style=display:flex><span>                rollbackListenerInvoked <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>                
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// Core: Roll back to the savepoint and release it</span>
+</span></span><span style=display:flex><span>                status.<span style=color:#a6e22e>rollbackToHeldSavepoint</span>();
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// If it is a root transaction, perform a physical rollback</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>isNewTransaction</span>()) {
+</span></span><span style=display:flex><span>                logger.<span style=color:#a6e22e>debug</span>(<span style=color:#e6db74>&#34;Initiating transaction rollback&#34;</span>);
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>beforeRollback</span>(status));
+</span></span><span style=display:flex><span>                rollbackListenerInvoked <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>                doRollback(status);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Participating in a larger transaction (like PROPAGATION_REQUIRED)</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>hasTransaction</span>()) {
+</span></span><span style=display:flex><span>                    <span style=color:#75715e>// Mark the global connection holder as rollback-only!</span>
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>isLocalRollbackOnly</span>() <span style=color:#f92672>||</span> isGlobalRollbackOnParticipationFailure()) {
+</span></span><span style=display:flex><span>                        doSetRollbackOnly(status);
+</span></span><span style=display:flex><span>                    }
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// ...</span>
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// ... cleanup logic omitted</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Digging into <code>status.rollbackToHeldSavepoint()</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From AbstractTransactionStatus.java</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>rollbackToHeldSavepoint</span>() <span style=color:#66d9ef>throws</span> TransactionException {
+</span></span><span style=display:flex><span>    Object savepoint <span style=color:#f92672>=</span> getSavepoint();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (savepoint <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> TransactionUsageException(<span style=color:#e6db74>&#34;Cannot roll back to savepoint - no savepoint associated with current transaction&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    TransactionSynchronizationUtils.<span style=color:#a6e22e>triggerSavepointRollback</span>(savepoint);
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Delegate rollback to SavepointManager</span>
+</span></span><span style=display:flex><span>    getSavepointManager().<span style=color:#a6e22e>rollbackToSavepoint</span>(savepoint);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. Delegate release to SavepointManager</span>
+</span></span><span style=display:flex><span>    getSavepointManager().<span style=color:#a6e22e>releaseSavepoint</span>(savepoint);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 3. Clear local savepoint state</span>
+</span></span><span style=display:flex><span>    setSavepoint(<span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>In <code>JdbcTransactionObjectSupport.java</code>, the physical rollback to savepoint occurs:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From JdbcTransactionObjectSupport.java</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>rollbackToSavepoint</span>(Object savepoint) <span style=color:#66d9ef>throws</span> TransactionException {
+</span></span><span style=display:flex><span>    ConnectionHolder conHolder <span style=color:#f92672>=</span> getConnectionHolderForSavepoint();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Physical JDBC Call: connection.rollback(Savepoint)</span>
+</span></span><span style=display:flex><span>        conHolder.<span style=color:#a6e22e>getConnection</span>().<span style=color:#a6e22e>rollback</span>((Savepoint) savepoint);
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Critical: Reset the ConnectionHolder&#39;s rollback-only flag.</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// This ensures the failure of the nested transaction does not poison </span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// the outer transaction&#39;s physical connection state!</span>
+</span></span><span style=display:flex><span>        conHolder.<span style=color:#a6e22e>resetRollbackOnly</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (Throwable ex) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> TransactionSystemException(<span style=color:#e6db74>&#34;Could not roll back to JDBC savepoint&#34;</span>, ex);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=step-3-committing-the-nested-transaction-releasing-the-savepoint>Step 3: Committing the Nested Transaction (Releasing the Savepoint)</h4><p>If the nested method completes successfully, the execution flow leads to <code>processCommit</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From AbstractPlatformTransactionManager.java (processCommit method)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>hasSavepoint</span>()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (status.<span style=color:#a6e22e>isDebug</span>()) {
+</span></span><span style=display:flex><span>        logger.<span style=color:#a6e22e>debug</span>(<span style=color:#e6db74>&#34;Releasing transaction savepoint&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    unexpectedRollback <span style=color:#f92672>=</span> status.<span style=color:#a6e22e>isGlobalRollbackOnly</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>transactionExecutionListeners</span>.<span style=color:#a6e22e>forEach</span>(listener <span style=color:#f92672>-&gt;</span> listener.<span style=color:#a6e22e>beforeCommit</span>(status));
+</span></span><span style=display:flex><span>    commitListenerInvoked <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Core: Release the savepoint. Note that no physical Connection.commit() is executed here!</span>
+</span></span><span style=display:flex><span>    status.<span style=color:#a6e22e>releaseHeldSavepoint</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>In <code>JdbcTransactionObjectSupport.java</code>, the savepoint is released:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// From JdbcTransactionObjectSupport.java</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>releaseSavepoint</span>(Object savepoint) <span style=color:#66d9ef>throws</span> TransactionException {
+</span></span><span style=display:flex><span>    ConnectionHolder conHolder <span style=color:#f92672>=</span> getConnectionHolderForSavepoint();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Physical JDBC Call: connection.releaseSavepoint(Savepoint)</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Some databases (like Oracle) do not support releasing savepoints explicitly;</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// this exception is caught and safely ignored.</span>
+</span></span><span style=display:flex><span>        conHolder.<span style=color:#a6e22e>getConnection</span>().<span style=color:#a6e22e>releaseSavepoint</span>((Savepoint) savepoint);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (SQLFeatureNotSupportedException ex) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Ignore (typically on Oracle)</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (SQLException ex) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Additional cleanups ...</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Why is there no physical <code>commit()</code> call?</strong>
+Because the nested transaction shares the same physical database connection with the outer transaction. A physical commit can only occur at the boundary of the root transaction. Releasing the savepoint simply means that the nested transaction has completed successfully and its changes are buffered in the connection. If the outer transaction commits later, the nested transaction&rsquo;s changes commit as well. If the outer transaction rolls back, all changes (including the nested transaction&rsquo;s changes) are rolled back.</p><hr><h2 id=5-summary>5. Summary</h2><ol><li><strong>Unified Interface</strong>: Spring&rsquo;s <code>PlatformTransactionManager</code> decouples transaction logic from resource details, using <code>TransactionSynchronizationManager</code> and <code>ThreadLocal</code> variables to manage active connection sessions.</li><li><strong>Lifecycle Control</strong>: <code>TransactionInterceptor</code> coordinates method execution using <code>TransactionInfo</code> to preserve state context during nested execution chains.</li><li><strong>Isolation Levels & Propagation</strong>:<ul><li><code>REQUIRED</code> shares transaction state. A failure anywhere poisons the entire execution path, making it rollback-only.</li><li><code>REQUIRES_NEW</code> suspends active connections and spawns a new physical connection for absolute transaction isolation.</li><li><code>NESTED</code> utilizes database savepoints on a single shared connection, allowing localized rollbacks while leaving the outer transaction control intact.</li></ul></li></ol></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/transaction/>transaction</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/mysql/volcano/ data-tooltip="MySQL query Internals - Volcano model" aria-label="PREVIOUS: MySQL query Internals - Volcano model"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring/transaction/",this.page.identifier="/post/java/spring/transaction/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/mysql/volcano/ data-tooltip="MySQL query Internals - Volcano model" aria-label="PREVIOUS: MySQL query Internals - Volcano model"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/transaction/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Ftransaction%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Ftransaction%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Ftransaction%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})},loadMathJaxIfNeeded=()=>{if(document.body.textContent.includes("$")){const e=/\$[^$]+\$/.test(document.body.textContent)||/\$\$[^$]+\$\$/.test(document.body.textContent);e&&loadScript("https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",()=>{MathJax.Hub.Config({tex2jax:{inlineMath:[["$","$"]],displayMath:[["$$","$$"]],processEscapes:!0,processEnvironments:!0},displayAlign:"center","HTML-CSS":{styles:{".MathJax_Display":{margin:0}},linebreaks:{automatic:!0}}}),MathJax.Hub.Queue(["Typeset",MathJax.Hub])})}};window.addEventListener("load",function(){loadPlantUMLOnNeed(),loadMathJaxIfNeeded()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script></body></html>
