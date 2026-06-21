@@ -292,16 +292,16 @@ body {
   margin-bottom: 40px !important;
 }
 
-/* POST LIST COLUMN - grid style */
+/* POST LIST COLUMN - vertical card column style (one card per row) */
 .post-list-column {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)) !important;
-  gap: 28px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 24px !important;
   flex: 1 !important;
   min-width: 0 !important;
 }
 
-/* Modern Card Layout for Blog Posts */
+/* Compact Modern Card Layout for Blog Posts */
 .postShorten-card {
   background: #fff !important;
   border: 1px solid rgba(226, 232, 240, 0.8) !important;
@@ -318,14 +318,30 @@ body {
 }
 
 .postShorten-card:hover {
-  transform: translateY(-5px) !important;
+  transform: translateY(-4px) !important;
   box-shadow: 0 20px 25px -5px rgba(148, 163, 184, 0.12), 0 10px 10px -5px rgba(148, 163, 184, 0.06) !important;
   border-color: rgba(79, 70, 229, 0.4) !important;
 }
 
+/* Responsive row layout for cards with thumbnails on desktop */
+@media only screen and (min-width: 768px) {
+  .postShorten-card.has-thumbnail {
+    flex-direction: row !important;
+    align-items: stretch !important;
+  }
+
+  .postShorten-card-image-wrap {
+    width: 320px !important;
+    flex-shrink: 0 !important;
+    height: auto !important;
+    border-bottom: none !important;
+    border-right: 1px solid rgba(226, 232, 240, 0.5) !important;
+  }
+}
+
 .postShorten-card-image-wrap {
-  width: 100% !important;
-  height: 200px !important;
+  width: 100%;
+  height: 200px;
   overflow: hidden !important;
   position: relative !important;
   background: #f1f5f9 !important;
@@ -340,11 +356,11 @@ body {
 }
 
 .postShorten-card:hover .postShorten-card-image {
-  transform: scale(1.05) !important;
+  transform: scale(1.04) !important;
 }
 
 .postShorten-card-content {
-  padding: 24px !important;
+  padding: 22px !important;
   display: flex !important;
   flex-direction: column !important;
   flex-grow: 1 !important;
@@ -360,7 +376,7 @@ body {
   display: flex !important;
   flex-wrap: wrap !important;
   gap: 6px !important;
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
 }
 
 .postShorten-card-category-tag {
@@ -373,7 +389,7 @@ body {
   text-transform: uppercase !important;
   letter-spacing: 0.5px !important;
   text-decoration: none !important;
-  transition: background-color 0.2s, color 0.2s !important;
+  transition: background-color 0.15s, color 0.15s !important;
 }
 
 .postShorten-card-category-tag:hover {
@@ -384,15 +400,15 @@ body {
 
 .postShorten-card-title {
   font-size: 19px !important;
-  font-weight: 700 !important;
-  margin: 0 0 10px 0 !important;
-  line-height: 1.4 !important;
+  font-weight: 750 !important;
+  margin: 0 0 6px 0 !important;
+  line-height: 1.35 !important;
 }
 
 .postShorten-card-title a {
   color: #1e293b !important;
   text-decoration: none !important;
-  transition: color 0.2s !important;
+  transition: color 0.15s !important;
 }
 
 .postShorten-card-title a:hover {
@@ -406,7 +422,7 @@ body {
   gap: 14px !important;
   font-size: 12px !important;
   color: #64748b !important;
-  margin-bottom: 16px !important;
+  margin-bottom: 10px !important;
 }
 
 .postShorten-card-meta i {
@@ -423,8 +439,8 @@ body {
 .postShorten-card-excerpt {
   font-size: 14px !important;
   color: #475569 !important;
-  line-height: 1.6 !important;
-  margin: 0 0 4px 0 !important;
+  line-height: 1.5 !important;
+  margin: 0 !important;
   display: -webkit-box !important;
   -webkit-line-clamp: 3 !important;
   -webkit-box-orient: vertical !important;
@@ -432,12 +448,18 @@ body {
   text-overflow: ellipsis !important;
 }
 
+.postShorten-card-excerpt p {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.5 !important;
+}
+
 .postShorten-card-bottom {
   display: flex !important;
   flex-direction: column !important;
-  margin-top: 20px !important;
+  margin-top: 14px !important;
   border-top: 1px solid #f1f5f9 !important;
-  padding-top: 16px !important;
+  padding-top: 12px !important;
 }
 
 .postShorten-card-tags-action {
@@ -462,7 +484,7 @@ body {
   padding: 3px 8px !important;
   border-radius: 6px !important;
   text-decoration: none !important;
-  transition: all 0.2s !important;
+  transition: all 0.15s !important;
 }
 
 .postShorten-card-tag:hover {
@@ -479,7 +501,7 @@ body {
   display: inline-flex !important;
   align-items: center !important;
   gap: 6px !important;
-  transition: color 0.2s !important;
+  transition: color 0.15s !important;
 }
 
 .postShorten-card-readmore i {
@@ -497,7 +519,6 @@ body {
 
 /* Pagination bar as a matching card */
 .pagination-bar {
-  grid-column: 1 / -1 !important;
   width: 100% !important;
   background: #fff !important;
   border: 1px solid rgba(226, 232, 240, 0.8) !important;
@@ -654,9 +675,7 @@ body {
     position: static !important;
     margin-top: 20px !important;
   }
-  .post-list-column {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
-  }
+  /* No grid override needed since post-list-column is now a flex column */
 }
 
 @media only screen and (max-width: 767px) {
@@ -689,5 +708,16 @@ body {
   .main-content-wrap {
     padding-left: 16px !important;
     padding-right: 16px !important;
+  }
+
+  /* Card responsive stacking */
+  .postShorten-card {
+    flex-direction: column !important;
+  }
+  .postShorten-card-image-wrap {
+    width: 100% !important;
+    height: 200px !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.5) !important;
   }
 }
