@@ -1,0 +1,26 @@
+<aside class="sidebar-right">
+  <div class="sidebar-right-widget widget-categories">
+    <h3 class="widget-title">Categories</h3>
+    <ul class="widget-list">
+      {{ range .Site.Taxonomies.categories.ByCount }}
+        <li class="widget-list-item">
+          <a href="/categories/{{ .Name | urlize }}" class="widget-link">
+            <span class="widget-name">{{ .Name | title }}</span>
+            <span class="widget-count">({{ .Count }})</span>
+          </a>
+        </li>
+      {{ end }}
+    </ul>
+  </div>
+  
+  <div class="sidebar-right-widget widget-tags">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget-tag-cloud">
+      {{ range .Site.Taxonomies.tags.ByCount }}
+        <a href="/tags/{{ .Name | urlize }}" class="widget-tag-item">
+          #{{ .Name }} <span class="widget-tag-count">({{ .Count }})</span>
+        </a>
+      {{ end }}
+    </div>
+  </div>
+</aside>

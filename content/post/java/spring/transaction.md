@@ -1,5 +1,5 @@
 ---
-title: "Deep Dive into Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics"
+title: "Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics"
 date: 2026-06-19T17:41:02+02:00
 categories:
 - java
@@ -509,6 +509,183 @@ public void releaseSavepoint(Object savepoint) throws TransactionException {
 
 **Why is there no physical `commit()` call?**
 Because the nested transaction shares the same physical database connection with the outer transaction. A physical commit can only occur at the boundary of the root transaction. Releasing the savepoint simply means that the nested transaction has completed successfully and its changes are buffered in the connection. If the outer transaction commits later, the nested transaction's changes commit as well. If the outer transaction rolls back, all changes (including the nested transaction's changes) are rolled back.
+
+---
+
+### 4.3 Transaction Context Switching & Restoration: REQUIRES_NEW vs NESTED
+
+To support transaction state changes (such as suspending an active transaction to start a new one, or checkpointing inside a transaction) and subsequently restoring the original state, Spring relies on specific core data structures. Understanding these structures explains how Spring manages ThreadLocals and connection boundaries without leaking or losing transaction states.
+
+#### 4.3.1 Core Data Structures for Context Management
+
+The class structure below illustrates how Spring keeps track of active connections, suspended states, and savepoints:
+
+```plantuml
+@startuml
+skinparam monochrome false
+skinparam class {
+    BackgroundColor White
+    ArrowColor Black
+    BorderColor Black
+}
+
+class TransactionSynchronizationManager {
+    {static} - resources : ThreadLocal<Map<Object, Object>>
+    {static} - synchronizations : ThreadLocal<Set<TransactionSynchronization>>
+    {static} - currentTransactionName : ThreadLocal<String>
+    {static} - currentTransactionReadOnly : ThreadLocal<Boolean>
+    {static} - currentTransactionIsolationLevel : ThreadLocal<Integer>
+    {static} - actualTransactionActive : ThreadLocal<Boolean>
+}
+
+class DefaultTransactionStatus {
+    - transaction : Object
+    - newTransaction : boolean
+    - newSynchronization : boolean
+    - nested : boolean
+    - suspendedResources : Object
+    - savepoint : Object
+}
+
+class SuspendedResourcesHolder {
+    + suspendedResources : Object
+    + suspendedSynchronizations : List<TransactionSynchronization>
+    + name : String
+    + readOnly : boolean
+    + isolationLevel : Integer
+    + wasActive : boolean
+}
+
+class ConnectionHolder {
+    - connection : Connection
+    - referenceCount : int
+    - rollbackOnly : boolean
+}
+
+interface Savepoint {
+}
+
+TransactionSynchronizationManager "1" --> "0..*" ConnectionHolder : binds to resources (Key: DataSource, Value: ConnectionHolder)
+DefaultTransactionStatus "1" --> "0..1" SuspendedResourcesHolder : holds suspended resources (for REQUIRES_NEW)
+DefaultTransactionStatus "1" --> "0..1" Savepoint : holds database checkpoint (for NESTED)
+SuspendedResourcesHolder "1" --> "0..1" ConnectionHolder : preserves suspended outer connection
+@enduml
+```
+
+* **`TransactionSynchronizationManager`**: Acts as the ThreadLocal registry. It holds the active database connection (inside `ConnectionHolder`) keyed by the `DataSource`.
+* **`SuspendedResourcesHolder`**: Acts as a backup snapshot. When `PROPAGATION_REQUIRES_NEW` suspends the current transaction, all ThreadLocal states (the current connection holder, transaction name, isolation level, read-only flag) are extracted from `TransactionSynchronizationManager` and wrapped into this holder.
+* **`DefaultTransactionStatus`**: Tracks transaction execution state. It holds the reference to the `SuspendedResourcesHolder` (for suspended parent transactions) or the `Savepoint` (for nested sub-transactions).
+
+---
+
+#### 4.3.2 Propagation Mechanism Comparison
+
+##### 1. `PROPAGATION_REQUIRES_NEW` (Context Suspension & Resumption)
+
+Under `REQUIRES_NEW`, the current transaction is suspended, and a new physical connection is opened. The lifecycle of context switching and restoration is depicted below:
+
+```plantuml
+@startuml
+autonumber
+participant "TransactionAspectSupport" as TAS
+participant "AbstractPlatformTransactionManager" as APTM
+participant "TransactionSynchronizationManager" as TSM
+participant "DataSourceTransactionManager" as DSTM
+database "DataSource / DB" as DB
+
+== Phase 1: Suspension of Outer Transaction ==
+TAS -> APTM : getTransaction(def) [PROPAGATION_REQUIRES_NEW]
+APTM -> TSM : isSynchronizationActive()
+APTM -> APTM : suspend(outerTx)
+APTM -> APTM : doSuspendSynchronization()
+APTM -> DSTM : doSuspend(outerTx)
+DSTM -> TSM : unbindResource(dataSource)
+note right: Unbinds Outer ConnectionHolder from ThreadLocal
+DSTM --> APTM : return Outer ConnectionHolder
+APTM -> TSM : clear/get current thread states (name, readOnly, isolation, wasActive)
+APTM -> APTM : new SuspendedResourcesHolder(suspendedResources, ...)
+note right: Saves outer connection & thread state
+APTM --> TAS : return SuspendedResourcesHolder
+
+== Phase 2: Start of Inner Transaction ==
+APTM -> APTM : startTransaction(def, innerTx, ..., suspendedResources)
+APTM -> APTM : newTransactionStatus(..., suspendedResources)
+note right: Holds SuspendedResourcesHolder in DefaultTransactionStatus
+APTM -> DSTM : doBegin(innerTx, def)
+DSTM -> DB : getConnection() (New Physical Connection)
+DSTM -> TSM : bindResource(dataSource, innerConnectionHolder)
+note right: Binds Inner ConnectionHolder to ThreadLocal
+APTM -> APTM : prepareSynchronization(status, def) (Init inner thread states)
+
+== Phase 3: Complete Inner & Resume Outer ==
+TAS -> APTM : commit/rollback(innerStatus)
+APTM -> APTM : cleanupAfterCompletion(innerStatus)
+APTM -> DSTM : doCleanupAfterCompletion(innerTx)
+DSTM -> TSM : unbindResource(dataSource) (Unbinds Inner ConnectionHolder)
+DSTM -> DB : close/return Connection to pool
+APTM -> APTM : resume(outerTx, suspendedResources)
+APTM -> DSTM : doResume(outerTx, suspendedResources)
+DSTM -> TSM : bindResource(dataSource, outerConnectionHolder)
+note right: Binds Outer ConnectionHolder back to ThreadLocal
+APTM -> TSM : Restore thread states (name, readOnly, isolation, wasActive)
+APTM -> APTM : doResumeSynchronization(suspendedSynchronizations)
+@enduml
+```
+
+* **Suspension (`suspend()`)**: Unbinds the parent connection from ThreadLocal, clears transaction metadata, and packages them into `SuspendedResourcesHolder`.
+* **Resumption (`resume()`)**: Re-binds the parent connection to ThreadLocal and restores the transaction properties and synchronizations after the inner transaction completes.
+
+##### 2. `PROPAGATION_NESTED` (Savepoint Creation & Restore)
+
+Under `NESTED`, the existing transaction connection is reused, but a checkpoint (Savepoint) is established. The context is restored simply by rolling back database operations to the savepoint:
+
+```plantuml
+@startuml
+autonumber
+participant "TransactionAspectSupport" as TAS
+participant "AbstractPlatformTransactionManager" as APTM
+participant "DefaultTransactionStatus" as DTS
+participant "JdbcTransactionObjectSupport" as JTOS
+participant "ConnectionHolder" as CH
+database "DB Connection" as DB
+
+== Phase 1: Nested Transaction Initialization (Savepoint) ==
+TAS -> APTM : getTransaction(def) [PROPAGATION_NESTED]
+APTM -> APTM : handleExistingTransaction(def, outerTx)
+note right: No suspension of resources. Same physical connection is reused.
+APTM -> APTM : newTransactionStatus(..., nested = true, suspendedResources = null)
+APTM -> DTS : createAndHoldSavepoint()
+DTS -> JTOS : createSavepoint()
+JTOS -> CH : getConnectionHolderForSavepoint()
+JTOS -> CH : createSavepoint()
+CH -> DB : Connection.setSavepoint()
+DB --> CH : return JDBC Savepoint object
+CH --> JTOS : return Savepoint
+JTOS --> DTS : return Savepoint
+DTS -> DTS : setSavepoint(savepoint)
+note right: Savepoint is held in inner DefaultTransactionStatus
+
+== Phase 2: Execution & Local Rollback (If Inner Fails) ==
+TAS -> APTM : rollback(innerStatus)
+APTM -> APTM : processRollback(innerStatus)
+APTM -> DTS : rollbackToHeldSavepoint()
+DTS -> JTOS : rollbackToSavepoint(savepoint)
+JTOS -> CH : getConnection().rollback(savepoint)
+DB -> DB : Revert changes to savepoint
+JTOS -> CH : resetRollbackOnly()
+note right: Reset rollback-only flag on ConnectionHolder\nto avoid poisoning outer transaction.
+DTS -> JTOS : releaseSavepoint(savepoint)
+JTOS -> CH : getConnection().releaseSavepoint(savepoint)
+DTS -> DTS : setSavepoint(null)
+
+== Phase 3: Cleanup ==
+APTM -> APTM : cleanupAfterCompletion(innerStatus)
+note right: No resumption or physical connection close since nested=true\nand suspendedResources is null.
+@enduml
+```
+
+* **Savepoint Creation**: Instead of suspending resources, it requests the database connection to mark a `Savepoint` object and registers it within `DefaultTransactionStatus`.
+* **State Recovery & Protection**: If the nested method fails, it rolls back physically to the savepoint (`connection.rollback(savepoint)`). Critically, it calls `conHolder.resetRollbackOnly()`. This resets the connection's rollback-only flag so the outer transaction can proceed and commit normally.
 
 ---
 

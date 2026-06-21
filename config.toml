@@ -26,7 +26,7 @@ defaultContentLanguage = "en"
     label = "English"
     locale = "en-US"
 [pagination]
-  pagerSize = 7
+  pagerSize = 9999
 [module]
 
 [permalinks]
@@ -98,7 +98,7 @@ defaultContentLanguage = "en"
   identifier = "about"
   name = "About"
   pre = "<i class=\"sidebar-button-icon fas fa-lg fa-question\" aria-hidden=\"true\"></i>"
-  url = "/#about"
+  url = "/about/"
 
 [[menu.links]]
   weight = 6
@@ -371,7 +371,7 @@ defaultContentLanguage = "en"
   [params.header.rightLink]
     class = ""
     icon = ""
-    url = "/#about"
+    url = "/about/"
 
   # --------------------
   # Footer configuration

@@ -1,0 +1,98 @@
+{{ if .Site.Params.thumbnailImage }}
+  {{ if .Params.thumbnailimage }}
+    {{ .Scratch.Set "thumbnailImage" (.Params.thumbnailimage | absURL) }}
+  {{ else }}
+    {{ if or .Params.autothumbnailimage (and .Site.Params.autoThumbnailImage (ne .Params.autothumbnailimage false)) }}
+      {{ if .Params.gallery }}
+        {{ range first 1 .Params.gallery }}
+          {{ range first 1 (split . " ") }}
+            {{ $.Scratch.Set "thumbnailImage" (. | absURL) }}
+          {{ end }}
+        {{ end }}
+      {{ else }}
+        {{ if .Params.coverImage }}
+          {{ if (findRE "^/" .Params.coverImage 1) }}
+            {{ .Scratch.Set "thumbnailImage" (.Params.coverImage | absURL) }}
+          {{ else }}
+            {{ .Scratch.Set "thumbnailImage" (path.Join .RelPermalink .Params.coverImage) }}
+          {{ end }}
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+{{ end }}
+
+<article class="postShorten-card {{ if .Scratch.Get "thumbnailImage" }}has-thumbnail{{ end }}">
+  {{ if .Scratch.Get "thumbnailImage" }}
+    <div class="postShorten-card-image-wrap">
+      {{ with .Params.link }}
+        <a href="{{ . | absURL }}" target="_blank">
+      {{ else }}
+        <a href="{{ .Permalink }}">
+      {{ end }}
+        <img class="postShorten-card-image" src="{{ .Scratch.Get "thumbnailImage" }}" alt="{{ .Title }}" loading="lazy" />
+      </a>
+    </div>
+  {{ end }}
+
+  <div class="postShorten-card-content">
+    <div class="postShorten-card-top">
+      {{ if .Params.categories }}
+        <div class="postShorten-card-categories">
+          {{ range .Params.categories }}
+            <a href="/categories/{{ . | urlize }}" class="postShorten-card-category-tag">
+              {{ . | title }}
+            </a>
+          {{ end }}
+        </div>
+      {{ end }}
+      
+      <h2 class="postShorten-card-title">
+        {{ with .Params.link }}
+          <a href="{{ . | absURL }}" target="_blank">{{ $.Title }}</a>
+        {{ else }}
+          <a href="{{ .Permalink }}">{{ .Title }}</a>
+        {{ end }}
+      </h2>
+      
+      <div class="postShorten-card-meta">
+        <time class="postShorten-card-date" datetime="{{ .Date.Format "2006-01-02T15:04:05Z07:00" }}">
+          <i class="far fa-calendar-alt"></i> {{ partial "internal/date.html" . }}
+        </time>
+        {{ with .Params.readingtime }}
+          <span class="postShorten-card-readingtime">
+            <i class="far fa-clock"></i> {{ . }} min read
+          </span>
+        {{ end }}
+      </div>
+
+      <div class="postShorten-card-excerpt">
+        {{ if .Params.Summary }}
+          {{ .Params.Summary | markdownify | truncate 150 }}
+        {{ else }}
+          {{ .Summary | truncate 150 }}
+        {{ end }}
+      </div>
+    </div>
+    
+    <div class="postShorten-card-bottom">
+      <div class="postShorten-card-tags-action">
+        <div class="postShorten-card-tags">
+          {{ if .Params.tags }}
+            {{ range first 3 .Params.tags }}
+              <a href="/tags/{{ . | urlize }}" class="postShorten-card-tag">#{{ . }}</a>
+            {{ end }}
+          {{ end }}
+        </div>
+        
+        <div class="postShorten-card-action">
+          {{ with .Params.link }}
+            <a href="{{ . | absURL }}" target="_blank" class="postShorten-card-readmore">Read <i class="fas fa-arrow-right"></i></a>
+          {{ else }}
+            <a href="{{ .Permalink }}" class="postShorten-card-readmore">Read <i class="fas fa-arrow-right"></i></a>
+          {{ end }}
+        </div>
+      </div>
+    </div>
+  </div>
+</article>
