@@ -1,0 +1,42 @@
+{{ partial "head.html" . }}
+  <body>
+    <div id="blog">
+      {{ partial "header.html" . }}
+      {{ partial "sidebar.html" . }}
+      {{ if or (not (isset .Site.Params "tagPagination")) (.Site.Params.tagPagination) }}
+        {{ partial "post/header-cover.html" . }}
+      {{ end }}
+      <div id="main" data-behavior="{{ .Scratch.Get "sidebarBehavior" }}"
+        class="{{ with .Params.coverimage }}hasCover{{ end }}
+               {{ if eq .Params.covermeta "out" }}hasCoverMetaOut{{ else }}hasCoverMetaIn{{ end }}
+               {{ with .Params.coverCaption }}hasCoverCaption{{ end }}">
+        
+        <div class="main-content-wrap">
+          <div class="blog-layout-container">
+            {{ if or (not (isset .Site.Params "tagPagination")) (.Site.Params.tagPagination) }}
+              <section class="postShorten-group post-list-column">
+                {{ $paginator := .Paginate (where .Data.Pages "Type" "in" site.Params.mainSections) }}
+                {{ range $paginator.Pages }}
+                  {{ .Render "summary" }}
+                {{ end }}
+                {{ partial "pagination.html" . }}
+              </section>
+            {{ else }}
+              <section class="post-list-column">
+                <div id="archives" style="width: 100%;">
+                  <form id="filter-form" action="#">
+                    <input name="date" type="text" class="form-control input--xlarge" placeholder="{{ i18n "global.search_date" }}" autofocus="autofocus">
+                  </form>
+                  {{ partial "archive-post.html" (where .Data.Pages "Type" "in" site.Params.mainSections) }}
+                </div>
+              </section>
+            {{ end }}
+            
+            {{ partial "sidebar-right.html" . }}
+          </div>
+        </div>
+        
+        {{ partial "footer.html" . }}
+      </div>
+    </div>
+{{ partial "foot.html" . }}

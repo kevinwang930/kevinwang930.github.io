@@ -3,8 +3,16 @@
     <h3 class="widget-title">Categories</h3>
     <ul class="widget-list">
       {{ range .Site.Taxonomies.categories.ByCount }}
+        {{ $isCurrent := false }}
+        {{ if eq $.Kind "term" }}
+          {{ if eq $.Data.Plural "categories" }}
+            {{ if eq (urlize $.Data.Term) (urlize .Name) }}
+              {{ $isCurrent = true }}
+            {{ end }}
+          {{ end }}
+        {{ end }}
         <li class="widget-list-item">
-          <a href="/categories/{{ .Name | urlize }}" class="widget-link">
+          <a href="/categories/{{ .Name | urlize }}" class="widget-link {{ if $isCurrent }}active{{ end }}">
             <span class="widget-name">{{ .Name | title }}</span>
             <span class="widget-count">({{ .Count }})</span>
           </a>
@@ -17,7 +25,15 @@
     <h3 class="widget-title">Tags</h3>
     <div class="widget-tag-cloud">
       {{ range .Site.Taxonomies.tags.ByCount }}
-        <a href="/tags/{{ .Name | urlize }}" class="widget-tag-item">
+        {{ $isCurrent := false }}
+        {{ if eq $.Kind "term" }}
+          {{ if eq $.Data.Plural "tags" }}
+            {{ if eq (urlize $.Data.Term) (urlize .Name) }}
+              {{ $isCurrent = true }}
+            {{ end }}
+          {{ end }}
+        {{ end }}
+        <a href="/tags/{{ .Name | urlize }}" class="widget-tag-item {{ if $isCurrent }}active{{ end }}">
           #{{ .Name }} <span class="widget-tag-count">({{ .Count }})</span>
         </a>
       {{ end }}
