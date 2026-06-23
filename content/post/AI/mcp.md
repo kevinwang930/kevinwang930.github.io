@@ -149,7 +149,8 @@ Without a standard protocol, connecting $N$ AI clients to $M$ data sources requi
 For 3 clients and 3 data sources, this creates a fully connected mesh of **9 unique integration pathways**:
 
 ```mermaid
-graph LR
+%%{init: {'flowchart': {'curve': 'linear'}}}%%
+flowchart LR
     subgraph Clients [AI Clients]
         C1[Claude]
         C2[VS Code]
@@ -178,7 +179,8 @@ graph LR
 With MCP, the integration complexity is reduced to **$N + M$ connections**. Each client implements a single standard MCP client, and each data source implements a single standard MCP server. Because they all speak the same protocol, any client can immediately connect to any server:
 
 ```mermaid
-graph LR
+%%{init: {'flowchart': {'curve': 'linear'}}}%%
+flowchart LR
     subgraph Clients [AI Clients]
         C1[Claude]
         C2[VS Code]
