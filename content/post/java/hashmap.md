@@ -1,5 +1,5 @@
 ---
-title: "Hashmap"
+title: "Java HashMap implementation"
 date: 2026-06-23T21:59:08+02:00
 categories:
 - java
@@ -131,6 +131,39 @@ table::0 --> n1
 table::2 --> tr
 @enduml
 ```
+
+### 1.3 Singly-Linked Lists vs. Doubly-Linked Trees: Design Trade-offs
+
+The architectural difference in how entries are chained—singly-linked for normal lists and doubly-linked for trees—is a deliberate design trade-off between **space overhead** and **time complexity**.
+
+#### Why the List Bin is Singly Linked
+* **Memory Optimization**: 
+  The vast majority of buckets in a well-distributed hash table contain either zero or one element. Under a default load factor of $0.75$, the probability of a bin containing more than 2 elements is extremely small. 
+  By keeping the standard `Node` singly linked (possessing only a `next` pointer), `HashMap` minimizes its overall memory footprint. Adding a `prev` pointer to every single key-value entry would incur an unacceptable memory overhead across the application for a feature that is rarely utilized in short lists.
+* **Negligible Deletion Cost**: 
+  Although removing a node from a singly-linked list technically requires traversing the list to find the predecessor ($O(n)$ time complexity), the maximum list length is capped in practice (under 8 due to treeification). Finding the predecessor in a list of length $\le 8$ is extremely fast and effectively constant time ($O(1)$) in practice.
+
+#### Why the Tree Bin is Doubly Linked (Adding the `prev` Pointer)
+
+Because `TreeNode` inherits from `Node`, it automatically inherits the `next` pointer. This sequential `next` chain is what enables forward-only operations like **efficient resizing partitioning (`split`)** and the **$O(1)$ iteration step**. Indeed, a singly-linked list structure is completely sufficient for these two tasks since they only require forward traversal.
+
+However, `TreeNode` introduces a `prev` pointer, transforming the chain into a doubly-linked list. The `prev` pointer is added **specifically and exclusively** to optimize deletion:
+
+* **Constant-Time Sequential Unlinking During Deletion (`removeTreeNode`)**:
+  When a key-value pair is removed from a tree bin, `HashMap` must delete the node from both the Red-Black Tree and the sequential list.
+  * If the nodes were only singly linked, the only way to unlink a deleted node from the list would be to start at the head of the bin and traverse forward to find the node's predecessor, which takes $O(n)$ time.
+  * Since the tree itself operates in $O(\log n)$ time, a sequential $O(n)$ predecessor search during list unlinking would bottleneck the entire deletion operation, destroying the worst-case logarithmic guarantee.
+  * By maintaining a `prev` pointer, `HashMap` can immediately locate the predecessor and unlink the node from the list in $O(1)$ time:
+  ```java
+  TreeNode<K,V> succ = (TreeNode<K,V>)next, pred = prev;
+  if (pred == null)
+      tab[index] = first = succ;
+  else
+      pred.next = succ;
+  if (succ != null)
+      succ.prev = pred;
+  ```
+  This keeps the overall deletion complexity bounded at $O(\log n)$ (determined solely by the tree rebalancing phase).
 
 ---
 
