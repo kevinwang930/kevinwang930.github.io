@@ -316,6 +316,51 @@ Inside `treeify`, nodes are inserted one by one into a Red-Black Tree. To mainta
    ```
    This ensures a total and consistent order across tree rebalancings. After every insertion, `balanceInsertion` is called to repaint and rotate the tree, and `moveRootToFront` ensures the tree's root remains at the head of the table bin.
 
+### 4.3 Tree Node Insertion and Deletion Mechanics
+
+When a bin is treeified, operations such as adding a node or deleting a node are no longer simple pointer reassignments on a linked list. They require executing Red-Black Tree traversal, structural manipulation, and rebalancing algorithms.
+
+#### How a Tree Node is Added (`putTreeVal`)
+When `putVal` delegates to `putTreeVal(map, tab, h, k, v)`, the insertion follows these steps:
+1. **Locate the Root**: It identifies the root node of the current tree bin:
+   ```java
+   TreeNode<K,V> root = (parent != null) ? root() : this;
+   ```
+2. **Binary Search Tree Traversal**: It starts at the root and traverses down the tree. At each node `p`, it compares the target hash `h` and key `k` to decide the direction:
+   * **Go Left**: If `h < p.hash`.
+   * **Go Right**: If `h > p.hash`.
+   * **Exact Match**: If `h == p.hash` and `(p.key == k || (k != null && k.equals(p.key)))`, the key already exists. It returns `p` to let the caller update its value.
+   * **Tie-Breaking**: If the hashes are equal but the keys do not match, it checks if the key implements `Comparable` to compare them. If they are still not comparable or `compareTo` returns `0`, it searches the left and right subtrees (`find`). If the key is not found anywhere in the tree, it invokes `tieBreakOrder` to consistently choose a left or right direction.
+3. **Insert the TreeNode**:
+   - Once it reaches a leaf position (where the chosen direction is `null`), it creates a new `TreeNode`.
+   - It hooks the new node as the child of the parent node (`xp`).
+   - In addition to the tree pointers (`parent`, `left`, `right`), it inserts the new node immediately after `xp` in the sequential doubly-linked list (`next` and `prev` pointers).
+4. **Restore Red-Black Invariants**:
+   - It calls `balanceInsertion(root, x)` which performs necessary color adjustments and tree rotations (left or right) to maintain the Red-Black Tree balance.
+   - It calls `moveRootToFront(tab, root)` to guarantee that the root of the tree is stored at the head of the table bucket array `tab[index]`.
+
+#### How a Tree Node is Deleted (`removeTreeNode`)
+When removing an entry that resides in a tree bin, `HashMap` invokes `removeTreeNode(map, tab, movable)`. The deletion follows these steps:
+1. **Unlink from the Doubly-Linked List**:
+   - It immediately unlinks the node from the sequential doubly-linked list using its `prev` and `next` pointers. This is done in $O(1)$ time, preventing the need to traverse the bin.
+2. **Pre-emptive Untreeify Check**:
+   - Before performing complex tree rotations, it checks the tree's structure. If the tree is too small, it is converted back to a plain singly-linked list:
+     ```java
+     if (root == null || (movable && (root.right == null || (rl = root.left) == null || rl.left == null))) {
+         tab[index] = first.untreeify(map); // Too small, untreeify
+         return;
+     }
+     ```
+3. **Tree Linkage Swapping**:
+   - Unlike standard academic Red-Black Tree implementations that simply swap the key-value data of a deleted node with its successor, `HashMap` **swaps the actual node pointers and tree connections** (parent, left, right, and colors).
+   - This is necessary because external iterators and other threads might hold references to the actual `TreeNode` object, and mutating its key/value fields would violate thread safety and consistency.
+4. **Unlink from the Tree Structure**:
+   - Once the node is isolated or swapped with a successor leaf, the parent's and children's references are updated to bypass the deleted node, effectively unlinking it.
+5. **Restore Balance (`balanceDeletion`)**:
+   - If the deleted node (or its replacement) was black, deleting it disrupts the black-height invariant of the tree. `HashMap` runs `balanceDeletion(root, replacement)` to perform recoloring and rotations to rebalance the tree.
+6. **Maintain Root at Head**:
+   - Finally, it calls `moveRootToFront` to ensure that the potentially new root node of the rebalanced tree is placed at the index of the table array.
+
 ---
 
 ## 5. Resizing and Capacity Management
