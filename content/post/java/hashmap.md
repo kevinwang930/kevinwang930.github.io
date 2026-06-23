@@ -361,6 +361,65 @@ When removing an entry that resides in a tree bin, `HashMap` invokes `removeTree
 6. **Maintain Root at Head**:
    - Finally, it calls `moveRootToFront` to ensure that the potentially new root node of the rebalanced tree is placed at the index of the table array.
 
+### 4.4 The "compareTo() == 0" vs "equals() == false" Scenario
+
+In Java, two keys `k1` and `k2` are considered logically identical in a `HashMap` **if and only if** their hashes match and their `equals` method returns `true`:
+```java
+k1.hashCode() == k2.hashCode() && (k1 == k2 || k1.equals(k2))
+```
+If this condition is met, `HashMap` will overwrite the existing entry's value.
+
+However, a Red-Black Tree is a binary search tree that requires a **total ordering** of elements to arrange them hierarchically. This means for any two nodes in a tree bin, `HashMap` must determine which one goes left and which one goes right.
+
+When a hash collision occurs (i.e., different keys share the exact same hash, such as `"Aa"` and `"BB"` which both hash to `2112`), `HashMap` relies on the `Comparable` interface to establish this ordering.
+
+This introduces a subtle and critical edge case: **What happens when `compareTo()` returns `0`, but `equals()` is `false`?**
+
+#### 1. How Can This Happen?
+According to the Java documentation for the `Comparable` interface:
+> "It is strongly recommended (though not required) that natural orderings be consistent with equals."
+This means a developer can write a class where `compareTo(x) == 0` does **not** imply `equals(x) == true`.
+For example, consider a custom class representing a student:
+* `equals()` compares all fields: `id`, `name`, and `age`.
+* `compareTo()` is written to only compare `id`.
+* If we have `Student("123", "Alice", 20)` and `Student("123", "Bob", 22)`:
+  * Their `compareTo()` will return `0` (because they share the same ID).
+  * Their `equals()` will return `false` (because their names and ages differ).
+  * Since `equals()` is `false`, they are distinct keys and **both must be stored as separate entries in the HashMap**.
+
+#### 2. How `HashMap` Resolves This Conflict
+When `HashMap` encounters two keys in a tree bin where `hash(k1) == hash(k2)` and `k1.compareTo(k2) == 0`, but `k1.equals(k2) == false`, it handles it as follows:
+
+1. **Subtree Search (`find`)**:
+   Before declaring that the key is new and inserting a new node, `HashMap` must guarantee that the key does not already exist in the tree. Because `compareTo() == 0` fails to provide a left/right direction, the target key could be located in either subtree.
+   Therefore, `HashMap` searches both the left and right subtrees of the current node:
+   ```java
+   if (!searched) {
+       TreeNode<K,V> q, ch;
+       searched = true;
+       if (((ch = p.left) != null && (q = ch.find(h, k, kc)) != null) ||
+           ((ch = p.right) != null && (q = ch.find(h, k, kc)) != null))
+           return q; // Found the matching node (via equals() == true)
+   }
+   ```
+2. **Deterministic Tie-Breaking (`tieBreakOrder`)**:
+   If the subtree search returns `null` (meaning the key is indeed not in the map yet), `HashMap` must insert the new node. To maintain a stable tree structure, it must choose a consistent left/right direction.
+   Since neither the hash nor `compareTo` can break the tie, `HashMap` invokes `tieBreakOrder`:
+   ```java
+   static int tieBreakOrder(Object a, Object b) {
+       int d;
+       if (a == null || b == null ||
+           (d = a.getClass().getName().compareTo(b.getClass().getName())) == 0)
+           d = (System.identityHashCode(a) <= System.identityHashCode(b) ? -1 : 1);
+       return d;
+   }
+   ```
+   * It first compares their class names alphabetically.
+   * If the classes are identical, it compares their `System.identityHashCode()`.
+   * Since `System.identityHashCode` is based on the object's memory address, it guarantees a consistent, stable ordering for different object instances.
+
+Through this combination of subtree searching and memory-address-based tie-breaking, `HashMap` safely supports keys where the natural ordering is inconsistent with equality, maintaining both the correctness of the map and the logarithmic search performance of the Red-Black Tree.
+
 ---
 
 ## 5. Resizing and Capacity Management
