@@ -144,31 +144,67 @@ Prompts are pre-configured templates that help users interact with the model eff
 
 ## How MCP Solves the N × M Problem
 
-Without a standard protocol, connecting $N$ AI clients to $M$ data sources requires $N \times M$ unique integrations:
+Without a standard protocol, connecting $N$ AI clients to $M$ data sources requires building and maintaining $N \times M$ unique, custom connectors. Every client must implement a bespoke driver for every data source it wants to support.
 
-```
-  Clients       Integrations       Data Sources
-┌─────────┐      ┌─────────┐      ┌──────────────┐
-│ Claude  ├─────►│ Custom  ├─────►│ PostgreSQL   │
-├─────────┤      ├─────────┤      ├──────────────┤
-│ VS Code ├─────►│ Custom  ├─────►│ GitHub API   │
-├─────────┤      ├─────────┤      ├──────────────┤
-│ Copilot ├─────►│ Custom  ├─────►│ Filesystem   │
-└─────────┘      └─────────┘      └──────────────┘
+For 3 clients and 3 data sources, this creates a fully connected mesh of **9 unique integration pathways**:
+
+```mermaid
+graph LR
+    subgraph Clients [AI Clients]
+        C1[Claude]
+        C2[VS Code]
+        C3[Copilot]
+    end
+
+    subgraph Sources [Data Sources]
+        D1[(PostgreSQL)]
+        D2[GitHub API]
+        D3[Filesystem]
+    end
+
+    C1 --- D1
+    C1 --- D2
+    C1 --- D3
+
+    C2 --- D1
+    C2 --- D2
+    C2 --- D3
+
+    C3 --- D1
+    C3 --- D2
+    C3 --- D3
 ```
 
-With MCP, the complexity is reduced to $N + M$. A client only needs to implement the MCP client interface, and a data source only needs to implement an MCP server:
+With MCP, the integration complexity is reduced to **$N + M$ connections**. Each client implements a single standard MCP client, and each data source implements a single standard MCP server. Because they all speak the same protocol, any client can immediately connect to any server:
 
+```mermaid
+graph LR
+    subgraph Clients [AI Clients]
+        C1[Claude]
+        C2[VS Code]
+        C3[Copilot]
+    end
+
+    subgraph Protocol [Standard]
+        MCP((Model Context<br/>Protocol))
+    end
+
+    subgraph Sources [Data Sources]
+        D1[(PostgreSQL)]
+        D2[GitHub API]
+        D3[Filesystem]
+    end
+
+    C1 --- MCP
+    C2 --- MCP
+    C3 --- MCP
+
+    MCP --- D1
+    MCP --- D2
+    MCP --- D3
 ```
-  Clients          Protocol          Servers         Data Sources
-┌─────────┐      ┌──────────┐      ┌──────────┐      ┌──────────────┐
-│ Claude  ├─────►│          ├─────►│ Local FS ├─────►│ Filesystem   │
-├─────────┤      │          │      ├──────────┤      ├──────────────┤
-│ VS Code ├─────►│   MCP    ├─────►│ PG-Serv  ├─────►│ PostgreSQL   │
-├─────────┤      │          │      ├──────────┤      ├──────────────┤
-│ Copilot ├─────►│          ├─────►│ GH-Serv  ├─────►│ GitHub API   │
-└─────────┘      └──────────┘      └──────────┘      └──────────────┘
-```
+
+This reduces the total development and maintenance effort from **9 custom connectors** to **6 standard implementations** (3 clients + 3 servers).
 
 ## Getting Started: Configuring an MCP Server
 
