@@ -191,6 +191,79 @@ Write operations (`put`, `remove`, `replace`) use a combination of CAS and local
 Unlike `HashMap`, `ConcurrentHashMap` does not permit `null` keys or values. 
 In a concurrent map, allowing `null` values introduces an ambiguity: `map.get(key) -> null` could mean that the key maps to `null`, or that the key is not present in the map. In a single-threaded map, this is resolved using `map.containsKey(key)`. In a concurrent map, the state of the map can change between the calls to `get()` and `containsKey()`, creating race conditions. To prevent this ambiguity, `null` keys and values are strictly prohibited.
 
+### 2.4 TreeBin LockState and Non-Blocking Reads
+
+When a bucket is treeified, the bin head is replaced by a `TreeBin` node, which acts as the root of a balanced Red-Black Tree. To coordinate concurrent reads and writes on the tree without blocking, `TreeBin` maintains an internal `lockState` field:
+* **`WRITER = 1`**: Set when a thread is writing to or restructuring the tree (holding a write lock).
+* **`WAITER = 2`**: Set when a thread is waiting to acquire the write lock.
+* **`READER = 4`**: Used as a unit of increment/decrement to track active reader threads.
+
+#### 1. Reader Counter Tracking Mechanics
+When a thread calls `find(h, k)` on a `TreeBin`:
+* **Acquisition**: It checks if there are active writers or waiters (`(lockState & (WAITER|WRITER)) != 0`). If the tree is stable, the thread attempts to increment the reader count by `READER` using CAS:
+  ```java
+  U.compareAndSetInt(this, LOCKSTATE, s, s + READER)
+  ```
+  If successful, it traverses the Red-Black Tree using `findTreeNode(h, k)`.
+* **Release**: Once the read is complete, the thread decrements the reader count in the `finally` block using an atomic add:
+  ```java
+  U.getAndAddInt(this, LOCKSTATE, -READER)
+  ```
+  If this thread was the last reader and a writer thread is waiting (`lockState` becomes `WAITER`), it calls `LockSupport.unpark(waiter)` to wake up the waiting writer.
+
+#### 2. Rationale for Thread-Safe Concurrent Reads
+This atomic increment and decrement of the reader count does **not** cause problems or bottlenecks in concurrent multiple reads:
+* **No Mutual Reader Blockage**: Since `READER` is represented by bit-fields above `WRITER` and `WAITER` (value 4, or `0b100`), multiple reader threads can increment the lock state concurrently without interfering with each other. If five threads read at the same time, `lockState` simply becomes `20` (`5 * READER`). They all traverse the tree in parallel.
+* **Optimistic CAS Loop**: The acquisition uses a CAS spin-loop. If multiple threads attempt to increment `lockState` concurrently, the ones that fail the CAS will simply loop, read the updated state, and retry immediately. Since read registration is a simple, fast register update, spin contention is extremely short-lived.
+* **Atomic Release**: The release phase uses `U.getAndAddInt`, which translates to a hardware-level atomic instruction (such as `LOCK XADD` on x86). This instruction never fails and is guaranteed by the hardware to update the count thread-safely without locks.
+* **Zero-Blocking Fallback (Singly-Linked List Traversal)**: If a reader thread detects that a writer is active or waiting (`(lockState & (WAITER|WRITER)) != 0`), or if it repeatedly fails to acquire the read lock due to extreme contention, **it does not block or spin**. Instead, it immediately bypasses the tree structure and traverses the bin using the sequential singly-linked list (`next` pointers) maintained by the `TreeNode` instances.
+  This fallback guarantees that **reader threads never block under any circumstance**, preserving the non-blocking read contract of `ConcurrentHashMap`.
+
+### 2.5 The Single-Writer Constraint and the Waiter Field
+
+A key observation of the `TreeBin` class is that the `waiter` field is a single `volatile Thread` reference, rather than a queue or list of waiting threads. This implies that **at most one thread** can ever be waiting to acquire the tree write lock at any given time.
+
+This design is correct because of a fundamental architectural constraint in `ConcurrentHashMap`: **the Single-Writer Constraint**.
+
+#### 1. Rationale for a Single Waiter
+Although `ConcurrentHashMap` allows lock-free reads, **all write operations (such as insertion, deletion, and treeification) are serialized at the bin level using monitor synchronization**.
+
+Before any thread can call `putTreeVal` or `removeTreeNode` to write to a `TreeBin`, it must first acquire the Java monitor lock on the `TreeBin` instance (`f`) itself:
+```java
+synchronized (f) {
+    if (tabAt(tab, i) == f) {
+        // Delegate to putTreeVal or removeTreeNode
+    }
+}
+```
+
+Because of this outer `synchronized` block:
+* At most **one** writer thread can ever execute code inside a specific `TreeBin` at any time.
+* Consequently, there is **never any contention between multiple writers** trying to write to the same `TreeBin` simultaneously.
+* The only contention a writer thread faces is with **active reader threads** that are currently traversing the tree.
+
+#### 2. The Locking Flow for the Single Writer
+When the single writer thread enters `putTreeVal` or `removeTreeNode`, it must restructure the tree. To ensure reader threads do not read an unstable, partially restructured tree, the writer must wait for all active readers to exit.
+1. The writer calls `lockRoot()`:
+   * It attempts to CAS `lockState` from `0` to `WRITER` (1).
+   * If there are active readers, `lockState` is greater than 0 (a multiple of `READER` = 4). The CAS fails.
+2. The writer delegates to `contendedLock()`:
+   * Since this is the only writer thread allowed in the `TreeBin` block, it is the **only** thread that will ever execute `contendedLock()`.
+   * It sets the `WAITER` bit (2) in `lockState` and stores its own thread reference in the `waiter` field:
+     ```java
+     U.compareAndSetReference(this, WAITERTHREAD, null, current);
+     ```
+   * It then parks itself using `LockSupport.park(this)`.
+3. Waking the Writer:
+   * As reader threads finish their traversal, they decrement the reader count in `lockState`.
+   * The last reader thread to exit detects that the `WAITER` bit is set and wakes up the single waiting writer:
+     ```java
+     if (U.getAndAddInt(this, LOCKSTATE, -READER) == (READER|WAITER) && (w = waiter) != null)
+         LockSupport.unpark(w);
+     ```
+
+Because the outer monitor lock (`synchronized(f)`) guarantees that there is at most one writer thread per bin, **it is physically impossible for multiple threads to wait in `contendedLock()` at the same time**. A single `waiter` reference is therefore completely sufficient, and no waiting queue is required.
+
 ---
 
 ## 3. Multi-Threaded Cooperative Resizing
