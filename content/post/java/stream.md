@@ -1,7 +1,6 @@
 ---
 title: "Java Stream internals"
 date: 2026-06-27T18:02:29+08:00
-draft: true
 categories:
 - java
 tags:
