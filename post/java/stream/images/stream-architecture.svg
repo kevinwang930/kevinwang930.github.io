@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="850" viewBox="0 0 1000 850" role="img" aria-label="Java Stream Architecture layered UML class diagram">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&amp;display=swap');
+    text {
+      font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+    }
+    .title-main {
+      font-size: 20px;
+      font-weight: 700;
+      fill: #0f172a;
+    }
+    .subtitle-main {
+      font-size: 13px;
+      fill: #475569;
+    }
+    
+    /* Layer Backgrounds */
+    .layer-bg-1 { fill: #faf5ff; stroke: rgba(139, 92, 246, 0.15); stroke-width: 1.5px; rx: 12px; }
+    .layer-bg-2 { fill: #ecfeff; stroke: rgba(6, 182, 212, 0.15); stroke-width: 1.5px; rx: 12px; }
+    .layer-bg-3 { fill: #ecfdf5; stroke: rgba(16, 185, 129, 0.15); stroke-width: 1.5px; rx: 12px; }
+    .layer-bg-4 { fill: #fffbeb; stroke: rgba(245, 158, 11, 0.15); stroke-width: 1.5px; rx: 12px; }
+
+    /* Layer Titles */
+    .layer-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .layer-title-1 { fill: #7c3aed; }
+    .layer-title-2 { fill: #0891b2; }
+    .layer-title-3 { fill: #059669; }
+    .layer-title-4 { fill: #d97706; }
+
+    /* UML Class Styles - Modern Uniform Theme */
+    .uml-card {
+      fill: #ffffff;
+      stroke-width: 1.25px;
+      rx: 8px;
+    }
+    .card-purple { stroke: #8b5cf6; }
+    .card-cyan { stroke: #06b6d4; }
+    .card-green { stroke: #10b981; }
+    .card-amber { stroke: #f59e0b; }
+
+    .uml-divider {
+      stroke-width: 1px;
+    }
+    .divider-purple { stroke: rgba(139, 92, 246, 0.2); }
+    .divider-cyan { stroke: rgba(6, 182, 212, 0.2); }
+    .divider-green { stroke: rgba(16, 185, 129, 0.2); }
+    .divider-amber { stroke: rgba(245, 158, 11, 0.2); }
+
+    .uml-text-bold {
+      font-size: 11.5px;
+      font-weight: 700;
+      fill: #0f172a;
+      text-anchor: middle;
+    }
+    .uml-text-italic {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-anchor: middle;
+    }
+    .text-purple { fill: #7c3aed; }
+    .text-cyan { fill: #0891b2; }
+    .text-green { fill: #059669; }
+    .text-amber { fill: #d97706; }
+
+    .uml-member {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 9.5px;
+      fill: #334155;
+    }
+    
+    /* Badge styling */
+    .badge-interface { fill: #2563eb; }
+    .badge-class { fill: #7c3aed; }
+    .badge-enum { fill: #b45309; }
+    .badge-text { font-size: 10px; font-weight: bold; fill: #ffffff; text-anchor: middle; }
+
+    /* Connector Lines */
+    .uml-inheritance-line {
+      fill: none;
+      stroke: #1e293b;
+      stroke-width: 1.75px;
+    }
+    .uml-dependency-line {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 1.25px;
+      stroke-dasharray: 4,4;
+    }
+    
+    .arrow-label-rect {
+      fill: #ffffff;
+      stroke: #cbd5e1;
+      stroke-width: 1px;
+      rx: 4px;
+    }
+    .arrow-label-text {
+      font-size: 9px;
+      fill: #475569;
+      font-weight: 500;
+      text-anchor: middle;
+    }
+  </style>
+  <defs>
+    <!-- Background grid pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(15, 23, 42, 0.015)" stroke-width="1" />
+    </pattern>
+
+    <!-- UML Inheritance Marker -->
+    <marker id="uml-inheritance" markerWidth="12" markerHeight="10" refX="12" refY="5" orient="auto">
+      <polygon points="0,0 12,5 0,10" fill="#ffffff" stroke="#1e293b" stroke-width="1.75" />
+    </marker>
+
+    <!-- UML Dependency Marker -->
+    <marker id="uml-dependency" markerWidth="10" markerHeight="8" refX="10" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8" fill="none" stroke="#94a3b8" stroke-width="1.25" />
+    </marker>
+
+    <!-- Shadow filter -->
+    <filter id="card-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.05" />
+    </filter>
+  </defs>
+
+  <!-- Outer background -->
+  <rect width="1000" height="850" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5" />
+  <rect width="1000" height="850" rx="16" fill="url(#grid)" />
+
+  <!-- Header -->
+  <g transform="translate(40, 30)">
+    <text x="0" y="15" class="title-main">Java Stream Architecture Layers (UML Class Diagram)</text>
+    <text x="0" y="34" class="subtitle-main">OpenJDK classes, interfaces, methods, and types structured under their architecture layers</text>
+  </g>
+
+  <!-- ==================== LAYER 1: PUBLIC API ==================== -->
+  <rect x="40" y="90" width="920" height="150" class="layer-bg-1" />
+  <text x="60" y="114" class="layer-title layer-title-1">1. Public API</text>
+
+  <!-- Card: Stream -->
+  <g filter="url(#card-shadow)" transform="translate(60, 130)">
+    <rect width="210" height="105" class="uml-card card-purple" />
+    <line x1="0" y1="36" x2="210" y2="36" class="uml-divider divider-purple" />
+    <circle cx="20" cy="18" r="9" class="badge-interface" />
+    <text x="20" y="21.5" class="badge-text">I</text>
+    <text x="115" y="16" class="uml-text-italic text-purple">«interface»</text>
+    <text x="115" y="29" class="uml-text-bold">Stream&lt;T&gt;</text>
+    <text x="10" y="52" class="uml-member">+ filter(Predicate): Stream&lt;T&gt;</text>
+    <text x="10" y="66" class="uml-member">+ map(Function): Stream&lt;R&gt;</text>
+    <text x="10" y="80" class="uml-member">+ flatMap(Function): Stream&lt;R&gt;</text>
+    <text x="10" y="94" class="uml-member">+ collect(Collector): R</text>
+  </g>
+
+  <!-- Card: BaseStream -->
+  <g filter="url(#card-shadow)" transform="translate(290, 130)">
+    <rect width="200" height="105" class="uml-card card-purple" />
+    <line x1="0" y1="36" x2="200" y2="36" class="uml-divider divider-purple" />
+    <circle cx="20" cy="18" r="9" class="badge-interface" />
+    <text x="20" y="21.5" class="badge-text">I</text>
+    <text x="110" y="16" class="uml-text-italic text-purple">«interface»</text>
+    <text x="110" y="29" class="uml-text-bold">BaseStream</text>
+    <text x="10" y="52" class="uml-member">+ iterator(): Iterator&lt;T&gt;</text>
+    <text x="10" y="66" class="uml-member">+ spliterator(): Spliterator</text>
+    <text x="10" y="80" class="uml-member">+ sequential(): S</text>
+    <text x="10" y="94" class="uml-member">+ parallel(): S</text>
+  </g>
+
+  <!-- Card: StreamSupport -->
+  <g filter="url(#card-shadow)" transform="translate(510, 130)">
+    <rect width="210" height="105" class="uml-card card-purple" />
+    <line x1="0" y1="36" x2="210" y2="36" class="uml-divider divider-purple" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="115" y="16" class="uml-text-italic text-purple">«class»</text>
+    <text x="115" y="29" class="uml-text-bold">StreamSupport</text>
+    <text x="10" y="52" class="uml-member">+ stream(Spliterator, bool)</text>
+    <text x="10" y="66" class="uml-member">+ intStream(Spliterator, bool)</text>
+    <text x="10" y="80" class="uml-member">  : IntStream</text>
+  </g>
+
+  <!-- Card: Collectors -->
+  <g filter="url(#card-shadow)" transform="translate(740, 130)">
+    <rect width="200" height="105" class="uml-card card-purple" />
+    <line x1="0" y1="36" x2="200" y2="36" class="uml-divider divider-purple" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="110" y="16" class="uml-text-italic text-purple">«class»</text>
+    <text x="110" y="29" class="uml-text-bold">Collectors</text>
+    <text x="10" y="52" class="uml-member">+ toList(): Collector</text>
+    <text x="10" y="66" class="uml-member">+ groupingBy(Func): Collector</text>
+    <text x="10" y="80" class="uml-member">+ reducing(BinOp): Collector</text>
+  </g>
+
+
+  <!-- ==================== LAYER 2: PIPELINE CORE ==================== -->
+  <rect x="40" y="270" width="920" height="190" class="layer-bg-2" />
+  <text x="60" y="294" class="layer-title layer-title-2">2. Pipeline Core</text>
+
+  <!-- Card: ReferencePipeline -->
+  <g filter="url(#card-shadow)" transform="translate(60, 310)">
+    <rect width="210" height="135" class="uml-card card-cyan" />
+    <line x1="0" y1="36" x2="210" y2="36" class="uml-divider divider-cyan" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="115" y="16" class="uml-text-italic text-cyan">«class»</text>
+    <text x="115" y="29" class="uml-text-bold">ReferencePipeline</text>
+    <text x="10" y="52" class="uml-member"># Head (static class)</text>
+    <text x="10" y="66" class="uml-member"># StatelessOp (static class)</text>
+    <text x="10" y="80" class="uml-member"># StatefulOp (static class)</text>
+    <line x1="0" y1="88" x2="210" y2="88" class="uml-divider divider-cyan" stroke-dasharray="2,2" />
+    <text x="10" y="102" class="uml-member">+ filter(Predicate): Stream</text>
+    <text x="10" y="116" class="uml-member">+ map(Function): Stream</text>
+  </g>
+
+  <!-- Card: AbstractPipeline -->
+  <g filter="url(#card-shadow)" transform="translate(290, 310)">
+    <rect width="210" height="135" class="uml-card card-cyan" />
+    <line x1="0" y1="36" x2="210" y2="36" class="uml-divider divider-cyan" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="115" y="16" class="uml-text-italic text-cyan">«class»</text>
+    <text x="115" y="29" class="uml-text-bold">AbstractPipeline</text>
+    <text x="10" y="52" class="uml-member">- previousStage: AbstractPipeline</text>
+    <text x="10" y="66" class="uml-member">- nextStage: AbstractPipeline</text>
+    <text x="10" y="80" class="uml-member">- sourceStage: AbstractPipeline</text>
+    <line x1="0" y1="88" x2="210" y2="88" class="uml-divider divider-cyan" stroke-dasharray="2,2" />
+    <text x="10" y="102" class="uml-member">+ evaluate(TerminalOp): R</text>
+    <text x="10" y="116" class="uml-member"># opWrapSink(int, Sink): Sink</text>
+  </g>
+
+  <!-- Card: PipelineHelper -->
+  <g filter="url(#card-shadow)" transform="translate(510, 310)">
+    <rect width="210" height="135" class="uml-card card-cyan" />
+    <line x1="0" y1="36" x2="210" y2="36" class="uml-divider divider-cyan" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="115" y="16" class="uml-text-italic text-cyan">«class»</text>
+    <text x="115" y="29" class="uml-text-bold">PipelineHelper</text>
+    <text x="10" y="52" class="uml-member"># wrapAndCopyInto(Sink, Splitr)</text>
+    <text x="10" y="66" class="uml-member"># wrapSink(Sink): Sink</text>
+    <text x="10" y="80" class="uml-member"># copyInto(Sink, Spliterator)</text>
+    <text x="10" y="94" class="uml-member"># copyIntoWithCancel(Sink, Splitr)</text>
+  </g>
+
+  <!-- Card: StreamOpFlag -->
+  <g filter="url(#card-shadow)" transform="translate(740, 310)">
+    <rect width="200" height="135" class="uml-card card-cyan" />
+    <line x1="0" y1="36" x2="200" y2="36" class="uml-divider divider-cyan" />
+    <circle cx="20" cy="18" r="9" class="badge-enum" />
+    <text x="20" y="21.5" class="badge-text">E</text>
+    <text x="110" y="16" class="uml-text-italic text-cyan">«enum»</text>
+    <text x="110" y="29" class="uml-text-bold">StreamOpFlag</text>
+    <text x="10" y="52" class="uml-member">DISTINCT, SORTED, ORDERED</text>
+    <line x1="0" y1="62" x2="200" y2="62" class="uml-divider divider-cyan" stroke-dasharray="2,2" />
+    <text x="10" y="76" class="uml-member">+ combineOpFlags(int, int): int</text>
+    <text x="10" y="90" class="uml-member">+ isKnown(int): boolean</text>
+  </g>
+
+
+  <!-- ==================== LAYER 3: LIFECYCLE & FLOW ==================== -->
+  <rect x="40" y="490" width="920" height="160" class="layer-bg-3" />
+  <text x="60" y="514" class="layer-title layer-title-3">3. Lifecycle &amp; Element Flow</text>
+
+  <!-- Card: Spliterator -->
+  <g filter="url(#card-shadow)" transform="translate(60, 530)">
+    <rect width="260" height="105" class="uml-card card-green" />
+    <line x1="0" y1="36" x2="260" y2="36" class="uml-divider divider-green" />
+    <circle cx="20" cy="18" r="9" class="badge-interface" />
+    <text x="20" y="21.5" class="badge-text">I</text>
+    <text x="140" y="16" class="uml-text-italic text-green">«interface»</text>
+    <text x="140" y="29" class="uml-text-bold">Spliterator&lt;T&gt;</text>
+    <text x="10" y="52" class="uml-member">+ trySplit(): Spliterator&lt;T&gt;</text>
+    <text x="10" y="66" class="uml-member">+ tryAdvance(Consumer): boolean</text>
+    <text x="10" y="80" class="uml-member">+ forEachRemaining(Consumer): void</text>
+  </g>
+
+  <!-- Card: Sink -->
+  <g filter="url(#card-shadow)" transform="translate(370, 530)">
+    <rect width="260" height="105" class="uml-card card-green" />
+    <line x1="0" y1="36" x2="260" y2="36" class="uml-divider divider-green" />
+    <circle cx="20" cy="18" r="9" class="badge-interface" />
+    <text x="20" y="21.5" class="badge-text">I</text>
+    <text x="140" y="16" class="uml-text-italic text-green">«interface»</text>
+    <text x="140" y="29" class="uml-text-bold">Sink&lt;T&gt;</text>
+    <text x="10" y="52" class="uml-member">+ begin(size: long): void</text>
+    <text x="10" y="66" class="uml-member">+ accept(value: T): void</text>
+    <text x="10" y="80" class="uml-member">+ end(): void</text>
+    <text x="10" y="94" class="uml-member">+ cancellationRequested(): boolean</text>
+  </g>
+
+  <!-- Card: TerminalOp -->
+  <g filter="url(#card-shadow)" transform="translate(680, 530)">
+    <rect width="260" height="105" class="uml-card card-green" />
+    <line x1="0" y1="36" x2="260" y2="36" class="uml-divider divider-green" />
+    <circle cx="20" cy="18" r="9" class="badge-interface" />
+    <text x="20" y="21.5" class="badge-text">I</text>
+    <text x="140" y="16" class="uml-text-italic text-green">«interface»</text>
+    <text x="140" y="29" class="uml-text-bold">TerminalOp&lt;E_IN, R&gt;</text>
+    <text x="10" y="52" class="uml-member">+ evaluateSequential(helper, splitr): R</text>
+    <text x="10" y="66" class="uml-member">+ evaluateParallel(helper, splitr): R</text>
+    <text x="10" y="80" class="uml-member">+ getOpFlags(): int</text>
+  </g>
+
+
+  <!-- ==================== LAYER 4: RUNTIME EXECUTION ==================== -->
+  <rect x="40" y="680" width="920" height="130" class="layer-bg-4" />
+  <text x="60" y="704" class="layer-title layer-title-4">4. Runtime Execution</text>
+
+  <!-- Card: AbstractTask -->
+  <g filter="url(#card-shadow)" transform="translate(60, 720)">
+    <rect width="410" height="80" class="uml-card card-amber" />
+    <line x1="0" y1="36" x2="410" y2="36" class="uml-divider divider-amber" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="215" y="16" class="uml-text-italic text-amber">«class»</text>
+    <text x="215" y="29" class="uml-text-bold">AbstractTask&lt;P_IN, P_OUT, R, K&gt;</text>
+    <text x="10" y="52" class="uml-member"># helper: PipelineHelper &amp; # spliterator: Spliterator</text>
+    <line x1="0" y1="60" x2="410" y2="60" class="uml-divider divider-amber" stroke-dasharray="2,2" />
+    <text x="10" y="72" class="uml-member">+ compute(): void &amp; # doLeaf(): R</text>
+  </g>
+
+  <!-- Card: Nodes -->
+  <g filter="url(#card-shadow)" transform="translate(510, 720)">
+    <rect width="430" height="80" class="uml-card card-amber" />
+    <line x1="0" y1="36" x2="430" y2="36" class="uml-divider divider-amber" />
+    <circle cx="20" cy="18" r="9" class="badge-class" />
+    <text x="20" y="21.5" class="badge-text">C</text>
+    <text x="225" y="16" class="uml-text-italic text-amber">«class»</text>
+    <text x="225" y="29" class="uml-text-bold">Nodes</text>
+    <text x="10" y="52" class="uml-member">+ builder(size: long, generator: IntFunction): Node.Builder</text>
+    <text x="10" y="66" class="uml-member">+ node(collection: Collection): Node</text>
+  </g>
+
+  <!-- ==================== UML RELATIONSHIPS (Rendered on top) ==================== -->
+
+  <!-- Stream extends BaseStream (Inheritance - Right to Left) -->
+  <path d="M 270,182 L 290,182" class="uml-inheritance-line" marker-end="url(#uml-inheritance)" />
+  
+  <!-- ReferencePipeline implements Stream (Realization - Bottom to Top) -->
+  <path d="M 165,310 L 165,235" stroke-dasharray="4,4" class="uml-inheritance-line" marker-end="url(#uml-inheritance)" />
+  
+  <!-- AbstractPipeline implements BaseStream (Realization - Bottom to Top) -->
+  <path d="M 390,310 L 390,235" stroke-dasharray="4,4" class="uml-inheritance-line" marker-end="url(#uml-inheritance)" />
+  
+  <!-- ReferencePipeline extends AbstractPipeline (Inheritance - Left to Right) -->
+  <path d="M 270,385 L 290,385" class="uml-inheritance-line" marker-end="url(#uml-inheritance)" />
+  
+  <!-- AbstractPipeline extends PipelineHelper (Inheritance - Left to Right) -->
+  <path d="M 500,385 L 510,385" class="uml-inheritance-line" marker-end="url(#uml-inheritance)" />
+
+  <!-- Dependency 1: StreamSupport -> ReferencePipeline -->
+  <path d="M 615,235 C 615,272.5 165,272.5 165,310" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(367.5, 272.5)">
+    <rect x="-56" y="-8" width="112" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">instantiates Head stage</text>
+  </g>
+
+  <!-- Dependency 2: Spliterator -> AbstractPipeline -->
+  <path d="M 190,530 C 190,495 340,495 340,469" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(265, 495)">
+    <rect x="-56" y="-8" width="112" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">drives element traversal</text>
+  </g>
+
+  <!-- Dependency 3: Collectors -> TerminalOp -->
+  <path d="M 840,235 L 840,255 L 965,255 L 965,475 L 810,475 L 810,530" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(887.5, 475)">
+    <rect x="-52" y="-8" width="104" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">supplies TerminalOp</text>
+  </g>
+
+  <!-- Dependency 4: PipelineHelper -> Sink -->
+  <path d="M 615,460 C 615,495 500,495 500,520" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(557.5, 495)">
+    <rect x="-58" y="-8" width="116" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">wraps downstream Sinks</text>
+  </g>
+
+  <!-- Dependency 5: TerminalOp -> AbstractTask -->
+  <path d="M 810,650 C 810,685 265,685 265,710" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(537.5, 685)">
+    <rect x="-56" y="-8" width="112" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">launches ForkJoin tasks</text>
+  </g>
+
+  <!-- Dependency 6: TerminalOp -> Nodes -->
+  <path d="M 810,650 C 810,685 725,685 725,710" class="uml-dependency-line" marker-end="url(#uml-dependency)" />
+  <g transform="translate(767.5, 685)">
+    <rect x="-64" y="-8" width="128" height="16" class="arrow-label-rect" filter="url(#card-shadow)" />
+    <text x="0" y="4" class="arrow-label-text">materializes stateful results</text>
+  </g>
+</svg>
