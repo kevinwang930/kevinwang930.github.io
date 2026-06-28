@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="560" viewBox="0 0 920 560" role="img" aria-label="ForkJoinPool work-stealing deque">
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#ea580c"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, -apple-system, sans-serif; }
+    .title { font-size: 18px; font-weight: 700; fill: #0f172a; }
+    .subtitle { font-size: 12px; fill: #64748b; }
+    .label { font-size: 11px; font-weight: 600; fill: #334155; }
+    .small { font-size: 10px; fill: #64748b; }
+    .mono { font-family: ui-monospace, monospace; font-size: 9.5px; fill: #475569; }
+    .worker-title { font-size: 12px; font-weight: 700; }
+    .worker-blue { fill: #1d4ed8; }
+    .worker-orange { fill: #c2410c; }
+    .slot-empty { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
+    .slot-task { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .slot-stolen { fill: #fff7ed; stroke: #fb923c; stroke-width: 2; stroke-dasharray: 4 3; }
+    .slot-pop { fill: #eff6ff; stroke: #3b82f6; stroke-width: 2; }
+    .legend-box { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+  ]]></style>
+
+  <rect width="920" height="560" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+
+  <text x="40" y="36" class="title">ForkJoinPool work-stealing</text>
+  <text x="40" y="56" class="subtitle">Each worker owns a WorkQueue deque: owner at top (LIFO), thieves at base (FIFO)</text>
+
+  <!-- Worker 1 -->
+  <rect x="40" y="88" width="160" height="72" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="120" y="110" text-anchor="middle" class="worker-title worker-blue">Worker 1 (owner)</text>
+  <text x="120" y="128" text-anchor="middle" class="small">ForkJoinWorkerThread</text>
+  <text x="120" y="146" text-anchor="middle" class="mono">fork() / nextLocalTask()</text>
+
+  <!-- Worker 2 -->
+  <rect x="720" y="88" width="160" height="72" rx="8" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="800" y="110" text-anchor="middle" class="worker-title worker-orange">Worker 2 (thief)</text>
+  <text x="800" y="128" text-anchor="middle" class="small">local deque empty</text>
+  <text x="800" y="146" text-anchor="middle" class="mono">runWorker() / poll()</text>
+
+  <!-- WorkQueue container -->
+  <rect x="120" y="200" width="680" height="130" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="460" y="222" text-anchor="middle" class="label">WorkQueue.array - circular buffer (base=2, top=6, size=4)</text>
+
+  <!-- Array slots -->
+  <rect x="148" y="240" width="64" height="48" rx="4" class="slot-empty"/>
+  <rect x="220" y="240" width="64" height="48" rx="4" class="slot-empty"/>
+  <rect x="292" y="240" width="64" height="48" rx="4" class="slot-stolen"/>
+  <rect x="364" y="240" width="64" height="48" rx="4" class="slot-task"/>
+  <rect x="436" y="240" width="64" height="48" rx="4" class="slot-task"/>
+  <rect x="508" y="240" width="64" height="48" rx="4" class="slot-pop"/>
+  <rect x="580" y="240" width="64" height="48" rx="4" class="slot-empty"/>
+  <rect x="652" y="240" width="64" height="48" rx="4" class="slot-empty"/>
+
+  <text x="180" y="298" text-anchor="middle" class="small">0</text>
+  <text x="252" y="298" text-anchor="middle" class="small">1</text>
+  <text x="324" y="298" text-anchor="middle" class="small">2</text>
+  <text x="396" y="298" text-anchor="middle" class="small">3</text>
+  <text x="468" y="298" text-anchor="middle" class="small">4</text>
+  <text x="540" y="298" text-anchor="middle" class="small">5</text>
+  <text x="612" y="298" text-anchor="middle" class="small">6</text>
+  <text x="684" y="298" text-anchor="middle" class="small">7</text>
+
+  <text x="324" y="268" text-anchor="middle" class="label" fill="#ea580c">T1</text>
+  <text x="396" y="268" text-anchor="middle" class="label">T2</text>
+  <text x="468" y="268" text-anchor="middle" class="label">T3</text>
+  <text x="540" y="268" text-anchor="middle" class="label" fill="#2563eb">T4</text>
+
+  <!-- base / top markers -->
+  <line x1="324" y1="310" x2="324" y2="328" stroke="#ea580c" stroke-width="2"/>
+  <text x="324" y="342" text-anchor="middle" class="mono" fill="#ea580c">base: steal here</text>
+  <line x1="572" y1="310" x2="572" y2="328" stroke="#2563eb" stroke-width="2"/>
+  <text x="572" y="342" text-anchor="middle" class="mono" fill="#2563eb">top: push / pop</text>
+
+  <!-- Push arrow -->
+  <path d="M 120 130 C 120 175, 572 175, 572 232" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <rect x="330" y="158" width="88" height="22" rx="6" class="legend-box"/>
+  <text x="374" y="173" text-anchor="middle" class="mono" fill="#2563eb">push() at top</text>
+
+  <!-- Pop arrow -->
+  <path d="M 540 232 C 540 185, 200 185, 200 160" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrow-blue)"/>
+  <rect x="430" y="158" width="100" height="22" rx="6" class="legend-box"/>
+  <text x="480" y="173" text-anchor="middle" class="mono" fill="#2563eb">pop() LIFO - T4</text>
+
+  <!-- Steal arrow -->
+  <path d="M 720 130 C 680 175, 360 175, 324 232" fill="none" stroke="#ea580c" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
+  <rect x="520" y="88" width="118" height="22" rx="6" class="legend-box"/>
+  <text x="579" y="103" text-anchor="middle" class="mono" fill="#ea580c">poll() steal - T1</text>
+
+  <!-- Three operation panels -->
+  <text x="40" y="378" class="label">Three operations on the same deque (concurrent via slot CAS)</text>
+
+  <rect x="40" y="392" width="260" height="140" rx="6" class="legend-box" filter="url(#shadow)"/>
+  <text x="56" y="414" class="worker-title worker-blue">1. push (owner)</text>
+  <text x="56" y="432" class="mono">fork() -&gt; push(task)</text>
+  <text x="56" y="448" class="small">Write task at top slot;</text>
+  <text x="56" y="462" class="small">increment top. Signal worker</text>
+  <text x="56" y="476" class="small">if queue was empty.</text>
+  <text x="56" y="498" class="mono">array[top++] = T5</text>
+  <text x="56" y="518" class="small">Depth-first: new subtasks stay local.</text>
+
+  <rect x="330" y="392" width="260" height="140" rx="6" class="legend-box" filter="url(#shadow)"/>
+  <text x="346" y="414" class="worker-title worker-blue">2. pop (owner, LIFO)</text>
+  <text x="346" y="432" class="mono">nextLocalTask()</text>
+  <text x="346" y="448" class="small">getAndSet(top-1 slot, null);</text>
+  <text x="346" y="462" class="small">decrement top. Takes newest</text>
+  <text x="346" y="476" class="small">task (T4) - recently forked work.</text>
+  <text x="346" y="498" class="mono">pop from top -&gt; T4</text>
+
+  <rect x="620" y="392" width="260" height="140" rx="6" class="legend-box" filter="url(#shadow)"/>
+  <text x="636" y="414" class="worker-title worker-orange">3. poll (thief, FIFO)</text>
+  <text x="636" y="432" class="mono">WorkQueue.poll()</text>
+  <text x="636" y="448" class="small">CAS base slot to null;</text>
+  <text x="636" y="462" class="small">increment base. Takes oldest</text>
+  <text x="636" y="476" class="small">task (T1) - load balancing.</text>
+  <text x="636" y="498" class="mono">steal from base -&gt; T1</text>
+  <text x="636" y="518" class="small">Then topLevelExec + local pops.</text>
+
+  <!-- Bottom flow -->
+  <rect x="40" y="510" width="840" height="36" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="460" y="532" text-anchor="middle" class="small">Owner pops at top while thief polls at base (no index lock). Idle worker scans all queues until steal succeeds or parks.</text>
+</svg>

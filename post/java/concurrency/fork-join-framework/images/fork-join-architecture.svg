@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="420" viewBox="0 0 880 420" role="img" aria-label="ForkJoin framework architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .b-purple { stroke: #8b5cf6; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  ]]></style>
+
+  <rect width="880" height="420" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">Fork/Join Framework Architecture</text>
+  <text x="40" y="50" class="s">ForkJoinPool coordinates worker threads; each worker owns a WorkQueue; tasks flow via fork/push and work-stealing poll</text>
+
+  <!-- Layer 1: API -->
+  <rect x="40" y="68" width="800" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">1. Task API</text>
+  <rect x="56" y="98" width="200" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="156" y="118" text-anchor="middle" class="m">ForkJoinTask: fork / join / invoke</text>
+  <rect x="280" y="98" width="180" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="370" y="118" text-anchor="middle" class="m">RecursiveTask / CountedCompleter</text>
+  <rect x="484" y="98" width="160" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="564" y="118" text-anchor="middle" class="m">External: pool.invoke()</text>
+  <rect x="668" y="98" width="156" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="746" y="118" text-anchor="middle" class="m">parallelStream tasks</text>
+
+  <!-- Layer 2: Pool -->
+  <rect x="40" y="156" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="176" class="lt" fill="#0891b2">2. ForkJoinPool</text>
+  <rect x="56" y="186" width="240" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="176" y="206" text-anchor="middle" class="t" style="font-size:12px">ForkJoinPool</text>
+  <text x="176" y="222" text-anchor="middle" class="m">ctl / runState / signalWork()</text>
+  <rect x="320" y="186" width="200" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="420" y="206" text-anchor="middle" class="t" style="font-size:12px">WorkQueue[] queues</text>
+  <text x="420" y="222" text-anchor="middle" class="m">worker deques + submission queues</text>
+  <rect x="544" y="186" width="280" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="684" y="206" text-anchor="middle" class="t" style="font-size:12px">runWorker() scan loop</text>
+  <text x="684" y="222" text-anchor="middle" class="m">random steal / deactivate / park on ctl</text>
+
+  <!-- Layer 3: Workers -->
+  <rect x="40" y="260" width="800" height="140" rx="8" class="layer"/>
+  <text x="56" y="280" class="lt" fill="#059669">3. Workers and deques</text>
+
+  <rect x="56" y="292" width="180" height="96" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="146" y="312" text-anchor="middle" class="t" style="font-size:11px">Worker 1</text>
+  <text x="146" y="328" text-anchor="middle" class="m">ForkJoinWorkerThread</text>
+  <rect x="72" y="338" width="148" height="36" rx="4" fill="#ecfdf5" stroke="#10b981"/>
+  <text x="146" y="360" text-anchor="middle" class="m">WorkQueue: push/pop top</text>
+
+  <rect x="260" y="292" width="180" height="96" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="350" y="312" text-anchor="middle" class="t" style="font-size:11px">Worker 2</text>
+  <text x="350" y="328" text-anchor="middle" class="m">local deque empty</text>
+  <rect x="276" y="338" width="148" height="36" rx="4" fill="#fff7ed" stroke="#fb923c"/>
+  <text x="350" y="360" text-anchor="middle" class="m">poll() steal at base</text>
+
+  <rect x="464" y="292" width="180" height="96" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="554" y="312" text-anchor="middle" class="t" style="font-size:11px">Worker N</text>
+  <text x="554" y="328" text-anchor="middle" class="m">...</text>
+  <rect x="480" y="338" width="148" height="36" rx="4" fill="#ecfdf5" stroke="#10b981"/>
+  <text x="554" y="360" text-anchor="middle" class="m">WorkQueue</text>
+
+  <rect x="668" y="292" width="156" height="96" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="746" y="312" text-anchor="middle" class="t" style="font-size:11px">Submission Q</text>
+  <text x="746" y="328" text-anchor="middle" class="m">owner = null</text>
+  <text x="746" y="344" text-anchor="middle" class="m">external fork()</text>
+  <text x="746" y="360" text-anchor="middle" class="m">phase seqlock</text>
+
+  <!-- Arrows -->
+  <path d="M 176 130 L 176 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 420 130 L 420 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 176 244 L 146 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 420 244 L 350 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 420 244 L 554 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 600 244 L 746 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 236 360 C 280 380, 300 380, 276 360" fill="none" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+  <text x="310" y="378" class="s" fill="#ea580c">work-steal</text>
+</svg>
