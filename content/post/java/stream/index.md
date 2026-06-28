@@ -112,9 +112,37 @@ interface "Sink<T>" as Sink {
 interface "TerminalOp<E_IN, R>" as TerminalOp {
     + evaluateSequential()
     + evaluateParallel()
+    + getOpFlags()
 }
 
 interface "TerminalSink<T, R>" as TerminalSink
+
+interface "AccumulatingSink<T, R, K>" as AccumulatingSink {
+    + combine(K)
+}
+
+interface "Collector<T, A, R>" as Collector {
+    + supplier()
+    + accumulator()
+    + combiner()
+    + finisher()
+    + characteristics()
+}
+
+class "Collectors" as Collectors {
+    + {static} toList()
+    + {static} toSet()
+    + {static} groupingBy()
+    + {static} reducing()
+}
+
+abstract class "ReduceOps.ReduceOp<T, R, S>" as ReduceOp {
+    + makeSink()
+}
+
+class "ForEachOps.ForEachOp" as ForEachOp
+class "FindOps.FindOp" as FindOp
+class "MatchOps.MatchOp" as MatchOp
 
 BaseStream <|.. Stream
 Stream <|.. ReferencePipeline
@@ -125,13 +153,28 @@ ReferencePipeline <|-- StatelessOp
 ReferencePipeline <|-- StatefulOp
 ReferencePipeline <|-- Head
 Sink <|.. TerminalSink
-TerminalOp <|.. "ReduceOps.ReduceOp"
+AccumulatingSink <|.. TerminalSink
+
+TerminalOp <|.. ReduceOp
+TerminalOp <|.. ForEachOp
+TerminalOp <|.. FindOp
+TerminalOp <|.. MatchOp
+
+TerminalSink <|.. ForEachOp
+
+ReduceOp ..> AccumulatingSink : makeSink() returns S
+Collectors ..> Collector : factory methods
+Stream ..> Collector : collect(Collector)
+Stream ..> TerminalOp : evaluate via ReduceOps / ForEachOps / …
+ReduceOp ..> Collector : makeRef(Collector)\nwraps supplier/accumulator/combiner
 @enduml
 ```
 
+Terminal operations are **not** pipeline stages — they are created at evaluation time by factory classes. `collect(Collector)` builds a `ReduceOps.ReduceOp` whose `ReducingSink` implements `AccumulatingSink`: the collector's `supplier` initializes state, `accumulator` accepts each element, and `combiner` merges partial results across parallel workers. `ReferencePipeline` applies the collector's `finisher` after `evaluate` returns. Other terminals use sibling ops: `ForEachOps` (side-effect), `FindOps` (`findFirst` / `findAny`), `MatchOps` (`anyMatch` / `allMatch` / `noneMatch`); `reduce` and `count` also route through `ReduceOps.ReduceOp` with different sinks.
+
 ### 3.2 Pipeline stage linking
 
-Each `AbstractPipeline` instance is one **stage**. Stages form a doubly-linked list from source to terminal:
+Each `AbstractPipeline` instance is one **stage**. Stages form a doubly-linked list (`previousStage` / `nextStage`) from source to terminal:
 
 ```mermaid
 flowchart LR
@@ -145,23 +188,52 @@ flowchart LR
 
 ### 3.3 Parallel execution runtime
 
-Parallel terminal evaluation submits `AbstractTask` instances to the common `ForkJoinPool`. Tasks split the source `Spliterator`, run fused sink chains on leaf chunks, and merge partial results via `AccumulatingSink.combine()`:
+Every stream parallel task is ultimately a `ForkJoinTask`. `CountedCompleter` extends `ForkJoinTask` and overrides `exec()` to delegate to `compute()`; `AbstractTask` implements that split/fork/leaf logic. A terminal op such as `ReduceOp.evaluateParallel()` constructs the root task and blocks on `invoke()` until the tree completes:
+
+```java
+// ReduceOps.java
+return new ReduceTask<>(this, helper, spliterator).invoke().get();
+```
 
 ```plantuml
 @startuml
-class "CountedCompleter<R>" as CountedCompleter
+class "ForkJoinPool" as FJP {
+    + {static} commonPool()
+}
+
+abstract class "ForkJoinTask<V>" as ForkJoinTask {
+    + invoke()
+    + fork()
+    + join()
+    # exec()
+    + getRawResult()
+}
+
+class "CountedCompleter<R>" as CountedCompleter {
+    + compute()
+    + fork()
+    + tryComplete()
+    + setPendingCount(n)
+    # exec() → compute()
+}
 
 abstract class "AbstractTask<P_IN, P_OUT, R, K>" as AbstractTask {
     - spliterator
     - targetSize
+    - leftChild
+    - rightChild
+    - localResult
     + compute()
     + doLeaf()
     + makeChild()
+    + onCompletion()
+    + getRawResult()
 }
 
 abstract class "AbstractShortCircuitTask" as ShortCircuitTask {
     - sharedResult
     - canceled
+    + shortCircuit()
 }
 
 class "ReduceTask" as ReduceTask {
@@ -171,26 +243,42 @@ class "ReduceTask" as ReduceTask {
 
 class "FindTask" as FindTask
 class "MatchTask" as MatchTask
+class "CollectorTask" as CollectorTask
+class "SliceTask" as SliceTask
 
+ForkJoinTask <|-- CountedCompleter
 CountedCompleter <|-- AbstractTask
 AbstractTask <|-- ShortCircuitTask
 AbstractTask <|-- ReduceTask
+AbstractTask <|-- CollectorTask
 ShortCircuitTask <|-- FindTask
 ShortCircuitTask <|-- MatchTask
+ShortCircuitTask <|-- SliceTask
 
 interface "TerminalOp<E_IN, R>" as TerminalOp {
-    + evaluateSequential()
     + evaluateParallel()
 }
 
 interface "AccumulatingSink" as AccumulatingSink {
     + combine()
+    + get()
 }
 
-ReduceTask --> TerminalOp : runs ReduceOp
-ReduceTask ..> AccumulatingSink : leaf sinks combine in onCompletion
+ReduceTask --> TerminalOp : evaluateParallel creates root
+ReduceTask ..> AccumulatingSink : doLeaf → sink;\nonCompletion → combine
+ForkJoinTask ..> FJP : fork() → pool queue;\ncaller thread runs invoke()
 @enduml
 ```
+
+| Task type | Extends | Used for |
+|-----------|---------|----------|
+| `ReduceTask` | `AbstractTask` | `reduce`, `collect`, `count` |
+| `FindTask` | `AbstractShortCircuitTask` | `findFirst`, `findAny` |
+| `MatchTask` | `AbstractShortCircuitTask` | `anyMatch`, `allMatch`, `noneMatch` |
+| `CollectorTask` | `AbstractTask` | parallel `Nodes.collect` (stateful segment materialization) |
+| `SliceTask` | `AbstractShortCircuitTask` | ordered parallel `skip` / `limit` barriers |
+
+Target leaf size ≈ `estimateSize() / (parallelism × 4)` — over-partitioned so idle workers can steal forked tasks. The calling thread runs the root task inline via `invoke()` → `doExec()`; sibling subtasks are `fork()`'d into `ForkJoinPool.commonPool()` for work-stealing. `ReduceTask.doLeaf()` runs the same fused `wrapSink` chain as sequential mode on its sub-spliterator; `onCompletion()` walks up the tree calling `AccumulatingSink.combine()` on sibling partial results.
 
 ---
 
@@ -341,5 +429,93 @@ flowchart LR
     end
     F1 --> ST --> M1
 ```
+
+#### Worked example: `parallel().filter().sorted().map().collect(toList())`
+
+Consider a `List<String>` with 10,000 elements. The pipeline stages link as:
+
+`Head → filter(p) → sorted() → map(f) → collect(toList())`
+
+When `collect` runs on the **map** stage, execution happens in **three phases**:
+
+**Phase 1 — `sourceSpliterator()` prepares segments**
+
+`evaluate()` calls `sourceSpliterator()` before `evaluateParallel`. The loop hits the stateful **`sorted`** stage (`p`) with upstream helper **`filter`** (`u`):
+
+```java
+// Inside sorted.opEvaluateParallel(filterHelper, listSpliterator)
+T[] data = filterHelper.evaluate(spliterator, true, generator).asArray(generator);
+Arrays.parallelSort(data, comparator);
+return Nodes.node(data).spliterator();
+```
+
+What runs here:
+
+1. **`filterHelper.evaluate`** — parallel `Nodes.collect` / `CollectorTask` tree splits the **list spliterator** across ForkJoin workers.
+2. Each leaf calls `filterHelper.wrapAndCopyInto(sink, chunk)` — a fused sink chain of **Head → filter only** (`sorted` has `depth = 0`, so it is not in this chain).
+3. Partial `Node` trees merge into one flat array of filtered elements.
+4. **`Arrays.parallelSort`** sorts the entire array on the common pool.
+5. Return value replaces `spliterator` with a **spliterator over the sorted `Node`**.
+
+Then `sourceSpliterator` assigns depths: `sorted.depth = 0`, `map.depth = 1`.
+
+**Phase 2 — terminal `ReduceTask` on segment 2**
+
+```java
+new ReduceTask<>(ReduceOps.makeRef(collector), mapStage, sortedNodeSpliterator).invoke();
+```
+
+The spliterator now describes **sorted output**, not the original list. `ReduceTask` splits it again:
+
+| Worker | `trySplit` chunk | `wrapSink` chain | Partial result |
+|--------|------------------|------------------|----------------|
+| W1 | elements 0–2499 | **map(f) → list sink** | `List` fragment A |
+| W2 | elements 2500–4999 | **map(f) → list sink** | `List` fragment B |
+| … | … | … | … |
+
+Only **`map`** appears in `wrapSink` — `filter` and `sorted` already ran in phase 1.
+
+**Phase 3 — merge**
+
+Internal `ReduceTask` nodes call `onCompletion`: sibling list fragments combine via the collector's combiner until one `List` is returned.
+
+```mermaid
+sequenceDiagram
+    participant Collect as collect() on map stage
+    participant SrcSpl as sourceSpliterator()
+    participant Filter as filter (helper u)
+    participant Sorted as sorted (stateful p)
+    participant FJP as ForkJoinPool
+    participant Reduce as ReduceTask
+
+    Collect->>SrcSpl: prepare spliterator
+    SrcSpl->>Sorted: opEvaluateParallelLazy(filter, listSpliterator)
+
+    Sorted->>FJP: filterHelper.evaluate — split list
+    loop each leaf chunk
+        FJP->>Filter: wrapAndCopyInto(filterSink, chunk)
+    end
+    FJP-->>Sorted: Node of filtered elements
+    Sorted->>Sorted: Arrays.parallelSort(node)
+    Sorted-->>SrcSpl: spliterator over sorted Node
+    SrcSpl->>SrcSpl: sorted.depth=0, map.depth=1
+
+    Collect->>Reduce: evaluateParallel(map, sortedSpliterator)
+    loop each leaf chunk
+        Reduce->>Reduce: wrapAndCopyInto(mapSink, chunk)
+    end
+    Reduce->>Reduce: combine partial lists
+    Reduce-->>Collect: final List
+```
+
+**Contrast — no stateful op:** `parallel().filter().map().collect()` skips phase 1 entirely. One `ReduceTask` splits the **original list spliterator** once; each leaf runs **filter → map → list sink** in a single fused pass.
+
+**Two stateful ops:** `parallel().distinct().sorted().collect()` runs **two barriers** inside `sourceSpliterator`:
+
+1. `distinct.opEvaluateParallelLazy` → `Node` / spliterator of unique elements (ordered: full `LinkedHashSet` materialization).
+2. `sorted.opEvaluateParallelLazy` → parallel-collects that output, sorts, returns new spliterator.
+3. Terminal `collect` runs on segment 3 only.
+
+Each barrier is a complete parallel pass; memory holds the intermediate `Node` until the next segment finishes.
 
 ---
