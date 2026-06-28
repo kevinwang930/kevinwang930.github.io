@@ -142,25 +142,79 @@ if (t != null && compareAndSetReference(array, slot, t, null)) {
 
 Slot-based CAS lets owner pop and thief poll **concurrent** on the same deque without locking indices. Failed CAS or stall → thief tries another queue (bounded retries).
 
-### 2.3 Worker scan loop
+### 2.3 Task acquisition and execution
 
-`ForkJoinWorkerThread` runs `ForkJoinPool.runWorker(w)`. When the local deque is empty, the worker **randomly scans** all queues in the pool:
+The same pool uses different acquire-and-run paths depending on who submits the work and whether the thread is already a worker. Two execution modes recur:
+
+| Mode | Pattern | Used when |
+|------|---------|-----------|
+| **Burst** | `topLevelExec(task)` → `doExec()` then `nextLocalTask()` until local deque empty | Worker's main loop after scan-stealing |
+| **Single** | one `doExec()` per acquired task | `join()` helping, external untracked polls |
+| **Inline** | `doExec()` on the current thread, no queue | `invoke()`, `invokeAll()` |
 
 ```java
-// runWorker() — scan loop (simplified)
-for (;;) {
-    r = xorshift(r);                          // pseudo-random probe
-    for each queue q at index (r & (n-1)), step by coprime offset:
-        try CAS-steal from q.base
-        if stolen:
-            w.nsteals++;
-            w.topLevelExec(task, fifo);       // run task + drain local deque
-            break scan
-    if nothing stolen → deactivate(w);        // park on ctl waiter stack
+// WorkQueue.topLevelExec() — burst mode
+while (task != null) {
+    task.doExec();              // may fork() subtasks onto this worker's deque
+    task = nextLocalTask(fifo); // pop local work (LIFO at top) until empty
 }
 ```
 
-`topLevelExec` runs the stolen task, then repeatedly `nextLocalTask()` until the local deque is empty — amortizing scan cost.
+#### Entry points
+
+| Entry | Thread | Acquire | Execute |
+|-------|--------|---------|---------|
+| **`runWorker`** (idle worker) | FJ worker | Scan all queues; CAS-steal one task from `q.base` (pseudo-random order) | `topLevelExec(stolen)` |
+| **`fork()`** | FJ worker | `push()` onto **own** deque at `top`; not run yet | Picked up by caller's `topLevelExec` / `helpJoin` / `helpComplete` via `nextLocalTask()` or targeted scan |
+| **`invoke()`** | FJ worker | **`doExec()` inline first** (no queue); unfinished work via `join()` | `join()` → `helpJoin` or `helpComplete` (single `doExec` per stolen task) |
+| **`join()`** on child | FJ worker | `tryRemoveAndExec` on local deque; then scan for tasks in the target's steal chain | Single `doExec()` per helping steal — **not** `topLevelExec` |
+| **`join()`** on `CountedCompleter` | FJ worker | Pop downstream `CountedCompleter`s from own top; then scan pool for eligible completers | Single `doExec()` per helping steal |
+| **`pool.execute()` / external `fork()`** | Non-FJ | `push()` onto **submission queue** (`owner == null`); `signalWork()` | Idle worker scan-steals → `topLevelExec` |
+| **`pool.invoke()`** | Non-FJ | Same submit as `execute()`; caller **`join()` blocks** on `Aux` after limited external help | Worker runs task via scan → `topLevelExec`; caller waits |
+
+#### Worker idle loop (`runWorker`)
+
+When a worker has no local work, it scans every queue (worker deques and submission queues) and CAS-steals from `base`:
+
+```java
+// runWorker() — simplified
+for (;;) {
+    // local deque empty (drained by previous topLevelExec)
+    scan all queues in pseudo-random order:
+        CAS-steal one task from q.base
+        if stolen:
+            topLevelExec(task);   // burst: run + drain all local forks
+            break scan              // re-poll same queue (temporal locality)
+    if nothing stolen → deactivate(w);   // park on ctl waiter stack
+}
+```
+
+The scan runs only when the local deque is empty — `topLevelExec` drained it on the previous iteration. That is why the loop looks like "steal first, clear local second": local clearing is **inside** the burst after each steal, not as a separate pre-scan step. Depth-first behavior comes from `fork()` pushing onto the executing worker's deque and `nextLocalTask()` popping before the next scan.
+
+#### `fork()` vs `invoke()` inside a worker
+
+```java
+// fork() — queue for later
+q.push(this, pool, internal);   // own deque at top
+
+// invoke() — run now, then wait
+doExec();    // exec() on current thread first
+return join();  // helpJoin / helpComplete if still incomplete
+```
+
+A common divide-and-conquer pattern forks one child and **`compute()`s the other inline** — equivalent to `invoke()` on one side without queueing it:
+
+```java
+left.fork();
+long right = new RightTask(...).compute();  // inline doExec path
+return right + left.join();
+```
+
+#### `join()` helping (not the main loop)
+
+When a worker blocks on `join()`, it must not idle. `awaitDone()` dispatches to `helpJoin` (plain tasks) or `helpComplete` (`CountedCompleter`s). Each helping steal runs **one** `doExec()` — the waiter targets work that might unblock its join target, rather than draining its full local deque in burst mode.
+
+External callers joining from a non-FJ thread get limited helping via `pollScan()`; if the target is still running elsewhere, they park on the task's `Aux` list and the pool may **compensate** with a spare worker.
 
 `signalWork()` wakes idle workers or starts new ones when a push makes a previously empty queue non-empty.
 
