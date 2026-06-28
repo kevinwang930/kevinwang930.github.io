@@ -58,9 +58,37 @@ interface &#34;Sink&lt;T&gt;&#34; as Sink {
 interface &#34;TerminalOp&lt;E_IN, R&gt;&#34; as TerminalOp {
     + evaluateSequential()
     + evaluateParallel()
+    + getOpFlags()
 }
 
 interface &#34;TerminalSink&lt;T, R&gt;&#34; as TerminalSink
+
+interface &#34;AccumulatingSink&lt;T, R, K&gt;&#34; as AccumulatingSink {
+    + combine(K)
+}
+
+interface &#34;Collector&lt;T, A, R&gt;&#34; as Collector {
+    + supplier()
+    + accumulator()
+    + combiner()
+    + finisher()
+    + characteristics()
+}
+
+class &#34;Collectors&#34; as Collectors {
+    + {static} toList()
+    + {static} toSet()
+    + {static} groupingBy()
+    + {static} reducing()
+}
+
+abstract class &#34;ReduceOps.ReduceOp&lt;T, R, S&gt;&#34; as ReduceOp {
+    + makeSink()
+}
+
+class &#34;ForEachOps.ForEachOp&#34; as ForEachOp
+class &#34;FindOps.FindOp&#34; as FindOp
+class &#34;MatchOps.MatchOp&#34; as MatchOp
 
 BaseStream &lt;|.. Stream
 Stream &lt;|.. ReferencePipeline
@@ -71,29 +99,68 @@ ReferencePipeline &lt;|-- StatelessOp
 ReferencePipeline &lt;|-- StatefulOp
 ReferencePipeline &lt;|-- Head
 Sink &lt;|.. TerminalSink
-TerminalOp &lt;|.. &#34;ReduceOps.ReduceOp&#34;
+AccumulatingSink &lt;|.. TerminalSink
+
+TerminalOp &lt;|.. ReduceOp
+TerminalOp &lt;|.. ForEachOp
+TerminalOp &lt;|.. FindOp
+TerminalOp &lt;|.. MatchOp
+
+TerminalSink &lt;|.. ForEachOp
+
+ReduceOp ..&gt; AccumulatingSink : makeSink() returns S
+Collectors ..&gt; Collector : factory methods
+Stream ..&gt; Collector : collect(Collector)
+Stream ..&gt; TerminalOp : evaluate via ReduceOps / ForEachOps / …
+ReduceOp ..&gt; Collector : makeRef(Collector)\nwraps supplier/accumulator/combiner
 @enduml
-</code></pre><h3 id=32-pipeline-stage-linking>3.2 Pipeline stage linking</h3><p>Each <code>AbstractPipeline</code> instance is one <strong>stage</strong>. Stages form a doubly-linked list from source to terminal:</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart LR
+</code></pre><p>Terminal operations are <strong>not</strong> pipeline stages — they are created at evaluation time by factory classes. <code>collect(Collector)</code> builds a <code>ReduceOps.ReduceOp</code> whose <code>ReducingSink</code> implements <code>AccumulatingSink</code>: the collector&rsquo;s <code>supplier</code> initializes state, <code>accumulator</code> accepts each element, and <code>combiner</code> merges partial results across parallel workers. <code>ReferencePipeline</code> applies the collector&rsquo;s <code>finisher</code> after <code>evaluate</code> returns. Other terminals use sibling ops: <code>ForEachOps</code> (side-effect), <code>FindOps</code> (<code>findFirst</code> / <code>findAny</code>), <code>MatchOps</code> (<code>anyMatch</code> / <code>allMatch</code> / <code>noneMatch</code>); <code>reduce</code> and <code>count</code> also route through <code>ReduceOps.ReduceOp</code> with different sinks.</p><h3 id=32-pipeline-stage-linking>3.2 Pipeline stage linking</h3><p>Each <code>AbstractPipeline</code> instance is one <strong>stage</strong>. Stages form a doubly-linked list (<code>previousStage</code> / <code>nextStage</code>) from source to terminal:</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart LR
     Head[&#34;ReferencePipeline.Head\n(source spliterator)&#34;]
     Filter[&#34;StatelessOp: filter&#34;]
     Map[&#34;StatelessOp: map&#34;]
     Terminal[&#34;TerminalOp: collect&#34;]
 
     Head --&gt; Filter --&gt; Map --&gt; Terminal
-</code></pre><h3 id=33-parallel-execution-runtime>3.3 Parallel execution runtime</h3><p>Parallel terminal evaluation submits <code>AbstractTask</code> instances to the common <code>ForkJoinPool</code>. Tasks split the source <code>Spliterator</code>, run fused sink chains on leaf chunks, and merge partial results via <code>AccumulatingSink.combine()</code>:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-class &#34;CountedCompleter&lt;R&gt;&#34; as CountedCompleter
+</code></pre><h3 id=33-parallel-execution-runtime>3.3 Parallel execution runtime</h3><p>Every stream parallel task is ultimately a <code>ForkJoinTask</code>. <code>CountedCompleter</code> extends <code>ForkJoinTask</code> and overrides <code>exec()</code> to delegate to <code>compute()</code>; <code>AbstractTask</code> implements that split/fork/leaf logic. A terminal op such as <code>ReduceOp.evaluateParallel()</code> constructs the root task and blocks on <code>invoke()</code> until the tree completes:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ReduceOps.java</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> ReduceTask<span style=color:#f92672>&lt;&gt;</span>(<span style=color:#66d9ef>this</span>, helper, spliterator).<span style=color:#a6e22e>invoke</span>().<span style=color:#a6e22e>get</span>();
+</span></span></code></pre></div><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class &#34;ForkJoinPool&#34; as FJP {
+    + {static} commonPool()
+}
+
+abstract class &#34;ForkJoinTask&lt;V&gt;&#34; as ForkJoinTask {
+    + invoke()
+    + fork()
+    + join()
+    # exec()
+    + getRawResult()
+}
+
+class &#34;CountedCompleter&lt;R&gt;&#34; as CountedCompleter {
+    + compute()
+    + fork()
+    + tryComplete()
+    + setPendingCount(n)
+    # exec() → compute()
+}
 
 abstract class &#34;AbstractTask&lt;P_IN, P_OUT, R, K&gt;&#34; as AbstractTask {
     - spliterator
     - targetSize
+    - leftChild
+    - rightChild
+    - localResult
     + compute()
     + doLeaf()
     + makeChild()
+    + onCompletion()
+    + getRawResult()
 }
 
 abstract class &#34;AbstractShortCircuitTask&#34; as ShortCircuitTask {
     - sharedResult
     - canceled
+    + shortCircuit()
 }
 
 class &#34;ReduceTask&#34; as ReduceTask {
@@ -103,26 +170,32 @@ class &#34;ReduceTask&#34; as ReduceTask {
 
 class &#34;FindTask&#34; as FindTask
 class &#34;MatchTask&#34; as MatchTask
+class &#34;CollectorTask&#34; as CollectorTask
+class &#34;SliceTask&#34; as SliceTask
 
+ForkJoinTask &lt;|-- CountedCompleter
 CountedCompleter &lt;|-- AbstractTask
 AbstractTask &lt;|-- ShortCircuitTask
 AbstractTask &lt;|-- ReduceTask
+AbstractTask &lt;|-- CollectorTask
 ShortCircuitTask &lt;|-- FindTask
 ShortCircuitTask &lt;|-- MatchTask
+ShortCircuitTask &lt;|-- SliceTask
 
 interface &#34;TerminalOp&lt;E_IN, R&gt;&#34; as TerminalOp {
-    + evaluateSequential()
     + evaluateParallel()
 }
 
 interface &#34;AccumulatingSink&#34; as AccumulatingSink {
     + combine()
+    + get()
 }
 
-ReduceTask --&gt; TerminalOp : runs ReduceOp
-ReduceTask ..&gt; AccumulatingSink : leaf sinks combine in onCompletion
+ReduceTask --&gt; TerminalOp : evaluateParallel creates root
+ReduceTask ..&gt; AccumulatingSink : doLeaf → sink;\nonCompletion → combine
+ForkJoinTask ..&gt; FJP : fork() → pool queue;\ncaller thread runs invoke()
 @enduml
-</code></pre><hr><h2 id=4-implementation-details>4. Implementation Details</h2><h3 id=41-stream-creation-and-intermediate-ops>4.1 Stream creation and intermediate ops</h3><p><code>StreamSupport.stream</code> wraps a spliterator in <code>ReferencePipeline.Head</code> and records source flags. Intermediate methods such as <code>filter</code> append a <code>StatelessOp</code> stage — they do not process elements:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StreamSupport.java</span>
+</code></pre><table><thead><tr><th>Task type</th><th>Extends</th><th>Used for</th></tr></thead><tbody><tr><td><code>ReduceTask</code></td><td><code>AbstractTask</code></td><td><code>reduce</code>, <code>collect</code>, <code>count</code></td></tr><tr><td><code>FindTask</code></td><td><code>AbstractShortCircuitTask</code></td><td><code>findFirst</code>, <code>findAny</code></td></tr><tr><td><code>MatchTask</code></td><td><code>AbstractShortCircuitTask</code></td><td><code>anyMatch</code>, <code>allMatch</code>, <code>noneMatch</code></td></tr><tr><td><code>CollectorTask</code></td><td><code>AbstractTask</code></td><td>parallel <code>Nodes.collect</code> (stateful segment materialization)</td></tr><tr><td><code>SliceTask</code></td><td><code>AbstractShortCircuitTask</code></td><td>ordered parallel <code>skip</code> / <code>limit</code> barriers</td></tr></tbody></table><p>Target leaf size ≈ <code>estimateSize() / (parallelism × 4)</code> — over-partitioned so idle workers can steal forked tasks. The calling thread runs the root task inline via <code>invoke()</code> → <code>doExec()</code>; sibling subtasks are <code>fork()</code>&rsquo;d into <code>ForkJoinPool.commonPool()</code> for work-stealing. <code>ReduceTask.doLeaf()</code> runs the same fused <code>wrapSink</code> chain as sequential mode on its sub-spliterator; <code>onCompletion()</code> walks up the tree calling <code>AccumulatingSink.combine()</code> on sibling partial results.</p><hr><h2 id=4-implementation-details>4. Implementation Details</h2><h3 id=41-stream-creation-and-intermediate-ops>4.1 Stream creation and intermediate ops</h3><p><code>StreamSupport.stream</code> wraps a spliterator in <code>ReferencePipeline.Head</code> and records source flags. Intermediate methods such as <code>filter</code> append a <code>StatelessOp</code> stage — they do not process elements:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StreamSupport.java</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Stream<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>stream</span>(Spliterator<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> spliterator, <span style=color:#66d9ef>boolean</span> parallel) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> ReferencePipeline.<span style=color:#a6e22e>Head</span><span style=color:#f92672>&lt;&gt;</span>(spliterator,
 </span></span><span style=display:flex><span>            StreamOpFlag.<span style=color:#a6e22e>fromCharacteristics</span>(spliterator), parallel);
@@ -192,7 +265,38 @@ ReduceTask ..&gt; AccumulatingSink : leaf sinks combine in onCompletion
         M1[&#34;map&#34;] --&gt; T1[&#34;collect&#34;]
     end
     F1 --&gt; ST --&gt; M1
-</code></pre><hr></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
+</code></pre><h4 id=worked-example-parallelfiltersortedmapcollecttolist>Worked example: <code>parallel().filter().sorted().map().collect(toList())</code></h4><p>Consider a <code>List&lt;String></code> with 10,000 elements. The pipeline stages link as:</p><p><code>Head → filter(p) → sorted() → map(f) → collect(toList())</code></p><p>When <code>collect</code> runs on the <strong>map</strong> stage, execution happens in <strong>three phases</strong>:</p><p><strong>Phase 1 — <code>sourceSpliterator()</code> prepares segments</strong></p><p><code>evaluate()</code> calls <code>sourceSpliterator()</code> before <code>evaluateParallel</code>. The loop hits the stateful <strong><code>sorted</code></strong> stage (<code>p</code>) with upstream helper <strong><code>filter</code></strong> (<code>u</code>):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Inside sorted.opEvaluateParallel(filterHelper, listSpliterator)</span>
+</span></span><span style=display:flex><span>T<span style=color:#f92672>[]</span> data <span style=color:#f92672>=</span> filterHelper.<span style=color:#a6e22e>evaluate</span>(spliterator, <span style=color:#66d9ef>true</span>, generator).<span style=color:#a6e22e>asArray</span>(generator);
+</span></span><span style=display:flex><span>Arrays.<span style=color:#a6e22e>parallelSort</span>(data, comparator);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> Nodes.<span style=color:#a6e22e>node</span>(data).<span style=color:#a6e22e>spliterator</span>();
+</span></span></code></pre></div><p>What runs here:</p><ol><li><strong><code>filterHelper.evaluate</code></strong> — parallel <code>Nodes.collect</code> / <code>CollectorTask</code> tree splits the <strong>list spliterator</strong> across ForkJoin workers.</li><li>Each leaf calls <code>filterHelper.wrapAndCopyInto(sink, chunk)</code> — a fused sink chain of <strong>Head → filter only</strong> (<code>sorted</code> has <code>depth = 0</code>, so it is not in this chain).</li><li>Partial <code>Node</code> trees merge into one flat array of filtered elements.</li><li><strong><code>Arrays.parallelSort</code></strong> sorts the entire array on the common pool.</li><li>Return value replaces <code>spliterator</code> with a <strong>spliterator over the sorted <code>Node</code></strong>.</li></ol><p>Then <code>sourceSpliterator</code> assigns depths: <code>sorted.depth = 0</code>, <code>map.depth = 1</code>.</p><p><strong>Phase 2 — terminal <code>ReduceTask</code> on segment 2</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>new</span> ReduceTask<span style=color:#f92672>&lt;&gt;</span>(ReduceOps.<span style=color:#a6e22e>makeRef</span>(collector), mapStage, sortedNodeSpliterator).<span style=color:#a6e22e>invoke</span>();
+</span></span></code></pre></div><p>The spliterator now describes <strong>sorted output</strong>, not the original list. <code>ReduceTask</code> splits it again:</p><table><thead><tr><th>Worker</th><th><code>trySplit</code> chunk</th><th><code>wrapSink</code> chain</th><th>Partial result</th></tr></thead><tbody><tr><td>W1</td><td>elements 0–2499</td><td><strong>map(f) → list sink</strong></td><td><code>List</code> fragment A</td></tr><tr><td>W2</td><td>elements 2500–4999</td><td><strong>map(f) → list sink</strong></td><td><code>List</code> fragment B</td></tr><tr><td>…</td><td>…</td><td>…</td><td>…</td></tr></tbody></table><p>Only <strong><code>map</code></strong> appears in <code>wrapSink</code> — <code>filter</code> and <code>sorted</code> already ran in phase 1.</p><p><strong>Phase 3 — merge</strong></p><p>Internal <code>ReduceTask</code> nodes call <code>onCompletion</code>: sibling list fragments combine via the collector&rsquo;s combiner until one <code>List</code> is returned.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant Collect as collect() on map stage
+    participant SrcSpl as sourceSpliterator()
+    participant Filter as filter (helper u)
+    participant Sorted as sorted (stateful p)
+    participant FJP as ForkJoinPool
+    participant Reduce as ReduceTask
+
+    Collect-&gt;&gt;SrcSpl: prepare spliterator
+    SrcSpl-&gt;&gt;Sorted: opEvaluateParallelLazy(filter, listSpliterator)
+
+    Sorted-&gt;&gt;FJP: filterHelper.evaluate — split list
+    loop each leaf chunk
+        FJP-&gt;&gt;Filter: wrapAndCopyInto(filterSink, chunk)
+    end
+    FJP--&gt;&gt;Sorted: Node of filtered elements
+    Sorted-&gt;&gt;Sorted: Arrays.parallelSort(node)
+    Sorted--&gt;&gt;SrcSpl: spliterator over sorted Node
+    SrcSpl-&gt;&gt;SrcSpl: sorted.depth=0, map.depth=1
+
+    Collect-&gt;&gt;Reduce: evaluateParallel(map, sortedSpliterator)
+    loop each leaf chunk
+        Reduce-&gt;&gt;Reduce: wrapAndCopyInto(mapSink, chunk)
+    end
+    Reduce-&gt;&gt;Reduce: combine partial lists
+    Reduce--&gt;&gt;Collect: final List
+</code></pre><p><strong>Contrast — no stateful op:</strong> <code>parallel().filter().map().collect()</code> skips phase 1 entirely. One <code>ReduceTask</code> splits the <strong>original list spliterator</strong> once; each leaf runs <strong>filter → map → list sink</strong> in a single fused pass.</p><p><strong>Two stateful ops:</strong> <code>parallel().distinct().sorted().collect()</code> runs <strong>two barriers</strong> inside <code>sourceSpliterator</code>:</p><ol><li><code>distinct.opEvaluateParallelLazy</code> → <code>Node</code> / spliterator of unique elements (ordered: full <code>LinkedHashSet</code> materialization).</li><li><code>sorted.opEvaluateParallelLazy</code> → parallel-collects that output, sorts, returns new spliterator.</li><li>Terminal <code>collect</code> runs on segment 3 only.</li></ol><p>Each barrier is a complete parallel pass; memory holds the intermediate <code>Node</code> until the next segment finishes.</p><hr></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/stream/>stream</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrenthashmap/ data-tooltip="Java ConcurrentHashMap implementation" aria-label="PREVIOUS: Java ConcurrentHashMap implementation"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/stream/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/stream/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/stream/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/stream/",this.page.identifier="/post/java/stream/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
