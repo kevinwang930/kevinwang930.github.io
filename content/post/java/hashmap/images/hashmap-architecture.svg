@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="480" viewBox="0 0 880 480" role="img" aria-label="HashMap architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-purple { stroke: #8b5cf6; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  ]]></style>
+
+  <rect width="880" height="480" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">HashMap Architecture</text>
+  <text x="40" y="50" class="s">Chained hash table: hash spread and index mask locate a bin; list or tree holds collisions; resize when threshold exceeded</text>
+
+  <!-- Layer 1 -->
+  <rect x="40" y="68" width="800" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">1. Map API</text>
+  <rect x="56" y="98" width="160" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="136" y="118" text-anchor="middle" class="m">put(K, V)</text>
+  <rect x="232" y="98" width="160" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="312" y="118" text-anchor="middle" class="m">get(K) / remove(K)</text>
+  <rect x="408" y="98" width="200" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="508" y="118" text-anchor="middle" class="m">null key and null value allowed</text>
+  <rect x="624" y="98" width="200" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="724" y="118" text-anchor="middle" class="m">not thread-safe</text>
+
+  <!-- Layer 2 -->
+  <rect x="40" y="156" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="176" class="lt" fill="#0891b2">2. Table core</text>
+  <rect x="56" y="186" width="180" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="146" y="206" text-anchor="middle" class="t" style="font-size:11px">Node[] table</text>
+  <text x="146" y="222" text-anchor="middle" class="m">power-of-two capacity</text>
+  <rect x="256" y="186" width="200" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="356" y="206" text-anchor="middle" class="t" style="font-size:11px">hash(key)</text>
+  <text x="356" y="222" text-anchor="middle" class="m">h ^ (h &gt;&gt;&gt; 16)</text>
+  <rect x="476" y="186" width="180" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="566" y="206" text-anchor="middle" class="t" style="font-size:11px">index</text>
+  <text x="566" y="222" text-anchor="middle" class="m">(n - 1) &amp; hash</text>
+  <rect x="676" y="186" width="148" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="750" y="206" text-anchor="middle" class="t" style="font-size:11px">threshold</text>
+  <text x="750" y="222" text-anchor="middle" class="m">capacity x loadFactor</text>
+
+  <!-- Layer 3 -->
+  <rect x="40" y="260" width="800" height="100" rx="8" class="layer"/>
+  <text x="56" y="280" class="lt" fill="#059669">3. Bin storage</text>
+  <rect x="56" y="292" width="240" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="176" y="312" text-anchor="middle" class="t" style="font-size:11px">Singly-linked Node chain</text>
+  <text x="176" y="328" text-anchor="middle" class="m">default bin: hash, key, value, next</text>
+  <text x="176" y="342" text-anchor="middle" class="m">most bins have 0-1 entries</text>
+  <rect x="320" y="292" width="260" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="450" y="312" text-anchor="middle" class="t" style="font-size:11px">TreeNode red-black tree</text>
+  <text x="450" y="328" text-anchor="middle" class="m">treeify at length 8 (table &gt;= 64)</text>
+  <text x="450" y="342" text-anchor="middle" class="m">RB tree + doubly-linked next/prev</text>
+  <rect x="604" y="292" width="220" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="714" y="312" text-anchor="middle" class="t" style="font-size:11px">untreeify at length 6</text>
+  <text x="714" y="328" text-anchor="middle" class="m">on resize or shrink</text>
+  <text x="714" y="342" text-anchor="middle" class="m">O(log n) worst-case bin</text>
+
+  <!-- Layer 4 -->
+  <rect x="40" y="376" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="396" class="lt" fill="#d97706">4. Operations</text>
+  <rect x="56" y="406" width="180" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="146" y="426" text-anchor="middle" class="t" style="font-size:11px">putVal</text>
+  <text x="146" y="442" text-anchor="middle" class="m">insert / update / treeifyBin</text>
+  <rect x="256" y="406" width="160" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="336" y="426" text-anchor="middle" class="t" style="font-size:11px">getNode</text>
+  <text x="336" y="442" text-anchor="middle" class="m">list or tree lookup</text>
+  <rect x="436" y="406" width="180" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="526" y="426" text-anchor="middle" class="t" style="font-size:11px">resize</text>
+  <text x="526" y="442" text-anchor="middle" class="m">double capacity, rehash bins</text>
+  <rect x="636" y="406" width="188" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="730" y="426" text-anchor="middle" class="t" style="font-size:11px">split / untreeify</text>
+  <text x="730" y="442" text-anchor="middle" class="m">on shrink or low bin count</text>
+
+  <!-- Arrows -->
+  <path d="M 146 130 L 146 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 356 130 L 356 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 176 244 L 176 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 450 244 L 450 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 356 360 L 356 376" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 526 360 L 526 376" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+</svg>
