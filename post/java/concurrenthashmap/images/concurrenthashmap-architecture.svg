@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="480" viewBox="0 0 880 480" role="img" aria-label="ConcurrentHashMap architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-purple { stroke: #8b5cf6; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  ]]></style>
+
+  <rect width="880" height="480" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">ConcurrentHashMap Architecture</text>
+  <text x="40" y="50" class="s">Binned hash table with lock-free reads, CAS on empty bins, synchronized bin heads, cooperative resize</text>
+
+  <!-- Layer 1 -->
+  <rect x="40" y="68" width="800" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">1. ConcurrentMap API</text>
+  <rect x="56" y="98" width="150" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="131" y="118" text-anchor="middle" class="m">put / get / remove</text>
+  <rect x="222" y="98" width="180" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="312" y="118" text-anchor="middle" class="m">computeIfAbsent / merge</text>
+  <rect x="418" y="98" width="200" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="518" y="118" text-anchor="middle" class="m">no null keys or values</text>
+  <rect x="634" y="98" width="190" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="729" y="118" text-anchor="middle" class="m">concurrent reads + updates</text>
+
+  <!-- Layer 2 -->
+  <rect x="40" y="156" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="176" class="lt" fill="#0891b2">2. Concurrency control</text>
+  <rect x="56" y="186" width="180" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="146" y="206" text-anchor="middle" class="t" style="font-size:11px">volatile table</text>
+  <text x="146" y="222" text-anchor="middle" class="m">Node.val / Node.next</text>
+  <rect x="256" y="186" width="180" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="346" y="206" text-anchor="middle" class="t" style="font-size:11px">CAS empty bin</text>
+  <text x="346" y="222" text-anchor="middle" class="m">casTabAt(tab, i, null, node)</text>
+  <rect x="456" y="186" width="180" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="546" y="206" text-anchor="middle" class="t" style="font-size:11px">synchronized(f)</text>
+  <text x="546" y="222" text-anchor="middle" class="m">lock bin head for writes</text>
+  <rect x="656" y="186" width="168" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="740" y="206" text-anchor="middle" class="t" style="font-size:11px">sizeCtl</text>
+  <text x="740" y="222" text-anchor="middle" class="m">init / resize / threshold</text>
+
+  <!-- Layer 3 -->
+  <rect x="40" y="260" width="800" height="100" rx="8" class="layer"/>
+  <text x="56" y="280" class="lt" fill="#059669">3. Bin variants</text>
+  <rect x="56" y="292" width="170" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="141" y="312" text-anchor="middle" class="t" style="font-size:11px">Node</text>
+  <text x="141" y="328" text-anchor="middle" class="m">hash &gt;= 0</text>
+  <text x="141" y="342" text-anchor="middle" class="m">linked list bin</text>
+  <rect x="242" y="292" width="170" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="327" y="312" text-anchor="middle" class="t" style="font-size:11px">TreeBin</text>
+  <text x="327" y="328" text-anchor="middle" class="m">hash = TREEBIN (-2)</text>
+  <text x="327" y="342" text-anchor="middle" class="m">lockState + RB tree</text>
+  <rect x="428" y="292" width="190" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="523" y="312" text-anchor="middle" class="t" style="font-size:11px">ForwardingNode</text>
+  <text x="523" y="328" text-anchor="middle" class="m">hash = MOVED (-1)</text>
+  <text x="523" y="342" text-anchor="middle" class="m">points to nextTable</text>
+  <rect x="634" y="292" width="190" height="56" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="729" y="312" text-anchor="middle" class="t" style="font-size:11px">ReservationNode</text>
+  <text x="729" y="328" text-anchor="middle" class="m">hash = RESERVED (-3)</text>
+  <text x="729" y="342" text-anchor="middle" class="m">compute placeholder</text>
+
+  <!-- Layer 4 -->
+  <rect x="40" y="376" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="396" class="lt" fill="#d97706">4. Scale and resize</text>
+  <rect x="56" y="406" width="220" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="166" y="426" text-anchor="middle" class="t" style="font-size:11px">Cooperative transfer</text>
+  <text x="166" y="442" text-anchor="middle" class="m">transferIndex strides, helpTransfer</text>
+  <rect x="296" y="406" width="180" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="386" y="426" text-anchor="middle" class="t" style="font-size:11px">nextTable</text>
+  <text x="386" y="442" text-anchor="middle" class="m">dual-table during resize</text>
+  <rect x="496" y="406" width="160" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="576" y="426" text-anchor="middle" class="t" style="font-size:11px">baseCount</text>
+  <text x="576" y="442" text-anchor="middle" class="m">+ CounterCell[]</text>
+  <rect x="676" y="406" width="148" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="750" y="426" text-anchor="middle" class="t" style="font-size:11px">LongAdder-style</text>
+  <text x="750" y="442" text-anchor="middle" class="m">striped size counter</text>
+
+  <!-- Arrows -->
+  <path d="M 131 130 L 146 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 346 130 L 346 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 141 244 L 141 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 523 244 L 523 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 386 360 L 386 376" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 576 360 L 576 376" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+</svg>
