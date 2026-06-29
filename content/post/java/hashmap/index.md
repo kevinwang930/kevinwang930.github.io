@@ -20,7 +20,7 @@ At a high level, every operation follows the same path: spread the key's hash, m
 
 ## 1. Architecture
 
-### 1.1 Layers and operation lifecycle
+### 1.1 Design overview
 
 HashMap uses **chaining** to resolve hash collisions. Most bins hold zero or one entry as a singly-linked `Node`; when a bin's chain reaches length 8 (and the table is at least 64 slots), it **treeifies** into a red-black tree for $O(\log n)$ worst-case lookup in that bin.
 
@@ -43,9 +43,9 @@ HashMap uses **chaining** to resolve hash collisions. Most bins hold zero or one
 
 ---
 
-### 1.2 Structure
+### 1.2 Nodes and bins
 
-#### Class hierarchy and node variants
+#### Node class hierarchy
 
 HashMap represents entries using two primary node types:
 1. **`Node<K,V>`**: The standard singly-linked list node used for most bins.
@@ -79,7 +79,7 @@ class "HashMap.TreeNode<K, V>" as TreeNode extends LHEntry {
 
 `TreeNode` extends `LinkedHashMap.Entry` → `HashMap.Node`, adding tree pointers and `prev` on top of the base `next` field.
 
-#### Memory layout
+#### Table and bin layout
 
 The following diagram illustrates the memory layout of a HashMap containing both standard linked-list bins and a treeified red-black tree bin:
 
@@ -164,7 +164,7 @@ if (succ != null) succ.prev = pred;
 
 ---
 
-### 1.3 Key thresholds and constants
+### 1.3 Constants and thresholds
 
 The behavior of HashMap is governed by several critical constants defined in the source code:
 
@@ -177,7 +177,7 @@ The behavior of HashMap is governed by several critical constants defined in the
 | `UNTREEIFY_THRESHOLD` | `6` | The bin count threshold for transforming a tree back into a list during resizing. |
 | `MIN_TREEIFY_CAPACITY` | `64` | The minimum table capacity required to treeify a bin. |
 
-#### The Poisson Distribution and Threshold Design
+#### Poisson distribution and treeify threshold
 The selection of `TREEIFY_THRESHOLD = 8` is mathematically motivated. Under a well-distributed hash function, the probability of having $k$ elements in any given bin follows a Poisson Distribution with a parameter of approximately $0.5$ (for a load factor of $0.75$).
 
 The expected probability for list sizes is:
@@ -195,9 +195,9 @@ Treeification is an exceptional fallback designed to protect against poor hash d
 
 ---
 
-## 2. Implementation details
+## 2. Implementation
 
-### 2.1 Hash function and index calculation
+### 2.1 Hash function and indexing
 
 #### Hash spreading
 To ensure elements are dispersed uniformly, HashMap applies a supplemental hash function to the key's `hashCode()`:
@@ -209,7 +209,7 @@ static final int hash(Object key) {
 }
 ```
 
-##### Supplemental Hash Design Rationale
+##### Why XOR-spread upper bits
 Since the table capacity is always a power of two, index calculations only consider the lower bits of the hash. If keys have hash codes that differ only in their higher bits, they will collide. Shifting the higher 16 bits downward and XORing them with the lower 16 bits ensures that variations in the upper bits influence the final index calculation, reducing systematic collisions in small tables.
 
 #### Index masking
@@ -221,7 +221,7 @@ Since the table capacity $n$ is a power of two, $n-1$ acts as a bitmask where al
 
 ---
 
-### 2.2 The put operation and treeify mechanism
+### 2.2 Put and treeify
 
 `put()` delegates to `putVal`: hash and index the key, insert or update in the bin (empty slot, list walk, or `putTreeVal` for trees), increment `size`, resize if over `threshold`.
 
@@ -305,11 +305,11 @@ if (root == null || (movable &&
 
 ---
 
-### 2.3 Resizing and capacity management
+### 2.3 Resize
 
 Resizing occurs when the number of elements in the map exceeds `threshold` (capacity $\times$ load factor). The `resize()` method initializes the table or doubles its capacity.
 
-#### The bitwise split logic
+#### Bitwise split on double capacity
 During capacity doubling, the table capacity increases from `oldCap` to `newCap` (where `newCap = oldCap << 1`). 
 
 Because the table size is a power of two, the index of any key in the new table is calculated as `hash & (newCap - 1)`. The difference between the new mask (`newCap - 1`) and the old mask (`oldCap - 1`) is exactly the bit representing `oldCap`. 
@@ -328,7 +328,7 @@ if ((e.hash & oldCap) == 0) {
 ```
 This bitwise split avoids recalculating hash codes or performing division/modulo arithmetic.
 
-#### Preservation of insertion order
+#### Insertion order during split
 When redistributing a singly-linked list, HashMap builds two separate sub-lists: the `lo` list (which stays at `j`) and the `hi` list (which moves to `j + oldCap`).
 
 ```java
@@ -360,7 +360,7 @@ if (hiTail != null) {
 
 By appending elements to the tail of `lo` and `hi` lists, HashMap preserves their original relative iteration order. Java 8 preserves the relative order of nodes during redistribution, addressing a vulnerability in Java 7 where order reversal under concurrent resize operations could lead to infinite loops.
 
-#### The Java 7 multi-threaded resizing bug (circular references)
+#### Java 7 resize bug (circular references)
 
 A circular reference occurs when two nodes in a bucket's linked list point to each other, forming a closed loop:
 ```
@@ -420,7 +420,7 @@ In Java 8, HashMap uses tail-insertion during resizing. By building two separate
 
 ---
 
-### 2.4 Shrinking and untreeification mechanics
+### 2.4 Untreeify and shrink
 
 While HashMap enlarges its capacity dynamically, it also shrinks individual tree bins back into plain singly-linked lists when their size becomes too small. This process is called **untreeification** and is done to save memory and avoid tree maintenance overhead when the number of elements is low.
 
@@ -492,7 +492,7 @@ If the tree is too small—specifically, if the root, the root's right child, th
 
 ---
 
-### 2.5 Summary of core state transitions
+### 2.5 Bin state transitions
 
 The lifecycle of a single HashMap bucket is summarized by the following state transitions:
 

@@ -13,20 +13,14 @@ keywords:
 - ConcurrentHashMap
 #thumbnailImage: //example.com/image.jpg
 ---
+`java.util.concurrent.ConcurrentHashMap` is a highly concurrent, thread-safe hash table in the Java Collections Framework. It allows **full concurrency of retrievals** and high expected concurrency for updates. Unlike `HashMap`, it **prohibits null keys and values** to avoid the ambiguity of `get(key) == null`.
 
+The design avoids table-wide locks: reads are lock-free via `volatile` fields; writes use CAS on empty bins and `synchronized` on the bin head; resizing is **cooperative** — threads that encounter a `ForwardingNode` help migrate bins rather than blocking.
 <!--more-->
 
 ---
 
-## 1. Overview
-
-`java.util.concurrent.ConcurrentHashMap` is a highly concurrent, thread-safe hash table in the Java Collections Framework. It allows **full concurrency of retrievals** and high expected concurrency for updates. Unlike `HashMap`, it **prohibits null keys and values** to avoid the ambiguity of `get(key) == null`.
-
-The design avoids table-wide locks: reads are lock-free via `volatile` fields; writes use CAS on empty bins and `synchronized` on the bin head; resizing is **cooperative** — threads that encounter a `ForwardingNode` help migrate bins rather than blocking.
-
----
-
-## 2. Architecture
+## 1. Architecture
 
 `ConcurrentHashMap` is a binned hash table like `HashMap`, but each bin can be a linked list, a `TreeBin`, a `ForwardingNode` during resize, or a `ReservationNode` during atomic compute operations. Negative `hash` values encode these special node roles.
 
@@ -39,7 +33,7 @@ The design avoids table-wide locks: reads are lock-free via `volatile` fields; w
 
 ![ConcurrentHashMap architecture: API, concurrency, bin variants, cooperative resize](images/concurrenthashmap-architecture.svg)
 
-### 2.1 Operation lifecycle
+### 1.1 Design overview
 
 1. **Read (`get`)** — lock-free: load `table`, index the bin, walk `next` chain or traverse tree via `TreeBin.find`. If the head is a `ForwardingNode`, follow `nextTable` to the new table.
 2. **Write to empty bin** — `casTabAt(tab, i, null, new Node(...))` inserts without locking.
@@ -50,9 +44,9 @@ The design avoids table-wide locks: reads are lock-free via `volatile` fields; w
 
 ---
 
-## 3. Structure
+### 1.2 Nodes and bins
 
-### 3.1 Node class hierarchy
+#### Node class hierarchy
 
 All entries in the table are subclasses of the base `Node<K,V>` class. Unlike `HashMap` which uses a deeply nested inheritance model via `LinkedHashMap`, `ConcurrentHashMap` maintains a flat node hierarchy where specialized nodes inherit directly from `Node<K,V>`.
 
@@ -102,14 +96,14 @@ CHM o-- Node : contains table of
 @enduml
 ```
 
-#### Node Types and Role Encodings
+#### Special node hash codes
 Specialized nodes are identified by negative values in their `hash` field, which are reserved for control purposes:
 * **`Node<K,V>`**: The standard node containing user key-value pairs (hash $\ge 0$).
 * **`ForwardingNode<K,V>`**: Placed at the head of a bin during resizing (hash = `MOVED` = `-1`). It contains a reference to the new table array (`nextTable`).
 * **`TreeBin<K,V>`**: Serves as the bin head and holds the root of a Red-Black Tree of `TreeNode`s (hash = `TREEBIN` = `-2`).
 * **`ReservationNode<K,V>`**: A transient placeholder node used during compute operations like `computeIfAbsent` to reserve the slot before the value is established (hash = `RESERVED` = `-3`).
 
-### 3.2 Memory layout and bin representation
+#### Table and bin layout
 
 The following diagram illustrates the structural layout of a `ConcurrentHashMap` with various bin states:
 
@@ -183,17 +177,19 @@ table::2 --> tb
 
 ---
 
-## 4. Concurrency design
+## 2. Implementation
 
-`ConcurrentHashMap` achieves high concurrency by avoiding table-wide locks. It separates read operations from write operations and applies locking at the individual bin level.
+`ConcurrentHashMap` achieves high concurrency by avoiding table-wide locks — reads and writes use different paths, and locking is scoped to individual bins.
 
-### 4.1 Lock-free read operations (`get`)
+### 2.1 Lock-free get and putVal
+
+#### get
 Retrieval operations do not block and run completely lock-free.
 * The `table` array reference and the `next` and `val` fields of every `Node` are declared `volatile`. This guarantees that updates made by one thread are immediately visible to reader threads.
 * If a reader thread encounters a `ForwardingNode` (hash = `-1`), the read is redirected to the new table array referenced by the node, ensuring seamless reads even during active resizing.
 * If a reader thread accesses a treeified bin, it can traverse the bin using the sequential `next` pointers of `TreeNode` without needing to acquire a tree-lock.
 
-### 4.2 Fine-grained write operations (`putVal`)
+#### putVal: CAS and synchronized bin head
 Write operations (`put`, `remove`, `replace`) use a combination of CAS and localized monitor synchronization:
 
 1. **CAS for Empty Bins**:
@@ -215,18 +211,18 @@ Write operations (`put`, `remove`, `replace`) use a combination of CAS and local
    * Only threads writing to the *same* bucket will contend for the lock. Threads writing to different buckets execute in parallel.
    * The double-check `tabAt(tab, i) == f` ensures that the head node has not been removed, treeified, or relocated by a concurrent resize before the lock was acquired.
 
-### 4.3 Prohibition of null keys and values
+#### No null keys or values
 Unlike `HashMap`, `ConcurrentHashMap` does not permit `null` keys or values. 
 In a concurrent map, allowing `null` values introduces an ambiguity: `map.get(key) -> null` could mean that the key maps to `null`, or that the key is not present in the map. In a single-threaded map, this is resolved using `map.containsKey(key)`. In a concurrent map, the state of the map can change between the calls to `get()` and `containsKey()`, creating race conditions. To prevent this ambiguity, `null` keys and values are strictly prohibited.
 
-### 4.4 TreeBin lockState and non-blocking reads
+### 2.2 TreeBin locking
 
-When a bucket is treeified, the bin head is replaced by a `TreeBin` node, which acts as the root of a balanced Red-Black Tree. To coordinate concurrent reads and writes on the tree without blocking, `TreeBin` maintains an internal `lockState` field:
+When a bucket is treeified, the bin head becomes a `TreeBin`. `lockState` coordinates concurrent reads and writes:
 * **`WRITER = 1`**: Set when a thread is writing to or restructuring the tree (holding a write lock).
 * **`WAITER = 2`**: Set when a thread is waiting to acquire the write lock.
 * **`READER = 4`**: Used as a unit of increment/decrement to track active reader threads.
 
-#### 1. Reader Counter Tracking Mechanics
+#### Reader count tracking
 When a thread calls `find(h, k)` on a `TreeBin`:
 * **Acquisition**: It checks if there are active writers or waiters (`(lockState & (WAITER|WRITER)) != 0`). If the tree is stable, the thread attempts to increment the reader count by `READER` using CAS:
   ```java
@@ -239,7 +235,7 @@ When a thread calls `find(h, k)` on a `TreeBin`:
   ```
   If this thread was the last reader and a writer thread is waiting (`lockState` becomes `WAITER`), it calls `LockSupport.unpark(waiter)` to wake up the waiting writer.
 
-#### 2. Rationale for Thread-Safe Concurrent Reads
+#### Why reads never block
 This atomic increment and decrement of the reader count does **not** cause problems or bottlenecks in concurrent multiple reads:
 * **No Mutual Reader Blockage**: Since `READER` is represented by bit-fields above `WRITER` and `WAITER` (value 4, or `0b100`), multiple reader threads can increment the lock state concurrently without interfering with each other. If five threads read at the same time, `lockState` simply becomes `20` (`5 * READER`). They all traverse the tree in parallel.
 * **Optimistic CAS Loop**: The acquisition uses a CAS spin-loop. If multiple threads attempt to increment `lockState` concurrently, the ones that fail the CAS will simply loop, read the updated state, and retry immediately. Since read registration is a simple, fast register update, spin contention is extremely short-lived.
@@ -247,16 +243,10 @@ This atomic increment and decrement of the reader count does **not** cause probl
 * **Zero-Blocking Fallback (Singly-Linked List Traversal)**: If a reader thread detects that a writer is active or waiting (`(lockState & (WAITER|WRITER)) != 0`), or if it repeatedly fails to acquire the read lock due to extreme contention, **it does not block or spin**. Instead, it immediately bypasses the tree structure and traverses the bin using the sequential singly-linked list (`next` pointers) maintained by the `TreeNode` instances.
   This fallback guarantees that **reader threads never block under any circumstance**, preserving the non-blocking read contract of `ConcurrentHashMap`.
 
-### 4.5 The single-writer constraint and the waiter field
+#### Single waiter field
+`TreeBin.waiter` is a single `volatile Thread` — not a queue — because the outer `synchronized(f)` on the bin head already serializes writers. At most one thread waits for active readers to finish.
 
-A key observation of the `TreeBin` class is that the `waiter` field is a single `volatile Thread` reference, rather than a queue or list of waiting threads. This implies that **at most one thread** can ever be waiting to acquire the tree write lock at any given time.
-
-This design is correct because of a fundamental architectural constraint in `ConcurrentHashMap`: **the Single-Writer Constraint**.
-
-#### 1. Rationale for a Single Waiter
-Although `ConcurrentHashMap` allows lock-free reads, **all write operations (such as insertion, deletion, and treeification) are serialized at the bin level using monitor synchronization**.
-
-Before any thread can call `putTreeVal` or `removeTreeNode` to write to a `TreeBin`, it must first acquire the Java monitor lock on the `TreeBin` instance (`f`) itself:
+Before any thread calls `putTreeVal` or `removeTreeNode`, it holds the monitor on the bin head:
 ```java
 synchronized (f) {
     if (tabAt(tab, i) == f) {
@@ -270,7 +260,7 @@ Because of this outer `synchronized` block:
 * Consequently, there is **never any contention between multiple writers** trying to write to the same `TreeBin` simultaneously.
 * The only contention a writer thread faces is with **active reader threads** that are currently traversing the tree.
 
-#### 2. The Locking Flow for the Single Writer
+#### Writer lock flow
 When the single writer thread enters `putTreeVal` or `removeTreeNode`, it must restructure the tree. To ensure reader threads do not read an unstable, partially restructured tree, the writer must wait for all active readers to exit.
 1. The writer calls `lockRoot()`:
    * It attempts to CAS `lockState` from `0` to `WRITER` (1).
@@ -294,18 +284,18 @@ Because the outer monitor lock (`synchronized(f)`) guarantees that there is at m
 
 ---
 
-## 5. Multi-threaded cooperative resizing
+### 2.3 Cooperative resize
 
-Resizing in `ConcurrentHashMap` is a cooperative, multi-threaded operation. When a thread detects that the map is resizing (by encountering a `ForwardingNode`), it assists in the transfer of elements rather than stalling.
+Resizing is multi-threaded: a thread that sees a `ForwardingNode` helps transfer bins via `helpTransfer` rather than blocking.
 
-### 5.1 Coordination constants and fields
+#### sizeCtl and transferIndex
 * **`sizeCtl`**: A multi-use control field:
   * `-1`: Represents active table initialization.
   * Less than `-1`: Represents active resizing. The value encodes a generation stamp in the higher 16 bits and the number of active helper threads in the lower 16 bits.
   * Positive value: Represents the next resize threshold (capacity $\times$ load factor).
 * **`transferIndex`**: Tracks the next block of bins to be migrated, starting from the old table capacity `n` down to `0`.
 
-### 5.2 Cooperative migration (stride)
+#### Stride migration
 To avoid contention among threads helping with a resize, the migration work is divided into chunks called **strides**.
 
 ```
@@ -335,11 +325,11 @@ Old Table:
 
 ---
 
-## 6. High-throughput concurrent size counter
+### 2.4 Size counting
 
-In a highly concurrent environment, a single global counter (like a volatile variable updated via CAS) becomes a performance bottleneck due to thread contention. `ConcurrentHashMap` implements a high-throughput counter based on the design of `java.util.concurrent.atomic.LongAdder`.
+A single global counter would bottleneck under contention. `ConcurrentHashMap` uses a **LongAdder-style** design:
 
-### 6.1 Counter representation
+#### baseCount and CounterCell
 The counter consists of two components:
 * **`baseCount`**: A volatile long updated via CAS when there is no contention.
 * **`counterCells`**: A volatile array of `CounterCell` objects, where each cell contains a volatile `value` field. This array is lazily allocated and grown as contention increases.
@@ -353,7 +343,7 @@ The counter consists of two components:
                                     [ Cell 0 ]          [ Cell 1 ]  (inside counterCells)
 ```
 
-### 6.2 Size update algorithm (`addCount`)
+#### addCount
 1. **Uncontended Update**:
    * The thread attempts to update the global `baseCount` using CAS:
      ```java
@@ -387,7 +377,7 @@ The counter consists of two components:
 
 ---
 
-## Summary of State and Concurrency Controls
+### 2.5 Concurrency summary
 
 The concurrent state and locking strategies of `ConcurrentHashMap` can be summarized by the following operational modes:
 
