@@ -1,58 +1,139 @@
-<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/concurrency\/synchronizer-framework\/","keywords":"[synchronizer]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.163.3 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="synchronizer"><meta name=description content="本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。"><meta property="og:description" content="本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。"><meta property="og:type" content="article"><meta property="og:title" content="java concurrency - Synchronizer Framework"><meta name=twitter:title content="java concurrency - Synchronizer Framework"><meta property="og:url" content="https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。"><meta name=twitter:description content="本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。"><meta property="og:locale" content="en"><meta property="article:published_time" content="2024-04-06T17:00:29"><meta property="article:modified_time" content="2024-04-06T17:00:29"><meta property="article:section" content="java"><meta property="article:section" content="concurrency"><meta property="article:tag" content="java"><meta property="article:tag" content="concurrency"><meta property="article:tag" content="synchronizer"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>java concurrency - Synchronizer Framework</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>java concurrency - Synchronizer Framework</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-06T17:00:29+08:00>April 6, 2024
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e\u003ccode\u003eReentrantLock\u003c\/code\u003e, \u003ccode\u003eSemaphore\u003c\/code\u003e, and \u003ccode\u003eCountDownLatch\u003c\/code\u003e look unrelated at the API level, but each holds a private \u003cstrong\u003e\u003ccode\u003eSync extends AbstractQueuedSynchronizer\u003c\/code\u003e\u003c\/strong\u003e. The \u003cstrong\u003e\u003ccode\u003eSync\u003c\/code\u003e\u003c\/strong\u003e subclass overrides \u003cstrong\u003e\u003ccode\u003etryAcquire\u003c\/code\u003e\u003c\/strong\u003e \/ \u003cstrong\u003e\u003ccode\u003etryRelease\u003c\/code\u003e\u003c\/strong\u003e and decides what \u003cstrong\u003e\u003ccode\u003estate\u003c\/code\u003e\u003c\/strong\u003e represents. \u003cstrong\u003e\u003ccode\u003eAbstractQueuedSynchronizer\u003c\/code\u003e\u003c\/strong\u003e (AQS) is the base class: it owns \u003ccode\u003estate\u003c\/code\u003e, the CLH sync queue, \u003ccode\u003eacquire\u003c\/code\u003e \/ \u003ccode\u003erelease\u003c\/code\u003e, and the nested \u003cstrong\u003e\u003ccode\u003eConditionObject\u003c\/code\u003e\u003c\/strong\u003e.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/concurrency\/synchronizer-framework\/","keywords":"[synchronizer]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.163.3 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="synchronizer"><meta name=description content="ReentrantLock, Semaphore, and CountDownLatch look unrelated at the API level, but each holds a private Sync extends AbstractQueuedSynchronizer. The Sync subclass overrides tryAcquire / tryRelease and decides what state represents. AbstractQueuedSynchronizer (AQS) is the base class: it owns state, the CLH sync queue, acquire / release, and the nested ConditionObject."><meta property="og:description" content="ReentrantLock, Semaphore, and CountDownLatch look unrelated at the API level, but each holds a private Sync extends AbstractQueuedSynchronizer. The Sync subclass overrides tryAcquire / tryRelease and decides what state represents. AbstractQueuedSynchronizer (AQS) is the base class: it owns state, the CLH sync queue, acquire / release, and the nested ConditionObject."><meta property="og:type" content="article"><meta property="og:title" content="java concurrency - Synchronizer Framework"><meta name=twitter:title content="java concurrency - Synchronizer Framework"><meta property="og:url" content="https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="ReentrantLock, Semaphore, and CountDownLatch look unrelated at the API level, but each holds a private Sync extends AbstractQueuedSynchronizer. The Sync subclass overrides tryAcquire / tryRelease and decides what state represents. AbstractQueuedSynchronizer (AQS) is the base class: it owns state, the CLH sync queue, acquire / release, and the nested ConditionObject."><meta name=twitter:description content="ReentrantLock, Semaphore, and CountDownLatch look unrelated at the API level, but each holds a private Sync extends AbstractQueuedSynchronizer. The Sync subclass overrides tryAcquire / tryRelease and decides what state represents. AbstractQueuedSynchronizer (AQS) is the base class: it owns state, the CLH sync queue, acquire / release, and the nested ConditionObject."><meta property="og:locale" content="en"><meta property="article:published_time" content="2024-04-06T17:00:29"><meta property="article:modified_time" content="2024-04-06T17:00:29"><meta property="article:section" content="java"><meta property="article:section" content="concurrency"><meta property="article:tag" content="java"><meta property="article:tag" content="concurrency"><meta property="article:tag" content="synchronizer"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>java concurrency - Synchronizer Framework</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>java concurrency - Synchronizer Framework</h1><div class="postShorten-meta post-meta"><time datetime=2024-04-06T17:00:29+08:00>April 6, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/concurrency>concurrency</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文记录 java AbstractQueuedSynchronizer (AQS) 的设计、实现以及具体应用。</p><h1 id=requirement>Requirement</h1><p>Synchronizers possess two kinds of methods:</p><ol><li>acquire operation blocks the calling thread until the synchronization state allows it to proceed.</li><li>release operation changes synchronization state in a way that may allow one or more blocked threads to unblock.</li></ol><p>Each synchronizer supports:</p><ol><li>nonblocking synchronization attempts as well as blocking versions.</li><li>Optional timeouts, so applications can give up waiting.</li><li>Cancellability via interruption, usually separated into one version of acquire that is cancellable, and one that is not.</li></ol><p>Synchronizers may vary according to whether they manage only exclusive states:</p><ol><li>only one thread at a time may continue past a possible blocking point</li><li>shared states in which multiple threads can at least sometimes proceed.</li></ol><p><code>java.util.concurrent</code> package also defines interface <code>Condition</code>, supporting monitor-style await/signal operations that may be associated with exclusive Lock Classes</p><h2 id=performance>Performance</h2><p>Primary performance goal is scalability: the overhead required to pass a synchronization point should be constant no matter how may threads are trying to do so. However this must be balanced against resource considerations, including:</p><ol><li>total cpu time requirements</li><li>memory traffic</li><li>thread scheduling overhead</li></ol><h1 id=design-and-implementation>Design and Implementation</h1><p>The ideas between synchronizer are straightforward.</p><pre tabindex=0><code>acquire:
-while (synchronization state does not allow acquire) {
-    enqueue current thread if not already queued
-    possibly block current thread
-}   dequeue current thread if it was queued
-
-release:
-if (state permit a blocked thread to acquire)
-    unblock one or more queued threads 
-</code></pre><p>Support for these operations requires the coordination of three basic components:</p><ol><li>Atomically managing synchronization state.</li><li>blocking and unblocking threads</li><li>maintaining queues</li></ol><p>The central decision in the synchronizer framework was to choose a concrete implementation of each of these three components, while still permitting a wide range of options in how they are used.</p><h2 id=synchronization-state>Synchronization state</h2><p>AQS maintains synchronization state using only a single (32-bit) int, and exports operations to access and update state</p><ol><li>getState()</li><li>setState()</li><li>compareAndSetState()</li></ol><p>Concrete classes based on AbstractQueuedSynchronizer must define methods:</p><ol><li>tryAcquire</li><li>tryRelease</li></ol><h2 id=blocking>Blocking</h2><p><code>java.util.concurrent.locks</code> package includes a LockSupport class with methods that :</p><ol><li>LockSupport.park blocks the current thread.</li><li>Thread.interrupt interrupting a thread unparks it.</li><li>LockSupport.unpark unblocks the current thread.
-HotspotJVM uses a pthread condvar</li></ol><h2 id=queues>Queues</h2><p>The heart of the framework is maintenance of queues of blocked threads, which are restricted to FIFO queues.
-The appropriate choices for synchronization queues are non-blocking data structures that do not themselves need to be constructed using lower-level locks.
-CLH(lock queue) have been used only in spinlocks.
-AQS made modification to the CLH locks to support blocking,cancellation and timeouts.</p><ol><li>CLH node with <code>prev</code> node link can deal with timeouts and cancellation</li><li>CLH node with <code>next</code> node link to support blocking and waking up (park/unpark)</li><li><code>status</code> field kept in each node for purposes of controlling blocking.</li><li>garbage collection of nodes relies on GC</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+<a class=category-link href=https://kevinwang930.github.io/categories/concurrency>concurrency</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p><code>ReentrantLock</code>, <code>Semaphore</code>, and <code>CountDownLatch</code> look unrelated at the API level, but each holds a private <strong><code>Sync extends AbstractQueuedSynchronizer</code></strong>. The <strong><code>Sync</code></strong> subclass overrides <strong><code>tryAcquire</code></strong> / <strong><code>tryRelease</code></strong> and decides what <strong><code>state</code></strong> represents. <strong><code>AbstractQueuedSynchronizer</code></strong> (AQS) is the base class: it owns <code>state</code>, the CLH sync queue, <code>acquire</code> / <code>release</code>, and the nested <strong><code>ConditionObject</code></strong>.</p><hr><h2 id=1-architecture>1. Architecture</h2><h3 id=11-design-overview>1.1 Design overview</h3><p>A blocking synchronizer has two operations: <strong>acquire</strong> waits until <code>state</code> permits progress; <strong>release</strong> updates <code>state</code> and may wake waiters. In the JDK this splits across two classes:</p><table><thead><tr><th>Class</th><th>Responsibility</th></tr></thead><tbody><tr><td><strong><code>Sync extends AQS</code></strong></td><td>Override <code>tryAcquire*</code> / <code>tryRelease*</code>; define what <code>state</code> means</td></tr><tr><td><strong><code>AbstractQueuedSynchronizer</code></strong></td><td>Hold <code>state</code>, run the <code>acquire</code> / <code>release</code> loop, manage the CLH queue, park threads via <code>LockSupport</code></td></tr></tbody></table><p><img src=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/images/synchronizer-architecture.svg alt="AbstractQueuedSynchronizer: synchronizers, Sync subclass, and AQS internals"></p><p>The diagram shows the call chain:</p><ol><li><strong><code>ReentrantLock</code></strong>, <strong><code>Semaphore</code></strong>, etc. — public API (<code>lock</code>, <code>acquire</code>, <code>await</code>).</li><li><strong><code>Sync</code></strong> — inner class that extends AQS and implements the <code>try*</code> hooks. <code>ReentrantLock.Sync</code> treats <code>state</code> as hold count; <code>Semaphore.Sync</code> treats it as permit count.</li><li><strong><code>AbstractQueuedSynchronizer</code></strong> — when <code>tryAcquire</code> fails, AQS enqueues the thread on a CLH FIFO queue and blocks it with <code>LockSupport.park</code>. On <code>release</code>, AQS calls <code>tryRelease</code> then <code>signalNext</code> to unpark a successor. Also contains <strong><code>ConditionObject</code></strong> for <code>await</code> / <code>signal</code>, and extends <strong><code>AbstractOwnableSynchronizer</code></strong> to track the exclusive owner thread.</li></ol><p><code>AbstractQueuedLongSynchronizer</code> is the same design with a <code>long state</code> field — used by <code>ReentrantReadWriteLock</code>.</p><p>Both modes share one sync queue; the node type records the mode:</p><table><thead><tr><th>Mode</th><th>AQS API</th><th>Node class</th><th>Examples</th></tr></thead><tbody><tr><td>Exclusive</td><td><code>acquire</code> / <code>release</code></td><td><code>ExclusiveNode</code></td><td><code>ReentrantLock</code>, write lock</td></tr><tr><td>Shared</td><td><code>acquireShared</code> / <code>releaseShared</code></td><td><code>SharedNode</code></td><td><code>Semaphore</code>, <code>CountDownLatch.await</code>, read lock</td></tr></tbody></table><p>CAS, memory fences, and the OS primitives behind <code>park</code> are covered in <a href=https://kevinwang930.github.io/2024/04/concurrency/synchronization/>Synchronization</a>.</p><h3 id=12-abstractqueuedsynchronizer>1.2 AbstractQueuedSynchronizer</h3><p>Every AQS-backed type holds a <code>Sync extends AbstractQueuedSynchronizer</code> (or <code>AbstractQueuedLongSynchronizer</code>) and overrides the hook methods:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 abstract class AbstractOwnableSynchronizer {
     transient Thread exclusiveOwnerThread
 }
-class AbstractQueuedSynchronizer extends AbstractOwnableSynchronizer {
+
+abstract class AbstractQueuedSynchronizer extends AbstractOwnableSynchronizer {
     transient volatile Node head
     transient volatile Node tail
     volatile int state
+    + acquire(int arg)
+    + release(int arg)
+    + acquireShared(int arg)
+    + releaseShared(int arg)
+    # tryAcquire(int arg)
+    # tryRelease(int releases)
+    # tryAcquireShared(int arg)
+    # tryReleaseShared(int releases)
 }
 
-class Node {
+abstract class Node {
     volatile Node prev
     volatile Node next
     Thread waiter
     volatile int status
 }
 
-AbstractQueuedSynchronizer o-- Node
-</code></pre><h2 id=condition-queues>Condition queues</h2><p>The synchronizer framework provides a <code>ConditionObject</code> class for use by synchronizers that maintain exclusive synchronization and conform to the <code>LOCK</code> interface.
-Any number of condition objects may be attached to a lock object, providing classis monitor-style await, signal and signalAll operations.</p><p>A <code>ConditionObject</code> uses the same internal queue nodes as synchronizers, but maintains them on a separate condition queue. The signal operation is implemented as a queue transfer from the condition queue to the lock queue, without necessarily waking up the signalled thread before it has re-acquired its lock.</p><pre tabindex=0><code>await:
-    create and add new node to condition queue;
-    release lock;
-    block until node is on lock queue;
-    re-acquire lock;
-
-signal:
-    transfer the first node from condition queue to lock queue.
-</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
-interface Condition {
-    void await()
-    void awaitUninterruptibly()
-    long awaitNanos(long nanosTimeout)
-    boolean await(long time, TimeUnit unit)
-    boolean awaitUntil(Date deadline)
-    void signal()
-    void signalAll()
+class ExclusiveNode extends Node
+class SharedNode extends Node
+class ConditionNode extends Node {
+    ConditionNode nextWaiter
 }
 
-class Node {
+AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
+@enduml
+</code></pre><h4 id=state-and-hooks>State and hooks</h4><p><code>state</code> is read and written only through <code>getState</code>, <code>setState</code>, and <code>compareAndSetState</code>. Subclasses override <strong>hooks</strong>; callers never touch <code>state</code> directly:</p><table><thead><tr><th>Mode</th><th>Acquire hook</th><th>Release hook</th><th>Result</th></tr></thead><tbody><tr><td>Exclusive</td><td><code>tryAcquire(int arg)</code></td><td><code>tryRelease(int releases)</code></td><td><code>boolean</code>; <code>true</code> when fully released</td></tr><tr><td>Shared</td><td><code>tryAcquireShared(int arg)</code></td><td><code>tryReleaseShared(int releases)</code></td><td><code>int</code>: negative = fail; <code>0</code> = success; positive = success and others may proceed</td></tr></tbody></table><p><code>AbstractOwnableSynchronizer</code> tracks <code>exclusiveOwnerThread</code> for exclusive syncs. When 32 bits are insufficient, <strong><code>AbstractQueuedLongSynchronizer</code></strong> provides the same API with a <code>long state</code> — used by <code>ReentrantReadWriteLock</code>.</p><h4 id=sync-queue>Sync queue</h4><p>On first contention AQS installs a dummy header; waiters link at <code>tail</code> via CAS:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>transient</span> <span style=color:#66d9ef>volatile</span> Node head;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>transient</span> <span style=color:#66d9ef>volatile</span> Node tail;
+</span></span></code></pre></div><table><thead><tr><th>Field</th><th>Role</th></tr></thead><tbody><tr><td><code>prev</code>, <code>next</code></td><td>CLH-variant links; enqueue uses <code>prev</code>; <code>next</code> may lag after cancellation</td></tr><tr><td><code>waiter</code></td><td><code>Thread</code> passed to <code>LockSupport.unpark</code></td></tr><tr><td><code>status</code></td><td><code>WAITING</code> (1), <code>CANCELLED</code>, <code>COND</code> (2) — bit flags</td></tr></tbody></table><h4 id=exclusivenode-and-sharednode>ExclusiveNode and SharedNode</h4><p><code>ExclusiveNode</code> and <code>SharedNode</code> are empty subclasses of <code>Node</code> — no extra fields. AQS uses the type tag to decide which hook to call and which waiters to wake:</p><table><thead><tr><th></th><th><code>ExclusiveNode</code></th><th><code>SharedNode</code></th></tr></thead><tbody><tr><td><strong>Created when</strong></td><td><code>acquire(..., shared=false, ...)</code></td><td><code>acquire(..., shared=true, ...)</code></td></tr><tr><td><strong>Fast-path hook</strong></td><td><code>tryAcquire(arg)</code> → <code>boolean</code></td><td><code>tryAcquireShared(arg) >= 0</code></td></tr><tr><td><strong>Release path</strong></td><td><code>release</code> → <code>signalNext(head)</code></td><td><code>releaseShared</code> → <code>signalNext(head)</code></td></tr><tr><td><strong>After becoming head</strong></td><td>stop</td><td><code>signalNextIfShared(node)</code> — wake next shared waiter if still eligible</td></tr><tr><td><strong>Queue inspection</strong></td><td><code>getExclusiveQueuedThreads()</code></td><td><code>getSharedQueuedThreads()</code></td></tr></tbody></table><p>Enqueue picks the node type in the main acquire loop:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>node <span style=color:#f92672>=</span> (shared) <span style=color:#f92672>?</span> <span style=color:#66d9ef>new</span> SharedNode() : <span style=color:#66d9ef>new</span> ExclusiveNode();
+</span></span></code></pre></div><p>Inside the loop, the same <code>acquire(...)</code> method branches on <code>shared</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>if</span> (shared)
+</span></span><span style=display:flex><span>    acquired <span style=color:#f92672>=</span> (tryAcquireShared(arg) <span style=color:#f92672>&gt;=</span> 0);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>else</span>
+</span></span><span style=display:flex><span>    acquired <span style=color:#f92672>=</span> tryAcquire(arg);
+</span></span></code></pre></div><p>When a shared waiter succeeds and installs itself as the new head, AQS may propagate the wake to the next shared node — multiple readers can pass through without each needing a separate <code>release</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>if</span> (acquired) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (first) {
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>        head <span style=color:#f92672>=</span> node;
+</span></span><span style=display:flex><span>        pred.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>waiter</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (shared)
+</span></span><span style=display:flex><span>            signalNextIfShared(node);   <span style=color:#75715e>// only unparks if successor is SharedNode</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// ...</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> 1;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>signalNext</code> wakes any successor; <code>signalNextIfShared</code> wakes only a <code>SharedNode</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNext</span>(Node h) {
+</span></span><span style=display:flex><span>    Node s;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (h <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> (s <span style=color:#f92672>=</span> h.<span style=color:#a6e22e>next</span>) <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> s.<span style=color:#a6e22e>status</span> <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNextIfShared</span>(Node h) {
+</span></span><span style=display:flex><span>    Node s;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (h <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> (s <span style=color:#f92672>=</span> h.<span style=color:#a6e22e>next</span>) <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>        (s <span style=color:#66d9ef>instanceof</span> SharedNode) <span style=color:#f92672>&amp;&amp;</span> s.<span style=color:#a6e22e>status</span> <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>ConditionNode</code> is a third node type, used on condition queues rather than the CLH sync queue (§1.3).</p><h4 id=acquire-and-release>Acquire and release</h4><p>Public entry points try the hook once, then delegate to the internal loop:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// exclusive — ReentrantLock.lock()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>acquire</span>(<span style=color:#66d9ef>int</span> arg) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>tryAcquire(arg))
+</span></span><span style=display:flex><span>        acquire(<span style=color:#66d9ef>null</span>, arg, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>false</span>, 0L);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// shared — Semaphore.acquire(), CountDownLatch.await()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>acquireShared</span>(<span style=color:#66d9ef>int</span> arg) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryAcquireShared(arg) <span style=color:#f92672>&lt;</span> 0)
+</span></span><span style=display:flex><span>        acquire(<span style=color:#66d9ef>null</span>, arg, <span style=color:#66d9ef>true</span>, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>false</span>, 0L);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>The internal <strong><code>acquire(...)</code></strong> loop handles enqueue, park, and retry. Simplified flow:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. If at queue head (or not yet enqueued), try the hook</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (first <span style=color:#f92672>||</span> pred <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> acquired <span style=color:#f92672>=</span> shared
+</span></span><span style=display:flex><span>            <span style=color:#f92672>?</span> (tryAcquireShared(arg) <span style=color:#f92672>&gt;=</span> 0)
+</span></span><span style=display:flex><span>            : tryAcquire(arg);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (acquired) { <span style=color:#75715e>/* set head, maybe signalNextIfShared */</span> <span style=color:#66d9ef>return</span> 1; }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. Initialize queue on first contention</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tail <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        tryInitializeHead();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 3. Allocate ExclusiveNode or SharedNode</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (node <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        node <span style=color:#f92672>=</span> shared <span style=color:#f92672>?</span> <span style=color:#66d9ef>new</span> SharedNode() : <span style=color:#66d9ef>new</span> ExclusiveNode();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 4. CAS onto tail, link prev</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (pred <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) { <span style=color:#75715e>/* enqueue */</span> }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 5. Spin after unpark (postSpins)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (first <span style=color:#f92672>&amp;&amp;</span> spins <span style=color:#f92672>!=</span> 0) { <span style=color:#f92672>--</span>spins; Thread.<span style=color:#a6e22e>onSpinWait</span>(); }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 6. Set WAITING on predecessor, then park</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (node.<span style=color:#a6e22e>status</span> <span style=color:#f92672>==</span> 0)
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>status</span> <span style=color:#f92672>=</span> WAITING;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>park</span>(<span style=color:#66d9ef>this</span>);   <span style=color:#75715e>// or parkNanos for timed acquire</span>
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>clearStatus</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Release is symmetric and short — hook first, then unpark one successor:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>release</span>(<span style=color:#66d9ef>int</span> arg) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryRelease(arg)) {
+</span></span><span style=display:flex><span>        signalNext(head);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>releaseShared</span>(<span style=color:#66d9ef>int</span> arg) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryReleaseShared(arg)) {
+</span></span><span style=display:flex><span>        signalNext(head);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Timed or interrupted acquires set <code>CANCELLED</code>; <code>cleanQueue()</code> unlinks dead nodes so successors remain reachable.</p><h3 id=13-conditionobject>1.3 ConditionObject</h3><p><code>ConditionObject</code> is nested inside AQS and backs <code>Lock.newCondition()</code>. It reuses <code>ConditionNode</code> but maintains a <strong>separate condition queue</strong> (<code>firstWaiter</code> / <code>lastWaiter</code>), distinct from the CLH sync queue:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Condition {
+    + await()
+    + awaitUninterruptibly()
+    + awaitNanos(long nanosTimeout)
+    + await(long time, TimeUnit unit)
+    + awaitUntil(Date deadline)
+    + signal()
+    + signalAll()
+}
+
+abstract class Node {
     volatile Node prev
     volatile Node next
     Thread waiter
@@ -65,119 +146,320 @@ class ConditionObject implements Condition {
 }
 
 interface ManagedBlocker {
-    boolean block() throws InterruptedException
-    boolean isReleasable()
+    + block() : boolean
+    + isReleasable() : boolean
 }
 
 class ConditionNode extends Node implements ManagedBlocker {
     ConditionNode nextWaiter
 }
 
-ConditionObject *-right- ConditionNode
-</code></pre><h1 id=synchronizers>Synchronizers</h1><h2 id=reentrantlock>ReentrantLock</h2><p>ReentrantLock will check the current owner of the lock,if it is the current thread, it set state and return directly.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Lock {
-    void lock()
-    void lockInterruptibly() throws InterruptedException
-    boolean tryLock()
-    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
-    void unlock()
-    Condition newCondition()
+ConditionObject *-right- ConditionNode : condition queue
+@enduml
+</code></pre><p><strong><code>await()</code></strong> (caller must hold the exclusive lock):</p><ol><li><code>enableWait(node)</code> — enqueue on the condition list, then <strong><code>release(savedState)</code></strong>.</li><li>Park (<code>ForkJoinPool.managedBlock</code> or <code>LockSupport.park</code>) until signalled.</li><li><code>reacquire(node, savedState)</code> — competitive <code>acquire</code>; may re-enter the sync queue.</li><li>Restore interrupt status if interrupted after a real signal.</li></ol><p><strong><code>signal()</code></strong> transfers nodes from the condition queue to the sync queue. The signalled thread does not run until it re-acquires the lock:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doSignal</span>(ConditionNode first, <span style=color:#66d9ef>boolean</span> all) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>while</span> (first <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        ConditionNode next <span style=color:#f92672>=</span> first.<span style=color:#a6e22e>nextWaiter</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> ((first.<span style=color:#a6e22e>getAndUnsetStatus</span>(COND) <span style=color:#f92672>&amp;</span> COND) <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>            enqueue(first);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>all) <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        first <span style=color:#f92672>=</span> next;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Unlike <code>synchronized</code>, each <code>Condition</code> instance has its own wait set rather than sharing one per monitor.</p><hr><h2 id=2-implementation>2. Implementation</h2><h3 id=21-locksupport>2.1 LockSupport</h3><p>AQS stores the waiting thread in <code>Node.waiter</code> and calls <strong><code>LockSupport.unpark</code></strong> from <code>signalNext</code>. Each thread holds at most <strong>one permit</strong>; <code>park()</code> consumes it or blocks. Parking is per-thread, not bound to a lock object. Short spins (<code>postSpins</code>, <code>Thread.onSpinWait</code>) before parking cut context switches when the releaser is still on-CPU.</p><h3 id=22-built-in-synchronizers>2.2 Built-in synchronizers</h3><table><thead><tr><th>Class</th><th>AQS base</th><th><code>state</code> meaning</th><th>Mode</th></tr></thead><tbody><tr><td><code>ReentrantLock</code></td><td><code>AbstractQueuedSynchronizer</code></td><td>hold count (0 = unlocked)</td><td>exclusive</td></tr><tr><td><code>ReentrantReadWriteLock</code></td><td><code>AbstractQueuedLongSynchronizer</code></td><td>high 32 = reads, low 32 = writes</td><td>both</td></tr><tr><td><code>Semaphore</code></td><td><code>AbstractQueuedSynchronizer</code></td><td>available permits</td><td>shared</td></tr><tr><td><code>CountDownLatch</code></td><td><code>AbstractQueuedSynchronizer</code></td><td>countdown (0 = open)</td><td>shared</td></tr><tr><td><code>CyclicBarrier</code></td><td>— (<code>ReentrantLock</code> + <code>Condition</code>)</td><td><code>count</code> under lock</td><td>—</td></tr><tr><td><code>FutureTask</code></td><td>— (own CAS <code>state</code> + <code>WaitNode</code> stack)</td><td>task lifecycle</td><td>—</td></tr></tbody></table><h4 id=reentrantlock>ReentrantLock</h4><p>A reentrant mutual-exclusion lock: one thread holds it at a time, but the owner may acquire it again. It supports optional FIFO fairness, timed and interruptible acquire, and multiple condition variables on the same lock. Use it wherever <code>synchronized</code> is too limited — <code>tryLock</code>, fairness, or separate <em>notFull</em> / <em>notEmpty</em> waits on one buffer.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Lock {
+    + lock()
+    + lockInterruptibly()
+    + tryLock()
+    + tryLock(long time, TimeUnit unit)
+    + unlock()
+    + newCondition() : Condition
 }
+
+interface Condition {
+    + await()
+    + signal()
+    + signalAll()
+}
+
+class ConditionObject implements Condition
 
 class ReentrantLock implements Lock {
     final Sync sync
 }
 
-abstract class AbstractOwnableSynchronizer {
-    transient Thread exclusiveOwnerThread
-}
-class AbstractQueuedSynchronizer extends AbstractOwnableSynchronizer {
-    transient volatile Node head
-    transient volatile Node tail
-    volatile int state
-}
-
-class Node {
-    volatile Node prev
-    volatile Node next
-    Thread waiter
-    volatile int status
-}
-abstract  class Sync extends AbstractQueuedSynchronizer {
-
-}
-ReentrantLock *-- Sync
-AbstractQueuedSynchronizer o-- Node
-</code></pre><h2 id=reentrantreadwritelock>ReentrantReadWriteLock</h2><p>State of lock is 32 bit, upper 16 bits store shared count, lower 16 bits store exclusive count.</p><p>The ReadLock uses the <code>acquireShared</code> methods to enable multiple readers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
-interface Lock {
-    void lock()
-    void lockInterruptibly() throws InterruptedException
-    boolean tryLock()
-    boolean tryLock(long time, TimeUnit unit) throws InterruptedException
-    void unlock()
-    Condition newCondition()
-}
-
-interface ReadWriteLock {
-    Lock readLock()
-    Lock writeLock()
-}
-
-class ReentrantReadWriteLock  {
-    ReadLock readerLock
-    WriteLock writerLock
-    Sync sync
-}
-
-class ReadLock {
-    Sync sync
-}
-
-class WriteLock  {
-    Sync sync
-}
 abstract class Sync extends AbstractQueuedSynchronizer {
-    ThreadLocalHoldCounter readHolds
-    HoldCounter cachedHoldCounter
-    Thread firstReader
-    int firstReaderHoldCount
+    + newCondition() : ConditionObject
 }
 
 class NonfairSync extends Sync
-Lock &lt;|--- ReadLock
-Lock &lt;|--- WriteLock
-ReadWriteLock &lt;|-- ReentrantReadWriteLock
-ReentrantReadWriteLock *-left- ReadLock
-ReentrantReadWriteLock *-right- WriteLock
+class FairSync extends Sync
 
+ReentrantLock *-- Sync
+Sync ..&gt; ConditionObject : newCondition()
+@enduml
+</code></pre><p><code>lock.newCondition()</code> returns a <strong><code>ConditionObject</code></strong> on the same <code>Sync</code>. A thread **<code>await</code>**s only while holding the lock; <code>await</code> releases the lock and waits on the condition queue; <strong><code>signal</code></strong> moves waiters back to the sync queue. One lock can have many conditions (e.g. <em>notFull</em> and <em>notEmpty</em>).</p><p>Fairness is not in AQS — it is chosen in the <strong><code>Sync</code> subclass</strong>. The default constructor uses <strong><code>NonfairSync</code></strong>; <code>new ReentrantLock(true)</code> uses <strong><code>FairSync</code></strong>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#a6e22e>ReentrantLock</span>() {
+</span></span><span style=display:flex><span>    sync <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> NonfairSync();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#a6e22e>ReentrantLock</span>(<span style=color:#66d9ef>boolean</span> fair) {
+</span></span><span style=display:flex><span>    sync <span style=color:#f92672>=</span> fair <span style=color:#f92672>?</span> <span style=color:#66d9ef>new</span> FairSync() : <span style=color:#66d9ef>new</span> NonfairSync();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>NonfairSync</strong> skips the queue check, so a new thread can <strong>barge</strong> ahead of waiters:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>initialTryLock</span>() {
+</span></span><span style=display:flex><span>    Thread current <span style=color:#f92672>=</span> Thread.<span style=color:#a6e22e>currentThread</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (compareAndSetState(0, 1)) {
+</span></span><span style=display:flex><span>        setExclusiveOwnerThread(current);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (getExclusiveOwnerThread() <span style=color:#f92672>==</span> current) {
+</span></span><span style=display:flex><span>        setState(getState() <span style=color:#f92672>+</span> 1);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>tryAcquire</span>(<span style=color:#66d9ef>int</span> acquires) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (getState() <span style=color:#f92672>==</span> 0 <span style=color:#f92672>&amp;&amp;</span> compareAndSetState(0, acquires)) {
+</span></span><span style=display:flex><span>        setExclusiveOwnerThread(Thread.<span style=color:#a6e22e>currentThread</span>());
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>FairSync</strong> calls <code>hasQueuedThreads()</code> / <code>hasQueuedPredecessors()</code> before CAS:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>initialTryLock</span>() {
+</span></span><span style=display:flex><span>    Thread current <span style=color:#f92672>=</span> Thread.<span style=color:#a6e22e>currentThread</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> c <span style=color:#f92672>=</span> getState();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>==</span> 0) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>hasQueuedThreads() <span style=color:#f92672>&amp;&amp;</span> compareAndSetState(0, 1)) {
+</span></span><span style=display:flex><span>            setExclusiveOwnerThread(current);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (getExclusiveOwnerThread() <span style=color:#f92672>==</span> current) {
+</span></span><span style=display:flex><span>        setState(<span style=color:#f92672>++</span>c);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>tryAcquire</span>(<span style=color:#66d9ef>int</span> acquires) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (getState() <span style=color:#f92672>==</span> 0 <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>hasQueuedPredecessors() <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>        compareAndSetState(0, acquires)) {
+</span></span><span style=display:flex><span>        setExclusiveOwnerThread(Thread.<span style=color:#a6e22e>currentThread</span>());
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>lock()</code> always tries <code>initialTryLock()</code> before <code>acquire(1)</code>, so a fair lock still takes the fast path when the queue is empty.</p><p><code>state</code> is the reentrant hold count; <code>exclusiveOwnerThread</code> is the owner. <code>tryRelease</code> decrements and returns <code>true</code> at zero, which triggers <code>signalNext</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>tryRelease</span>(<span style=color:#66d9ef>int</span> releases) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> c <span style=color:#f92672>=</span> getState() <span style=color:#f92672>-</span> releases;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (getExclusiveOwnerThread() <span style=color:#f92672>!=</span> Thread.<span style=color:#a6e22e>currentThread</span>())
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalMonitorStateException();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>boolean</span> free <span style=color:#f92672>=</span> (c <span style=color:#f92672>==</span> 0);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (free) setExclusiveOwnerThread(<span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    setState(c);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> free;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=reentrantreadwritelock>ReentrantReadWriteLock</h4><p>A read/write lock: many threads may hold the read lock together; the write lock excludes all readers and other writers. Both modes are reentrant. It fits read-heavy data — caches, config snapshots — where writes are infrequent but must see a consistent view.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Lock {
+    + lock()
+    + unlock()
+    + newCondition() : Condition
+}
 
-ReentrantReadWriteLock *-down- Sync
-</code></pre><h2 id=semaphore>Semaphore</h2><p>Semaphore uses the synchronization state to hold the current count. It defines <code>acquireShared</code> to decrement the count or block if nonpositive, and <code>tryRelease</code> to increment the count, possibly unblocking threads if it is now positive.</p><h2 id=countdownlatch>CountDownlatch</h2><p><code>CountDownLatch</code> uses the synchronization state to represent the count.All acquires pass when it reaches zero.</p><h2 id=cyclicbarrier>CyclicBarrier</h2><p>A synchronization aid that allows a set of threads to all wait for each other to reach a common barrier point. It</p><h2 id=futuretask>FutureTask</h2><p><code>FutureTask</code> uses synchronization state to represent the run-state of a future(initial, running, cancelled, done). Setting or cancelling a future invokes release, unblocking threads waiting for its computed value via <code>acquire</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface Future&lt;V&gt; {
-    boolean cancel(boolean mayInterruptIfRunning)
-    boolean isCancelled()
-    boolean isDone()
-    V get() 
-    V get(long timeout, TimeUnit unit)
-    default V resultNow() 
-    default Throwable exceptionNow()
-    default State state()
+interface Condition {
+    + await()
+    + signal()
 }
-interface RunnableFuture&lt;V&gt; extends Runnable, Future {
-    void run()
+
+class ConditionObject implements Condition
+
+interface ReadWriteLock {
+    + readLock() : Lock
+    + writeLock() : Lock
 }
+
+class ReentrantReadWriteLock implements ReadWriteLock {
+    readerLock : ReadLock
+    writerLock : WriteLock
+    sync : Sync
+}
+
+class ReadLock implements Lock {
+    sync : Sync
+}
+
+class WriteLock implements Lock {
+    sync : Sync
+}
+
+abstract class &#34;AbstractQueuedLongSynchronizer&#34; as AQLS {
+    volatile long state
+}
+
+abstract class Sync extends AQLS {
+    + newCondition() : ConditionObject
+    readHolds : ThreadLocalHoldCounter
+    cachedHoldCounter : HoldCounter
+}
+
+class HoldCounter {
+    count : int
+}
+
+class ThreadLocalHoldCounter
+
+class NonfairSync extends Sync
+class FairSync extends Sync
+
+ReentrantReadWriteLock *-- ReadLock
+ReentrantReadWriteLock *-- WriteLock
+ReentrantReadWriteLock *-- Sync
+WriteLock ..&gt; ConditionObject : newCondition()
+Sync ..&gt; ConditionObject
+note right of ReadLock : newCondition() throws\nUnsupportedOperationException
+@enduml
+</code></pre><p>Only <strong><code>writeLock().newCondition()</code></strong> is supported — <code>await</code> must release exclusive ownership. <strong><code>readLock().newCondition()</code></strong> throws <code>UnsupportedOperationException</code>.</p><p><code>SHARED_SHIFT = 32</code>: low 32 bits hold write count, high 32 bits hold read count. <code>ReadLock</code> calls <code>acquireShared</code>; <code>WriteLock</code> calls <code>acquire</code>. Per-thread read recursion is tracked in <code>ThreadLocalHoldCounter</code>.</p><h4 id=semaphore>Semaphore</h4><p>A counting semaphore tracks a pool of permits. <code>acquire</code> takes one and blocks when the pool is empty; <code>release</code> returns one. There is no owner — any thread may release. Typical uses are connection pools, rate limiters, and any cap of <em>N</em> concurrent workers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class Semaphore {
+    final Sync sync
+    + acquire()
+    + release()
+    + tryAcquire()
+}
+
+abstract class Sync extends AbstractQueuedSynchronizer {
+    + nonfairTryAcquireShared(int) : int
+}
+
+class NonfairSync extends Sync
+class FairSync extends Sync
+
+Semaphore *-- Sync
+@enduml
+</code></pre><p><code>state</code> holds available permits. <strong>NonfairSync</strong> subtracts via CAS with no queue check. <strong>FairSync</strong> returns <code>-1</code> when <code>hasQueuedPredecessors()</code> is true, forcing the thread to enqueue:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// NonfairSync — barging allowed</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>tryAcquireShared</span>(<span style=color:#66d9ef>int</span> acquires) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> available <span style=color:#f92672>=</span> getState();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> remaining <span style=color:#f92672>=</span> available <span style=color:#f92672>-</span> acquires;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (remaining <span style=color:#f92672>&lt;</span> 0 <span style=color:#f92672>||</span> compareAndSetState(available, remaining))
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> remaining;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// FairSync</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>tryAcquireShared</span>(<span style=color:#66d9ef>int</span> acquires) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (hasQueuedPredecessors())
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#f92672>-</span>1;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> available <span style=color:#f92672>=</span> getState();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> remaining <span style=color:#f92672>=</span> available <span style=color:#f92672>-</span> acquires;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (remaining <span style=color:#f92672>&lt;</span> 0 <span style=color:#f92672>||</span> compareAndSetState(available, remaining))
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> remaining;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=countdownlatch>CountDownLatch</h4><p>A one-shot countdown latch starts at <em>N</em>. Threads <code>await</code> until <code>countDown</code> has been called <em>N</em> times; then every waiter is released at once. The count cannot be reset — use a new latch or a <code>CyclicBarrier</code> when the gate must fire again. Common pattern: wait for all workers to finish startup before processing begins.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class CountDownLatch {
+    final Sync sync
+    + await()
+    + countDown()
+    + getCount() : int
+}
+
+class Sync extends AbstractQueuedSynchronizer {
+    + getCount() : int
+}
+
+CountDownLatch *-- Sync
+@enduml
+</code></pre><p><code>state</code> is the remaining count. <code>await</code> succeeds only when <code>state == 0</code>; the last <code>countDown</code> returns <code>true</code> from <code>tryReleaseShared</code> and wakes all waiters.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>tryAcquireShared</span>(<span style=color:#66d9ef>int</span> acquires) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> (getState() <span style=color:#f92672>==</span> 0) <span style=color:#f92672>?</span> 1 : <span style=color:#f92672>-</span>1;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>tryReleaseShared</span>(<span style=color:#66d9ef>int</span> releases) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> c <span style=color:#f92672>=</span> getState();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>==</span> 0) <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> nextc <span style=color:#f92672>=</span> c <span style=color:#f92672>-</span> 1;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (compareAndSetState(c, nextc))
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> nextc <span style=color:#f92672>==</span> 0;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=cyclicbarrier>CyclicBarrier</h4><p>A cyclic barrier synchronizes a fixed number of parties. Each calls <code>await</code>; when the last arrives, an optional action runs and everyone proceeds. The barrier then resets for the next round — suited to parallel algorithms that advance in lockstep phases. <code>reset()</code> or a broken barrier starts a fresh cycle.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Condition {
+    + await()
+    + signalAll()
+}
+
+class ConditionObject implements Condition
+
+class ReentrantLock {
+    + newCondition() : Condition
+}
+
+class CyclicBarrier {
+    ReentrantLock lock
+    Condition trip
+    int parties
+    int count
+    Generation generation
+}
+
+class Generation {
+    boolean broken
+}
+
+CyclicBarrier *-- ReentrantLock
+CyclicBarrier o-- Condition : trip
+ReentrantLock ..&gt; ConditionObject : newCondition()
+note right of Condition
+  trip: parties await here
+  until count hits 0;
+  last party signalAll()
+  in nextGeneration()
+end note
+@enduml
+</code></pre><p>Field <strong><code>trip</code></strong> is the condition all parties share. Under <code>lock</code>, each party decrements <code>count</code>; non-last threads <strong><code>trip.await()</code></strong>; the last thread runs the barrier action and <strong><code>trip.signalAll()</code></strong> in <strong><code>nextGeneration()</code></strong> to release everyone for the next cycle.</p><p>Fields and setup:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>final</span> ReentrantLock lock <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ReentrantLock();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>final</span> Condition trip <span style=color:#f92672>=</span> lock.<span style=color:#a6e22e>newCondition</span>();
+</span></span></code></pre></div><p>Each party decrements <code>count</code> under <code>lock</code>. Non-last parties <strong><code>trip.await()</code></strong>; the last party runs <code>barrierCommand</code>, then <strong><code>nextGeneration()</code></strong> resets <code>count</code> and <strong><code>trip.signalAll()</code></strong> wakes everyone:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>nextGeneration</span>() {
+</span></span><span style=display:flex><span>    trip.<span style=color:#a6e22e>signalAll</span>();
+</span></span><span style=display:flex><span>    count <span style=color:#f92672>=</span> parties;
+</span></span><span style=display:flex><span>    generation <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Generation();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// inside dowait(), after lock.lock()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> index <span style=color:#f92672>=</span> <span style=color:#f92672>--</span>count;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (index <span style=color:#f92672>==</span> 0) {          <span style=color:#75715e>// last party — trip the barrier</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (barrierCommand <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        barrierCommand.<span style=color:#a6e22e>run</span>();
+</span></span><span style=display:flex><span>    nextGeneration();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> 0;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>timed)
+</span></span><span style=display:flex><span>        trip.<span style=color:#a6e22e>await</span>();      <span style=color:#75715e>// wait for last party to signal</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (nanos <span style=color:#f92672>&gt;</span> 0L)
+</span></span><span style=display:flex><span>        nanos <span style=color:#f92672>=</span> trip.<span style=color:#a6e22e>awaitNanos</span>(nanos);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (g <span style=color:#f92672>!=</span> generation)     <span style=color:#75715e>// woken by nextGeneration()</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> index;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=futuretask>FutureTask</h4><p>A <code>FutureTask</code> wraps a <code>Callable</code> or <code>Runnable</code>, runs it on an executor, and exposes the result through <code>Future</code>. Callers block on <code>get()</code> until the task completes, fails, or is cancelled — the usual task type behind <code>ExecutorService.submit</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Future&lt;V&gt; {
+    + get() : V
+    + cancel(boolean) : boolean
+}
+
+interface Runnable
+interface RunnableFuture&lt;V&gt; extends Runnable, Future
 
 class FutureTask&lt;V&gt; implements RunnableFuture {
     volatile int state
-    Callable&lt;V&gt; callable
-    Object outcome
-    volatile Thread runner
     volatile WaitNode waiters
 }
+
 class WaitNode {
     Thread thread
     WaitNode next
 }
+
 FutureTask *-right- WaitNode
-</code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
+@enduml
+</code></pre><hr><h2 id=summary>Summary</h2><table><thead><tr><th>Piece</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>state</code> + hooks</strong></td><td>Subclass decides when acquire / release succeeds</td></tr><tr><td><strong><code>acquire</code> / <code>release</code></strong></td><td>Template loop: try → enqueue → park → retry</td></tr><tr><td><strong>CLH queue</strong></td><td>FIFO waiters; fair mode checks <code>hasQueuedPredecessors</code></td></tr><tr><td><strong><code>LockSupport</code></strong></td><td>Per-thread park / unpark</td></tr><tr><td><strong><code>ConditionObject</code></strong></td><td>Separate condition queue; <code>signal</code> enqueues onto sync queue</td></tr><tr><td><strong>Concrete syncs</strong></td><td>Thin wrappers mapping domain semantics onto <code>state</code></td></tr></tbody></table><p>Every AQS-backed class wraps a <strong><code>Sync</code></strong> inner class: read how <strong><code>state</code></strong> is encoded, then read <strong><code>tryAcquire*</code></strong> / <strong><code>tryRelease*</code></strong>.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/java/>java</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/concurrency/>concurrency</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/synchronizer/>synchronizer</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/concurrency/synchronization/ data-tooltip="Concurrency Synchronization" aria-label="NEXT: Concurrency Synchronization"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/tomcat/ data-tooltip="Tomcat- Servlet Container" aria-label="PREVIOUS: Tomcat- Servlet Container"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>

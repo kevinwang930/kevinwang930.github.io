@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="440" viewBox="0 0 880 440" role="img" aria-label="AbstractQueuedSynchronizer architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-purple { stroke: #8b5cf6; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+  ]]></style>
+
+  <rect width="880" height="440" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">AbstractQueuedSynchronizer</text>
+  <text x="40" y="50" class="s">Public synchronizers delegate to a Sync inner class that extends AQS</text>
+
+  <!-- Public synchronizers -->
+  <rect x="40" y="68" width="800" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">j.u.c synchronizers</text>
+  <rect x="56" y="98" width="130" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="121" y="118" text-anchor="middle" class="m">ReentrantLock</text>
+  <rect x="200" y="98" width="150" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="275" y="118" text-anchor="middle" class="m">ReadWriteLock</text>
+  <rect x="364" y="98" width="120" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="424" y="118" text-anchor="middle" class="m">Semaphore</text>
+  <rect x="498" y="98" width="140" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="568" y="118" text-anchor="middle" class="m">CountDownLatch</text>
+  <rect x="652" y="98" width="172" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="738" y="118" text-anchor="middle" class="m">lock.newCondition()</text>
+
+  <!-- Sync inner class -->
+  <rect x="40" y="152" width="800" height="56" rx="8" class="layer"/>
+  <text x="56" y="172" class="lt" fill="#0891b2">Sync extends AbstractQueuedSynchronizer</text>
+  <rect x="56" y="182" width="360" height="20" rx="4" class="box b-blue" filter="url(#sh)"/>
+  <text x="236" y="196" text-anchor="middle" class="m">tryAcquire / tryRelease / tryAcquireShared / tryReleaseShared</text>
+  <rect x="430" y="182" width="390" height="20" rx="4" class="box b-blue" filter="url(#sh)"/>
+  <text x="625" y="196" text-anchor="middle" class="m">defines what state means (hold count, permits, latch count, …)</text>
+
+  <!-- AQS -->
+  <rect x="40" y="222" width="800" height="148" rx="8" class="layer"/>
+  <text x="56" y="242" class="lt" fill="#059669">AbstractQueuedSynchronizer</text>
+  <rect x="56" y="252" width="150" height="48" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="131" y="270" text-anchor="middle" class="t" style="font-size:11px">state</text>
+  <text x="131" y="286" text-anchor="middle" class="m">volatile int</text>
+  <rect x="220" y="252" width="170" height="48" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="305" y="270" text-anchor="middle" class="t" style="font-size:11px">acquire / release</text>
+  <text x="305" y="286" text-anchor="middle" class="m">final methods</text>
+  <rect x="404" y="252" width="210" height="48" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="509" y="270" text-anchor="middle" class="t" style="font-size:11px">CLH sync queue</text>
+  <text x="509" y="286" text-anchor="middle" class="m">head, tail, Node</text>
+  <rect x="628" y="252" width="196" height="48" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="726" y="270" text-anchor="middle" class="t" style="font-size:11px">ConditionObject</text>
+  <text x="726" y="286" text-anchor="middle" class="m">nested class</text>
+  <rect x="56" y="312" width="768" height="48" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="440" y="330" text-anchor="middle" class="t" style="font-size:11px">extends AbstractOwnableSynchronizer</text>
+  <text x="440" y="346" text-anchor="middle" class="m">exclusiveOwnerThread — uses LockSupport.park / unpark to block and wake waiters</text>
+
+  <path d="M 440 140 L 440 152" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 440 208 L 440 222" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+</svg>
