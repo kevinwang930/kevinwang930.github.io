@@ -1,6 +1,7 @@
 ---
 title: "java collections internals"
 date: 2024-02-24T19:16:25+08:00
+draft:true
 categories:
 - java
 - data structure
