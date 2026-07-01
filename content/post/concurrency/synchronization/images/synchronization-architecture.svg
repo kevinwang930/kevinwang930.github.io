@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="420" viewBox="0 0 880 420" role="img" aria-label="Shared-memory synchronization architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-purple { stroke: #8b5cf6; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  ]]></style>
+
+  <rect width="880" height="420" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">Shared-Memory Synchronization Architecture</text>
+  <text x="40" y="50" class="s">Threads coordinate via constructs built on hardware atomics; spin locks for mutual exclusion, barriers for rendezvous</text>
+
+  <rect x="40" y="68" width="800" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">1. Programming model</text>
+  <rect x="56" y="98" width="220" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="166" y="118" text-anchor="middle" class="m">shared memory + atomic ops</text>
+  <rect x="296" y="98" width="180" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="386" y="118" text-anchor="middle" class="m">blocking (park / deschedule)</text>
+  <rect x="492" y="98" width="180" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="582" y="118" text-anchor="middle" class="m">busy-wait (spin on flag)</text>
+  <rect x="688" y="98" width="136" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="756" y="118" text-anchor="middle" class="m">mutex / rendezvous</text>
+
+  <rect x="40" y="156" width="800" height="88" rx="8" class="layer"/>
+  <text x="56" y="176" class="lt" fill="#0891b2">2. Synchronization constructs</text>
+  <rect x="56" y="186" width="240" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="176" y="206" text-anchor="middle" class="t" style="font-size:11px">Spin locks</text>
+  <text x="176" y="222" text-anchor="middle" class="m">TAS, ticket, MCS queue</text>
+  <rect x="320" y="186" width="240" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="440" y="206" text-anchor="middle" class="t" style="font-size:11px">Barriers</text>
+  <text x="440" y="222" text-anchor="middle" class="m">centralized, tree combining</text>
+  <rect x="584" y="186" width="240" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="704" y="206" text-anchor="middle" class="t" style="font-size:11px">Higher-level sync</text>
+  <text x="704" y="222" text-anchor="middle" class="m">semaphore, monitor, AQS</text>
+
+  <rect x="40" y="260" width="800" height="140" rx="8" class="layer"/>
+  <text x="56" y="280" class="lt" fill="#059669">3. Hardware atomics</text>
+  <rect x="56" y="292" width="200" height="96" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="156" y="312" text-anchor="middle" class="t" style="font-size:11px">Compare-and-swap</text>
+  <text x="156" y="328" text-anchor="middle" class="m">test-and-set, CAS loops</text>
+  <text x="156" y="344" text-anchor="middle" class="m">x86: CMPXCHG</text>
+  <text x="156" y="360" text-anchor="middle" class="m">fetch-and-store</text>
+  <rect x="280" y="292" width="200" height="96" rx="6" class="box b-green" filter="url(#sh)"/>
+  <text x="380" y="312" text-anchor="middle" class="t" style="font-size:11px">Read-modify-write</text>
+  <text x="380" y="328" text-anchor="middle" class="m">fetch-and-add / decrement</text>
+  <text x="380" y="344" text-anchor="middle" class="m">x86: LOCK XADD</text>
+  <text x="380" y="360" text-anchor="middle" class="m">ticket counters</text>
+  <rect x="504" y="292" width="160" height="96" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="584" y="312" text-anchor="middle" class="t" style="font-size:11px">Cache coherence</text>
+  <text x="584" y="328" text-anchor="middle" class="m">invalidation traffic</text>
+  <text x="584" y="344" text-anchor="middle" class="m">motivates queue locks</text>
+  <text x="584" y="360" text-anchor="middle" class="m">local spinning</text>
+  <rect x="684" y="292" width="140" height="96" rx="6" class="box b-amber" filter="url(#sh)"/>
+  <text x="754" y="312" text-anchor="middle" class="t" style="font-size:11px">Memory order</text>
+  <text x="754" y="328" text-anchor="middle" class="m">lock prefix</text>
+  <text x="754" y="344" text-anchor="middle" class="m">full barrier on x86</text>
+
+  <path d="M 176 130 L 176 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 440 130 L 440 156" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 176 244 L 156 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 440 244 L 380 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M 704 244 L 584 260" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+</svg>

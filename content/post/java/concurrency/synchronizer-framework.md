@@ -3,11 +3,11 @@ title: "java concurrency - Synchronizer Framework"
 date: 2024-04-06T17:00:29+08:00
 categories:
 - java
-- synchronizer
+- concurrency
 tags:
 - java
-- synchronizer
 - concurrency
+- synchronizer
 keywords:
 - synchronizer
 #thumbnailImage: //example.com/image.jpg
