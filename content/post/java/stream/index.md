@@ -45,7 +45,7 @@ The design separates **declaration** (building the pipeline) from **execution** 
 
 For sequential pipelines without stateful intermediate operations, the framework **fuses** all stages into a single pass — filter, map, and reduce can run with minimal intermediate buffering.
 
-For parallel pipelines with **stateful** operations (`sorted`, `distinct`, `limit` in some cases), the pipeline is split into **segments** at each stateful stage; each segment is evaluated separately and its output becomes the next segment's input.
+For parallel pipelines with **stateful** operations (`sorted`, `distinct`, `limit` in some cases), the pipeline is split into **segments** at each stateful stage; each segment is evaluated separately and its output becomes the next segment's input (§4.5). Sequential pipelines keep a single fused pass (§4.4).
 
 ---
 
@@ -97,8 +97,18 @@ abstract class "ReferencePipeline.StatelessOp<E_IN, E_OUT>" as StatelessOp {
 }
 
 abstract class "ReferencePipeline.StatefulOp<E_IN, E_OUT>" as StatefulOp {
-    # opEvaluateParallel()
+    # opEvaluateParallel() : Node<E_OUT>
 }
+
+class "SortedOps.OfRef<T>" as SortedOfRef
+
+class "DistinctOps.Ref<T>" as DistinctRef
+
+class "SliceOps.Ref<T>" as SliceRef
+
+class "WhileOps.TakeWhileRef<T>" as TakeWhileRef
+
+class "WhileOps.DropWhileRef<T>" as DropWhileRef
 
 class "ReferencePipeline.Head<E_IN, E_OUT>" as Head
 
@@ -152,6 +162,13 @@ AbstractPipeline <|-- ReferencePipeline
 ReferencePipeline <|-- StatelessOp
 ReferencePipeline <|-- StatefulOp
 ReferencePipeline <|-- Head
+
+StatefulOp <|-- SortedOfRef
+StatefulOp <|-- DistinctRef
+StatefulOp <|-- SliceRef
+StatefulOp <|-- TakeWhileRef
+StatefulOp <|-- DropWhileRef
+
 Sink <|.. TerminalSink
 AccumulatingSink <|.. TerminalSink
 
@@ -171,6 +188,8 @@ ReduceOp ..> Collector : makeRef(Collector)\nwraps supplier/accumulator/combiner
 ```
 
 Terminal operations are **not** pipeline stages — they are created at evaluation time by factory classes. `collect(Collector)` builds a `ReduceOps.ReduceOp` whose `ReducingSink` implements `AccumulatingSink`: the collector's `supplier` initializes state, `accumulator` accepts each element, and `combiner` merges partial results across parallel workers. `ReferencePipeline` applies the collector's `finisher` after `evaluate` returns. Other terminals use sibling ops: `ForEachOps` (side-effect), `FindOps` (`findFirst` / `findAny`), `MatchOps` (`anyMatch` / `allMatch` / `noneMatch`); `reduce` and `count` also route through `ReduceOps.ReduceOp` with different sinks.
+
+Stateful intermediates extend `ReferencePipeline.StatefulOp`; `IntPipeline`, `LongPipeline`, and `DoublePipeline` mirror the same `StatelessOp` / `StatefulOp` nesting for primitive streams. Factory classes `SortedOps`, `DistinctOps`, `SliceOps`, and `WhileOps` supply the concrete subclasses shown (`SliceOps` and `DistinctOps` use anonymous classes for reference streams). `gather` (`GathererOp`) is stateful via `opIsStateful()` but extends `ReferencePipeline` directly, not `StatefulOp`. Parallel materialization via `Node` is covered in §4.5.
 
 ### 3.2 Pipeline stage linking
 
@@ -365,28 +384,117 @@ final <P_IN> void copyInto(Sink<P_IN> wrappedSink, Spliterator<P_IN> spliterator
 }
 ```
 
-Parallel `reduce` / `collect` submit a `ReduceTask` that splits the spliterator, runs `wrapAndCopyInto(makeSink(), chunk)` per leaf, and merges via `AccumulatingSink.combine()` in `onCompletion`.
+Parallel `reduce` / `collect` submit a `ReduceTask` that splits the spliterator, runs `wrapAndCopyInto(makeSink(), chunk)` per leaf, and merges via `AccumulatingSink.combine()` in `onCompletion`. See §3.3 for the ForkJoin task hierarchy.
 
-### 4.4 Parallel execution
+### 4.4 Stateful intermediate operators
 
-`.parallel()` sets `sourceStage.parallel = true` — no threads until a terminal op runs. `AbstractTask` (a `CountedCompleter`) recursively `trySplit`s the spliterator until chunks reach target size ≈ `N / (4 × parallelism)`, then each leaf runs the fused sink chain:
+In the JDK, `opIsStateful()` is true only for stages that extend `*Pipeline.StatefulOp`. Every other intermediate (`filter`, `map`, `flatMap`, `peek`, `mapToInt`, `boxed`, …) is a stateless `StatelessOp`:
 
-```java
-while (sizeEstimate > sizeThreshold && (ls = rs.trySplit()) != null) {
-    leftChild = makeChild(ls);
-    rightChild = makeChild(rs);
-    taskToFork.fork();
+| Operation | Stream types | Why stateful |
+|-----------|--------------|--------------|
+| `sorted` | all | needs the full input (or a materialized segment) before emitting in order |
+| `distinct` | `Stream` only | must observe elements to suppress duplicates |
+| `skip` / `limit` | all | global position / bound; `limit` is also short-circuit (`IS_SHORT_CIRCUIT`) |
+| `takeWhile` | all | predicate boundary; short-circuit (`IS_SHORT_CIRCUIT`) |
+| `dropWhile` | all | must skip a prefix before the first element that fails the predicate |
+| `gather` | `Stream` only (22+) | custom `Gatherer` may hold combiner state; currently always stateful |
+
+**Sequential evaluation.** A stateful stage does *not* split the pipeline on its own. `evaluateSequential` still drives one `wrapSink` chain from source spliterator to terminal sink — the same fusion as stateless ops. The difference is that each stateful stage's `opWrapSink` installs a **buffering sink** that holds local state across the `begin` → `accept` → `end` protocol:
+
+- **`sorted`** — `accept` fills an array or `ArrayList`; `end` sorts and pushes elements downstream (sized streams pre-allocate from `begin(size)`).
+- **`distinct`** — a `Set` (or adjacent-duplicate elimination when `SORTED` is already known) suppresses repeats before forwarding.
+- **`skip` / `limit`** — counters in the sink chain; `limit` also participates in short-circuit cancellation (§4.2).
+- **`takeWhile` / `dropWhile`** — a small state machine in the sink decides when to start or stop forwarding.
+- **`gather`** — delegates to the `Gatherer`'s integrator/finisher sinks.
+
+Memory cost is per-stage buffering (e.g. `sorted` may hold the entire stream), but traversal is still **one sequential pass** over the source spliterator. Parallel evaluation cannot fuse across a stateful boundary — §4.5.
+
+### 4.5 Parallel stateful operations
+
+When `isParallel() && hasAnyStateful()`, `sourceSpliterator()` **materializes barriers** before the terminal op runs. General parallel splitting and merging follow §3.3; stateful ops are the reason a parallel pipeline may execute multiple passes instead of one fused `ReduceTask` over the original source.
+
+**`StatefulOp` and `Node`.** Each `StatefulOp` implements `opEvaluateParallel(PipelineHelper, Spliterator, IntFunction)` and returns a `Node` — an immutable ordered container, not a pipeline stage. The usual pattern is to parallel-collect the upstream segment via `helper.evaluate(spliterator, flatten, generator)` (which calls `Nodes.collect` and runs a `CollectorTask` tree), transform the result (sort, dedupe, slice), then hand off `node.spliterator()` to the next segment. For example, `SortedOps.OfRef` collects into a `Node`, flattens to an array when `flatten == true`, runs `Arrays.parallelSort`, and returns `Nodes.node(array)`.
+
+A `Node` is either a **leaf** (`getChildCount() == 0`) or an **internal** node with children. Leaves wrap existing storage without copying when possible:
+
+- **`ArrayNode`** — backs an `Object[]` or primitive array (`OfInt` / `OfLong` / `OfDouble` variants).
+- **`CollectionNode`** — holds a `Collection` reference.
+- **`EmptyNode`** — zero elements.
+
+Internal nodes are **`ConcNode`** instances (extending `AbstractConcNode`): a binary tree whose shape mirrors the parallel `CollectorTask` fork/join tree. `Nodes.conc(left, right)` merges sibling partial results; `count()` on an internal node is the sum of its children. When `flatten == true`, `Nodes.flatten` collapses a `ConcNode` tree into a single `ArrayNode` in parallel — stateful ops that need random access (e.g. sorting) request this.
+
+During collection, `Node.Builder` implementations act as **`Sink`s** that accumulate elements: `FixedNodeBuilder` pre-allocates a sized array (when `SUBSIZED` and exact size are known); `SpinedNodeBuilder` grows dynamically. Each `CollectorTask` leaf calls `helper.wrapAndCopyInto(builder, chunk).build()`; `onCompletion` combines siblings with `ConcNode::new`.
+
+```plantuml
+@startuml
+interface "Sink<T>" as Sink {
+    + begin(long)
+    + accept(T)
+    + end()
 }
-setLocalResult(doLeaf());  // helper.wrapAndCopyInto(op.makeSink(), spliterator)
+
+interface "Node<T>" as Node {
+    + spliterator()
+    + count()
+    + asArray()
+    + forEach()
+    + getChildCount()
+    + getChild(i)
+}
+
+interface "Node.Builder<T>" as NodeBuilder {
+    + build() : Node
+}
+
+interface "Node.OfInt" as OfInt
+interface "Node.OfLong" as OfLong
+interface "Node.OfDouble" as OfDouble
+
+class "Nodes.ArrayNode<T>" as ArrayNode
+class "Nodes.CollectionNode<T>" as CollectionNode
+class "Nodes.EmptyNode" as EmptyNode
+abstract class "Nodes.AbstractConcNode<T>" as AbstractConcNode
+class "Nodes.ConcNode<T>" as ConcNode
+
+class "Nodes.FixedNodeBuilder<T>" as FixedBuilder
+class "Nodes.SpinedNodeBuilder<T>" as SpinedBuilder
+
+class "Nodes" as Nodes {
+    + {static} collect()
+    + {static} node(T[])
+    + {static} conc()
+    + {static} builder()
+}
+
+Node <|.. ArrayNode
+Node <|.. CollectionNode
+Node <|.. EmptyNode
+Node <|.. OfInt
+Node <|.. OfLong
+Node <|.. OfDouble
+AbstractConcNode <|-- ConcNode
+ConcNode ..|> Node
+
+Sink <|.. NodeBuilder
+NodeBuilder <|.. FixedBuilder
+NodeBuilder <|.. SpinedBuilder
+FixedBuilder --|> ArrayNode
+SpinedNodeBuilder ..|> Node
+
+Nodes ..> ArrayNode : node(array)
+Nodes ..> ConcNode : conc(left, right)
+Nodes ..> NodeBuilder : builder()
+
+abstract class "StatefulOp<E_IN, E_OUT>" as StatefulOp {
+    + opEvaluateParallel() : Node
+}
+
+StatefulOp ..> Node : returns
+StatefulOp ..> Nodes : via helper.evaluate()
+@enduml
 ```
 
-`ReduceTask.onCompletion` merges sibling partial results via `AccumulatingSink.combine()`. Parallel `collect` with a `CONCURRENT` collector on an unordered stream skips tree merge — workers write into one shared concurrent map.
-
-When **stateful** ops appear (`sorted`, `distinct`, `limit`, …), the pipeline splits into segments (§4.5) instead of one fused split tree.
-
-### 4.5 Parallel segmentation at stateful boundaries
-
-Stateful ops need global input knowledge, so parallel evaluation **materializes barriers** between segments. This runs inside `sourceSpliterator()`, called before the terminal op:
+Segmentation runs inside `sourceSpliterator()`, called before the terminal op:
 
 ```java
 if (isParallel() && hasAnyStateful()) {
@@ -414,7 +522,10 @@ if (isParallel() && hasAnyStateful()) {
 
 - **`sorted`** — `helper.evaluate()` → `Node` → `Arrays.parallelSort`
 - **`distinct` (ordered)** — parallel collect into `LinkedHashSet`; unordered may use lazy `DistinctSpliterator`
-- **`limit/skip`** — cheap `SliceSpliterator` if unordered+subsized; else `SliceTask` full materialization
+- **`skip` / `limit`** — cheap `SliceSpliterator` if unordered+subsized; else `SliceTask` full materialization
+- **`takeWhile` (ordered)** — `TakeWhileTask` materializes upstream; unordered uses `UnorderedWhileSpliterator.Taking`
+- **`dropWhile` (ordered)** — `DropWhileTask` materializes upstream; unordered uses `UnorderedWhileSpliterator.Dropping`
+- **`gather`** — always materializes via `opEvaluateParallel` (no lazy parallel path yet)
 
 Example `parallel().filter().sorted().map().collect()`: `sorted` parallel-collects+filters into a `Node`, sorts it, returns a spliterator; terminal `ReduceTask` splits that sorted output and runs only the `map` sink per leaf.
 
