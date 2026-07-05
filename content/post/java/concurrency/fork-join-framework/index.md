@@ -37,7 +37,7 @@ Fork/join fits computations that are:
 
 - **Recursive** — large tasks split into smaller subtasks until a base-case granularity is reached
 - **DAG-structured** — completion dependencies are acyclic (`join` waits only on tasks you forked)
-- **Mostly non-blocking** — workers should not block on I/O or locks; on `join()` they run other available tasks instead of idling
+- **Mostly non-blocking** — workers should not block on I/O or locks; on `join()` they run other available tasks instead of idling; unavoidable blocking uses `ForkJoinPool.ManagedBlocker` (§4.3)
 
 `ForkJoinTask` javadoc recommends a rough granularity of **100–10,000** basic steps per leaf task. Too large → poor parallelism; too small → queue and task allocation overhead dominates.
 
@@ -595,6 +595,127 @@ Common-pool threads are **daemon** threads, slowly reclaimed when idle and recre
 - `java.util.concurrent.ForkJoinPool.common.exceptionHandler`
 - `java.util.concurrent.ForkJoinPool.common.maximumSpares`
 
+### 4.3 ManagedBlocker
+
+A `ForkJoinWorkerThread` that parks on a lock, condition, or I/O does not execute tasks from its deque and does not participate in **join helping**. If enough workers block simultaneously, effective parallelism falls below the pool's target and the computation may stall. `ForkJoinPool.ManagedBlocker` is the supported extension for blocking inside a fork/join computation: the pool may **compensate** by activating a spare worker before the current thread enters `block()`.
+
+#### Interface contract
+
+```java
+public static interface ManagedBlocker {
+    boolean isReleasable();              // true if blocking is unnecessary
+    boolean block() throws InterruptedException;  // block if needed; true when done
+}
+```
+
+`ForkJoinPool.managedBlock(ManagedBlocker blocker)` repeatedly evaluates the blocker until completion:
+
+1. Call `isReleasable()` — if `true`, exit (no block required).
+2. Otherwise call `block()` — which must be preceded by an `isReleasable()` that returned `false`.
+3. Exit when either method returns `true`.
+
+`isReleasable()` must be **idempotent and cheap to retry** — it may be invoked many times before `block()` runs. Implementations typically combine a non-blocking probe (`tryLock`, `poll`) with the condition that motivated blocking.
+
+Unlike `join()`, managed blocking does **not** run arbitrary stolen tasks while waiting. Compensation (below) is the sole mechanism for preserving parallelism.
+
+#### Compensation path
+
+When the caller is a `ForkJoinWorkerThread`, `managedBlock` delegates to **`compensatedBlock`**:
+
+```java
+public static void managedBlock(ManagedBlocker blocker) throws InterruptedException {
+    if (t instanceof ForkJoinWorkerThread && (p = wt.pool) != null)
+        p.compensatedBlock(blocker);
+    else
+        unmanagedBlock(blocker);   // plain spin/block loop, no compensation
+}
+
+private void compensatedBlock(ManagedBlocker blocker) throws InterruptedException {
+    for (;;) {
+        if (blocker.isReleasable()) break;
+        if ((comp = tryCompensate(ctl)) >= 0) {
+            try {
+                done = blocker.block();
+            } finally {
+                if (comp > 0) getAndAddCtl(RC_UNIT);  // release compensation slot
+            }
+            if (done) break;
+        }
+    }
+}
+```
+
+**`tryCompensate`** adjusts `ctl` to create or wake a **spare worker** so that, while the current worker is blocked in `block()`, the pool retains approximately `parallelism` active (unblocked) threads. After `block()` returns, the compensation count is restored in `finally`. If compensation cannot be obtained (pool at limits or terminating), the loop retries `isReleasable()` before attempting again.
+
+For blocking code whose necessity cannot be determined statically, the pool also exposes explicit bookkeeping:
+
+```java
+long post = pool.beginCompensatedBlock();  // tryCompensate; returns RC_UNIT or 0
+try {
+    // unknown blocking operation
+} finally {
+    pool.endCompensatedBlock(post);
+}
+```
+
+External threads (not `ForkJoinWorkerThread`) invoke **`unmanagedBlock`** — a simple loop without compensation:
+
+```java
+do {} while (!blocker.isReleasable() && !blocker.block());
+```
+
+#### Example: blocking queue take
+
+The `ForkJoinPool` Javadoc pattern wraps a `BlockingQueue.take()`:
+
+```java
+class QueueTaker<E> implements ManagedBlocker {
+    final BlockingQueue<E> queue;
+    volatile E item = null;
+
+    public boolean isReleasable() {
+        return item != null || (item = queue.poll()) != null;
+    }
+    public boolean block() throws InterruptedException {
+        if (item == null)
+            item = queue.take();
+        return true;
+    }
+}
+
+// inside a ForkJoinTask running on a worker:
+QueueTaker<E> taker = new QueueTaker<>(queue);
+ForkJoinPool.managedBlock(taker);
+return taker.item;
+```
+
+`isReleasable()` permits a fast exit when an element is already available; `block()` performs the blocking `take()` only after compensation is arranged.
+
+#### JDK usage
+
+Several j.u.c. components implement `ManagedBlocker` so blocking on a **ForkJoin worker** does not silently consume a parallelism slot:
+
+| Class | Role |
+|-------|------|
+| `AbstractQueuedSynchronizer.ConditionNode` | `ConditionObject.await` on a worker parks via `managedBlock` |
+| `LinkedTransferQueue.DualNode` | `SynchronousQueue` / transfer-queue waits on FJ workers |
+| `CompletableFuture.Signaller` | async completion waits without starving the common pool |
+| `Phaser.QNode` | phase barrier wait |
+| `SubmissionPublisher.BufferedSubscription` | back-pressure wait on reactive streams |
+
+`DualNode.block()` on a `ForkJoinWorkerThread` delegates to `ForkJoinPool.managedBlock(this)` instead of raw `LockSupport.park`, linking transfer-queue blocking to the compensation protocol.
+
+#### Relation to `join()` compensation
+
+Both **`join()`** external waiters and **`ManagedBlocker`** can trigger **`tryCompensate`**, but through different paths:
+
+| Mechanism | While waiting | Parallelism preservation |
+|-----------|---------------|--------------------------|
+| `join()` (FJ worker) | `helpJoin` / `helpComplete` — runs other tasks | helping first; `Aux` park + compensation if target runs elsewhere |
+| `ManagedBlocker` | only `block()` | compensation before `block()`; no helping |
+
+`ForkJoinTask` javadoc requires `ManagedBlocker` (or a bounded number of blocked tasks) when fork/join tasks block on external synchronization — otherwise the pool cannot guarantee progress.
+
 ---
 
 ## 5. Design trade-offs
@@ -607,7 +728,7 @@ Common-pool threads are **daemon** threads, slowly reclaimed when idle and recre
 
 **Constraints** (from `ForkJoinTask` / `ForkJoinPool` contracts)
 
-- Avoid blocking I/O and heavy synchronization inside `compute()`; use `ManagedBlocker` if blocking is unavoidable
+- Avoid blocking I/O and heavy synchronization inside `compute()`; use `ForkJoinPool.managedBlock(ManagedBlocker)` when blocking is unavoidable (§4.3)
 - Cyclic join dependencies deadlock — structure work as a DAG
 - `CountedCompleter` fits completion-tree merges (streams, async pipelines) better than naive `join` when subtasks vary widely in duration
 - External blocking joins may reduce effective parallelism unless the pool compensates

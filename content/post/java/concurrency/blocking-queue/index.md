@@ -268,18 +268,157 @@ No `notFull` condition exists: `put` and `offer` succeed until memory is exhaust
 
 ### 4.4 SynchronousQueue
 
-`SynchronousQueue` retains **no queued elements**. Each insertion must rendezvous with a concurrent removal, and vice versa — equivalent to a CSP **rendezvous channel**.
+`SynchronousQueue` implements a **zero-capacity** handoff channel: no internal buffer exists, not even capacity one. An element is transferred only when a producer and a consumer rendezvous concurrently — equivalent to a CSP rendezvous or Ada entry call. `remainingCapacity()` is always zero; `peek()` always returns `null`.
 
-Internally, `Transferer` (extending `LinkedTransferQueue`) implements the **dual stack / dual queue** algorithm of Scherer and Scott. Nodes operate in **data mode** (carrying an offered element) or **request mode** (awaiting a matcher). A complementary operation pairs with an opposite-mode node and completes the transfer without a global lock on the fast path.
+#### 4.4.1 Structure
 
-| Fairness | Internal structure | Typical deployment |
-|----------|-------------------|-------------------|
-| Non-fair (default) | LIFO stack (`xferLifo`) | cached thread pools; improved temporal locality |
-| Fair | FIFO queue | ordered handoff; message-passing pipelines |
+All synchronization is delegated to a single **`Transferer`** — a package-private subclass of `LinkedTransferQueue` that adds LIFO transfer (`xferLifo`). The queue itself holds no element array and no `ReentrantLock`; blocking is mediated by **`DualNode`** wait cells and `LockSupport`.
 
-`peek` always returns `null`. `isEmpty` and `size()` report an empty collection because no elements are buffered; waiting threads are represented as internal transfer nodes, not as stored queue entries.
+```plantuml
+@startuml
+class "SynchronousQueue<E>" as SQ {
+    - Transferer<E> transferer
+    - boolean fair
+}
 
-**Application profile:** `Executors.newCachedThreadPool()` (handoff queue with elastic thread creation); designs requiring synchronous producer–consumer pairing without intermediate buffering.
+class "Transferer<E>" as Transferer {
+    + xfer(e, ns) : Object
+    + xferLifo(e, ns) : Object
+}
+
+class "LinkedTransferQueue<E>" as LTQ {
+    # volatile DualNode head
+    # volatile DualNode tail
+}
+
+class "DualNode" as DN {
+    volatile Object item
+    volatile DualNode next
+    Thread waiter
+    final boolean isData
+}
+
+SQ *-- Transferer
+Transferer --|> LTQ
+LTQ o-- DN
+@enduml
+```
+
+| Component | Role |
+|-----------|------|
+| `transferer` | owns the dual transfer structure (`head`; `tail` used in FIFO mode) |
+| `fair` | `true` → FIFO `xfer`; `false` (default) → LIFO `xferLifo` |
+| `DualNode` | one node per waiting `put` or `take`; carries no buffered queue slot |
+
+**`DualNode` fields.**
+
+| Field | Producer node (`put`) | Consumer node (`take`) |
+|-------|----------------------|------------------------|
+| `isData` | `true` | `false` |
+| `item` | element offered; CAS-updated on match | initially `null`; CAS-updated to receive element |
+| `next` | link in FIFO list or LIFO stack | same |
+| `waiter` | blocked thread until `unpark` | same |
+
+A node is **live** while unmatched and **matched** once `isData` disagrees with whether `item` is non-null:
+
+```java
+final boolean matched() {
+    return isData != (item != null);
+}
+```
+
+The transfer structure is always in exactly one of three states (Scherer–Scott **dual queue**):
+
+1. **Empty** — no unmatched `DualNode` instances.
+2. **Data mode** — one or more unmatched producer nodes (`isData == true`, `item != null`).
+3. **Request mode** — one or more unmatched consumer nodes (`isData == false`, `item == null`).
+
+Coordination on the fast path uses `VarHandle` CAS on `head`, `tail`, `next`, and `item`; there is no global mutex.
+
+#### 4.4.2 Unified transfer entry point
+
+Every public operation reduces to **`xfer(Object e, long nanos)`**:
+
+```java
+private Object xfer(Object e, long nanos) {
+    return fair ? transferer.xfer(e, nanos)
+                : transferer.xferLifo(e, nanos);
+}
+```
+
+| Argument | Interpretation |
+|----------|----------------|
+| `e != null` | **producer** transfer (`put` / `offer`); `haveData = true` |
+| `e == null` | **consumer** transfer (`take` / `poll`); `haveData = false` |
+| `nanos` | `0` — non-blocking (`offer` / `poll`); `Long.MAX_VALUE` — unbounded wait (`put` / `take`); otherwise timed |
+
+**Return-value contract** (from `xfer`):
+
+| Return | Meaning |
+|--------|---------|
+| `null` | producer handoff complete (`put` succeeded) |
+| non-`null` element | consumer received item (`take` succeeded) |
+| `e` (same reference passed in) | no match within allotted time, or interrupt during wait |
+
+Public wrappers interpret this contract:
+
+```java
+// put — success when xfer returns null
+public void put(E e) throws InterruptedException {
+    if (xfer(e, Long.MAX_VALUE) == null) return;
+    throw new InterruptedException();
+}
+
+// take — success when xfer returns non-null
+public E take() throws InterruptedException {
+    E e = (E) xfer(null, Long.MAX_VALUE);
+    if (e != null) return e;
+    throw new InterruptedException();
+}
+```
+
+#### 4.4.3 `put` mechanism
+
+A `put(e)` invokes `xfer(e, ns)` with `haveData = true`. The transfer loop attempts, in order:
+
+1. **Locate a complementary node** — scan from `head` (LIFO) or `head`/`tail` (FIFO) for an unmatched **request** node (`isData == false`, `item == null`).
+2. **Fulfill in place** — on a complementary node `p`, execute `p.cmpExItem(m, e)` (CAS `item` from `null` to `e` on the consumer node, or the symmetric CAS on a data node when the caller is `take`). On success:
+   - read the prior value `m` (the element delivered to the consumer, or `null` for a fulfilled `put`);
+   - `LockSupport.unpark(p.waiter)`;
+   - collapse or advance `head` / pop the stack;
+   - return `null` (producer done — element handed off without allocating a producer node).
+3. **Enqueue and block** — if no complementary node exists and `ns > 0`, allocate `new DualNode(e, true)`, append (FIFO) or push (LIFO), then `await(e, ns, …)` until a consumer matches or the wait is cancelled.
+4. **Immediate failure** — if `ns == 0` (`offer`) and no matcher is present, return `e` without waiting.
+
+For a **blocking `put` with no waiting consumer**, the producer thread parks on its own data node until a `take` performs step 2 against that node.
+
+#### 4.4.4 `take` mechanism
+
+A `take()` invokes `xfer(null, ns)` with `haveData = false`. The protocol is symmetric to `put`:
+
+1. **Locate a complementary node** — scan for an unmatched **data** node (`isData == true`, `item != null`).
+2. **Fulfill in place** — `p.cmpExItem(m, null)` CASes the element out of the producer node (`m` is the transferred item). On success, `unpark(p.waiter)` and return `m` to the consumer.
+3. **Enqueue and block** — allocate `new DualNode(null, false)` (request node), link it, and `await(null, ns, …)` until a `put` supplies an element via CAS.
+4. **Immediate failure** — `poll()` with `ns == 0` returns `null` when no producer is waiting.
+
+A matched **request** node ends with `item != null` (element received); a matched **data** node ends with `item == null` (element taken). In both cases `matched()` becomes true and the node is eventually unspliced from the structure.
+
+#### 4.4.5 FIFO vs LIFO traversal
+
+| Policy | Method | Linking | Match order |
+|--------|--------|---------|-------------|
+| Non-fair (default) | `xferLifo` | push at `head` (stack) | most recently arrived waiter |
+| Fair | `xfer` | append at `tail` (slack list) | oldest arrived waiter |
+
+Both variants share the same complementary-match logic (`cmpExItem`, `unpark`, `matched`); they differ only in how unmatched nodes are ordered when no peer is available.
+
+#### 4.4.6 Waiting, cancellation, and visibility
+
+An unmatched node blocks in **`DualNode.await`**: brief spin (`Thread.onSpinWait`), then `LockSupport.park` / `parkNanos`, or `ForkJoinPool.managedBlock` on a `ForkJoinWorkerThread`. The waiter publishes itself in `node.waiter` before parking.
+
+Cancellation (timeout or interrupt) attempts an impossible `cmpExItem` to mark the node matched, then **`unsplice`** / **`unspliceLifo`** removes it from the structure so cancelled waiters do not block subsequent transfers.
+
+**Application profile:** `Executors.newCachedThreadPool()` uses a non-fair `SynchronousQueue` as the handoff point between submitting threads and worker threads — each task is transferred directly without queuing, and the pool may create a new worker when no idle consumer is available.
 
 ### 4.5 DelayQueue
 
