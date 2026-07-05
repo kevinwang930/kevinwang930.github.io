@@ -114,7 +114,7 @@ private transient volatile Node tail;
 |-------|------|
 | `prev`, `next` | CLH-variant links; enqueue uses `prev`; `next` may lag after cancellation |
 | `waiter` | `Thread` passed to `LockSupport.unpark` |
-| `status` | `WAITING` (1), `CANCELLED`, `COND` (2) — bit flags |
+| `status` | Bit flags: `WAITING` (1), `COND` (2), `CANCELLED` (`0x80000000`, negative) — see [Cancellation](#cancellation-cancelled) |
 
 #### ExclusiveNode and SharedNode
 
@@ -252,7 +252,187 @@ public final boolean releaseShared(int arg) {
 }
 ```
 
-Timed or interrupted acquires set `CANCELLED`; `cleanQueue()` unlinks dead nodes so successors remain reachable.
+#### Interrupts and waking parked waiters
+
+A contending thread that fails `tryAcquire` is enqueued on the CLH sync queue and enters the internal `acquire(...)` loop. The **first waiter** — the successor of `head` (`head.next`) — is the node that will invoke `tryAcquire` on the next eligible iteration. Blocking follows a two-phase protocol to prevent a lost signal between `release` and `park` (Dekker-style arrangement documented in the AQS source):
+
+1. Assign `node.status = WAITING` on one loop iteration, publishing the intent to block.
+2. On a subsequent iteration, if acquisition still fails, invoke `LockSupport.park(this)` (or `parkNanos` for timed acquire).
+
+`signalNext` atomically clears `WAITING` via `getAndUnsetStatus(WAITING)` and calls `LockSupport.unpark(node.waiter)` on the successor. While blocked, a waiter has `Node.waiter` bound to its thread and `WAITING` set on its node until `park` returns.
+
+##### Delivery of `Thread.interrupt()` to a parked thread
+
+At the API level, interruption is a status flag; at the JVM level, it unblocks a thread parked in a native wait.
+
+1. **Interrupt request.** Thread *T* invokes `target.interrupt()`. The implementation sets `target.interrupted = true` and invokes the native `interrupt0()`.
+2. **Native unpark.** If *target* is blocked in a park or wait primitive, `interrupt0()` unparks the underlying carrier thread, making it eligible for scheduling. The interrupting thread does not call `LockSupport.unpark`; the VM delivers the wake.
+3. **Return from `park`.** The blocked thread's `LockSupport.park` invocation returns. `LockSupport` does not indicate whether the return was caused by `unpark`, interrupt, timeout, or spurious wakeup; callers must re-evaluate their blocking condition.
+4. **Interrupt status.** Following an interrupt-induced return from `park`, the target's interrupted status remains set until it is observed and cleared (typically by `Thread.interrupted()`).
+
+An interrupt therefore unblocks a parked first waiter — or any sync-queue waiter — in the same operational sense as `signalNext`: the `park` call returns and execution resumes inside `acquire(...)`. Interruption alone does not grant the synchronizer and does not dequeue the thread.
+
+##### Post-wake processing in `acquire(...)`
+
+Every return from `park` executes the same epilogue, irrespective of cause:
+
+```java
+node.clearStatus();
+if ((interrupted |= Thread.interrupted()) && interruptible)
+    break;
+```
+
+`Thread.interrupted()` queries the current thread's interrupted status and **clears** it, OR-ing the result into a local `interrupted` variable. The loop either continues (retry `tryAcquire`, reassign `WAITING`, re-park) or exits into `cancelAcquire`.
+
+For the first waiter after a wake, the next iteration satisfies `first == (head == pred)` and therefore invokes `tryAcquire` / `tryAcquireShared` before blocking again. If the hook succeeds — for example, after a concurrent `release` — the node is promoted to `head` and acquisition completes. If the hook fails, including when the wake originated solely from an interrupt without a corresponding `release`, the thread reassigns `WAITING` and re-parks. **Interruption alone does not satisfy acquisition.**
+
+| Entry point | `interruptible` | Outcome when interrupted during `park` |
+|-------------|-----------------|----------------------------------------|
+| `acquire` / `acquireShared` (`lock()`, `Semaphore.acquire()`, …) | `false` | Loop continues; thread remains enqueued; re-parks if `tryAcquire` fails |
+| `acquireInterruptibly` / `acquireSharedInterruptibly` (`lockInterruptibly()`, …) | `true` | Loop terminates; node marked `CANCELLED`; `cleanQueue()`; `InterruptedException` |
+| Timed `tryAcquireNanos` / `tryAcquireSharedNanos` | `true` | Same termination as interruptible acquire; timeout returns `0` |
+
+##### Non-interruptible acquire and deferred interrupt restoration
+
+When `interruptible == false`, interruption is not a loop-termination condition. If acquisition eventually succeeds at the queue head, AQS restores the interrupt status before returning:
+
+```java
+if (acquired) {
+    if (first) {
+        // ... promote to head; signalNextIfShared ...
+        if (interrupted)
+            current.interrupt();
+    }
+    return 1;
+}
+```
+
+This restoration follows from two contractual obligations that must hold simultaneously.
+
+**Obligation 1 — uninterruptible acquisition.** Methods such as `lock()` and `Semaphore.acquire()` delegate to `acquire(...)` with `interruptible = false`. They must neither throw `InterruptedException` nor abort the wait in response to `interrupt()`. A thread that wakes from `park` due to interruption re-enters the loop and continues waiting until `tryAcquire` succeeds. Completion of acquisition is unconditional with respect to interruption.
+
+**Obligation 2 — preservation of interrupt status.** Each `park` return invokes `Thread.interrupted()`, which atomically reads and **clears** the thread's interrupted bit, recording the outcome in the local `interrupted` variable. Without subsequent restoration, a successful return from `acquire` would leave the interrupt request permanently unobservable: `isInterrupted()` would return `false`, and subsequent interruptible operations would not detect the prior interruption. The established convention for an uninterruptible method that internally uses an interruptible blocking primitive (`park`) is to accumulate interrupt observations during the wait, complete the operation, and restore the status before returning to the caller. The sample lock in the `LockSupport` specification implements the same protocol.
+
+The call to `current.interrupt()` upon successful acquisition is **deferred restoration**, not generation of a new interrupt. It reinstates the interrupt request that was cleared during the wait, enabling the caller to observe and respond after `lock()` returns:
+
+```java
+lock.lock();   // may restore interrupted status before return
+try {
+    if (Thread.currentThread().isInterrupted())
+        return;
+    // critical section
+} finally {
+    lock.unlock();
+}
+```
+
+**Contrast with interruptible acquire.** `lockInterruptibly()` passes `interruptible = true`. An interrupt during `park` terminates the loop, cancels the node, and results in `InterruptedException` at the public API (with interrupt status cleared per the exception contract). Successful acquisition and interrupt-driven cancellation are mutually exclusive on that path; no restoration occurs on success because success implies the interrupt was not acted upon as a failure.
+
+If `cancelAcquire` is invoked without acquisition and `interrupted && !interruptible`, the same restoration applies:
+
+```java
+if (interrupted) {
+    if (interruptible)
+        return CANCELLED;
+    else
+        Thread.currentThread().interrupt();
+}
+```
+
+The caller of `lock()` may therefore observe a set interrupted status after holding the lock, although `lock()` itself does not throw `InterruptedException`.
+
+**Interruptible acquire (`interruptible == true`).** The `break` following `Thread.interrupted()` enters `cancelAcquire`: `node.status = CANCELLED`, `node.waiter = null`, and `cleanQueue()` unlinks cancelled nodes so successors remain reachable. The public method maps a negative return to `InterruptedException`. A first waiter cancelled on this path relinquishes its queue position; a subsequent `release` invokes `signalNext` on the next non-cancelled successor.
+
+##### Interrupt wake compared with `release` wake
+
+Both causes converge at the same `park` return site; `acquire` does not record the wake reason.
+
+| Source | Mechanism | Effect on first waiter |
+|--------|-----------|------------------------|
+| `release` → `signalNext(head)` | Clear successor `WAITING`; `LockSupport.unpark(successor.waiter)` | `park` returns; `tryAcquire` succeeds if `tryRelease` permitted acquisition |
+| `Thread.interrupt()` on waiter | Set interrupted status; `interrupt0()` unparks carrier | `park` returns; `tryAcquire` succeeds only if the synchronizer permits; otherwise re-park |
+| Spurious wakeup | JVM may return from `park` without `unpark` or interrupt | Identical epilogue; condition re-evaluated; possible re-park |
+
+Following a wake from `release`, the first waiter may execute up to `postSpins` iterations of `Thread.onSpinWait` before re-parking, reducing context-switch overhead when the releasing thread remains on-CPU. Interrupt-induced wakes follow the same spin path when applicable.
+
+When `signalNext` encounters a cancelled successor, it may fail to unpark an eligible thread. Traversal in `cleanQueue()` unlinks cancelled nodes and unparks a relinked first waiter, preserving liveness.
+
+#### Cancellation (`CANCELLED`)
+
+`CANCELLED` is assigned the most significant bit so that **`status < 0`** identifies a dead sync-queue node in a single comparison. A cancelled node remains linked until `cleanQueue()` unsplices it; it must never acquire the synchronizer.
+
+##### When `CANCELLED` is set on the sync queue
+
+`cancelAcquire` marks a node and triggers cleanup:
+
+```java
+private int cancelAcquire(Node node, boolean interrupted, boolean interruptible) {
+    if (node != null) {
+        node.waiter = null;
+        node.status = CANCELLED;
+        if (node.prev != null)
+            cleanQueue();
+    }
+    // ...
+}
+```
+
+| Trigger | `interruptible` | Result |
+|---------|-----------------|--------|
+| Interrupt during `acquireInterruptibly` / `tryAcquireNanos` | `true` | `CANCELLED` return → `InterruptedException` or `false` |
+| Timed `tryAcquire` / `tryAcquireShared` expires | `true` | return `0` (timeout) |
+| `Error` / `RuntimeException` from `tryAcquire` in the loop | `false` | node cancelled; exception propagated |
+| Interrupt during non-interruptible `acquire` | `false` | node **not** cancelled; loop continues (§1.2 interrupt section) |
+
+A waiting thread may also discover that its **predecessor** was cancelled:
+
+```java
+if (pred.status < 0) {
+    cleanQueue();   // unlink cancelled nodes from tail
+    continue;
+}
+```
+
+`cleanQueue()` walks from `tail` toward `head`, unsplicing nodes with `status < 0` via CAS on `prev`/`next`. If the relinked node becomes the new first waiter (`p.prev == null`), it invokes `signalNext(p)` so a successor blocked behind cancelled nodes is not stranded. This complements `signalNext(head)`, which skips cancelled successors that may still appear in a stale `next` pointer.
+
+##### Condition waits and cancellation
+
+Condition handling reuses `Node.status` but applies **`COND`** rather than `CANCELLED` for the primary wait protocol. A `ConditionNode` on the condition queue carries `COND | WAITING`; transfer to the sync queue clears `COND` and proceeds through normal `acquire`.
+
+**`enableWait` failure.** If the lock is not held exclusively, or `release` fails, the node is marked `CANCELLED` and `IllegalMonitorStateException` is thrown — the thread never entered a valid wait:
+
+```java
+node.status = CANCELLED; // lock not held or inconsistent
+throw new IllegalMonitorStateException();
+```
+
+**Interrupt or timeout while still on the condition queue.** In `await()`, `awaitNanos()`, and related timed methods, the wait loop tests whether the node **remains on the condition queue** by atomically clearing and inspecting the `COND` bit:
+
+```java
+if (interrupted |= Thread.interrupted()) {
+    if (cancelled = (node.getAndUnsetStatus(COND) & COND) != 0)
+        break;              // still on condition queue — abort wait
+}
+// else: interrupted after signal() already cleared COND and enqueued node
+```
+
+| `cancelled` | Meaning | Subsequent action |
+|-------------|---------|-------------------|
+| `true` | `COND` was present — thread not yet transferred by `signal()` | `unlinkCancelledWaiters(node)`; `reacquire`; throw `InterruptedException` or return `false` on timeout |
+| `false` | `signal()` already ran — `doSignal` cleared `COND` and called `enqueue` | `reacquire` via sync queue; restore interrupt if interrupted after signal |
+
+`doSignal` skips nodes whose `COND` bit was already cleared (for example, by a concurrent interrupt):
+
+```java
+if ((first.getAndUnsetStatus(COND) & COND) != 0)
+    enqueue(first);
+```
+
+**`unlinkCancelledWaiters`.** Removes condition-queue entries that no longer carry the `COND` flag — nodes aborted before transfer. The sync-queue `CANCELLED` marker is not used for this path; the node is simply unlinked from `firstWaiter` / `lastWaiter`.
+
+**`reacquire`.** After any `await` variant, the thread re-enters the sync queue through non-interruptible `acquire(node, savedState, …)` — even following interruptible `await()`. Cancellation on the condition queue prevents reacquisition from starting; once `signal()` has enqueued the node, reacquisition follows the standard sync-queue protocol, including `CANCELLED` handling if the competitive `acquire` is interruptible (not the case for `reacquire`, which passes `interruptible = false`).
+
+**`awaitUninterruptibly`.** Does not use the `cancelled` / `COND` abort path; the loop runs until `canReacquire(node)` — that is, until `signal()` has enqueued the node and links are consistent.
 
 ### 1.3 ConditionObject
 
@@ -318,6 +498,8 @@ private void doSignal(ConditionNode first, boolean all) {
 ```
 
 Unlike `synchronized`, each `Condition` instance has its own wait set rather than sharing one per monitor.
+
+Interrupt and timeout handling on the condition queue — the `COND` bit, the local `cancelled` flag, and `unlinkCancelledWaiters` — are described in [Cancellation (`CANCELLED`)](#cancellation-cancelled). In summary: abort while still on the condition queue unlinks the node and throws or returns failure after `reacquire`; interrupt after `signal()` defers to the sync-queue `reacquire` path with deferred interrupt restoration.
 
 ---
 

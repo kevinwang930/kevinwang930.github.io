@@ -612,4 +612,4 @@ Common-pool threads are **daemon** threads, slowly reclaimed when idle and recre
 - `CountedCompleter` fits completion-tree merges (streams, async pipelines) better than naive `join` when subtasks vary widely in duration
 - External blocking joins may reduce effective parallelism unless the pool compensates
 
-For parallel stream internals built on this framework, see [Java Stream internals](/2026/06/stream/).
+For parallel stream internals built on this framework, see [Java Stream internals](/post/java/stream/).
