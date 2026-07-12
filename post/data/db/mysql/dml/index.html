@@ -1,0 +1,727 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThis article traces MySQL \u003cstrong\u003eINSERT\u003c\/strong\u003e and \u003cstrong\u003eUPDATE\u003c\/strong\u003e from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on \u003cstrong\u003econcurrency control\u003c\/strong\u003e, \u003cstrong\u003elock modes\u003c\/strong\u003e, and \u003cstrong\u003etransaction boundaries\u003c\/strong\u003e. It complements \u003ca href=\u0022\/post\/data\/db\/mysql\/query\/\u0022\u003equery processing\u003c\/a\u003e (SELECT pipeline) and \u003ca href=\u0022\/post\/data\/db\/mysql\/innodb\/\u0022\u003eInnoDB storage\u003c\/a\u003e (MVCC, pages, redo\/undo layout). Source paths refer to the checked-out \u003ccode\u003emysql-server\u003c\/code\u003e tree.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/mysql\/dml\/","keywords":"[mysql, dml, lock, transaction]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.164.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="mysql,dml,lock,transaction"><meta name=description content="This article traces MySQL INSERT and UPDATE from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on concurrency control, lock modes, and transaction boundaries. It complements query processing (SELECT pipeline) and InnoDB storage (MVCC, pages, redo/undo layout). Source paths refer to the checked-out mysql-server tree."><meta property="og:description" content="This article traces MySQL INSERT and UPDATE from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on concurrency control, lock modes, and transaction boundaries. It complements query processing (SELECT pipeline) and InnoDB storage (MVCC, pages, redo/undo layout). Source paths refer to the checked-out mysql-server tree."><meta property="og:type" content="article"><meta property="og:title" content="MySQL DML Internals — INSERT / UPDATE, Locks & Transactions"><meta name=twitter:title content="MySQL DML Internals — INSERT / UPDATE, Locks & Transactions"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/mysql/dml/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/mysql/dml/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="This article traces MySQL INSERT and UPDATE from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on concurrency control, lock modes, and transaction boundaries. It complements query processing (SELECT pipeline) and InnoDB storage (MVCC, pages, redo/undo layout). Source paths refer to the checked-out mysql-server tree."><meta name=twitter:description content="This article traces MySQL INSERT and UPDATE from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on concurrency control, lock modes, and transaction boundaries. It complements query processing (SELECT pipeline) and InnoDB storage (MVCC, pages, redo/undo layout). Source paths refer to the checked-out mysql-server tree."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-07-12T16:24:51"><meta property="article:modified_time" content="2026-07-12T16:24:51"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="mysql"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="mysql"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>MySQL DML Internals — INSERT / UPDATE, Locks & Transactions</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/mysql/dml/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>MySQL DML Internals — INSERT / UPDATE, Locks & Transactions</h1><div class="postShorten-meta post-meta"><time datetime=2026-07-12T16:24:51+02:00>July 12, 2026
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/db>db</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/mysql>mysql</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article traces MySQL <strong>INSERT</strong> and <strong>UPDATE</strong> from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on <strong>concurrency control</strong>, <strong>lock modes</strong>, and <strong>transaction boundaries</strong>. It complements <a href=https://kevinwang930.github.io/post/data/db/mysql/query/>query processing</a> (SELECT pipeline) and <a href=https://kevinwang930.github.io/post/data/db/mysql/innodb/>InnoDB storage</a> (MVCC, pages, redo/undo layout). Source paths refer to the checked-out <code>mysql-server</code> tree.</p><h1 id=1-architecture>1. Architecture</h1><p>A modifying statement reuses the same <code>Sql_cmd_dml</code> prepare / open / lock / execute skeleton as SELECT, but diverges where rows are written:</p><ol><li><strong>SQL layer</strong> — parse to <code>Sql_cmd_update</code> / <code>Sql_cmd_insert_*</code>, open tables, acquire MDL and <code>MYSQL_LOCK</code>, then either a specialized write loop (single-table UPDATE, INSERT VALUES) or an iterator plan that sinks rows into <code>Query_result_update</code> / <code>Query_result_insert</code>.</li><li><strong>Handler boundary</strong> — <code>ha_write_row</code> / <code>ha_update_row</code> / <code>ha_delete_row</code> on <code>ha_innobase</code>.</li><li><strong>InnoDB</strong> — table intention locks (<code>LOCK_IX</code>), record / gap / next-key / insert-intention locks, undo for rollback and MVCC, redo for durability, then group commit with the binary log.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
+  subgraph SQL[&#34;SQL layer&#34;]
+    Parse[PT_insert / PT_update]
+    Cmd[Sql_cmd_dml subclass]
+    Open[open_tables_for_query]
+    Lock[lock_tables / mysql_lock_tables]
+    Exec[execute_inner]
+    Parse --&gt; Cmd --&gt; Open --&gt; Lock --&gt; Exec
+  end
+  subgraph Handler[&#34;Handler&#34;]
+    WR[ha_write_row]
+    UR[ha_update_row]
+  end
+  subgraph InnoDB[&#34;InnoDB&#34;]
+    IX[lock_table LOCK_IX]
+    Rec[lock_rec_* / insert intention]
+    Undo[trx_undo_report_row_operation]
+    Btr[btr_cur_* physical change]
+    Cmt[trx_commit + binlog ordered_commit]
+    IX --&gt; Rec --&gt; Undo --&gt; Btr --&gt; Cmt
+  end
+  Exec --&gt; WR
+  Exec --&gt; UR
+  WR --&gt; IX
+  UR --&gt; Rec
+</code></pre><h3 id=key-source-directories>Key source directories</h3><table><thead><tr><th>Path</th><th>Role</th></tr></thead><tbody><tr><td><code>sql/sql_cmd_dml.h</code>, <code>sql/sql_select.cc</code></td><td>Shared DML prepare / execute pipeline</td></tr><tr><td><code>sql/sql_update.cc</code>, <code>sql/sql_insert.cc</code></td><td>UPDATE / INSERT command execution</td></tr><tr><td><code>sql/sql_base.cc</code>, <code>sql/lock.cc</code></td><td>Open tables, MDL, <code>MYSQL_LOCK</code></td></tr><tr><td><code>sql/transaction.cc</code>, <code>sql/handler.cc</code>, <code>sql/binlog.cc</code></td><td>Statement / session commit and 2PC</td></tr><tr><td><code>storage/innobase/handler/ha_innodb.cc</code></td><td>Handler writes, <code>external_lock</code>, commit hooks</td></tr><tr><td><code>storage/innobase/row/row0ins.cc</code>, <code>row0upd.cc</code>, <code>row0sel.cc</code></td><td>Insert / update / locking-read graphs</td></tr><tr><td><code>storage/innobase/lock/lock0lock.cc</code></td><td>Record, gap, next-key, insert-intention locks</td></tr><tr><td><code>storage/innobase/trx/trx0rec.cc</code>, <code>trx0trx.cc</code></td><td>Undo records and transaction commit</td></tr></tbody></table><hr><h1 id=2-sql-layer-dml-pipeline>2. SQL-layer DML pipeline</h1><h2 id=21-shared-sql_cmd_dml-path>2.1 Shared <code>Sql_cmd_dml</code> path</h2><p><code>Sql_cmd_dml</code> is the common base for SELECT and data-changing statements. <code>is_data_change_stmt()</code> defaults to <code>true</code>; SELECT overrides it. Execution always:</p><ol><li>Opens tables (<code>open_tables_for_query</code>) — also acquires <strong>MDL</strong>.</li><li>Locks tables (<code>lock_tables</code> → <code>mysql_lock_tables</code>) — THR_LOCK + engine <code>external_lock</code>.</li><li>Calls <code>execute_inner()</code>.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class Sql_cmd {
+  + execute(THD*)
+  + prepare(THD*)
+}
+
+class Sql_cmd_dml {
+  + is_data_change_stmt() : bool
+  + prepare(THD*)
+  + execute(THD*)
+  # prepare_inner(THD*)
+  # execute_inner(THD*)
+}
+
+class Sql_cmd_select
+class Sql_cmd_update {
+  - update_single_table(THD*)
+  # execute_inner(THD*)
+}
+
+class Sql_cmd_insert_base
+class Sql_cmd_insert_values {
+  # execute_inner(THD*)
+}
+class Sql_cmd_insert_select
+
+Sql_cmd &lt;|-- Sql_cmd_dml
+Sql_cmd_dml &lt;|-- Sql_cmd_select
+Sql_cmd_dml &lt;|-- Sql_cmd_update
+Sql_cmd_dml &lt;|-- Sql_cmd_insert_base
+Sql_cmd_insert_base &lt;|-- Sql_cmd_insert_values
+Sql_cmd_insert_base &lt;|-- Sql_cmd_insert_select
+@enduml
+</code></pre><p>Default <code>execute_inner()</code> is the query-expression path used by SELECT, <strong>INSERT … SELECT</strong>, and <strong>multi-table UPDATE</strong>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>unit-&gt;optimize() → create_iterators() → execute()
+</span></span></code></pre></div><p>Single-table UPDATE and INSERT VALUES override <code>execute_inner()</code> with specialized write loops that still call the same handler APIs.</p><h2 id=22-update>2.2 UPDATE</h2><p><code>Sql_cmd_update::execute_inner()</code> branches on target shape:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>multitable ? Sql_cmd_dml::execute_inner(thd)   // iterators + Query_result_update
+</span></span><span style=display:flex><span>           : update_single_table(thd)
+</span></span></code></pre></div><p><strong>Single-table UPDATE</strong> scans qualifying rows (locking read under InnoDB), then:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>table-&gt;file-&gt;ha_update_row(table-&gt;record[1], table-&gt;record[0])
+</span></span></code></pre></div><p><code>record[1]</code> is the old image; <code>record[0]</code> is the new image after SET expressions.</p><p><strong>Multi-table UPDATE</strong> installs <code>Query_result_update</code>, which never returns rows to the client (<code>send_data</code> asserts). It updates eligible targets immediately or buffers row IDs for delayed updates when join order / self-join safety requires it (<code>UpdateRowsIterator</code>).</p><p>Parser initially marks all listed tables as write-locked; <code>prepare_inner()</code> may downgrade non-target tables so concurrent readers are not blocked unnecessarily.</p><h2 id=23-insert>2.3 INSERT</h2><table><thead><tr><th>Class</th><th>Execution</th></tr></thead><tbody><tr><td><code>Sql_cmd_insert_values</code></td><td>Own <code>execute_inner()</code>: loop value lists → <code>write_record()</code></td></tr><tr><td><code>Sql_cmd_insert_select</code></td><td>Default <code>Sql_cmd_dml::execute_inner()</code>; SELECT streams into <code>Query_result_insert::send_data()</code> → <code>write_record()</code></td></tr></tbody></table><p><code>write_record()</code> centralizes duplicate handling:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td>Normal INSERT</td><td><code>ha_write_row()</code></td></tr><tr><td><code>ON DUPLICATE KEY UPDATE</code></td><td>On duplicate: <code>ha_update_row()</code></td></tr><tr><td><code>REPLACE</code></td><td>May <code>ha_delete_row()</code> then retry insert, or update in place depending on engine feedback</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+participant &#34;Sql_cmd_insert_*&#34; as Cmd
+participant write_record
+participant handler
+participant ha_innobase
+
+Cmd -&gt; write_record : fill record / triggers
+write_record -&gt; handler : ha_write_row
+handler -&gt; ha_innobase : write_row
+ha_innobase -&gt; ha_innobase : row_insert_for_mysql
+
+alt DUPLICATE KEY + UPDATE
+  write_record -&gt; handler : ha_update_row
+else REPLACE path
+  write_record -&gt; handler : ha_delete_row / retry write
+end
+@enduml
+</code></pre><hr><h1 id=3-concurrency-control-layers>3. Concurrency control layers</h1><p>MySQL applies several distinct locking mechanisms during DML. They operate at different granularities and must not be conflated: conflating them is a common source of incorrect conclusions such as “READ COMMITTED disables all gap locks.” Each mechanism addresses a separate question—whether DDL may alter the table definition, how the storage engine enters the statement, and whether another transaction may modify a given index record or the gap preceding it.</p><p>Unless otherwise stated, the examples below use InnoDB under the default <strong>REPEATABLE READ</strong> isolation level and the following schema:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> t (
+</span></span><span style=display:flex><span>  id   INT <span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>,
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>c</span>    INT <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span>,
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>KEY</span>  idx_c (<span style=color:#66d9ef>c</span>)
+</span></span><span style=display:flex><span>) ENGINE<span style=color:#f92672>=</span>InnoDB;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>10</span>, <span style=color:#ae81ff>10</span>), (<span style=color:#ae81ff>20</span>, <span style=color:#ae81ff>20</span>), (<span style=color:#ae81ff>30</span>, <span style=color:#ae81ff>30</span>);
+</span></span></code></pre></div><table><thead><tr><th>Layer</th><th>Protected resource</th><th>Typical acquisition under DML</th></tr></thead><tbody><tr><td><strong>MDL</strong></td><td>Table (and related) metadata against DDL</td><td>Target tables: <code>MDL_SHARED_WRITE</code>; read-only sources: <code>MDL_SHARED_READ</code></td></tr><tr><td><strong>THR_LOCK / <code>MYSQL_LOCK</code></strong></td><td>Server-layer table-lock compatibility among handlers</td><td>Write-oriented <code>thr_lock_type</code> values; for InnoDB, <code>lock_count()</code> is 0, so THR_LOCK is not the row-concurrency mechanism</td></tr><tr><td><strong>InnoDB table lock</strong></td><td>Table-level intention prior to record locks</td><td><code>LOCK_IX</code> or <code>LOCK_IS</code> for DML and locking reads</td></tr><tr><td><strong>InnoDB record locks</strong></td><td>Index records and intervening gaps</td><td><code>LOCK_S</code> / <code>LOCK_X</code> combined with <code>LOCK_REC_NOT_GAP</code>, <code>LOCK_GAP</code>, <code>LOCK_ORDINARY</code>, or <code>LOCK_INSERT_INTENTION</code></td></tr><tr><td><strong>Page latches / mtr</strong></td><td>Physical B-tree page mutation</td><td>Short-duration latches; not transactional locks</td></tr></tbody></table><h3 id=data-structure>Data Structure</h3><p>The structures below attach either to the SQL session (<code>THD</code>) or to the InnoDB transaction (<code>trx_t</code>). Edges in the diagram denote ownership or association; they do not depict call order.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+package &#34;SQL session&#34; {
+  class THD {
+    MDL_context mdl_context
+    MYSQL_LOCK *lock
+    Transaction_ctx m_transaction
+    Ha_data ha_data[]
+  }
+
+  class MDL_context {
+    MDL_ticket_store m_ticket_store
+    + acquire_lock(MDL_request*)
+    + release_transactional_locks()
+    + mdl_savepoint()
+  }
+
+  class MDL_request {
+    enum_mdl_type type
+    enum_mdl_duration duration
+    MDL_key key
+    MDL_ticket *ticket
+  }
+
+  class MDL_ticket {
+    enum_mdl_type m_type
+    MDL_lock *m_lock
+    MDL_context *m_ctx
+  }
+
+  class MDL_key {
+    enum_mdl_namespace
+    db + name
+  }
+
+  class MYSQL_LOCK {
+    TABLE **table
+    uint table_count
+    uint lock_count
+    THR_LOCK_DATA **locks
+  }
+
+  class TABLE {
+    handler *file
+    thr_lock_type lock_type
+  }
+
+  class Transaction_ctx {
+    THD_TRANS m_scope_info[]
+  }
+
+  class THD_TRANS {
+    Ha_trx_info *m_ha_list
+  }
+
+  class Ha_trx_info {
+    handlerton *m_ht
+  }
+}
+
+package &#34;InnoDB handler bridge&#34; {
+  class ha_innobase {
+    row_prebuilt_t *m_prebuilt
+    + store_lock()
+    + external_lock()
+    + write_row()
+    + update_row()
+  }
+
+  class row_prebuilt_t {
+    trx_t *trx
+    ulint select_lock_type
+    select_mode select_mode
+    ulint row_read_type
+  }
+}
+
+package &#34;InnoDB transaction + lock sys&#34; {
+  class trx_t {
+    trx_id_t id
+    trx_state_t state
+    isolation_level_t isolation_level
+    trx_lock_t lock
+    THD *mysql_thd
+    ReadView *read_view
+  }
+
+  class trx_lock_t {
+    trx_lock_list_t trx_locks
+    lock_t *wait_lock
+    trx_t *blocking_trx
+    uint32_t wait_lock_type
+    que_thr_t *wait_thr
+    mem_heap_t *lock_heap
+  }
+
+  class lock_t {
+    trx_t *trx
+    dict_index_t *index
+    uint32_t type_mode
+    lock_table_t tab_lock
+    lock_rec_t rec_lock
+    + is_waiting()
+    + is_gap()
+    + is_record_not_gap()
+  }
+
+  class lock_table_t {
+    dict_table_t *table
+  }
+
+  class lock_rec_t {
+    page_id_t page_id
+    uint32_t n_bits
+    &#39; bitmap follows lock_t in memory
+  }
+
+  enum lock_mode &lt;&lt;enumeration&gt;&gt; {
+    LOCK_IS
+    LOCK_IX
+    LOCK_S
+    LOCK_X
+    LOCK_AUTO_INC
+    LOCK_NONE
+  }
+
+  note right of lock_t
+    type_mode =
+      lock_mode
+      | LOCK_TABLE / LOCK_REC
+      | LOCK_WAIT
+      | LOCK_GAP / LOCK_REC_NOT_GAP / LOCK_ORDINARY
+      | LOCK_INSERT_INTENTION
+  end note
+}
+
+package &#34;Short-lived physical latch&#34; {
+  class mtr_t {
+    &#39; mini-transaction
+    + mtr_start()
+    + mtr_commit()
+  }
+}
+
+THD *-- MDL_context
+THD *-- MYSQL_LOCK
+THD *-- Transaction_ctx
+Transaction_ctx *-- THD_TRANS
+THD_TRANS o-- Ha_trx_info
+MDL_context o-- MDL_ticket
+MDL_request --&gt; MDL_ticket : granted as
+MDL_request *-- MDL_key
+MDL_ticket --&gt; MDL_key : via MDL_lock
+MYSQL_LOCK o-- TABLE
+TABLE --&gt; ha_innobase : file
+ha_innobase *-- row_prebuilt_t
+row_prebuilt_t --&gt; trx_t
+Ha_trx_info ..&gt; trx_t : check_trx_exists
+trx_t *-- trx_lock_t
+trx_lock_t o-- lock_t : trx_locks
+lock_t *-- lock_table_t
+lock_t *-- lock_rec_t
+lock_t ..&gt; lock_mode : type_mode &amp; MASK
+trx_lock_t --&gt; lock_t : wait_lock
+ha_innobase ..&gt; mtr_t : around B-tree ops
+@enduml
+</code></pre><p>Correspondence between layers and types:</p><table><thead><tr><th>Layer</th><th>Primary types</th></tr></thead><tbody><tr><td>MDL</td><td><code>THD::mdl_context</code> → <code>MDL_request</code> / <code>MDL_ticket</code> / <code>MDL_key</code></td></tr><tr><td>SQL table-lock handshake</td><td><code>THD::lock</code> (<code>MYSQL_LOCK</code>) → <code>TABLE</code> → <code>ha_innobase::{store,external}_lock</code></td></tr><tr><td>Statement locking-read mode</td><td><code>row_prebuilt_t::select_lock_type</code> (<code>LOCK_NONE</code> / <code>LOCK_S</code> / <code>LOCK_X</code>)</td></tr><tr><td>InnoDB transactional locks</td><td><code>trx_t::lock</code> (<code>trx_lock_t</code>) owns <code>trx_locks</code>; wait state in <code>wait_lock</code> / <code>blocking_trx</code></td></tr><tr><td>Table versus record</td><td><code>lock_t</code> discriminant: <code>lock_table_t</code> (e.g. IS/IX) or <code>lock_rec_t</code> (page identifier and bit map)</td></tr><tr><td>Page latch</td><td><code>mtr_t</code> — not linked into <code>trx_locks</code></td></tr></tbody></table><hr><h2 id=31-metadata-locks-mdl>3.1 Metadata locks (MDL)</h2><p><strong>Mechanism.</strong> A metadata lock is a server-wide lock on a dictionary object, identified by <code>MDL_key</code> and held in <code>THD::mdl_context</code>. Lock modes are defined in <code>sql/mdl.h</code>. For DML, the requested mode is derived from the SQL-layer table lock type:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/table.h — mdl_type_for_dml()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>inline</span> <span style=color:#66d9ef>enum</span> <span style=color:#a6e22e>enum_mdl_type</span> <span style=color:#a6e22e>mdl_type_for_dml</span>(<span style=color:#66d9ef>enum</span> <span style=color:#a6e22e>thr_lock_type</span> lock_type) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> lock_type <span style=color:#f92672>&gt;=</span> TL_WRITE_ALLOW_WRITE
+</span></span><span style=display:flex><span>             <span style=color:#f92672>?</span> (lock_type <span style=color:#f92672>==</span> TL_WRITE_LOW_PRIORITY <span style=color:#f92672>?</span> MDL_SHARED_WRITE_LOW_PRIO
+</span></span><span style=display:flex><span>                                                   : MDL_SHARED_WRITE)
+</span></span><span style=display:flex><span>             <span style=color:#f92672>:</span> MDL_SHARED_READ;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Acquisition is coupled to table opening. <code>open_tables_for_query()</code> installs a DML prelocking strategy and records an MDL savepoint so that a failed open can release only tickets acquired during that attempt:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/sql_base.cc — open_tables_for_query()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> <span style=color:#a6e22e>open_tables_for_query</span>(THD <span style=color:#f92672>*</span>thd, Table_ref <span style=color:#f92672>*</span>tables, uint flags) {
+</span></span><span style=display:flex><span>  DML_prelocking_strategy prelocking_strategy;
+</span></span><span style=display:flex><span>  MDL_savepoint mdl_savepoint <span style=color:#f92672>=</span> thd<span style=color:#f92672>-&gt;</span>mdl_context.mdl_savepoint();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (open_tables(thd, <span style=color:#f92672>&amp;</span>tables, <span style=color:#f92672>&amp;</span>thd<span style=color:#f92672>-&gt;</span>lex<span style=color:#f92672>-&gt;</span>table_count, flags,
+</span></span><span style=display:flex><span>                  <span style=color:#f92672>&amp;</span>prelocking_strategy))
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>goto</span> end;
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Within <code>open_tables()</code>, each <code>Table_ref</code> carries an <code>MDL_request</code>. The context grants the request through <code>thd->mdl_context.acquire_lock()</code> or <code>acquire_locks()</code>. Compatible shared modes permit concurrent DML on the same table. Exclusive modes required by DDL wait until all conflicting shared holders have released their tickets.</p><p><strong>Scope.</strong> MDL does not serialize concurrent <code>UPDATE</code> (or other DML) statements that modify distinct rows. Row-level mutual exclusion is the responsibility of InnoDB.</p><p><strong>Example — DML precludes DDL, not concurrent DML:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;   <span style=color:#75715e>-- holds MDL_SHARED_WRITE on t
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- do not COMMIT yet
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B (concurrent DML: proceeds)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>20</span>;   <span style=color:#75715e>-- also MDL_SHARED_WRITE
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session C (DDL: waits)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>ALTER</span> <span style=color:#66d9ef>TABLE</span> t <span style=color:#66d9ef>ADD</span> <span style=color:#66d9ef>COLUMN</span> d INT;         <span style=color:#75715e>-- exclusive MDL; blocked until A commits
+</span></span></span></code></pre></div><p><strong>Example — non-locking SELECT versus DDL:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;          <span style=color:#75715e>-- MDL_SHARED_READ
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>DROP</span> <span style=color:#66d9ef>TABLE</span> t;                           <span style=color:#75715e>-- waits until A&#39;s MDL is released
+</span></span></span></code></pre></div><p>Pending metadata locks may be observed through <code>performance_schema.metadata_locks</code> or <code>sys.schema_table_lock_waits</code>.</p><hr><h2 id=32-thr_lock--mysql_lock-and-innodb-external_lock>3.2 THR_LOCK / <code>MYSQL_LOCK</code> and InnoDB <code>external_lock</code></h2><p><strong>Mechanism.</strong> After tables have been opened, <code>lock_tables()</code> constructs a <code>MYSQL_LOCK</code> and invokes <code>mysql_lock_tables()</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/lock.cc — mysql_lock_tables() (structure)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>(sql_lock <span style=color:#f92672>=</span> get_lock_data(thd, tables, count, GET_LOCK_STORE_LOCKS)))
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>nullptr</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (sql_lock<span style=color:#f92672>-&gt;</span>table_count <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>    lock_external(thd, sql_lock<span style=color:#f92672>-&gt;</span>table, sql_lock<span style=color:#f92672>-&gt;</span>table_count)) {
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// → handler::external_lock() for each TABLE
+</span></span></span><span style=display:flex><span>  reset_lock_data_and_free(<span style=color:#f92672>&amp;</span>sql_lock);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>goto</span> end;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>rc <span style=color:#f92672>=</span> thr_lock_errno_to_mysql[(<span style=color:#66d9ef>int</span>)thr_multi_lock(
+</span></span><span style=display:flex><span>    sql_lock<span style=color:#f92672>-&gt;</span>locks <span style=color:#f92672>+</span> sql_lock<span style=color:#f92672>-&gt;</span>lock_count, sql_lock<span style=color:#f92672>-&gt;</span>lock_count,
+</span></span><span style=display:flex><span>    <span style=color:#f92672>&amp;</span>thd<span style=color:#f92672>-&gt;</span>lock_info, timeout)];
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>lock_tables()
+</span></span><span style=display:flex><span>  → mysql_lock_tables()
+</span></span><span style=display:flex><span>      → get_lock_data / store_lock() per handler
+</span></span><span style=display:flex><span>      → lock_external() → ha_innobase::external_lock()
+</span></span><span style=display:flex><span>      → thr_multi_lock()   // empty for InnoDB (lock_count() == 0)
+</span></span></code></pre></div><p>Engines that rely on <code>THR_LOCK</code> (historically MyISAM) use this path for table-level read/write exclusion. InnoDB reports <code>lock_count() == 0</code>, so <code>thr_multi_lock()</code> does not acquire an InnoDB table mutex for ordinary row DML. The material effect for InnoDB is the pair <code>store_lock()</code> / <code>external_lock()</code>, which:</p><ol><li>Registers the engine on <code>Transaction_ctx</code> via <code>Ha_trx_info</code>.</li><li>Establishes the statement context (<code>will_lock</code>, statement savepoint).</li><li>Maps SQL write intent onto <code>row_prebuilt_t::select_lock_type</code>:</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/handler/ha_innodb.cc — external_lock()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (lock_type <span style=color:#f92672>==</span> F_WRLCK) {
+</span></span><span style=display:flex><span>  <span style=color:#75715e>/* If this is a SELECT, then it is in UPDATE TABLE ...
+</span></span></span><span style=display:flex><span><span style=color:#75715e>  or SELECT ... FOR UPDATE */</span>
+</span></span><span style=display:flex><span>  m_prebuilt<span style=color:#f92672>-&gt;</span>select_lock_type <span style=color:#f92672>=</span> LOCK_X;
+</span></span><span style=display:flex><span>  m_stored_select_lock_type <span style=color:#f92672>=</span> LOCK_X;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (lock_type <span style=color:#f92672>!=</span> F_UNLCK) {
+</span></span><span style=display:flex><span>  innobase_register_trx(ht, thd, trx);
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// LOCK_NONE / LOCK_S / LOCK_X chosen from store_lock + isolation
+</span></span></span><span style=display:flex><span>  <span style=color:#75715e>// (non-locking SELECT → NONE; FOR SHARE → S; FOR UPDATE → X)
+</span></span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Consequently, the search phase of <code>UPDATE</code> and of <code>SELECT … FOR UPDATE</code> already requests exclusive record locks through <code>row_search_mvcc()</code> before <code>ha_update_row()</code> executes. A non-locking <code>SELECT</code> retains <code>LOCK_NONE</code> and relies on MVCC read views alone.</p><p><strong>Example — identical handshake, distinct InnoDB lock modes:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Non-locking read: read intent → LOCK_NONE
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Locking read: write-style table lock → select_lock_type = LOCK_X
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>UPDATE</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- DML: same F_WRLCK path as FOR UPDATE, followed by ha_update_row
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>11</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;
+</span></span></code></pre></div><p><strong>Example — explicit table locks:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>LOCK</span> TABLES t <span style=color:#66d9ef>WRITE</span>;     <span style=color:#75715e>-- SQL-layer table lock; excludes other sessions from the table
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;
+</span></span><span style=display:flex><span>UNLOCK TABLES;
+</span></span></code></pre></div><p>For ordinary transactional DML, InnoDB record locks are the appropriate concurrency mechanism; <code>LOCK TABLES</code> is a coarser SQL-layer alternative.</p><hr><h2 id=33-innodb-table-intention-locks-lock_is--lock_ix>3.3 InnoDB table intention locks (<code>LOCK_IS</code> / <code>LOCK_IX</code>)</h2><p><strong>Mechanism.</strong> Before any record lock is granted, InnoDB acquires a table-level intention lock so that full-table <code>LOCK_S</code> / <code>LOCK_X</code> remain compatible with fine-grained record locking. The mode occupies the low-order bits of <code>lock_t::type_mode</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0types.h
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>enum</span> <span style=color:#a6e22e>lock_mode</span> {
+</span></span><span style=display:flex><span>  LOCK_IS <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>,   <span style=color:#75715e>/* intention shared */</span>
+</span></span><span style=display:flex><span>  LOCK_IX,       <span style=color:#75715e>/* intention exclusive */</span>
+</span></span><span style=display:flex><span>  LOCK_S,        <span style=color:#75715e>/* shared */</span>
+</span></span><span style=display:flex><span>  LOCK_X,        <span style=color:#75715e>/* exclusive */</span>
+</span></span><span style=display:flex><span>  LOCK_AUTO_INC,
+</span></span><span style=display:flex><span>  LOCK_NONE,     <span style=color:#75715e>/* consistent read — not a lock */</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>};
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0lock.h
+</span></span></span><span style=display:flex><span>dberr_t <span style=color:#a6e22e>lock_table</span>(ulint flags, dict_table_t <span style=color:#f92672>*</span>table,
+</span></span><span style=display:flex><span>                   lock_mode mode, que_thr_t <span style=color:#f92672>*</span>thr);
+</span></span></code></pre></div><table><thead><tr><th>Mode</th><th>Interpretation</th><th>Typical acquisition</th></tr></thead><tbody><tr><td><code>LOCK_IS</code></td><td>Intention to place shared record locks</td><td><code>SELECT … FOR SHARE</code>; certain foreign-key checks</td></tr><tr><td><code>LOCK_IX</code></td><td>Intention to place exclusive record locks</td><td><code>UPDATE</code> / <code>DELETE</code> / <code>INSERT</code> / <code>SELECT … FOR UPDATE</code></td></tr><tr><td><code>LOCK_S</code> / <code>LOCK_X</code></td><td>Full-table shared / exclusive</td><td>Uncommon for ordinary DML; appears on some <code>LOCK TABLES</code> paths</td></tr></tbody></table><p>The insert execution graph acquires <code>LOCK_IX</code> when the statement first references the table:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/row/row0ins.cc — row_ins()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (node<span style=color:#f92672>-&gt;</span>state <span style=color:#f92672>==</span> INS_NODE_SET_IX_LOCK) {
+</span></span><span style=display:flex><span>  node<span style=color:#f92672>-&gt;</span>state <span style=color:#f92672>=</span> INS_NODE_ALLOC_ROW_ID;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (trx<span style=color:#f92672>-&gt;</span>id <span style=color:#f92672>==</span> node<span style=color:#f92672>-&gt;</span>trx_id) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>goto</span> same_trx;   <span style=color:#75715e>// already IX-locked in this trx
+</span></span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> lock_table(<span style=color:#ae81ff>0</span>, node<span style=color:#f92672>-&gt;</span>table, LOCK_IX, thr);
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>  node<span style=color:#f92672>-&gt;</span>trx_id <span style=color:#f92672>=</span> trx<span style=color:#f92672>-&gt;</span>id;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Record-lock helpers require that the corresponding intention already be held (<code>LOCK_X</code> implies <code>LOCK_IX</code>; <code>LOCK_S</code> implies <code>LOCK_IS</code>):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/lock/lock0lock.cc — lock_clust_rec_read_check_and_lock()
+</span></span></span><span style=display:flex><span>ut_ad(mode <span style=color:#f92672>!=</span> LOCK_X <span style=color:#f92672>||</span>
+</span></span><span style=display:flex><span>      lock_table_has(thr_get_trx(thr), index<span style=color:#f92672>-&gt;</span>table, LOCK_IX));
+</span></span><span style=display:flex><span>ut_ad(mode <span style=color:#f92672>!=</span> LOCK_S <span style=color:#f92672>||</span>
+</span></span><span style=display:flex><span>      lock_table_has(thr_get_trx(thr), index<span style=color:#f92672>-&gt;</span>table, LOCK_IS));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>err <span style=color:#f92672>=</span> lock_rec_lock(false, sel_mode, mode <span style=color:#f92672>|</span> gap_mode, block, heap_no, index, thr);
+</span></span></code></pre></div><p>Intention locks are mutually compatible (<code>LOCK_IS</code> coexists with <code>LOCK_IX</code>). They conflict with opposing full-table locks.</p><p><strong>Example:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>11</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;   <span style=color:#75715e>-- table IX + record X on id = 10
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>21</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>20</span>;   <span style=color:#75715e>-- table IX compatible; distinct row X succeeds
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session C
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>SHARE</span>;  <span style=color:#75715e>-- table IS; waits while A holds X on id = 10
+</span></span></span></code></pre></div><p>Table intention locks appear as <code>LOCK_TABLE</code> entries with mode <code>IX</code> or <code>IS</code> in <code>SHOW ENGINE INNODB STATUS</code> and <code>performance_schema.data_locks</code>.</p><hr><h2 id=34-innodb-record-lock-modes>3.4 InnoDB record lock modes</h2><p>A record lock is attached to an <strong>index record</strong> (clustered or secondary), not to an abstract SQL-row identity. Its effective mode is the composition of:</p><ul><li><strong>Strength:</strong> <code>LOCK_S</code> or <code>LOCK_X</code> (low nibble under <code>LOCK_MODE_MASK</code>);</li><li><strong>Gap coverage:</strong> precise-mode bits ORed into <code>type_mode</code>;</li><li><strong>Insert waiting:</strong> <code>LOCK_INSERT_INTENTION</code> when an insert must wait on a protected gap.</li></ul><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0lock.h — precise modes
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>constexpr</span> <span style=color:#66d9ef>uint32_t</span> LOCK_WAIT <span style=color:#f92672>=</span> <span style=color:#ae81ff>256</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>constexpr</span> <span style=color:#66d9ef>uint32_t</span> LOCK_ORDINARY <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;          <span style=color:#75715e>// next-key: record + preceding gap
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>constexpr</span> <span style=color:#66d9ef>uint32_t</span> LOCK_GAP <span style=color:#f92672>=</span> <span style=color:#ae81ff>512</span>;             <span style=color:#75715e>// gap only
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>constexpr</span> <span style=color:#66d9ef>uint32_t</span> LOCK_REC_NOT_GAP <span style=color:#f92672>=</span> <span style=color:#ae81ff>1024</span>;    <span style=color:#75715e>// record only
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>constexpr</span> <span style=color:#66d9ef>uint32_t</span> LOCK_INSERT_INTENTION <span style=color:#f92672>=</span> <span style=color:#ae81ff>2048</span>;
+</span></span></code></pre></div><p>Locking reads encode strength and gap coverage in a single <code>lock_rec_lock</code> invocation:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// lock0lock.cc — lock_clust_rec_read_check_and_lock()
+</span></span></span><span style=display:flex><span>err <span style=color:#f92672>=</span> lock_rec_lock(false, sel_mode, mode <span style=color:#f92672>|</span> gap_mode, block, heap_no, index, thr);
+</span></span><span style=display:flex><span><span style=color:#75715e>// e.g. LOCK_X | LOCK_ORDINARY, LOCK_X | LOCK_REC_NOT_GAP, LOCK_S | LOCK_GAP, ...
+</span></span></span></code></pre></div><p>For a locking index scan, <code>row_search_mvcc()</code> selects the gap mode from the cursor’s relation to the search range:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/row/row0sel.cc
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (prebuilt<span style=color:#f92672>-&gt;</span>select_lock_type <span style=color:#f92672>!=</span> LOCK_NONE) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>auto</span> rel <span style=color:#f92672>=</span> row_compare_row_to_range(...);
+</span></span><span style=display:flex><span>  ulint lock_type;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (rel.row_can_be_in_range) {
+</span></span><span style=display:flex><span>    lock_type <span style=color:#f92672>=</span> rel.gap_can_intersect_range <span style=color:#f92672>?</span> LOCK_ORDINARY
+</span></span><span style=display:flex><span>                                            : LOCK_REC_NOT_GAP;
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    lock_type <span style=color:#f92672>=</span> rel.gap_can_intersect_range <span style=color:#f92672>?</span> LOCK_GAP
+</span></span><span style=display:flex><span>                                            : <span style=color:#75715e>/* not found */</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> sel_set_rec_lock(..., prebuilt<span style=color:#f92672>-&gt;</span>select_lock_type, lock_type, ...);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+left to right direction
+skinparam rectangle {
+  BorderColor #555555
+  BackgroundColor #F7F7F7
+}
+skinparam card {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+
+rectangle &#34;Index order on PRIMARY KEY (id)&#34; {
+  card &#34;gap\n(-inf, 10)&#34; as G0
+  card &#34;id = 10&#34; as R10 #E8F0FE
+  card &#34;gap\n(10, 20)&#34; as G1
+  card &#34;id = 20&#34; as R20 #E8F0FE
+  card &#34;gap\n(20, 30)&#34; as G2
+  card &#34;id = 30&#34; as R30 #E8F0FE
+  card &#34;gap / supremum\n(30, +inf)&#34; as G3
+
+  G0 -[hidden]-&gt; R10
+  R10 -[hidden]-&gt; G1
+  G1 -[hidden]-&gt; R20
+  R20 -[hidden]-&gt; G2
+  G2 -[hidden]-&gt; R30
+  R30 -[hidden]-&gt; G3
+}
+@enduml
+</code></pre><h3 id=341-record-lock-only--lock_rec_not_gap>3.4.1 Record lock only — <code>LOCK_REC_NOT_GAP</code></h3><p><strong>Mechanism.</strong> The lock covers the index record and excludes the preceding gap. Concurrent inserts into adjacent gaps remain admissible. InnoDB employs this mode when the conflict domain is confined to a single existing record—typically a unique equality lookup that locates a non-deleted row (<code>row_can_be_in_range && !gap_can_intersect_range</code> in the decision above).</p><p>The clustered-index modify path reasserts record-only exclusive locking immediately before undo generation:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/lock/lock0lock.cc — lock_clust_rec_modify_check_and_lock()
+</span></span></span><span style=display:flex><span>lock_rec_convert_impl_to_expl(block, rec, index, offsets);
+</span></span><span style=display:flex><span>{
+</span></span><span style=display:flex><span>  locksys<span style=color:#f92672>::</span>Shard_latch_guard guard{UT_LOCATION_HERE, block<span style=color:#f92672>-&gt;</span>get_page_id()};
+</span></span><span style=display:flex><span>  ut_ad(lock_table_has(thr_get_trx(thr), index<span style=color:#f92672>-&gt;</span>table, LOCK_IX));
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> lock_rec_lock(true, SELECT_ORDINARY, LOCK_X <span style=color:#f92672>|</span> LOCK_REC_NOT_GAP,
+</span></span><span style=display:flex><span>                      block, heap_no, index, thr);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Example — unique primary-key locking read:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A (RR)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>20</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>UPDATE</span>;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- InnoDB: LOCK_X | LOCK_REC_NOT_GAP on clustered record id = 20
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- (unique hit; gaps (10,20) and (20,30) need not be locked)
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B: blocked on the same record
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>99</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>20</span>;          <span style=color:#75715e>-- waits
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session C: insert into a neighboring gap remains admissible
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>25</span>, <span style=color:#ae81ff>25</span>);                 <span style=color:#75715e>-- succeeds while A holds id = 20
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;
+</span></span></code></pre></div><h3 id=342-gap-lock--lock_gap>3.4.2 Gap lock — <code>LOCK_GAP</code></h3><p><strong>Mechanism.</strong> The lock covers only the open interval preceding an index record (or the supremum gap). It does not lock the boundary record. Its purpose is to prevent phantom inserts into that interval, not to exclude updates of the existing boundary row.</p><p>Under REPEATABLE READ, gap locks arise when <code>!row_can_be_in_range && gap_can_intersect_range</code> in the scan decision above, and during uniqueness probes on the first unequal (“next”) record:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/row/row0ins.cc — duplicate-key scan (plain INSERT)
+</span></span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> <span style=color:#a6e22e>if</span> (is_next) {
+</span></span><span style=display:flex><span>  <span style=color:#75715e>/* Only gap lock is required on next record. */</span>
+</span></span><span style=display:flex><span>  lock_type <span style=color:#f92672>=</span> LOCK_GAP;
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>  <span style=color:#75715e>/* Next key lock for all equal keys. */</span>
+</span></span><span style=display:flex><span>  lock_type <span style=color:#f92672>=</span> LOCK_ORDINARY;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>err <span style=color:#f92672>=</span> row_ins_set_rec_lock(LOCK_S, lock_type, block, rec, index, offsets, thr);
+</span></span></code></pre></div><p>Under READ COMMITTED, <code>trx_t::skip_gap_locks()</code> is true and ordinary <code>UPDATE</code> scans omit most gap locks. Duplicate-key and foreign-key paths may still request them; when <code>skip_gap_locks</code> is set, the same routine forces <code>LOCK_REC_NOT_GAP</code> where a gap would otherwise be taken.</p><p><strong>Example — range-boundary gaps under REPEATABLE READ:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A (RR)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>20</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>UPDATE</span>;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Acquires next-key / gap locks along (20, 30] and (30, +inf) as the scan proceeds;
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- inserts with id in (20, +inf) must wait.
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>25</span>, <span style=color:#ae81ff>25</span>);   <span style=color:#75715e>-- waits (gap within the locked range)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>15</span>, <span style=color:#ae81ff>15</span>);   <span style=color:#75715e>-- succeeds (outside the locked gaps)
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session C: a pure gap does not, by itself, block updates of an uncovered record
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;  <span style=color:#75715e>-- succeeds
+</span></span></span></code></pre></div><p>A <code>LOCK_GAP</code> attached at <code>id = 30</code> precludes <code>INSERT … (25)</code> yet does not, by itself, preclude <code>UPDATE … WHERE id = 30</code>. Next-key locking (§3.4.3) combines both effects.</p><h3 id=343-next-key-lock--lock_ordinary>3.4.3 Next-key lock — <code>LOCK_ORDINARY</code></h3><p><strong>Mechanism.</strong> A next-key lock covers the index record together with its preceding gap (<code>LOCK_S</code> or <code>LOCK_X</code> with precise mode <code>LOCK_ORDINARY == 0</code>). Under REPEATABLE READ it is the principal instrument against phantoms on locking range scans: neither an update of the matched record nor an insert into the preceding gap may proceed concurrently.</p><p><code>row_search_mvcc()</code> selects <code>LOCK_ORDINARY</code> when both <code>row_can_be_in_range</code> and <code>gap_can_intersect_range</code> hold, and passes that value as <code>gap_mode</code> to <code>lock_rec_lock(mode | LOCK_ORDINARY)</code>.</p><p><strong>Example — range <code>UPDATE</code> under REPEATABLE READ:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A (RR)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#66d9ef>BETWEEN</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>AND</span> <span style=color:#ae81ff>20</span>;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Next-key exclusive locks on scanned index positions covering the range
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- (exact placement depends on the access method; a primary-key range
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- typically acquires next-key locks along the walk).
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;     <span style=color:#75715e>-- waits (record covered)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>15</span>, <span style=color:#ae81ff>15</span>);          <span style=color:#75715e>-- waits (gap covered)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>35</span>, <span style=color:#ae81ff>35</span>);          <span style=color:#75715e>-- succeeds if outside locked gaps
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;  <span style=color:#75715e>-- after A commits
+</span></span></span></code></pre></div><p><strong>Example — READ COMMITTED weakens gap coverage on ordinary scans:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>TRANSACTION</span> <span style=color:#66d9ef>ISOLATION</span> <span style=color:#66d9ef>LEVEL</span> <span style=color:#66d9ef>READ</span> <span style=color:#66d9ef>COMMITTED</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#66d9ef>BETWEEN</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>AND</span> <span style=color:#ae81ff>20</span>;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Matching rows retain record X; gaps are generally not retained for the scan.
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>15</span>, <span style=color:#ae81ff>15</span>);   <span style=color:#75715e>-- typically succeeds under READ COMMITTED
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;
+</span></span></code></pre></div><h3 id=344-insert-intention-lock--lock_insert_intention>3.4.4 Insert-intention lock — <code>LOCK_INSERT_INTENTION</code></h3><p><strong>Mechanism.</strong> When the gap that would receive a new index entry is already held by another transaction’s gap or next-key lock, the inserting transaction does not request a conflicting ordinary gap lock—doing so would deadlock concurrent inserters. Prior to clustered undo and physical insert, <code>btr_cur_ins_lock_and_undo()</code> invokes <code>lock_rec_insert_check_and_lock()</code>, which enqueues a waiting insert-intention lock:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/btr/btr0cur.cc — btr_cur_ins_lock_and_undo()
+</span></span></span><span style=display:flex><span>err <span style=color:#f92672>=</span> lock_rec_insert_check_and_lock(
+</span></span><span style=display:flex><span>    flags, rec, btr_cur_get_block(cursor), index, thr, mtr, inherit);
+</span></span><span style=display:flex><span><span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>err <span style=color:#f92672>=</span> trx_undo_report_row_operation(flags, TRX_UNDO_INSERT_OP, ...);
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/lock/lock0lock.cc — lock_rec_insert_check_and_lock()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> ulint type_mode <span style=color:#f92672>=</span> LOCK_X <span style=color:#f92672>|</span> LOCK_GAP <span style=color:#f92672>|</span> LOCK_INSERT_INTENTION;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> <span style=color:#66d9ef>auto</span> conflicting <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    lock_rec_other_has_conflicting(type_mode, block, heap_no, trx);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (conflicting.wait_for <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>  RecLock <span style=color:#a6e22e>rec_lock</span>(thr, index, block, heap_no, type_mode);
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> rec_lock.add_to_waitq(conflicting.wait_for);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Insert-intention requests in the same gap are not treated as mutually conflicting; the implementation comment cites avoidance of spurious deadlocks among concurrent inserts.</p><p><strong>Example:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A (RR)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>20</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>UPDATE</span>;  <span style=color:#75715e>-- retains gaps in (20, +inf)
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>25</span>, <span style=color:#ae81ff>25</span>);
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Observes a conflicting gap/next-key lock → waits with INSERT_INTENTION
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session C
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>27</span>, <span style=color:#ae81ff>27</span>);
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Likewise INSERT_INTENTION on the same gap; does not conflict with B
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;   <span style=color:#75715e>-- releases gap locks → B and C proceed (subject to uniqueness checks)
+</span></span></span></code></pre></div><h3 id=345-shared-versus-exclusive-strength-lock_s--lock_x>3.4.5 Shared versus exclusive strength (<code>LOCK_S</code> / <code>LOCK_X</code>)</h3><p><strong>Mechanism.</strong> Independently of gap coverage, lock strength is <code>LOCK_S</code> or <code>LOCK_X</code>—the <code>mode</code> argument to <code>lock_rec_lock</code> and <code>row_ins_set_rec_lock</code>:</p><table><thead><tr><th>SQL construct</th><th>Typical strength</th><th>Source indication</th></tr></thead><tbody><tr><td><code>SELECT … FOR SHARE</code></td><td><code>LOCK_S</code></td><td><code>select_lock_type = LOCK_S</code> from <code>store_lock</code></td></tr><tr><td><code>SELECT … FOR UPDATE</code>, <code>UPDATE</code>, <code>DELETE</code></td><td><code>LOCK_X</code></td><td><code>external_lock(F_WRLCK)</code> / <code>select_lock_type = LOCK_X</code></td></tr><tr><td>Plain <code>INSERT</code> duplicate probe</td><td><code>LOCK_S</code></td><td><code>row_ins_set_rec_lock(LOCK_S, …)</code></td></tr><tr><td><code>INSERT … ON DUPLICATE KEY UPDATE</code> / <code>REPLACE</code></td><td><code>LOCK_X</code> on duplicate candidates</td><td><code>row_ins_set_rec_lock(LOCK_X, …)</code></td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/row/row0ins.cc — duplicate scan
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#75715e>/* REPLACE / ON DUPLICATE KEY UPDATE */</span>) {
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> row_ins_set_rec_lock(LOCK_X, lock_type, block, rec, index, offsets, thr);
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> row_ins_set_rec_lock(LOCK_S, lock_type, block, rec, index, offsets, thr);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Example — shared versus exclusive conflict:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>SHARE</span>;   <span style=color:#75715e>-- LOCK_S on the record
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>SHARE</span>;   <span style=color:#75715e>-- LOCK_S; compatible
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> t <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>FOR</span> <span style=color:#66d9ef>UPDATE</span>;  <span style=color:#75715e>-- LOCK_X; waits for A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>1</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;         <span style=color:#75715e>-- LOCK_X; waits for A
+</span></span></span></code></pre></div><p><strong>Example — duplicate-key locking on <code>INSERT</code>:</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- Session A
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>40</span>, <span style=color:#ae81ff>40</span>);   <span style=color:#75715e>-- succeeds; implicit X via DB_TRX_ID on the new row
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- not committed
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Session B
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>40</span>, <span style=color:#ae81ff>40</span>);   <span style=color:#75715e>-- uniqueness check locks the duplicate site; waits
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- or, with ON DUPLICATE KEY UPDATE:
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> t <span style=color:#66d9ef>VALUES</span> (<span style=color:#ae81ff>40</span>, <span style=color:#ae81ff>40</span>) <span style=color:#66d9ef>AS</span> n
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>ON</span> DUPLICATE <span style=color:#66d9ef>KEY</span> <span style=color:#66d9ef>UPDATE</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> n.<span style=color:#66d9ef>c</span>;  <span style=color:#75715e>-- LOCK_X on the duplicate, then the update path
+</span></span></span></code></pre></div><hr><h2 id=35-page-latches-and-mini-transactions>3.5 Page latches and mini-transactions</h2><p><strong>Mechanism.</strong> During B-tree search or modification, InnoDB holds <strong>page latches</strong> within an <code>mtr</code> (mini-transaction) for a brief critical section: the page is latched, the change is applied, redo is recorded in the mini-transaction, and <code>mtr_commit()</code> releases the latches. These latches are neither transactional locks nor retained until <code>COMMIT</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/btr/btr0cur.cc — typical search/modify framing
+</span></span></span><span style=display:flex><span>mtr_start(<span style=color:#f92672>&amp;</span>mtr);
+</span></span><span style=display:flex><span>btr_cur_search_to_nth_level(index, <span style=color:#ae81ff>0</span>, tuple, mode, ..., <span style=color:#f92672>&amp;</span>mtr);
+</span></span><span style=display:flex><span><span style=color:#75715e>// ... lock_rec_* / undo / page update under page latches ...
+</span></span></span><span style=display:flex><span>mtr_commit(<span style=color:#f92672>&amp;</span>mtr);   <span style=color:#75715e>// releases page latches; transactional locks remain
+</span></span></span></code></pre></div><p>Transactional locks (§3.3–3.4) outlive the latch: once the page latch is released, other transactions remain constrained by the logical lock until commit or rollback. Lock-system shard latches (<code>locksys::Shard_latch_guard</code> in the snippets above) protect lock-hash structures only for the duration of <code>lock_rec_lock</code> and are likewise short-lived.</p><p>Page latches are not expressible in SQL. Contention manifests as brief stalls or buffer-pool wait instrumentation, not as InnoDB lock-wait timeouts on a particular primary-key value.</p><hr><h2 id=36-layer-composition-for-a-single-statement>3.6 Layer composition for a single statement</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>BEGIN</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>UPDATE</span> t <span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>c</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>100</span> <span style=color:#66d9ef>WHERE</span> id <span style=color:#66d9ef>BETWEEN</span> <span style=color:#ae81ff>10</span> <span style=color:#66d9ef>AND</span> <span style=color:#ae81ff>20</span>;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- 1) MDL_SHARED_WRITE on t                         (§3.1)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>--      open_tables → mdl_context.acquire_lock
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- 2) mysql_lock_tables → external_lock(F_WRLCK)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>--      → select_lock_type = LOCK_X                 (§3.2)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- 3) InnoDB table LOCK_IX via lock_table()         (§3.3)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- 4) Per index record: lock_rec_lock(
+</span></span></span><span style=display:flex><span><span style=color:#75715e>--      LOCK_X | LOCK_ORDINARY / LOCK_REC_NOT_GAP) (§3.4)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- 5) Transient mtr page latches around B-tree I/O  (§3.5)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>COMMIT</span>;  <span style=color:#75715e>-- releases (3)–(4); MDL is released when tables are closed
+</span></span></span><span style=display:flex><span>         <span style=color:#75715e>-- or transactional MDL duration ends, as applicable
+</span></span></span></code></pre></div><hr><h1 id=4-update-concurrency-path>4. UPDATE concurrency path</h1><h2 id=41-call-chain>4.1 Call chain</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Sql_cmd_update::execute_inner
+</span></span><span style=display:flex><span>  → update_single_table  (or Query_result_update iterators)
+</span></span><span style=display:flex><span>      → row_search_mvcc          // LOCK_X locking read
+</span></span><span style=display:flex><span>      → sel_set_rec_lock
+</span></span><span style=display:flex><span>      → lock_clust/sec_rec_read_check_and_lock
+</span></span><span style=display:flex><span>      → ha_update_row
+</span></span><span style=display:flex><span>          → ha_innobase::update_row
+</span></span><span style=display:flex><span>          → row_update_for_mysql
+</span></span><span style=display:flex><span>          → row_upd_clust_step
+</span></span><span style=display:flex><span>          → lock_clust_rec_modify_check_and_lock   // X | LOCK_REC_NOT_GAP
+</span></span><span style=display:flex><span>          → trx_undo_report_row_operation(TRX_UNDO_MODIFY_OP)
+</span></span><span style=display:flex><span>          → clustered + secondary index updates
+</span></span></code></pre></div><h2 id=42-choosing-record-vs-gap-vs-next-key>4.2 Choosing record vs gap vs next-key</h2><p>During the locking scan, <code>row_search_mvcc()</code> maps the cursor position relative to the search range:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// row0sel.cc — simplified structure of the decision
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (prebuilt<span style=color:#f92672>-&gt;</span>select_lock_type <span style=color:#f92672>!=</span> LOCK_NONE) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>auto</span> rel <span style=color:#f92672>=</span> row_compare_row_to_range(...);
+</span></span><span style=display:flex><span>  ulint lock_type;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (rel.row_can_be_in_range) {
+</span></span><span style=display:flex><span>    lock_type <span style=color:#f92672>=</span> rel.gap_can_intersect_range <span style=color:#f92672>?</span> LOCK_ORDINARY : LOCK_REC_NOT_GAP;
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    lock_type <span style=color:#f92672>=</span> rel.gap_can_intersect_range <span style=color:#f92672>?</span> LOCK_GAP : <span style=color:#75715e>/* not found */</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> sel_set_rec_lock(..., prebuilt<span style=color:#f92672>-&gt;</span>select_lock_type, lock_type, ...);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Under <strong>REPEATABLE READ</strong>:</p><ul><li>Unique equality on an existing clustered record can take <strong>record-only X</strong>.</li><li>Range / non-unique scans take <strong>next-key X</strong> (and gap locks at boundaries) so phantoms cannot appear in the locked range before commit.</li><li>The modify step re-asserts <strong>X | LOCK_REC_NOT_GAP</strong> on the clustered record before writing undo and mutating the page.</li></ul><p>Under <strong>READ COMMITTED</strong>:</p><ul><li><code>trx_t::skip_gap_locks()</code> is true → ordinary UPDATE scans avoid gap/next-key where possible.</li><li>Matching rows stay <strong>record X</strong>-locked until commit.</li><li>Locks taken on rows that <strong>fail the WHERE</strong> can be released (<code>releases_non_matching_rows()</code> / <code>try_unlock</code>).</li><li>Semi-consistent read may observe the last committed version of a locked row, evaluate the predicate, then re-read with a lock if the row still qualifies.</li></ul><h2 id=43-update-vs-select--for-update>4.3 UPDATE vs <code>SELECT … FOR UPDATE</code></h2><p>Both set <code>select_lock_type = LOCK_X</code> and share the same locking-read machinery. Differences:</p><table><thead><tr><th></th><th><code>SELECT … FOR UPDATE</code></th><th><code>UPDATE</code></th></tr></thead><tbody><tr><td>After lock</td><td>Return row</td><td><code>ha_update_row</code> + undo + index maintenance</td></tr><tr><td>Predicate miss (RC)</td><td>May release non-matching locks</td><td>Same semi-consistent / unlock path</td></tr><tr><td>Binlog / triggers</td><td>No row change events</td><td>Full write side effects</td></tr></tbody></table><hr><h1 id=5-insert-concurrency-path>5. INSERT concurrency path</h1><h2 id=51-call-chain>5.1 Call chain</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Sql_cmd_insert_values::execute_inner
+</span></span><span style=display:flex><span>  → write_record
+</span></span><span style=display:flex><span>      → ha_write_row
+</span></span><span style=display:flex><span>          → ha_innobase::write_row
+</span></span><span style=display:flex><span>          → row_insert_for_mysql
+</span></span><span style=display:flex><span>          → lock_table(..., LOCK_IX, ...)
+</span></span><span style=display:flex><span>          → unique / FK checks (S or X locks on conflicting keys)
+</span></span><span style=display:flex><span>          → btr_cur_ins_lock_and_undo
+</span></span><span style=display:flex><span>              → lock_rec_insert_check_and_lock   // may wait INSERT_INTENTION
+</span></span><span style=display:flex><span>              → trx_undo_report_row_operation(TRX_UNDO_INSERT_OP)
+</span></span><span style=display:flex><span>              → insert clustered + secondary records
+</span></span></code></pre></div><p>The newly inserted clustered record carries an <strong>implicit X lock</strong> via <code>DB_TRX_ID</code>; another transaction that needs an explicit wait converts that to an explicit lock entry.</p><h2 id=52-insert-intention-locks>5.2 Insert-intention locks</h2><p>When the gap before the insert position is held by another transaction’s gap/next-key lock, the inserter does not take a conflicting ordinary lock immediately. It requests:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// lock0lock.cc — lock_rec_insert_check_and_lock()
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> ulint type_mode <span style=color:#f92672>=</span> LOCK_X <span style=color:#f92672>|</span> LOCK_GAP <span style=color:#f92672>|</span> LOCK_INSERT_INTENTION;
+</span></span><span style=display:flex><span><span style=color:#75715e>// wait on conflicting.wait_for if present
+</span></span></span></code></pre></div><p>This encodes “I intend to insert here” without blocking other insert intentions in the same gap. After the conflicting gap holder commits/rolls back, the insert proceeds and inherits/splits gap state as needed.</p><h2 id=53-duplicate-key-and-fk-locking>5.3 Duplicate-key and FK locking</h2><p>Unique-index duplicate checking walks equal keys and locks potential conflict sites. Mode depends on statement intent:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// row0ins.cc — duplicate scan (conceptual)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (will_update_or_replace_duplicate) {
+</span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> row_ins_set_rec_lock(LOCK_X, lock_type, ...);  <span style=color:#75715e>// REPLACE / ON DUP UPDATE
+</span></span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// plain INSERT: S locks; under RR often LOCK_ORDINARY / GAP on neighbors
+</span></span></span><span style=display:flex><span>  err <span style=color:#f92672>=</span> row_ins_set_rec_lock(LOCK_S, lock_type, ...);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Under RC, gap locks on supremum / “next” records are skipped where safe, but <strong>duplicate-key and foreign-key</strong> paths still take the locks required for correctness. Isolation level does not mean “no gap locks ever.”</p><p>Foreign-key checks place S record/gap locks on parent or child index entries so the referenced relationship cannot disappear mid-statement.</p><hr><h1 id=6-transactions>6. Transactions</h1><h2 id=61-from-thd-to-trx_t>6.1 From <code>THD</code> to <code>trx_t</code></h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class THD {
+  MDL_context mdl_context
+  Transaction_ctx m_transaction
+  MYSQL_LOCK *lock
+}
+
+class Transaction_ctx {
+  THD_TRANS m_scope_info[]  // statement + session
+}
+
+class THD_TRANS {
+  Ha_trx_info *m_ha_list
+}
+
+class Ha_trx_info {
+  handlerton *m_ht
+}
+
+class trx_t {
+  trx_id_t id
+  trx_state_t state
+  ReadView *read_view
+  trx_lock_t lock
+  isolation_level_t isolation_level
+  THD *mysql_thd
+  undo_no / last_sql_stat_start
+  commit_lsn
+}
+
+THD *-- Transaction_ctx
+Transaction_ctx *-- THD_TRANS
+THD_TRANS o-- Ha_trx_info
+Ha_trx_info ..&gt; trx_t : check_trx_exists / innobase_trx_allocate
+@enduml
+</code></pre><p><code>check_trx_exists(THD*)</code> lazily allocates <code>trx_t</code>. The first modifying operation calls <code>trx_start_if_not_started_xa()</code>. Isolation level is copied from the session into <code>trx_t</code> during lock setup; helpers such as <code>skip_gap_locks()</code> and <code>releases_non_matching_rows()</code> are derived from that field.</p><h2 id=62-undo-for-insert-and-update>6.2 Undo for INSERT and UPDATE</h2><p>Undo is generated on the <strong>clustered index</strong> path; secondary indexes are maintained/rolled back from clustered history.</p><table><thead><tr><th>Operation</th><th>Undo type</th><th>Role</th></tr></thead><tbody><tr><td>INSERT</td><td><code>TRX_UNDO_INSERT_OP</code></td><td>Identify new row for rollback deletion</td></tr><tr><td>UPDATE / DELETE</td><td><code>TRX_UNDO_MODIFY_OP</code></td><td>Before-image + system columns for rollback and MVCC</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>btr_cur_ins_lock_and_undo
+</span></span><span style=display:flex><span>  → trx_undo_report_row_operation(..., TRX_UNDO_INSERT_OP, ...)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>btr_cur_upd_lock_and_undo
+</span></span><span style=display:flex><span>  → lock_clust_rec_modify_check_and_lock
+</span></span><span style=display:flex><span>  → trx_undo_report_row_operation(..., TRX_UNDO_MODIFY_OP, ...)
+</span></span></code></pre></div><p>The returned <strong>roll pointer</strong> is stored in <code>DB_ROLL_PTR</code> on the clustered record. Concurrent consistent reads reconstruct older versions by walking that chain (see the InnoDB MVCC article). Writers still need locks: MVCC does not make UPDATE/INSERT lock-free.</p><h2 id=63-statement-vs-session-commit>6.3 Statement vs session commit</h2><p>After a successful statement:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>mysql_execute_command cleanup
+</span></span><span style=display:flex><span>  → trans_commit_stmt(thd)     // or trans_rollback_stmt on error
+</span></span><span style=display:flex><span>      → ha_commit_trans(thd, all=false, ...)
+</span></span></code></pre></div><ul><li><strong>Autocommit ON</strong>: statement commit is the real transaction commit.</li><li><strong>Explicit transaction</strong>: statement commit ends the statement scope; locks and undo stay until <code>COMMIT</code> / <code>ROLLBACK</code>.</li></ul><p>Explicit commit:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>trans_commit(thd)
+</span></span><span style=display:flex><span>  → ha_commit_trans(thd, all=true, ...)
+</span></span><span style=display:flex><span>      → tc_log-&gt;prepare()          // if multi-engine 2PC
+</span></span><span style=display:flex><span>      → MYSQL_BIN_LOG::commit()
+</span></span><span style=display:flex><span>      → ordered_commit()           // group commit
+</span></span><span style=display:flex><span>      → ha_commit_low()
+</span></span><span style=display:flex><span>          → handlerton::commit → innobase_commit
+</span></span><span style=display:flex><span>              → trx_commit_for_mysql → trx_commit_in_memory
+</span></span><span style=display:flex><span>              → trx_commit_complete_for_mysql  // redo flush policy
+</span></span></code></pre></div><p><code>innobase_commit()</code> records binlog file/offset on <code>trx_t</code>, may defer redo flush for group commit, then releases InnoDB locks as the transaction becomes committed in memory.</p><hr><h1 id=7-isolation-summary-for-dml>7. Isolation summary for DML</h1><table><thead><tr><th>Behavior</th><th>READ COMMITTED</th><th>REPEATABLE READ (default)</th></tr></thead><tbody><tr><td>Gap locks on ordinary UPDATE range scan</td><td>Generally skipped</td><td>Next-key / gap as needed</td></tr><tr><td>Lock non-matching scanned rows</td><td>May release</td><td>Held to transaction end</td></tr><tr><td>Semi-consistent read on UPDATE</td><td>Allowed</td><td>Not used</td></tr><tr><td>Duplicate-key / FK gap locks</td><td>Still possible</td><td>Taken</td></tr><tr><td>INSERT vs held next-key on gap</td><td>Waits (<code>INSERT_INTENTION</code>)</td><td>Same</td></tr><tr><td>Consistent read snapshot</td><td>Per statement</td><td>Per transaction (usual RR)</td></tr></tbody></table><p>Rule of thumb: <strong>RC weakens range protection for writers’ scans</strong>; it does not remove all gap locking required for uniqueness and referential integrity.</p><hr><h1 id=8-end-to-end-sequences>8. End-to-end sequences</h1><h2 id=81-single-table-update-under-rr>8.1 Single-table UPDATE under RR</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+actor Client
+participant Sql_cmd_update
+participant lock_cc as &#34;lock.cc&#34;
+participant InnoDB
+participant Binlog
+
+Client -&gt; Sql_cmd_update : UPDATE t SET ... WHERE range
+Sql_cmd_update -&gt; Sql_cmd_update : open_tables (MDL_SHARED_WRITE)
+Sql_cmd_update -&gt; lock_cc : mysql_lock_tables
+lock_cc -&gt; InnoDB : external_lock(F_WRLCK) → select_lock_type=LOCK_X
+loop qualifying rows
+  Sql_cmd_update -&gt; InnoDB : row_search_mvcc + X next-key / record locks
+  Sql_cmd_update -&gt; InnoDB : ha_update_row → undo + B-tree update
+end
+Sql_cmd_update -&gt; Binlog : trans_commit_stmt / COMMIT
+Binlog -&gt; InnoDB : ordered_commit → trx_commit (release locks)
+@enduml
+</code></pre><h2 id=82-insert-values-colliding-with-a-held-gap>8.2 INSERT VALUES colliding with a held gap</h2><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+participant &#34;Trx A (UPDATE range)&#34; as A
+participant &#34;Trx B (INSERT)&#34; as B
+participant LockSys
+
+A -&gt; LockSys : X next-key on scanned range (holds gap)
+B -&gt; LockSys : lock_table(IX)
+B -&gt; LockSys : lock_rec_insert_check_and_lock
+LockSys -&gt; B : wait LOCK_INSERT_INTENTION
+A -&gt; LockSys : COMMIT (release next-key)
+LockSys -&gt; B : wake
+B -&gt; LockSys : insert row + insert undo
+B -&gt; LockSys : COMMIT
+@enduml
+</code></pre><hr><h1 id=9-design-takeaways>9. Design takeaways</h1><ol><li><strong>DML reuses the SELECT pipeline</strong> until the sink: specialized loops or <code>Query_result_*</code> call <code>ha_write_row</code> / <code>ha_update_row</code>.</li><li><strong>Three lock stories coexist</strong> — MDL (DDL safety), SQL table locks (engine handshake), InnoDB record/gap locks (row concurrency). InnoDB does not depend on THR_LOCK for row serializability.</li><li><strong>UPDATE locks twice conceptually</strong> — X locking read to find rows, then clustered modify check + undo before the physical change.</li><li><strong>INSERT pays for gaps it enters</strong> — insert-intention waits on protective gap/next-key locks; uniqueness/FK checks add their own S/X locks.</li><li><strong>Commit is coordinated</strong> — statement vs session scope, binlog ordered/group commit, then InnoDB <code>trx_commit</code> releasing locks and applying flush policy.</li></ol><p>For the read-side iterator/optimizer path, see <a href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals</a>. For page format, undo chains, and ReadView visibility, see <a href=https://kevinwang930.github.io/post/data/db/mysql/innodb/>InnoDB Storage Engine Internals</a>.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/db/>db</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/mysql/>mysql</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrency/blocking-queue/ data-tooltip="java concurrency - BlockingQueue" aria-label="PREVIOUS: java concurrency - BlockingQueue"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/data/db/mysql/dml/",this.page.identifier="/post/data/db/mysql/dml/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrency/blocking-queue/ data-tooltip="java concurrency - BlockingQueue" aria-label="PREVIOUS: java concurrency - BlockingQueue"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/mysql/dml/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Fdml%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Fdml%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fmysql%2Fdml%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>
+    
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    
+    
+    
+    const getMermaidTheme = () =>
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
+
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: getMermaidTheme(),
+    });
+
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll(".mermaid"),
+        });
+    } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+    }
+</script><style>.mermaid svg{display:block;margin:auto}</style><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})},loadMathJaxIfNeeded=()=>{if(document.body.textContent.includes("$")){const e=/\$[^$]+\$/.test(document.body.textContent)||/\$\$[^$]+\$\$/.test(document.body.textContent);e&&loadScript("https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",()=>{MathJax.Hub.Config({tex2jax:{inlineMath:[["$","$"]],displayMath:[["$$","$$"]],processEscapes:!0,processEnvironments:!0},displayAlign:"center","HTML-CSS":{styles:{".MathJax_Display":{margin:0}},linebreaks:{automatic:!0}}}),MathJax.Hub.Queue(["Typeset",MathJax.Hub])})}};window.addEventListener("load",function(){loadPlantUMLOnNeed(),loadMathJaxIfNeeded()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script></body></html>
