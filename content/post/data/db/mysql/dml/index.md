@@ -881,7 +881,61 @@ A single leaf page therefore admits two distinct orderings: key order, used by r
 
 #### How `lock_t` encodes a record or gap on that page
 
-Explicit record-lock state is not stored in the leaf-page frame. The page contains only the index records (and thereby their `heap_no` slots). Each granted or waiting record lock is an in-memory `lock_t`:
+Explicit record-lock state is not stored in the leaf-page frame. The page contains only the index records (and thereby their `heap_no` slots). Each granted or waiting record lock is an in-memory `lock_t` owned by the transaction:
+
+```plantuml
+@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class trx_t {
+  trx_id_t id
+  trx_state_t state
+  trx_lock_t lock
+  THD *mysql_thd
+}
+
+class trx_lock_t {
+  mem_heap_t *lock_heap
+  trx_lock_list_t trx_locks
+  lock_pool_t rec_pool
+  lock_t *wait_lock
+}
+
+class lock_t {
+  trx_t *trx
+  UT_LIST_NODE trx_locks
+  dict_index_t *index
+  lock_t *hash
+  uint32_t type_mode
+  lock_rec_t rec_lock
+  --
+  byte bitmap[n_bits/8]
+}
+
+class lock_rec_t {
+  page_id_t page_id
+  uint32_t n_bits
+}
+
+note right of lock_t
+  Bitmap is not a named C++ member.
+  It is allocated immediately after
+  sizeof(lock_t): (byte*)&lock[1]
+  Length = rec_lock.n_bits / 8.
+  bit[i] => heap_no i on page_id.
+end note
+
+note bottom of trx_lock_t
+  Storage: lock_heap (or rec_pool).
+  Not written into the .ibd page.
+end note
+
+trx_t *-- trx_lock_t : lock
+trx_lock_t o-- lock_t : trx_locks / lock_heap
+lock_t *-- lock_rec_t : rec_lock
+@enduml
+```
 
 ```cpp
 // storage/innobase/include/lock0priv.h
@@ -893,23 +947,7 @@ struct lock_rec_t {
 // lock_t::type_mode = LOCK_S|LOCK_X | LOCK_GAP|LOCK_REC_NOT_GAP|LOCK_ORDINARY | ...
 ```
 
-**Storage of the bitmap.** A record `lock_t` is a variable-length object: a fixed-size header followed immediately by `n_bits / 8` bitmap bytes. Allocation requests `sizeof(lock_t) + bitmap_bytes` from the owning transaction’s lock heap, or reuses a pre-sized slot from `trx->lock.rec_pool`:
-
-```cpp
-// storage/innobase/lock/lock0lock.cc
-lock_t *lock_alloc_from_heap(mem_heap_t *heap, size_t bitmap_bytes) {
-  const size_t n_bytes = sizeof(lock_t) + bitmap_bytes;
-  auto ptr = mem_heap_alloc(heap, n_bytes);   // typically trx->lock.lock_heap
-  return reinterpret_cast<lock_t *>(ptr);
-}
-
-// storage/innobase/include/lock0priv.h — lock_t::bitset()
-const byte *bitmap = (const byte *)&this[1];  // first byte after the struct
-```
-
-The bitmap therefore resides in process memory owned by the transaction / lock subsystem (`trx->lock.lock_heap` or `rec_pool`), and is linked into `lock_sys->rec_hash` through `lock_t::hash` under the record’s `page_id`. It is never persisted in the tablespace page image. Field `rec_lock.n_bits` records only the bitmap length; the bit vector occupies the contiguous tail of the allocation. The logical identity of bit *i* is `(rec_lock.page_id, i)`, which denotes `heap_no == i` on that page.
-
-Bit *i* is set if and only if the lock request applies to **`heap_no == i`** on the given `page_id`. A single `lock_t` may set multiple bits on one page (as on a locking range scan). Precise mode flags in `type_mode` (`LOCK_S` / `LOCK_X`, gap, record-only, next-key, insert-intention) specify the conflict semantics of those bits; they do not alter the bitmap’s placement.
+**Storage.** A record `lock_t` is variable-length: fixed header + `n_bits / 8` trailing bitmap bytes (`sizeof(lock_t) + bitmap_bytes` from `trx->lock.lock_heap`, or a `rec_pool` slot). Access: `(const byte *)&lock[1]` via `lock_t::bitset()`. `rec_lock.n_bits` is length only; bit *i* denotes `heap_no == i` on `rec_lock.page_id`. The object is hashed into `lock_sys->rec_hash` via `lock_t::hash`. It is never persisted in the tablespace page image.
 
 | Mode bits on `heap_no` of record R | Coverage |
 |------------------------------------|----------|
