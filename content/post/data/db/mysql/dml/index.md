@@ -949,6 +949,27 @@ struct lock_rec_t {
 
 **Storage.** A record `lock_t` is variable-length: fixed header + `n_bits / 8` trailing bitmap bytes (`sizeof(lock_t) + bitmap_bytes` from `trx->lock.lock_heap`, or a `rec_pool` slot). Access: `(const byte *)&lock[1]` via `lock_t::bitset()`. `rec_lock.n_bits` is length only; bit *i* denotes `heap_no == i` on `rec_lock.page_id`. The object is hashed into `lock_sys->rec_hash` via `lock_t::hash`. It is never persisted in the tablespace page image.
 
+**How conflicts are found across transactions.** Ownership is per connection (`trx_t::lock.trx_locks`), but conflict detection does **not** iterate every `trx_t`. Lock-sys maintains a process-global hash `lock_sys->rec_hash` keyed by `page_id`. Every record `lock_t`, regardless of which transaction allocated it, is chained into that hash via `lock_t::hash`. Checking a lock on `(page_id, heap_no)` thus:
+
+![Cross-transaction record lock lookup via lock_sys rec_hash](images/rec-hash-cross-trx.svg)
+
+1. Latch the lock-sys shard for that `page_id`.
+2. Probe `rec_hash` for the cell of `page_id` and walk the chain (`Locks_hashtable::find_on_record` / `find_on_page`).
+3. For each `lock_t` whose bitmap has bit `heap_no` set, compare `type_mode` with the requester (`locksys::rec_lock_check_conflict`); skip the requester’s own locks.
+
+```cpp
+// lock0lock.cc — lock_rec_other_has_conflicting()
+RecID rec_id{block, heap_no};
+const lock_t *wait_for =
+    lock_sys->rec_hash.find_on_record(rec_id, [&](const lock_t *lock) {
+      return locksys::rec_lock_check_conflict(
+                 trx, mode, lock, is_supremum, trx_locks_cache) ==
+             locksys::Conflict::HAS_TO_WAIT;
+    });
+```
+
+So: **storage and lifetime** follow the owning `trx_t`; **lookup for “who else locked this slot?”** is global, by page, through `rec_hash`. Cross-connection and cross-statement contention on the same leaf page meet in that hash cell, not via a table-wide or session-wide lock list.
+
 | Mode bits on `heap_no` of record R | Coverage |
 |------------------------------------|----------|
 | `LOCK_REC_NOT_GAP` | Index record R only |

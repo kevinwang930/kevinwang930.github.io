@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 520" width="100%">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#455a64"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c62828"/>
+    </marker>
+    <filter id="sh" x="-6%" y="-6%" width="112%" height="112%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <rect width="920" height="520" fill="#fafafa" rx="8"/>
+
+  <text x="460" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Cross-transaction record lock lookup</text>
+  <text x="460" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Ownership: per trx_t. Conflict scan: lock_sys-&gt;rec_hash by page_id</text>
+
+  <!-- Session A -->
+  <g transform="translate(24, 70)" filter="url(#sh)">
+    <rect width="200" height="200" fill="#ffffff" stroke="#5d4037" stroke-width="1.5" rx="6"/>
+    <rect width="200" height="26" fill="#5d4037" rx="6"/>
+    <rect y="16" width="200" height="12" fill="#5d4037"/>
+    <text x="100" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Connection A</text>
+
+    <rect x="16" y="42" width="168" height="36" fill="#efebe9" stroke="#6d4c41" rx="3"/>
+    <text x="100" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#4e342e">trx_t A</text>
+
+    <rect x="16" y="90" width="168" height="90" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+    <text x="100" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#e65100">trx_lock_t</text>
+    <text x="28" y="130" font-family="Consolas, monospace" font-size="9" fill="#5d4037">lock_heap</text>
+    <text x="28" y="148" font-family="Consolas, monospace" font-size="9" fill="#c62828" font-weight="700">trx_locks</text>
+    <text x="100" y="170" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#795548">owns A's lock_t objects</text>
+  </g>
+
+  <!-- Session B -->
+  <g transform="translate(24, 290)" filter="url(#sh)">
+    <rect width="200" height="200" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="6"/>
+    <rect width="200" height="26" fill="#1565c0" rx="6"/>
+    <rect y="16" width="200" height="12" fill="#1565c0"/>
+    <text x="100" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Connection B</text>
+
+    <rect x="16" y="42" width="168" height="36" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+    <text x="100" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">trx_t B</text>
+
+    <rect x="16" y="90" width="168" height="90" fill="#e3f2fd" stroke="#1976d2" rx="3"/>
+    <text x="100" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#1565c0">trx_lock_t</text>
+    <text x="28" y="130" font-family="Consolas, monospace" font-size="9" fill="#0d47a1">lock_heap</text>
+    <text x="28" y="148" font-family="Consolas, monospace" font-size="9" fill="#c62828" font-weight="700">trx_locks</text>
+    <text x="100" y="170" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#546e7a">owns B's lock_t objects</text>
+  </g>
+
+  <!-- lock_t objects in middle -->
+  <g transform="translate(280, 120)" filter="url(#sh)">
+    <rect width="200" height="100" fill="#ffebee" stroke="#c62828" stroke-width="1.8" rx="4"/>
+    <text x="100" y="24" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#b71c1c">lock_t (A)</text>
+    <text x="16" y="46" font-family="Consolas, monospace" font-size="9" fill="#37474f">trx = A</text>
+    <text x="16" y="62" font-family="Consolas, monospace" font-size="9" fill="#37474f">page_id = P</text>
+    <text x="16" y="78" font-family="Consolas, monospace" font-size="9" fill="#2e7d32" font-weight="700">bit[4]=1 (heap_no 4)</text>
+    <text x="16" y="94" font-family="Consolas, monospace" font-size="9" fill="#37474f">type_mode = X | REC_NOT_GAP</text>
+  </g>
+
+  <g transform="translate(280, 320)" filter="url(#sh)">
+    <rect width="200" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.8" rx="4"/>
+    <text x="100" y="24" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">lock_t (B)</text>
+    <text x="16" y="46" font-family="Consolas, monospace" font-size="9" fill="#37474f">trx = B</text>
+    <text x="16" y="62" font-family="Consolas, monospace" font-size="9" fill="#37474f">page_id = P</text>
+    <text x="16" y="78" font-family="Consolas, monospace" font-size="9" fill="#2e7d32" font-weight="700">bit[4]=1 (heap_no 4)</text>
+    <text x="16" y="94" font-family="Consolas, monospace" font-size="9" fill="#37474f">type_mode = S | waiting</text>
+  </g>
+
+  <!-- ownership arrows -->
+  <path d="M224 200 L280 170" stroke="#5d4037" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="240" y="160" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">trx_locks</text>
+  <path d="M224 400 L280 370" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="236" y="400" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">trx_locks</text>
+
+  <!-- Global lock_sys -->
+  <g transform="translate(540, 100)" filter="url(#sh)">
+    <rect width="356" height="340" fill="#ffffff" stroke="#c62828" stroke-width="2" rx="6"/>
+    <rect width="356" height="28" fill="#c62828" rx="6"/>
+    <rect y="18" width="356" height="12" fill="#c62828"/>
+    <text x="178" y="19" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">lock_sys (global)</text>
+
+    <text x="178" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#b71c1c">rec_hash</text>
+    <text x="178" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">keyed by page_id (all trx)</text>
+
+    <!-- hash cells -->
+    <rect x="24" y="90" width="308" height="36" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="40" y="112" font-family="Consolas, monospace" font-size="10" fill="#546e7a">cell ...</text>
+
+    <rect x="24" y="136" width="308" height="100" fill="#fff8e1" stroke="#ef6c00" stroke-width="2" rx="3"/>
+    <text x="40" y="158" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">cell[hash(P)]</text>
+    <text x="40" y="178" font-family="Consolas, monospace" font-size="10" fill="#37474f">page_id = P chain:</text>
+    <text x="40" y="198" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">lock_t (A) --hash--&gt; lock_t (B) --&gt; ...</text>
+    <text x="40" y="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#795548">same page, any transaction</text>
+
+    <rect x="24" y="250" width="308" height="36" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="40" y="272" font-family="Consolas, monospace" font-size="10" fill="#546e7a">cell ...</text>
+
+    <text x="178" y="318" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828" font-weight="700">Conflict check walks this chain</text>
+    <text x="178" y="336" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">find_on_record(P, heap_no=4)</text>
+  </g>
+
+  <!-- hash pointers from lock objects -->
+  <path d="M480 170 L540 200" stroke="#c62828" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrRed)"/>
+  <path d="M480 370 L540 230" stroke="#c62828" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrRed)"/>
+  <text x="510" y="155" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#c62828">lock_t::hash</text>
+
+  <!-- check flow -->
+  <rect x="280" y="460" width="560" height="44" fill="#ffffff" stroke="#455a64" rx="4"/>
+  <text x="560" y="478" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">B requests lock on (P, heap_no=4): latch shard(P) -&gt; rec_hash.find_on_record -&gt; see A's bit[4]</text>
+  <text x="560" y="496" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Does not scan all trx_t; does not scan other pages</text>
+</svg>
