@@ -477,23 +477,65 @@ ha_innobase ..&gt; mtr_t : around B-tree ops
 </span></span></code></pre></div><h3 id=index-b-tree-page-layout-and-lock-attachment>Index B-tree page layout and lock attachment</h3><p>Record and gap locks are not represented as key intervals <code>(low_key, high_key)</code>. Each explicit lock request addresses a leaf-page record slot by the triple <code>(space_id, page_no, heap_no)</code>, with conflict semantics encoded in <code>lock_t::type_mode</code>. The attachment therefore depends on the index leaf-page layout.</p><p><img src=https://kevinwang930.github.io/post/data/db/mysql/dml/images/btree-record-gap-locks.svg alt="InnoDB leaf-page locks: heap_no, gaps, and bitmap storage"></p><h4 id=from-dict_index_t-to-a-leaf-page>From <code>dict_index_t</code> to a leaf page</h4><p>A clustered or secondary index (<code>dict_index_t</code>) is organized as a B+tree. Concurrent DML resolves row identity, uniqueness checks, and gap protection on <strong>leaf</strong> pages. A leaf page cached in the buffer pool is a <code>buf_block_t</code> whose frame contains the page header together with the linked sequence of index records.</p><h4 id=records-on-one-leaf-page>Records on one leaf page</h4><p>Every leaf page allocates two system records at fixed heap numbers, followed by user records:</p><table><thead><tr><th>Slot</th><th><code>heap_no</code></th><th>Role</th></tr></thead><tbody><tr><td>Infimum</td><td><code>PAGE_HEAP_NO_INFIMUM</code> (0)</td><td>Pseudo-record denoting −∞; first in the page’s logical order</td></tr><tr><td>Supremum</td><td><code>PAGE_HEAP_NO_SUPREMUM</code> (1)</td><td>Pseudo-record denoting +∞; last in logical order; receives locks that cover the final gap after the last user record</td></tr><tr><td>User records</td><td>≥ 2</td><td>Index entries; <code>heap_no</code> identifies the physical heap slot, not the SQL key value</td></tr></tbody></table><p><strong>Definition of <code>heap_no</code>.</strong> <code>heap_no</code> is the index of a record within the page’s physical record heap (<code>page_rec_get_heap_no</code>). Infimum and supremum occupy <code>0</code> and <code>1</code> permanently. User records receive successive free heap slots at insertion time. Deletions may leave unused slots; consequently heap numbers need not form a dense sequence and are not ordered by key value.</p><p>Logical order on the page is defined by <strong>next-record pointers</strong>, independent of <code>heap_no</code> numeric order:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>infimum → [id=10, heap_no=2] → [id=20, heap_no=4] → [id=30, heap_no=3] → supremum
 </span></span><span style=display:flex><span>              ↑                      ↑                      ↑
 </span></span><span style=display:flex><span>         gap locks attach to the successor record’s heap_no (see diagram)
-</span></span></code></pre></div><p>A single leaf page therefore admits two distinct orderings: key order, used by range predicates and cursor scans; and <code>heap_no</code> order, used by lock-sys as a stable slot address within <code>(space_id, page_no)</code>.</p><h4 id=how-lock_t-encodes-a-record-or-gap-on-that-page>How <code>lock_t</code> encodes a record or gap on that page</h4><p>Explicit record-lock state is not stored in the leaf-page frame. The page contains only the index records (and thereby their <code>heap_no</code> slots). Each granted or waiting record lock is an in-memory <code>lock_t</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0priv.h
+</span></span></code></pre></div><p>A single leaf page therefore admits two distinct orderings: key order, used by range predicates and cursor scans; and <code>heap_no</code> order, used by lock-sys as a stable slot address within <code>(space_id, page_no)</code>.</p><h4 id=how-lock_t-encodes-a-record-or-gap-on-that-page>How <code>lock_t</code> encodes a record or gap on that page</h4><p>Explicit record-lock state is not stored in the leaf-page frame. The page contains only the index records (and thereby their <code>heap_no</code> slots). Each granted or waiting record lock is an in-memory <code>lock_t</code> owned by the transaction:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class trx_t {
+  trx_id_t id
+  trx_state_t state
+  trx_lock_t lock
+  THD *mysql_thd
+}
+
+class trx_lock_t {
+  mem_heap_t *lock_heap
+  trx_lock_list_t trx_locks
+  lock_pool_t rec_pool
+  lock_t *wait_lock
+}
+
+class lock_t {
+  trx_t *trx
+  UT_LIST_NODE trx_locks
+  dict_index_t *index
+  lock_t *hash
+  uint32_t type_mode
+  lock_rec_t rec_lock
+  --
+  byte bitmap[n_bits/8]
+}
+
+class lock_rec_t {
+  page_id_t page_id
+  uint32_t n_bits
+}
+
+note right of lock_t
+  Bitmap is not a named C++ member.
+  It is allocated immediately after
+  sizeof(lock_t): (byte*)&amp;lock[1]
+  Length = rec_lock.n_bits / 8.
+  bit[i] =&gt; heap_no i on page_id.
+end note
+
+note bottom of trx_lock_t
+  Storage: lock_heap (or rec_pool).
+  Not written into the .ibd page.
+end note
+
+trx_t *-- trx_lock_t : lock
+trx_lock_t o-- lock_t : trx_locks / lock_heap
+lock_t *-- lock_rec_t : rec_lock
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0priv.h
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>struct</span> <span style=color:#a6e22e>lock_rec_t</span> {
 </span></span><span style=display:flex><span>  page_id_t page_id;   <span style=color:#75715e>// leaf page addressed by this bitmap
 </span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint32_t</span> n_bits;     <span style=color:#75715e>// bitmap length in bits (multiple of 8)
 </span></span></span><span style=display:flex><span>  <span style=color:#75715e>// NOTE: the lock bitmap is placed immediately after the lock struct
 </span></span></span><span style=display:flex><span>};
 </span></span><span style=display:flex><span><span style=color:#75715e>// lock_t::type_mode = LOCK_S|LOCK_X | LOCK_GAP|LOCK_REC_NOT_GAP|LOCK_ORDINARY | ...
-</span></span></span></code></pre></div><p><strong>Storage of the bitmap.</strong> A record <code>lock_t</code> is a variable-length object: a fixed-size header followed immediately by <code>n_bits / 8</code> bitmap bytes. Allocation requests <code>sizeof(lock_t) + bitmap_bytes</code> from the owning transaction’s lock heap, or reuses a pre-sized slot from <code>trx->lock.rec_pool</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// storage/innobase/lock/lock0lock.cc
-</span></span></span><span style=display:flex><span>lock_t <span style=color:#f92672>*</span><span style=color:#a6e22e>lock_alloc_from_heap</span>(mem_heap_t <span style=color:#f92672>*</span>heap, size_t bitmap_bytes) {
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>const</span> size_t n_bytes <span style=color:#f92672>=</span> <span style=color:#66d9ef>sizeof</span>(lock_t) <span style=color:#f92672>+</span> bitmap_bytes;
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>auto</span> ptr <span style=color:#f92672>=</span> mem_heap_alloc(heap, n_bytes);   <span style=color:#75715e>// typically trx-&gt;lock.lock_heap
-</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>reinterpret_cast</span><span style=color:#f92672>&lt;</span>lock_t <span style=color:#f92672>*&gt;</span>(ptr);
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// storage/innobase/include/lock0priv.h — lock_t::bitset()
-</span></span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> byte <span style=color:#f92672>*</span>bitmap <span style=color:#f92672>=</span> (<span style=color:#66d9ef>const</span> byte <span style=color:#f92672>*</span>)<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>this</span>[<span style=color:#ae81ff>1</span>];  <span style=color:#75715e>// first byte after the struct
-</span></span></span></code></pre></div><p>The bitmap therefore resides in process memory owned by the transaction / lock subsystem (<code>trx->lock.lock_heap</code> or <code>rec_pool</code>), and is linked into <code>lock_sys->rec_hash</code> through <code>lock_t::hash</code> under the record’s <code>page_id</code>. It is never persisted in the tablespace page image. Field <code>rec_lock.n_bits</code> records only the bitmap length; the bit vector occupies the contiguous tail of the allocation. The logical identity of bit <em>i</em> is <code>(rec_lock.page_id, i)</code>, which denotes <code>heap_no == i</code> on that page.</p><p>Bit <em>i</em> is set if and only if the lock request applies to <strong><code>heap_no == i</code></strong> on the given <code>page_id</code>. A single <code>lock_t</code> may set multiple bits on one page (as on a locking range scan). Precise mode flags in <code>type_mode</code> (<code>LOCK_S</code> / <code>LOCK_X</code>, gap, record-only, next-key, insert-intention) specify the conflict semantics of those bits; they do not alter the bitmap’s placement.</p><table><thead><tr><th>Mode bits on <code>heap_no</code> of record R</th><th>Coverage</th></tr></thead><tbody><tr><td><code>LOCK_REC_NOT_GAP</code></td><td>Index record R only</td></tr><tr><td><code>LOCK_GAP</code></td><td>Open gap preceding R (between the predecessor and R)</td></tr><tr><td><code>LOCK_ORDINARY</code> (next-key)</td><td>R together with the gap preceding R</td></tr><tr><td><code>LOCK_GAP | LOCK_INSERT_INTENTION</code></td><td>Waiting request to insert into the gap preceding R</td></tr></tbody></table><p>There is no separate gap object in lock-sys: <strong>the gap preceding R is represented by lock bits on R’s <code>heap_no</code></strong> (or on supremum for the final gap of the page).</p><h4 id=insert-locating-the-gap-by-the-successor>Insert: locating the gap by the successor</h4><p>An insert between two leaf records obtains the physical neighbors from the B-tree search. Gap conflict is evaluated exclusively against the <strong>successor</strong> record:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// lock0lock.cc — lock_rec_insert_check_and_lock()
+</span></span></span></code></pre></div><p><strong>Storage.</strong> A record <code>lock_t</code> is variable-length: fixed header + <code>n_bits / 8</code> trailing bitmap bytes (<code>sizeof(lock_t) + bitmap_bytes</code> from <code>trx->lock.lock_heap</code>, or a <code>rec_pool</code> slot). Access: <code>(const byte *)&amp;lock[1]</code> via <code>lock_t::bitset()</code>. <code>rec_lock.n_bits</code> is length only; bit <em>i</em> denotes <code>heap_no == i</code> on <code>rec_lock.page_id</code>. The object is hashed into <code>lock_sys->rec_hash</code> via <code>lock_t::hash</code>. It is never persisted in the tablespace page image.</p><table><thead><tr><th>Mode bits on <code>heap_no</code> of record R</th><th>Coverage</th></tr></thead><tbody><tr><td><code>LOCK_REC_NOT_GAP</code></td><td>Index record R only</td></tr><tr><td><code>LOCK_GAP</code></td><td>Open gap preceding R (between the predecessor and R)</td></tr><tr><td><code>LOCK_ORDINARY</code> (next-key)</td><td>R together with the gap preceding R</td></tr><tr><td><code>LOCK_GAP | LOCK_INSERT_INTENTION</code></td><td>Waiting request to insert into the gap preceding R</td></tr></tbody></table><p>There is no separate gap object in lock-sys: <strong>the gap preceding R is represented by lock bits on R’s <code>heap_no</code></strong> (or on supremum for the final gap of the page).</p><h4 id=insert-locating-the-gap-by-the-successor>Insert: locating the gap by the successor</h4><p>An insert between two leaf records obtains the physical neighbors from the B-tree search. Gap conflict is evaluated exclusively against the <strong>successor</strong> record:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// lock0lock.cc — lock_rec_insert_check_and_lock()
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> rec_t <span style=color:#f92672>*</span>next_rec <span style=color:#f92672>=</span> page_rec_get_next_const(rec);  <span style=color:#75715e>// right neighbor / supremum
 </span></span></span><span style=display:flex><span>ulint heap_no <span style=color:#f92672>=</span> page_rec_get_heap_no(next_rec);
 </span></span><span style=display:flex><span>
