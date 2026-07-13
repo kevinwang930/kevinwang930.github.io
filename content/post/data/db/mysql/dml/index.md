@@ -18,13 +18,13 @@ keywords:
 #thumbnailImage: //example.com/image.jpg
 ---
 
-This article traces MySQL **INSERT** and **UPDATE** from the SQL command layer through table and metadata locking into InnoDB row locking, undo generation, and commit — focusing on **concurrency control**, **lock modes**, and **transaction boundaries**. It complements [query processing](/post/data/db/mysql/query/) (SELECT pipeline) and [InnoDB storage](/post/data/db/mysql/innodb/) (MVCC, pages, redo/undo layout). Source paths refer to the checked-out `mysql-server` tree.
+This article examines MySQL **INSERT** and **UPDATE** from the SQL command layer through table and metadata locking into InnoDB record locking, undo generation, and commit, with emphasis on **concurrency control**, **lock modes**, and **transaction boundaries**. It complements [query processing](/post/data/db/mysql/query/) (SELECT pipeline) and [InnoDB storage](/post/data/db/mysql/innodb/) (MVCC, pages, redo/undo layout). Source citations refer to the checked-out `mysql-server` tree.
 
 <!--more-->
 
 # 1. Architecture
 
-A modifying statement reuses the same `Sql_cmd_dml` prepare / open / lock / execute skeleton as SELECT, but diverges where rows are written:
+A modifying statement follows the same `Sql_cmd_dml` prepare / open / lock / execute skeleton as SELECT, and diverges where rows are written:
 
 1. **SQL layer** — parse to `Sql_cmd_update` / `Sql_cmd_insert_*`, open tables, acquire MDL and `MYSQL_LOCK`, then either a specialized write loop (single-table UPDATE, INSERT VALUES) or an iterator plan that sinks rows into `Query_result_update` / `Query_result_insert`.
 2. **Handler boundary** — `ha_write_row` / `ha_update_row` / `ha_delete_row` on `ha_innobase`.
@@ -226,6 +226,12 @@ package "SQL session" {
     Ha_data ha_data[]
   }
 
+  class Ha_data {
+    void *ha_ptr
+    void *ha_ptr_backup
+    Ha_trx_info ha_info[2]
+  }
+
   class MDL_context {
     MDL_ticket_store m_ticket_store
     + acquire_lock(MDL_request*)
@@ -273,10 +279,18 @@ package "SQL session" {
 
   class Ha_trx_info {
     handlerton *m_ht
+    Ha_trx_info *m_next
   }
 }
 
-package "InnoDB handler bridge" {
+package "InnoDB per-connection / per-open-table" {
+  class innodb_session_t {
+    trx_t *m_trx
+    table_cache_t m_open_tables
+    Tablespace *m_usr_temp_tblsp
+    Tablespace *m_intrinsic_temp_tblsp
+  }
+
   class ha_innobase {
     row_prebuilt_t *m_prebuilt
     + store_lock()
@@ -330,7 +344,6 @@ package "InnoDB transaction + lock sys" {
   class lock_rec_t {
     page_id_t page_id
     uint32_t n_bits
-    ' bitmap follows lock_t in memory
   }
 
   enum lock_mode <<enumeration>> {
@@ -354,7 +367,6 @@ package "InnoDB transaction + lock sys" {
 
 package "Short-lived physical latch" {
   class mtr_t {
-    ' mini-transaction
     + mtr_start()
     + mtr_commit()
   }
@@ -363,8 +375,12 @@ package "Short-lived physical latch" {
 THD *-- MDL_context
 THD *-- MYSQL_LOCK
 THD *-- Transaction_ctx
+THD *-- Ha_data : ha_data[hton.slot]
+Ha_data --> innodb_session_t : ha_ptr
+innodb_session_t *-- trx_t : m_trx
 Transaction_ctx *-- THD_TRANS
 THD_TRANS o-- Ha_trx_info
+Ha_data *-- Ha_trx_info : ha_info[0|1]
 MDL_context o-- MDL_ticket
 MDL_request --> MDL_ticket : granted as
 MDL_request *-- MDL_key
@@ -373,7 +389,7 @@ MYSQL_LOCK o-- TABLE
 TABLE --> ha_innobase : file
 ha_innobase *-- row_prebuilt_t
 row_prebuilt_t --> trx_t
-Ha_trx_info ..> trx_t : check_trx_exists
+trx_t --> THD : mysql_thd
 trx_t *-- trx_lock_t
 trx_lock_t o-- lock_t : trx_locks
 lock_t *-- lock_table_t
@@ -384,10 +400,88 @@ ha_innobase ..> mtr_t : around B-tree ops
 @enduml
 ```
 
+#### How `THD` maintains InnoDB session and transaction state
+
+A connection’s InnoDB state is not stored on `TABLE` or on a single global. It is wired through **two complementary channels** on `THD`:
+
+1. **Engine-private session blob** — `THD::ha_data[innodb_hton->slot].ha_ptr` holds an `innodb_session_t`, which owns the session’s `trx_t *m_trx`.
+2. **SQL transaction coordinator lists** — `THD::m_transaction` (`Transaction_ctx`) tracks which engines participate in the **statement** and **session** scopes so `COMMIT` / `ROLLBACK` / 2PC can call each `handlerton`.
+
+```text
+THD
+├── ha_data[innodb_slot].ha_ptr ──► innodb_session_t
+│                                      └── m_trx ──► trx_t ──► mysql_thd ──► THD
+│                                      └── m_open_tables / temp tablespaces …
+├── ha_data[innodb_slot].ha_info[0]   // statement-scope Ha_trx_info (via register)
+├── ha_data[innodb_slot].ha_info[1]   // transaction-scope Ha_trx_info
+└── m_transaction (Transaction_ctx)
+     ├── THD_TRANS[statement].m_ha_list  ──► Ha_trx_info … (engines in this stmt)
+     └── THD_TRANS[session].m_ha_list    ──► Ha_trx_info … (engines in this trx)
+```
+
+**Slot lookup.** Each `handlerton` has a stable `slot`. `thd_ha_data(thd, innodb_hton)` returns `&thd->ha_data[slot].ha_ptr`. InnoDB casts that pointer to `innodb_session_t **`:
+
+```cpp
+// storage/innobase/handler/ha_innodb.cc
+innodb_session_t *&thd_to_innodb_session(THD *thd) {
+  innodb_session_t *&innodb_session =
+      *(innodb_session_t **)thd_ha_data(thd, innodb_hton_ptr);
+  if (innodb_session != nullptr)
+    return innodb_session;
+  innodb_session = ut::new_withkey<innodb_session_t>(...);
+  return innodb_session;
+}
+
+trx_t *&thd_to_trx(THD *thd) {
+  return thd_to_innodb_session(thd)->m_trx;
+}
+```
+
+**Lazy `trx_t` allocation.** The first InnoDB touch of a connection calls `check_trx_exists(thd)`, which resolves `thd_to_trx(thd)` and, if still null, allocates via `innobase_trx_allocate(thd)` (`trx_allocate_for_mysql()`, sets `trx->mysql_thd = thd`, initialises isolation / read-only flags). Subsequent `store_lock` / `external_lock` / DML reuse the same `trx_t` for the connection (unless XA / detach–reattach replaces it).
+
+```cpp
+trx_t *check_trx_exists(THD *thd) {
+  trx_t *&trx = thd_to_trx(thd);
+  if (trx == nullptr) {
+    trx = innobase_trx_allocate(thd);
+  } else {
+    innobase_trx_init(thd, trx);
+  }
+  return trx;
+}
+```
+
+**Binding open-table handlers to that `trx_t`.** Each `TABLE::file` (`ha_innobase`) keeps a private `row_prebuilt_t`. `external_lock()` / `update_thd()` set `m_prebuilt->trx` to the session’s `thd_to_trx(thd)`. Many handlers in one statement therefore share **one** `trx_t` while each retains its own `select_lock_type` and cursor state.
+
+**SQL-layer registration (`innobase_register_trx`).** Owning a `trx_t` is not enough for the server to commit the engine. During `external_lock` / `start_stmt`, InnoDB calls:
+
+```cpp
+void innobase_register_trx(handlerton *hton, THD *thd, trx_t *trx) {
+  trans_register_ha(thd, /*all=*/false, hton, &trx_id);  // statement list
+  if (!trx_is_registered_for_2pc(trx) &&
+      thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) {
+    trans_register_ha(thd, /*all=*/true, hton, &trx_id);   // session list
+  }
+  trx_register_for_2pc(trx);
+}
+```
+
+`trans_register_ha` inserts (or reuses) the corresponding `Ha_trx_info` into `Transaction_ctx`’s statement and/or all-transaction `m_ha_list`. That is what `ha_commit_trans` / `ha_rollback_trans` walks later. Lifetime of `Ha_data::ha_info[0]` is one statement (or the whole trx under autocommit); `ha_info[1]` is one explicit transaction.
+
+| Object | Lifetime | Role |
+|--------|----------|------|
+| `innodb_session_t` in `ha_data[].ha_ptr` | Connection | InnoDB-private session cache; holds `m_trx` |
+| `trx_t` (`m_trx`) | Until free / XA detach | InnoDB transaction id, locks, undo, read view |
+| `row_prebuilt_t` on `ha_innobase` | Open `TABLE` instance | Per-table cursor + locking-read mode; points at shared `trx_t` |
+| `Ha_trx_info` on statement/session lists | Stmt / trx | SQL coordinator membership for commit/rollback/2PC |
+
+**Not shared across connections.** Each `THD` has its own `ha_data` array and therefore its own `innodb_session_t` / `trx_t`. Handlers of different tables within one connection share that one `trx_t`; they do not share an `innodb_session_t` with another session.
+
 Correspondence between layers and types:
 
 | Layer | Primary types |
 |-------|----------------|
+| InnoDB session / trx on `THD` | `ha_data[slot].ha_ptr` → `innodb_session_t` → `trx_t`; `Transaction_ctx` / `Ha_trx_info` for commit coordination |
 | MDL | `THD::mdl_context` → `MDL_request` / `MDL_ticket` / `MDL_key` |
 | SQL table-lock handshake | `THD::lock` (`MYSQL_LOCK`) → `TABLE` → `ha_innobase::{store,external}_lock` |
 | Statement locking-read mode | `row_prebuilt_t::select_lock_type` (`LOCK_NONE` / `LOCK_S` / `LOCK_X`) |
@@ -459,18 +553,19 @@ Pending metadata locks may be observed through `performance_schema.metadata_lock
 
 ---
 
-## 3.2 THR_LOCK / `MYSQL_LOCK` and InnoDB `external_lock`
+## 3.2 THR_LOCK / `MYSQL_LOCK` and InnoDB `store_lock` / `external_lock`
 
-**Mechanism.** After tables have been opened, `lock_tables()` constructs a `MYSQL_LOCK` and invokes `mysql_lock_tables()`:
+**Mechanism.** After tables have been opened, `lock_tables()` constructs a `MYSQL_LOCK` and invokes `mysql_lock_tables()`. For engines that use `THR_LOCK`, this path acquires table-level read/write exclusion. InnoDB no longer participates in that protocol: `ha_innobase::lock_count()` returns **0**, so `thr_multi_lock()` receives an empty lock array. The SQL layer nevertheless still invokes InnoDB’s `store_lock()`, `external_lock()`, and (under `LOCK TABLES`) `start_stmt()`. Those three entry points convey **statement intent** and **statement boundaries** to InnoDB; they are not the mechanism by which InnoDB serializes row access.
 
 ```cpp
 // sql/lock.cc — mysql_lock_tables() (structure)
 if (!(sql_lock = get_lock_data(thd, tables, count, GET_LOCK_STORE_LOCKS)))
   return nullptr;
+// get_lock_data → handler::store_lock() per TABLE
 
 if (sql_lock->table_count &&
     lock_external(thd, sql_lock->table, sql_lock->table_count)) {
-  // → handler::external_lock() for each TABLE
+  // → handler::external_lock(thd, F_RDLCK | F_WRLCK) per TABLE
   reset_lock_data_and_free(&sql_lock);
   goto end;
 }
@@ -478,62 +573,155 @@ if (sql_lock->table_count &&
 rc = thr_lock_errno_to_mysql[(int)thr_multi_lock(
     sql_lock->locks + sql_lock->lock_count, sql_lock->lock_count,
     &thd->lock_info, timeout)];
+// For InnoDB, lock_count == 0 → thr_multi_lock is a no-op
 ```
 
 ```text
 lock_tables()
   → mysql_lock_tables()
-      → get_lock_data / store_lock() per handler
-      → lock_external() → ha_innobase::external_lock()
-      → thr_multi_lock()   // empty for InnoDB (lock_count() == 0)
+      → get_lock_data(..., GET_LOCK_STORE_LOCKS)
+            → ha_innobase::store_lock(thd, to, thr_lock_type)   // phase 1: intent
+      → lock_external()
+            → ha_innobase::external_lock(thd, F_RDLCK|F_WRLCK) // phase 2: start stmt
+      → thr_multi_lock()   // empty for InnoDB
+...
+unlock / statement end
+  → ha_innobase::external_lock(thd, F_UNLCK)                   // phase 3: end stmt
 ```
 
-Engines that rely on `THR_LOCK` (historically MyISAM) use this path for table-level read/write exclusion. InnoDB reports `lock_count() == 0`, so `thr_multi_lock()` does not acquire an InnoDB table mutex for ordinary row DML. The material effect for InnoDB is the pair `store_lock()` / `external_lock()`, which:
+The handler documentation states the design explicitly: InnoDB relies on **MDL** (DDL / `LOCK TABLES`) together with its own **record/table lock subsystem**; `store_lock` / `external_lock` / `start_stmt` remain solely as the SQL↔engine control channel.
 
-1. Registers the engine on `Transaction_ctx` via `Ha_trx_info`.
-2. Establishes the statement context (`will_lock`, statement savepoint).
-3. Maps SQL write intent onto `row_prebuilt_t::select_lock_type`:
+### Phase 1 — `store_lock()`: declare locking-read intent
+
+`store_lock()` is invoked once per table while `MYSQL_LOCK` is assembled. Because `lock_count()` is 0, the returned `THR_LOCK_DATA **` is unused for queuing. The function’s effect is to initialise or adjust `row_prebuilt_t` fields that later govern `row_search_mvcc()`:
+
+1. **Ensure a `trx_t` exists** (`check_trx_exists(thd)`). Note that `m_prebuilt->trx` may not yet equal this `trx`; `external_lock()` later calls `update_thd()` to bind them.
+2. **On the first table of a statement** (`n_mysql_tables_in_use == 0`), copy the session isolation level into `trx->isolation_level`. At READ COMMITTED / READ UNCOMMITTED, an active consistent-read view is closed so the next read can open a fresh snapshot.
+3. **Map `thr_lock_type` (+ SQL command) onto a preliminary `select_lock_type`**, stored in both `m_prebuilt->select_lock_type` and `m_stored_select_lock_type`.
+4. **Record `SELECT … FOR UPDATE/SHARE` wait policy** (`SELECT_ORDINARY` / `SELECT_SKIP_LOCKED` / `SELECT_NOWAIT`) from the table-list lock descriptor.
+5. **Increment `trx->will_lock`** when a locking read is anticipated, so the transaction is not classified as a non-locking autocommit select.
+
+The preliminary lock-mode decision (simplified from the source) is:
+
+| Condition | Preliminary `select_lock_type` |
+|-----------|--------------------------------|
+| Plain `SELECT` (`TL_READ`, not under `LOCK TABLES`) | `LOCK_NONE` |
+| `SELECT … FOR SHARE` / `TL_READ_WITH_SHARED_LOCKS`, or non-SELECT DML at this stage | `LOCK_S` (may later strengthen to `LOCK_X`) |
+| `INSERT…SELECT` / `UPDATE…(SELECT…)` / `CREATE…SELECT` under RC/RU **without** `FOR UPDATE`/`FOR SHARE` | `LOCK_NONE` (consistent read of the source) |
+| `SELECT … FOR UPDATE` (still `TL_WRITE*` at `store_lock` time) | left as `LOCK_NONE` here; **`external_lock(F_WRLCK)` raises it to `LOCK_X`** |
 
 ```cpp
-// storage/innobase/handler/ha_innodb.cc — external_lock()
+// storage/innobase/handler/ha_innodb.cc — store_lock() (core branches)
+if (lock_type != TL_IGNORE && trx->n_mysql_tables_in_use == 0) {
+  trx->isolation_level =
+      innobase_trx_map_isolation_level(thd_get_trx_isolation(thd));
+  // RC/RU: close active read_view so the next consistent read gets a new snapshot
+}
+
+if (/* FOR SHARE, LOCK TABLES READ, or non-SELECT … */) {
+  if (/* RC/RU source SELECT inside INSERT/UPDATE/CREATE SELECT */) {
+    m_prebuilt->select_lock_type = LOCK_NONE;
+  } else {
+    m_prebuilt->select_lock_type = LOCK_S;   // may strengthen later
+  }
+  m_stored_select_lock_type = m_prebuilt->select_lock_type;
+} else if (lock_type != TL_IGNORE) {
+  /* SELECT … FOR UPDATE: LOCK_X is deferred to external_lock */
+  m_prebuilt->select_lock_type = LOCK_NONE;
+  m_stored_select_lock_type = LOCK_NONE;
+}
+```
+
+Thus `store_lock` answers: *will this table’s scans be consistent reads, shared locking reads, or (pending) exclusive locking reads?* It does not yet place InnoDB locks.
+
+### Phase 2 — `external_lock(F_RDLCK|F_WRLCK)`: start the statement on this table
+
+`lock_external()` then calls `external_lock` once per table with POSIX-style `F_RDLCK` (read) or `F_WRLCK` (write). This is the statement-entry barrier:
+
+1. **`update_thd(thd)`** binds `m_prebuilt->trx` to the current session transaction.
+2. **Reset statement-local cursor state** (`sql_stat_start = true`, clear fetch template).
+3. **Strengthen lock mode for write intent:**
+
+```cpp
+// ha_innodb.cc — external_lock()
 if (lock_type == F_WRLCK) {
-  /* If this is a SELECT, then it is in UPDATE TABLE ...
-  or SELECT ... FOR UPDATE */
+  /* UPDATE / DELETE / SELECT … FOR UPDATE / write side of DML */
   m_prebuilt->select_lock_type = LOCK_X;
   m_stored_select_lock_type = LOCK_X;
 }
-
-if (lock_type != F_UNLCK) {
-  innobase_register_trx(ht, thd, trx);
-  // LOCK_NONE / LOCK_S / LOCK_X chosen from store_lock + isolation
-  // (non-locking SELECT → NONE; FOR SHARE → S; FOR UPDATE → X)
-}
 ```
 
-Consequently, the search phase of `UPDATE` and of `SELECT … FOR UPDATE` already requests exclusive record locks through `row_search_mvcc()` before `ha_update_row()` executes. A non-locking `SELECT` retains `LOCK_NONE` and relies on MVCC read views alone.
+4. **For `F_RDLCK`**, retain the value established by `store_lock`, subject to SERIALIZABLE (plain `SELECT` in an explicit transaction becomes `LOCK_S`) and special cases for data-dictionary / ACL tables (`LOCK_NONE` when `no_read_locking` is set).
+5. **`innobase_register_trx`** links InnoDB into `Transaction_ctx` / `Ha_trx_info` so commit and rollback include this engine.
+6. Optionally take a true InnoDB **table** lock for `LOCK TABLES` when `innodb_table_locks` is enabled and autocommit is off (`row_lock_table`).
+7. Increment **`trx->n_mysql_tables_in_use`**, set `m_mysql_has_locked`, possibly increment `will_lock`, and call **`TrxInInnoDB::begin_stmt(trx)`** — establishing the statement savepoint used for statement-level rollback.
+
+The resulting locking-read matrix (from the handler’s own documentation) is:
+
+| Statement class | Isolation &lt; SERIALIZABLE | SERIALIZABLE (explicit trx) |
+|-----------------|----------------------------|-----------------------------|
+| Non-locking `SELECT` | `LOCK_NONE` | `LOCK_S` |
+| `SELECT … FOR SHARE` | `LOCK_S` | `LOCK_S` |
+| `SELECT … FOR UPDATE` / DML write path | `LOCK_X` | `LOCK_X` |
+
+`LOCK_NONE` denotes a consistent read via `ReadView`. `LOCK_S` / `LOCK_X` cause `row_search_mvcc()` to invoke `sel_set_rec_lock` before returning a row. Therefore the **search phase** of `UPDATE` already takes exclusive record locks before `ha_update_row()` runs.
+
+### Phase 3 — `external_lock(F_UNLCK)`: end the statement on this table
+
+When the SQL layer releases table locks, it calls `external_lock(F_UNLCK)` per table:
+
+1. **`TrxInInnoDB::end_stmt(trx)`** closes the statement scope.
+2. Decrement **`n_mysql_tables_in_use`**.
+3. When the count reaches **0**, the current SQL statement has finished using all InnoDB tables. Under autocommit (no open `BEGIN`), InnoDB may then **`innobase_commit`** the transaction; under an explicit transaction, locks and undo remain until `COMMIT` / `ROLLBACK`.
+
+### `start_stmt()` — the `LOCK TABLES` exception
+
+Under `LOCK TABLES`, MySQL may keep tables locked across statements and call **`start_stmt()`** instead of a full `external_lock` acquire for a subsequent statement on an already-locked handle. `start_stmt()` restores `select_lock_type` from `m_stored_select_lock_type`, re-registers the transaction, and begins a new statement savepoint. Temporary tables created inside `LOCK TABLES` (where `external_lock` was never called) force `LOCK_X` so subsequent updates remain safe.
+
+### Division of labour
+
+| Call | Timing | Effect on InnoDB concurrency |
+|------|--------|------------------------------|
+| `store_lock(thr_lock_type)` | Building `MYSQL_LOCK` | Sets isolation; proposes `select_lock_type` / `select_mode`; bumps `will_lock` |
+| `external_lock(F_WRLCK\|F_RDLCK)` | After store, before execution | Binds `trx`; may raise mode to `LOCK_X`; registers engine; `begin_stmt`; counts tables in use |
+| `external_lock(F_UNLCK)` | Unlock / statement end | `end_stmt`; last table may autocommit |
+| `start_stmt` | Next stmt under `LOCK TABLES` | Restores stored mode; new statement savepoint |
+| `row_search_mvcc` / `lock_rec_*` | During execution | Places actual record / gap / next-key locks |
+
+`store_lock` / `external_lock` therefore configure **how** subsequent scans lock; they do not themselves enqueue `lock_t` objects on index records.
 
 **Example — identical handshake, distinct InnoDB lock modes:**
 
 ```sql
--- Non-locking read: read intent → LOCK_NONE
+-- store_lock(TL_READ) → LOCK_NONE; external_lock(F_RDLCK) retains NONE
 SELECT * FROM t WHERE id = 10;
 
--- Locking read: write-style table lock → select_lock_type = LOCK_X
-SELECT * FROM t WHERE id = 10 FOR UPDATE;
+-- store_lock(TL_READ_WITH_SHARED_LOCKS) → LOCK_S; external_lock(F_RDLCK) retains S
+SELECT * FROM t WHERE id = 10 FOR SHARE;
 
--- DML: same F_WRLCK path as FOR UPDATE, followed by ha_update_row
+-- store_lock(TL_WRITE*) → provisional NONE; external_lock(F_WRLCK) → LOCK_X
+SELECT * FROM t WHERE id = 10 FOR UPDATE;
 UPDATE t SET c = 11 WHERE id = 10;
+```
+
+**Example — RC source select inside `INSERT … SELECT`:**
+
+```sql
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+INSERT INTO t SELECT * FROM src WHERE …;
+-- store_lock on src: LOCK_NONE (consistent read of the source)
+-- store_lock / external_lock on t: write path → LOCK_X for the insert target
 ```
 
 **Example — explicit table locks:**
 
 ```sql
-LOCK TABLES t WRITE;     -- SQL-layer table lock; excludes other sessions from the table
+LOCK TABLES t WRITE;     -- MDL + optional InnoDB table lock; subsequent stmts use start_stmt
 UPDATE t SET c = 1 WHERE id = 10;
-UNLOCK TABLES;
+UNLOCK TABLES;           -- external_lock(F_UNLCK) releases statement/table state
 ```
 
-For ordinary transactional DML, InnoDB record locks are the appropriate concurrency mechanism; `LOCK TABLES` is a coarser SQL-layer alternative.
+Under ordinary transactional DML, InnoDB record locks (§3.3–3.4) provide concurrency control; `LOCK TABLES` is a coarser SQL-layer alternative.
 
 ---
 
@@ -659,38 +847,117 @@ if (prebuilt->select_lock_type != LOCK_NONE) {
 }
 ```
 
-```plantuml
-@startuml
-left to right direction
-skinparam rectangle {
-  BorderColor #555555
-  BackgroundColor #F7F7F7
-}
-skinparam card {
-  BorderColor #333333
-  BackgroundColor #FFFFFF
-}
+### Index B-tree page layout and lock attachment
 
-rectangle "Index order on PRIMARY KEY (id)" {
-  card "gap\n(-inf, 10)" as G0
-  card "id = 10" as R10 #E8F0FE
-  card "gap\n(10, 20)" as G1
-  card "id = 20" as R20 #E8F0FE
-  card "gap\n(20, 30)" as G2
-  card "id = 30" as R30 #E8F0FE
-  card "gap / supremum\n(30, +inf)" as G3
+Record and gap locks are not represented as key intervals `(low_key, high_key)`. Each explicit lock request addresses a leaf-page record slot by the triple `(space_id, page_no, heap_no)`, with conflict semantics encoded in `lock_t::type_mode`. The attachment therefore depends on the index leaf-page layout.
 
-  G0 -[hidden]-> R10
-  R10 -[hidden]-> G1
-  G1 -[hidden]-> R20
-  R20 -[hidden]-> G2
-  G2 -[hidden]-> R30
-  R30 -[hidden]-> G3
-}
-@enduml
+![InnoDB leaf-page locks: heap_no, gaps, and bitmap storage](images/btree-record-gap-locks.svg)
+
+#### From `dict_index_t` to a leaf page
+
+A clustered or secondary index (`dict_index_t`) is organized as a B+tree. Concurrent DML resolves row identity, uniqueness checks, and gap protection on **leaf** pages. A leaf page cached in the buffer pool is a `buf_block_t` whose frame contains the page header together with the linked sequence of index records.
+
+#### Records on one leaf page
+
+Every leaf page allocates two system records at fixed heap numbers, followed by user records:
+
+| Slot | `heap_no` | Role |
+|------|-----------|------|
+| Infimum | `PAGE_HEAP_NO_INFIMUM` (0) | Pseudo-record denoting −∞; first in the page’s logical order |
+| Supremum | `PAGE_HEAP_NO_SUPREMUM` (1) | Pseudo-record denoting +∞; last in logical order; receives locks that cover the final gap after the last user record |
+| User records | ≥ 2 | Index entries; `heap_no` identifies the physical heap slot, not the SQL key value |
+
+**Definition of `heap_no`.** `heap_no` is the index of a record within the page’s physical record heap (`page_rec_get_heap_no`). Infimum and supremum occupy `0` and `1` permanently. User records receive successive free heap slots at insertion time. Deletions may leave unused slots; consequently heap numbers need not form a dense sequence and are not ordered by key value.
+
+Logical order on the page is defined by **next-record pointers**, independent of `heap_no` numeric order:
+
+```text
+infimum → [id=10, heap_no=2] → [id=20, heap_no=4] → [id=30, heap_no=3] → supremum
+              ↑                      ↑                      ↑
+         gap locks attach to the successor record’s heap_no (see diagram)
 ```
 
+A single leaf page therefore admits two distinct orderings: key order, used by range predicates and cursor scans; and `heap_no` order, used by lock-sys as a stable slot address within `(space_id, page_no)`.
+
+#### How `lock_t` encodes a record or gap on that page
+
+Explicit record-lock state is not stored in the leaf-page frame. The page contains only the index records (and thereby their `heap_no` slots). Each granted or waiting record lock is an in-memory `lock_t`:
+
+```cpp
+// storage/innobase/include/lock0priv.h
+struct lock_rec_t {
+  page_id_t page_id;   // leaf page addressed by this bitmap
+  uint32_t n_bits;     // bitmap length in bits (multiple of 8)
+  // NOTE: the lock bitmap is placed immediately after the lock struct
+};
+// lock_t::type_mode = LOCK_S|LOCK_X | LOCK_GAP|LOCK_REC_NOT_GAP|LOCK_ORDINARY | ...
+```
+
+**Storage of the bitmap.** A record `lock_t` is a variable-length object: a fixed-size header followed immediately by `n_bits / 8` bitmap bytes. Allocation requests `sizeof(lock_t) + bitmap_bytes` from the owning transaction’s lock heap, or reuses a pre-sized slot from `trx->lock.rec_pool`:
+
+```cpp
+// storage/innobase/lock/lock0lock.cc
+lock_t *lock_alloc_from_heap(mem_heap_t *heap, size_t bitmap_bytes) {
+  const size_t n_bytes = sizeof(lock_t) + bitmap_bytes;
+  auto ptr = mem_heap_alloc(heap, n_bytes);   // typically trx->lock.lock_heap
+  return reinterpret_cast<lock_t *>(ptr);
+}
+
+// storage/innobase/include/lock0priv.h — lock_t::bitset()
+const byte *bitmap = (const byte *)&this[1];  // first byte after the struct
+```
+
+The bitmap therefore resides in process memory owned by the transaction / lock subsystem (`trx->lock.lock_heap` or `rec_pool`), and is linked into `lock_sys->rec_hash` through `lock_t::hash` under the record’s `page_id`. It is never persisted in the tablespace page image. Field `rec_lock.n_bits` records only the bitmap length; the bit vector occupies the contiguous tail of the allocation. The logical identity of bit *i* is `(rec_lock.page_id, i)`, which denotes `heap_no == i` on that page.
+
+Bit *i* is set if and only if the lock request applies to **`heap_no == i`** on the given `page_id`. A single `lock_t` may set multiple bits on one page (as on a locking range scan). Precise mode flags in `type_mode` (`LOCK_S` / `LOCK_X`, gap, record-only, next-key, insert-intention) specify the conflict semantics of those bits; they do not alter the bitmap’s placement.
+
+| Mode bits on `heap_no` of record R | Coverage |
+|------------------------------------|----------|
+| `LOCK_REC_NOT_GAP` | Index record R only |
+| `LOCK_GAP` | Open gap preceding R (between the predecessor and R) |
+| `LOCK_ORDINARY` (next-key) | R together with the gap preceding R |
+| `LOCK_GAP \| LOCK_INSERT_INTENTION` | Waiting request to insert into the gap preceding R |
+
+There is no separate gap object in lock-sys: **the gap preceding R is represented by lock bits on R’s `heap_no`** (or on supremum for the final gap of the page).
+
+#### Insert: locating the gap by the successor
+
+An insert between two leaf records obtains the physical neighbors from the B-tree search. Gap conflict is evaluated exclusively against the **successor** record:
+
+```cpp
+// lock0lock.cc — lock_rec_insert_check_and_lock()
+const rec_t *next_rec = page_rec_get_next_const(rec);  // right neighbor / supremum
+ulint heap_no = page_rec_get_heap_no(next_rec);
+
+const ulint type_mode = LOCK_X | LOCK_GAP | LOCK_INSERT_INTENTION;
+auto conflicting =
+    lock_rec_other_has_conflicting(type_mode, block, heap_no, trx);
+```
+
+```text
+insert key 25 between id=20 and id=30
+  → predecessor = record id=20
+  → successor   = record id=30   (next_rec)
+  → examine locks whose bitmap has heap_no(id=30) set on this page_id
+  → if another transaction holds GAP or next-key there → wait (insert intention)
+```
+
+Modification of an **existing** index entry addresses that entry’s own `heap_no` (`lock_clust_rec_modify_check_and_lock`, or a locking scan positioned on the cursor record). Gap locks on neighboring records alone do not conflict with that update unless a next-key lock also covers the modified record.
+
+#### Relation to the modes below
+
+Subsections 3.4.1–3.4.4 instantiate the same storage mechanism with distinct `type_mode` bits on a common `(page_id, heap_no)` identity:
+
+| Subsection | Typical attachment |
+|------------|--------------------|
+| `LOCK_REC_NOT_GAP` | bit on the matched user `heap_no` only |
+| `LOCK_GAP` | bit on the boundary / next / supremum `heap_no`, with the gap flag set |
+| `LOCK_ORDINARY` | bit on the scanned `heap_no`, covering the record and the preceding gap |
+| `LOCK_INSERT_INTENTION` | waiting bit on the **successor** `heap_no` of the insert position |
+
 ### 3.4.1 Record lock only — `LOCK_REC_NOT_GAP`
+
+
 
 **Mechanism.** The lock covers the index record and excludes the preceding gap. Concurrent inserts into adjacent gaps remain admissible. InnoDB employs this mode when the conflict domain is confined to a single existing record—typically a unique equality lookup that locates a non-deleted row (`row_can_be_in_range && !gap_can_intersect_range` in the decision above).
 
@@ -714,7 +981,7 @@ lock_rec_convert_impl_to_expl(block, rec, index, offsets);
 BEGIN;
 SELECT * FROM t WHERE id = 20 FOR UPDATE;
 -- InnoDB: LOCK_X | LOCK_REC_NOT_GAP on clustered record id = 20
--- (unique hit; gaps (10,20) and (20,30) need not be locked)
+-- (unique equality hit; adjacent gaps (10,20) and (20,30) are not locked)
 
 -- Session B: blocked on the same record
 UPDATE t SET c = 99 WHERE id = 20;          -- waits
@@ -776,8 +1043,8 @@ A `LOCK_GAP` attached at `id = 30` precludes `INSERT … (25)` yet does not, by 
 BEGIN;
 UPDATE t SET c = c + 1 WHERE id BETWEEN 10 AND 20;
 -- Next-key exclusive locks on scanned index positions covering the range
--- (exact placement depends on the access method; a primary-key range
--- typically acquires next-key locks along the walk).
+-- (attachment depends on the access path; a primary-key range scan
+-- typically acquires next-key locks at successive leaf records).
 
 -- Session B
 UPDATE t SET c = 0 WHERE id = 10;     -- waits (record covered)
@@ -1053,45 +1320,18 @@ Foreign-key checks place S record/gap locks on parent or child index entries so 
 
 ## 6.1 From `THD` to `trx_t`
 
-```plantuml
-@startuml
-class THD {
-  MDL_context mdl_context
-  Transaction_ctx m_transaction
-  MYSQL_LOCK *lock
-}
+Session binding (`ha_data` → `innodb_session_t` → `trx_t`) and SQL-layer registration (`Transaction_ctx` / `Ha_trx_info`) are detailed under [Data Structure](#data-structure). In brief:
 
-class Transaction_ctx {
-  THD_TRANS m_scope_info[]  // statement + session
-}
-
-class THD_TRANS {
-  Ha_trx_info *m_ha_list
-}
-
-class Ha_trx_info {
-  handlerton *m_ht
-}
-
-class trx_t {
-  trx_id_t id
-  trx_state_t state
-  ReadView *read_view
-  trx_lock_t lock
-  isolation_level_t isolation_level
-  THD *mysql_thd
-  undo_no / last_sql_stat_start
-  commit_lsn
-}
-
-THD *-- Transaction_ctx
-Transaction_ctx *-- THD_TRANS
-THD_TRANS o-- Ha_trx_info
-Ha_trx_info ..> trx_t : check_trx_exists / innobase_trx_allocate
-@enduml
+```text
+check_trx_exists(thd)
+  → thd_to_trx(thd)                 // via innodb_session_t in ha_data[slot]
+  → innobase_trx_allocate(thd)      // if m_trx still null
+external_lock / start_stmt
+  → update_thd → m_prebuilt->trx = session trx
+  → innobase_register_trx → trans_register_ha (stmt ± session lists)
 ```
 
-`check_trx_exists(THD*)` lazily allocates `trx_t`. The first modifying operation calls `trx_start_if_not_started_xa()`. Isolation level is copied from the session into `trx_t` during lock setup; helpers such as `skip_gap_locks()` and `releases_non_matching_rows()` are derived from that field.
+The first modifying operation calls `trx_start_if_not_started_xa()`. Isolation level is copied from the session into `trx_t` during lock setup; helpers such as `skip_gap_locks()` and `releases_non_matching_rows()` are derived from that field.
 
 ## 6.2 Undo for INSERT and UPDATE
 
@@ -1207,10 +1447,10 @@ B -> LockSys : COMMIT
 
 # 9. Design takeaways
 
-1. **DML reuses the SELECT pipeline** until the sink: specialized loops or `Query_result_*` call `ha_write_row` / `ha_update_row`.
-2. **Three lock stories coexist** — MDL (DDL safety), SQL table locks (engine handshake), InnoDB record/gap locks (row concurrency). InnoDB does not depend on THR_LOCK for row serializability.
-3. **UPDATE locks twice conceptually** — X locking read to find rows, then clustered modify check + undo before the physical change.
-4. **INSERT pays for gaps it enters** — insert-intention waits on protective gap/next-key locks; uniqueness/FK checks add their own S/X locks.
-5. **Commit is coordinated** — statement vs session scope, binlog ordered/group commit, then InnoDB `trx_commit` releasing locks and applying flush policy.
+1. **Shared command pipeline.** DML follows the SELECT prepare / open / lock path until the write sink: specialized loops or `Query_result_*` invoke `ha_write_row` / `ha_update_row`.
+2. **Distinct lock layers.** MDL protects schema change; SQL-layer table locks convey statement intent to the engine; InnoDB record, gap, next-key, and insert-intention locks serialize row access. Row serializability does not depend on THR_LOCK for InnoDB.
+3. **UPDATE locking stages.** A locking read first acquires exclusive coverage of candidate records; the clustered modify path then reasserts record-only X and reports undo before the physical change.
+4. **INSERT and gaps.** An insert that enters a protected gap waits with insert-intention; uniqueness and foreign-key checks may additionally acquire shared or exclusive locks on conflicting records.
+5. **Commit coordination.** Statement versus session scope, binlog ordered / group commit, and InnoDB `trx_commit` jointly release locks and apply the configured flush policy.
 
 For the read-side iterator/optimizer path, see [MySQL Query Processing Internals](/post/data/db/mysql/query/). For page format, undo chains, and ReadView visibility, see [InnoDB Storage Engine Internals](/post/data/db/mysql/innodb/).
