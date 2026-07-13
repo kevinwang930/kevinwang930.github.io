@@ -173,6 +173,20 @@ InnoDB tables are stored as **Index-Organized Tables** using B+ Trees:
 
 ![Secondary Index Lookup](images/secondary-index.svg)
 
+*   **Index page frame (on-disk / buffer-pool image).** A leaf or non-leaf index page is a fixed-size byte array (commonly 16 KiB). Its durable layout comprises the file-page header (`FIL_PAGE_*`), the index page header (`PAGE_*`), the record heap (infimum, supremum, user records addressed by `heap_no`), the page directory, and the file trailer. Representative header fields include:
+
+| Field | Role |
+|-------|------|
+| `PAGE_N_DIR_SLOTS` | Number of page-directory slots |
+| `PAGE_HEAP_TOP` | Offset of the free space boundary in the heap |
+| `PAGE_N_HEAP` | Number of records allocated in the heap (including system records) |
+| `PAGE_N_RECS` | Number of user records currently in the page |
+| `PAGE_LEVEL` / `PAGE_INDEX_ID` | B+tree level and owning index identity |
+
+The page header and record heap describe **physical layout and index keys only**. They do **not** contain record locks, gap locks, next-key locks, or insert-intention locks. There is no lock bitmap, wait queue, or `lock_t` payload in the `.ibd` page image.
+
+*   **Where concurrency locks reside.** Explicit InnoDB row locks are process-memory objects (`lock_t`) allocated from the owning transaction’s lock heap (`trx_t::lock.lock_heap`, or a fixed `rec_pool` entry) and indexed by `lock_sys->rec_hash` under `page_id`. For a record lock, a bitmap packed immediately after the `lock_t` header marks which `heap_no` slots on that page the request covers; `type_mode` encodes shared/exclusive strength and gap versus record-only versus next-key versus insert-intention semantics. Those structures are discarded when the transaction releases its locks; they are not written by page flush or recovery redo for ordinary DML. (See [MySQL DML Internals](/post/data/db/mysql/dml/) §3.4 for identity `(page_id, heap_no)` and bitmap placement.)
+
 *   **Redo Logs**: A Write-Ahead Log (WAL) structure ensuring transactional durability (D of ACID). It resides physically on disk as circular ring files (`ib_logfile0`, `ib_logfile1`). The circular buffer operates using a Checkpoint pointer (representing page changes already flushed from RAM to disk tablespace blocks) and a Write pointer (the current active logging head). The active space between checkpoint and write pointers represents logs that must not be overwritten.
 
 ![Redo Log Circular Buffer](images/redo-log.svg)

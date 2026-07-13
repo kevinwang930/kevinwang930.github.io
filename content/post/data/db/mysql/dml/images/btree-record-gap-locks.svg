@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 900" width="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 920" width="100%">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="#455a64"/>
@@ -18,276 +18,294 @@
     </pattern>
   </defs>
 
-  <rect width="960" height="900" fill="#fafafa" rx="8"/>
+  <rect width="960" height="920" fill="#fafafa" rx="8"/>
 
-  <text x="480" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#263238">InnoDB leaf-page locks: heap_no, gaps, and bitmap storage</text>
-  <text x="480" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Logical identity (page_id, heap_no) versus contiguous lock_t + bitmap in process memory</text>
+  <text x="480" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">InnoDB leaf-page locks: heap_no, gap attachment, and lock_t bitmap</text>
+  <text x="480" y="44" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Logical identity (page_id, heap_no); storage: contiguous lock_t header + bitmap in process memory</text>
 
-  <!-- ===== Row 1: B+tree + leaf logical order ===== -->
-  <g transform="translate(20, 60)" filter="url(#softShadow)">
-    <rect width="170" height="188" fill="#ffffff" stroke="#546e7a" stroke-width="1.5" rx="6"/>
-    <rect width="170" height="24" fill="#546e7a" rx="6"/>
-    <rect y="14" width="170" height="12" fill="#546e7a"/>
-    <text x="85" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">B+Tree (dict_index_t)</text>
+  <!-- Row 1: B+tree + leaf logical order -->
+  <g transform="translate(20, 58)" filter="url(#softShadow)">
+    <rect width="168" height="184" fill="#ffffff" stroke="#546e7a" stroke-width="1.5" rx="6"/>
+    <rect width="168" height="24" fill="#546e7a" rx="6"/>
+    <rect y="14" width="168" height="12" fill="#546e7a"/>
+    <text x="84" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">B+Tree (dict_index_t)</text>
 
-    <rect x="45" y="40" width="80" height="26" fill="#eceff1" stroke="#546e7a" rx="3"/>
-    <text x="85" y="57" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Root / branch</text>
+    <rect x="44" y="40" width="80" height="26" fill="#eceff1" stroke="#546e7a" rx="3"/>
+    <text x="84" y="57" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Root / branch</text>
 
-    <rect x="12" y="90" width="66" height="34" fill="#fff8e1" stroke="#f9a825" rx="3"/>
-    <text x="45" y="105" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#f57f17">Leaf A</text>
-    <text x="45" y="118" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#795548">id &lt; 10</text>
+    <rect x="12" y="88" width="64" height="34" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+    <text x="44" y="103" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#f57f17">Leaf A</text>
+    <text x="44" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#795548">id &lt; 10</text>
 
-    <rect x="90" y="90" width="68" height="34" fill="#fffde7" stroke="#f57f17" stroke-width="2" rx="3"/>
-    <text x="124" y="105" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#e65100">Leaf B</text>
-    <text x="124" y="118" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#795548">id 10..30</text>
+    <rect x="90" y="88" width="66" height="34" fill="#fffde7" stroke="#f57f17" stroke-width="2" rx="3"/>
+    <text x="123" y="103" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#e65100">Leaf B</text>
+    <text x="123" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#795548">id 10..30</text>
 
-    <path d="M85 66 L45 90" stroke="#546e7a" stroke-width="1.2" marker-end="url(#arrow)"/>
-    <path d="M85 66 L124 90" stroke="#546e7a" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <path d="M84 66 L44 88" stroke="#546e7a" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <path d="M84 66 L123 88" stroke="#546e7a" stroke-width="1.2" marker-end="url(#arrow)"/>
 
-    <text x="85" y="148" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">Record / gap locks</text>
-    <text x="85" y="164" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">are resolved on leaves</text>
-    <text x="85" y="180" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">(buf_block_t frame)</text>
+    <text x="84" y="146" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">Row locks attach to</text>
+    <text x="84" y="160" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">leaf records only</text>
+    <text x="84" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">(buf_block_t frame)</text>
   </g>
 
-  <g transform="translate(206, 60)" filter="url(#softShadow)">
-    <rect width="734" height="188" fill="#ffffff" stroke="#e65100" stroke-width="1.6" rx="6"/>
-    <rect width="734" height="24" fill="#e65100" rx="6"/>
-    <rect y="14" width="734" height="12" fill="#e65100"/>
-    <text x="367" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Leaf page P - logical order (next-record pointers); hatched = gap owned by successor heap_no</text>
+  <g transform="translate(202, 58)" filter="url(#softShadow)">
+    <rect width="738" height="184" fill="#ffffff" stroke="#e65100" stroke-width="1.6" rx="6"/>
+    <rect width="738" height="24" fill="#e65100" rx="6"/>
+    <rect y="14" width="738" height="12" fill="#e65100"/>
+    <text x="369" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Leaf page P: logical order (next-record); hatched intervals are gaps owned by the successor heap_no</text>
 
-    <rect x="102" y="52" width="48" height="66" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
-    <rect x="242" y="52" width="48" height="66" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
-    <rect x="382" y="52" width="48" height="66" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
-    <rect x="522" y="52" width="48" height="66" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
+    <rect x="104" y="48" width="46" height="62" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
+    <rect x="244" y="48" width="46" height="62" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
+    <rect x="384" y="48" width="46" height="62" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
+    <rect x="524" y="48" width="46" height="62" fill="url(#gapHatch)" opacity="0.85" rx="2"/>
 
-    <rect x="20" y="52" width="82" height="66" fill="#eceff1" stroke="#607d8b" rx="4"/>
-    <text x="61" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">infimum</text>
-    <text x="61" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no=0</text>
-    <text x="61" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">-inf</text>
+    <rect x="22" y="48" width="82" height="62" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="63" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">infimum</text>
+    <text x="63" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no=0</text>
+    <text x="63" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">-inf</text>
 
-    <rect x="150" y="52" width="92" height="66" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
-    <text x="196" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">id=10</text>
-    <text x="196" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">heap_no=2</text>
-    <text x="196" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">user</text>
+    <rect x="150" y="48" width="94" height="62" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
+    <text x="197" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">id=10</text>
+    <text x="197" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">heap_no=2</text>
+    <text x="197" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">user</text>
 
-    <rect x="290" y="52" width="92" height="66" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2.2" rx="4"/>
-    <text x="336" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">id=20</text>
-    <text x="336" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">heap_no=4</text>
-    <text x="336" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">user</text>
+    <rect x="290" y="48" width="94" height="62" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2.2" rx="4"/>
+    <text x="337" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">id=20</text>
+    <text x="337" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">heap_no=4</text>
+    <text x="337" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">user</text>
 
-    <rect x="430" y="52" width="92" height="66" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
-    <text x="476" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">id=30</text>
-    <text x="476" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">heap_no=3</text>
-    <text x="476" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">user</text>
+    <rect x="430" y="48" width="94" height="62" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
+    <text x="477" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">id=30</text>
+    <text x="477" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">heap_no=3</text>
+    <text x="477" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">user</text>
 
-    <rect x="570" y="52" width="82" height="66" fill="#eceff1" stroke="#607d8b" rx="4"/>
-    <text x="611" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">supremum</text>
-    <text x="611" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no=1</text>
-    <text x="611" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">+inf</text>
+    <rect x="570" y="48" width="82" height="62" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="611" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">supremum</text>
+    <text x="611" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no=1</text>
+    <text x="611" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">+inf</text>
 
-    <path d="M102 85 L150 85" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
-    <path d="M242 85 L290 85" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
-    <path d="M382 85 L430 85" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
-    <path d="M522 85 L570 85" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
+    <path d="M104 79 L150 79" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
+    <path d="M244 79 L290 79" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
+    <path d="M384 79 L430 79" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
+    <path d="M524 79 L570 79" stroke="#455a64" stroke-width="1.4" marker-end="url(#arrow)"/>
 
-    <text x="126" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(-inf,10)</text>
-    <text x="266" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(10,20)</text>
-    <text x="406" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(20,30)</text>
-    <text x="546" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(30,+inf)</text>
+    <text x="127" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(-inf,10)</text>
+    <text x="267" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(10,20)</text>
+    <text x="407" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(20,30)</text>
+    <text x="547" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">(30,+inf)</text>
 
-    <text x="367" y="168" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#5d4037">Key order != heap_no order (id=20 has heap_no=4; id=30 has heap_no=3). Gaps attach to the right-hand record.</text>
+    <text x="369" y="158" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#5d4037">Key order is independent of heap_no (id=20 occupies slot 4; id=30 occupies slot 3).</text>
+    <text x="369" y="174" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#5d4037">Gap before record R is represented by lock bits on R's heap_no (successor attachment).</text>
   </g>
 
-  <!-- ===== Row 2: physical heap + bitmap storage ===== -->
-  <g transform="translate(20, 266)" filter="url(#softShadow)">
-    <rect width="330" height="230" fill="#ffffff" stroke="#5e35b1" stroke-width="1.5" rx="6"/>
-    <rect width="330" height="24" fill="#5e35b1" rx="6"/>
-    <rect y="14" width="330" height="12" fill="#5e35b1"/>
-    <text x="165" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Physical heap on page P (slot index)</text>
+  <!-- Row 2: physical heap + precise bitmap memory layout -->
+  <g transform="translate(20, 260)" filter="url(#softShadow)">
+    <rect width="300" height="248" fill="#ffffff" stroke="#5e35b1" stroke-width="1.5" rx="6"/>
+    <rect width="300" height="24" fill="#5e35b1" rx="6"/>
+    <rect y="14" width="300" height="12" fill="#5e35b1"/>
+    <text x="150" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Physical heap slots on page P</text>
 
-    <rect x="14" y="40" width="56" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
-    <text x="42" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">heap_no</text>
-    <rect x="70" y="40" width="120" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
-    <text x="130" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">content</text>
-    <rect x="190" y="40" width="126" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
-    <text x="253" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">location</text>
+    <rect x="12" y="40" width="54" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
+    <text x="39" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">heap_no</text>
+    <rect x="66" y="40" width="110" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
+    <text x="121" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">content</text>
+    <rect x="176" y="40" width="112" height="22" fill="#ede7f6" stroke="#7e57c2" rx="2"/>
+    <text x="232" y="55" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#4527a0">in page frame</text>
 
-    <rect x="14" y="62" width="56" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="42" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">0</text>
-    <rect x="70" y="62" width="120" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="130" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">infimum</text>
-    <rect x="190" y="62" width="126" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="253" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">page frame</text>
+    <rect x="12" y="62" width="54" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="39" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">0</text>
+    <rect x="66" y="62" width="110" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="121" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">infimum</text>
+    <rect x="176" y="62" width="112" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="232" y="77" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">yes</text>
 
-    <rect x="14" y="84" width="56" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="42" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">1</text>
-    <rect x="70" y="84" width="120" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="130" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">supremum</text>
-    <rect x="190" y="84" width="126" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
-    <text x="253" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">page frame</text>
+    <rect x="12" y="84" width="54" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="39" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">1</text>
+    <rect x="66" y="84" width="110" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="121" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">supremum</text>
+    <rect x="176" y="84" width="112" height="22" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="232" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">yes</text>
 
-    <rect x="14" y="106" width="56" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="42" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">2</text>
-    <rect x="70" y="106" width="120" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="130" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#0d47a1">id=10</text>
-    <rect x="190" y="106" width="126" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="253" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">page frame</text>
+    <rect x="12" y="106" width="54" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="39" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">2</text>
+    <rect x="66" y="106" width="110" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="121" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#0d47a1">id=10</text>
+    <rect x="176" y="106" width="112" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="232" y="121" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">yes</text>
 
-    <rect x="14" y="128" width="56" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="42" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">3</text>
-    <rect x="70" y="128" width="120" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="130" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#0d47a1">id=30</text>
-    <rect x="190" y="128" width="126" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
-    <text x="253" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">page frame</text>
+    <rect x="12" y="128" width="54" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="39" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">3</text>
+    <rect x="66" y="128" width="110" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="121" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#0d47a1">id=30</text>
+    <rect x="176" y="128" width="112" height="22" fill="#e3f2fd" stroke="#42a5f5" rx="2"/>
+    <text x="232" y="143" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">yes</text>
 
-    <rect x="14" y="150" width="56" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
-    <text x="42" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">4</text>
-    <rect x="70" y="150" width="120" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
-    <text x="130" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">id=20</text>
-    <rect x="190" y="150" width="126" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
-    <text x="253" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#2e7d32">page frame</text>
+    <rect x="12" y="150" width="54" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
+    <text x="39" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">4</text>
+    <rect x="66" y="150" width="110" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
+    <text x="121" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">id=20</text>
+    <rect x="176" y="150" width="112" height="22" fill="#c8e6c9" stroke="#43a047" stroke-width="2" rx="2"/>
+    <text x="232" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#2e7d32">yes</text>
 
-    <text x="165" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828" font-weight="700">No lock bitmap on the page image</text>
-    <text x="165" y="214" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Slots need not be dense or key-ordered</text>
+    <text x="150" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">heap_no = physical slot index</text>
+    <text x="150" y="214" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">(page_rec_get_heap_no)</text>
+    <text x="150" y="234" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Slots need not be dense or key-ordered</text>
   </g>
 
-  <g transform="translate(366, 266)" filter="url(#softShadow)">
-    <rect width="574" height="230" fill="#ffffff" stroke="#c62828" stroke-width="1.6" rx="6"/>
-    <rect width="574" height="24" fill="#c62828" rx="6"/>
-    <rect y="14" width="574" height="12" fill="#c62828"/>
-    <text x="287" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Bitmap storage: sizeof(lock_t) + n_bits/8 in trx-&gt;lock.lock_heap</text>
+  <!-- Bitmap storage panel - improved -->
+  <g transform="translate(336, 260)" filter="url(#softShadow)">
+    <rect width="604" height="248" fill="#ffffff" stroke="#c62828" stroke-width="1.6" rx="6"/>
+    <rect width="604" height="24" fill="#c62828" rx="6"/>
+    <rect y="14" width="604" height="12" fill="#c62828"/>
+    <text x="302" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">lock_t bitmap: variable-length object in trx-&gt;lock.lock_heap</text>
 
-    <rect x="14" y="42" width="120" height="44" fill="#efebe9" stroke="#6d4c41" rx="3"/>
-    <text x="74" y="60" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#4e342e">trx_t</text>
-    <text x="74" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">lock.lock_heap</text>
-    <path d="M74 86 L74 100" stroke="#455a64" stroke-width="1.3" marker-end="url(#arrow)"/>
+    <!-- ownership chain compact horizontal -->
+    <rect x="12" y="40" width="108" height="36" fill="#efebe9" stroke="#6d4c41" rx="3"/>
+    <text x="66" y="56" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#4e342e">trx_t</text>
+    <text x="66" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#5d4037">lock.lock_heap</text>
+    <path d="M120 58 L138 58" stroke="#455a64" stroke-width="1.3" marker-end="url(#arrow)"/>
 
-    <rect x="14" y="102" width="120" height="44" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
-    <text x="74" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">mem_heap_alloc</text>
-    <text x="74" y="136" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">header + bitmap</text>
-    <path d="M134 124 L154 124" stroke="#455a64" stroke-width="1.3" marker-end="url(#arrow)"/>
+    <rect x="140" y="40" width="120" height="36" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+    <text x="200" y="56" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">mem_heap_alloc</text>
+    <text x="200" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#5d4037">sizeof(lock_t)+n_bits/8</text>
+    <path d="M260 58 L278 58" stroke="#455a64" stroke-width="1.3" marker-end="url(#arrow)"/>
 
-    <rect x="156" y="42" width="196" height="120" fill="#ffe0b2" stroke="#ef6c00" stroke-width="1.8" rx="4"/>
-    <text x="254" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">lock_t header</text>
-    <text x="166" y="82" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">trx* / type_mode / index*</text>
-    <text x="166" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">hash* ? lock_sys-&gt;rec_hash</text>
-    <text x="166" y="114" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">rec_lock.page_id = P</text>
-    <text x="166" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">rec_lock.n_bits = N (length)</text>
-    <text x="254" y="150" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#bf360c" font-weight="600">bits are not fields of the struct</text>
+    <!-- contiguous slab labeled as one allocation -->
+    <rect x="280" y="36" width="312" height="44" fill="none" stroke="#bf360c" stroke-width="1.5" stroke-dasharray="4 3" rx="4"/>
+    <text x="436" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#bf360c">one contiguous allocation</text>
 
-    <rect x="352" y="42" width="208" height="120" fill="#ffcdd2" stroke="#c62828" stroke-width="2.2" rx="4"/>
-    <text x="456" y="60" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#b71c1c">bitmap = (byte*)&amp;lock[1]</text>
-    <text x="456" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#c62828">contiguous tail bytes</text>
+    <rect x="286" y="40" width="148" height="36" fill="#ffe0b2" stroke="#ef6c00" stroke-width="1.8" rx="3"/>
+    <text x="360" y="56" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">lock_t header</text>
+    <text x="360" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#5d4037">fixed sizeof(lock_t)</text>
 
-    <text x="366" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">idx</text>
-    <rect x="388" y="84" width="24" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
-    <text x="400" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#9e9e9e">0</text>
-    <rect x="416" y="84" width="24" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
-    <text x="428" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#9e9e9e">0</text>
-    <rect x="444" y="84" width="24" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
-    <text x="456" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#9e9e9e">0</text>
-    <rect x="472" y="84" width="24" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
-    <text x="484" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#9e9e9e">0</text>
-    <rect x="500" y="82" width="28" height="26" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2" rx="2"/>
-    <text x="514" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">1</text>
-    <rect x="532" y="84" width="20" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
-    <text x="542" y="99" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#bdbdbd">.</text>
+    <rect x="434" y="40" width="150" height="36" fill="#ffcdd2" stroke="#c62828" stroke-width="2" rx="3"/>
+    <text x="509" y="56" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">bitmap bytes</text>
+    <text x="509" y="70" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#c62828">(byte*)&amp;lock[1]</text>
 
-    <text x="400" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#4527a0">0</text>
-    <text x="428" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#4527a0">1</text>
-    <text x="456" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#0d47a1">2</text>
-    <text x="484" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#0d47a1">3</text>
-    <text x="514" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1b5e20">4</text>
+    <!-- header fields detail -->
+    <rect x="12" y="92" width="250" height="100" fill="#fff8e1" stroke="#ef6c00" rx="3"/>
+    <text x="137" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">Header fields (not the bits)</text>
+    <text x="22" y="128" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">trx*, index*, hash* (rec_hash chain)</text>
+    <text x="22" y="144" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">type_mode: S|X + GAP|REC_NOT_GAP|...</text>
+    <text x="22" y="160" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">rec_lock.page_id = P</text>
+    <text x="22" y="176" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#5d4037">rec_lock.n_bits = N (bitmap length only)</text>
 
-    <text x="456" y="148" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="600">bit[4]=1 ? heap_no 4 (id=20) on page P</text>
+    <!-- bits detail -->
+    <rect x="274" y="92" width="318" height="100" fill="#ffebee" stroke="#c62828" rx="3"/>
+    <text x="433" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">Bitmap: bit[i] addresses heap_no i on page P</text>
 
-    <text x="14" y="178" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Access: lock_t::bitset() ? (const byte*)&amp;this[1]</text>
-    <text x="14" y="196" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Alternative pool: trx-&gt;lock.rec_pool[] for fixed-size record locks</text>
-    <text x="14" y="214" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Not persisted in .ibd; released when the transaction discards locks</text>
+    <text x="286" y="128" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">bit</text>
+    <rect x="308" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="321" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#9e9e9e">0</text>
+    <rect x="338" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="351" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#9e9e9e">0</text>
+    <rect x="368" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="381" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#9e9e9e">0</text>
+    <rect x="398" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="411" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#9e9e9e">0</text>
+    <rect x="428" y="112" width="30" height="26" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2" rx="2"/>
+    <text x="443" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">1</text>
+    <rect x="462" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="475" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#9e9e9e">0</text>
+    <rect x="492" y="114" width="26" height="22" fill="#eeeeee" stroke="#9e9e9e" rx="2"/>
+    <text x="505" y="129" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#bdbdbd">...</text>
+
+    <text x="321" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#4527a0">0</text>
+    <text x="351" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#4527a0">1</text>
+    <text x="381" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#0d47a1">2</text>
+    <text x="411" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#0d47a1">3</text>
+    <text x="443" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1b5e20">4</text>
+    <text x="475" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#90a4ae">5</text>
+
+    <text x="433" y="174" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#2e7d32" font-weight="600">bit[4]=1 denotes heap_no 4 (id=20) on page P</text>
+
+    <text x="12" y="214" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">Access: lock_t::bitset() returns Bitset over (const byte*)&amp;this[1], length n_bits/8</text>
+    <text x="12" y="230" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">Pool alternative: trx-&gt;lock.rec_pool[] when sizeof(lock_t)+bitmap &lt;= REC_LOCK_SIZE</text>
   </g>
 
-  <!-- ===== Row 3: mode panels ===== -->
-  <g transform="translate(20, 514)">
+  <!-- Row 3: mode panels -->
+  <g transform="translate(20, 526)">
     <g filter="url(#softShadow)">
-      <rect width="298" height="196" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="6"/>
+      <rect width="298" height="188" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="6"/>
       <rect width="298" height="24" fill="#2e7d32" rx="6"/>
       <rect y="14" width="298" height="12" fill="#2e7d32"/>
       <text x="149" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">LOCK_REC_NOT_GAP on id=20</text>
 
-      <rect x="28" y="44" width="48" height="34" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
-      <text x="52" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">10</text>
-      <rect x="84" y="44" width="26" height="34" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.7"/>
-      <rect x="118" y="42" width="56" height="38" fill="#c8e6c9" stroke="#1b5e20" stroke-width="2.4" rx="3"/>
-      <text x="146" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1b5e20">20</text>
-      <rect x="182" y="44" width="26" height="34" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.7"/>
-      <rect x="216" y="44" width="48" height="34" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
-      <text x="240" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">30</text>
+      <rect x="28" y="42" width="48" height="32" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
+      <text x="52" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">10</text>
+      <rect x="84" y="42" width="26" height="32" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.7"/>
+      <rect x="118" y="40" width="56" height="36" fill="#c8e6c9" stroke="#1b5e20" stroke-width="2.4" rx="3"/>
+      <text x="146" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1b5e20">20</text>
+      <rect x="182" y="42" width="26" height="32" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.7"/>
+      <rect x="216" y="42" width="48" height="32" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
+      <text x="240" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">30</text>
 
-      <text x="149" y="100" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">bit[heap_no=4] set; record only</text>
-      <text x="149" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="600">INSERT into adjacent gaps admissible</text>
-      <text x="149" y="142" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">LOCK_X | LOCK_REC_NOT_GAP</text>
-      <text x="149" y="166" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Unique equality hit typically uses this</text>
+      <text x="149" y="96" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">bit[heap_no=4] set; record only</text>
+      <text x="149" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="600">Adjacent gap inserts remain admissible</text>
+      <text x="149" y="138" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">LOCK_X | LOCK_REC_NOT_GAP</text>
+      <text x="149" y="160" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Typical unique equality hit</text>
     </g>
 
     <g transform="translate(314,0)" filter="url(#softShadow)">
-      <rect width="298" height="196" fill="#ffffff" stroke="#ef6c00" stroke-width="1.5" rx="6"/>
+      <rect width="298" height="188" fill="#ffffff" stroke="#ef6c00" stroke-width="1.5" rx="6"/>
       <rect width="298" height="24" fill="#ef6c00" rx="6"/>
       <rect y="14" width="298" height="12" fill="#ef6c00"/>
       <text x="149" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">LOCK_GAP on id=20</text>
 
-      <rect x="28" y="44" width="48" height="34" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
-      <text x="52" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">10</text>
-      <rect x="84" y="44" width="36" height="34" fill="url(#gapHatch)" stroke="#e65100" stroke-width="2" rx="2"/>
-      <text x="102" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" font-weight="700" fill="#e65100">gap</text>
-      <rect x="128" y="44" width="56" height="34" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.5" rx="3"/>
-      <text x="156" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#e65100">20</text>
-      <rect x="192" y="44" width="26" height="34" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.5"/>
-      <rect x="226" y="44" width="44" height="34" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
-      <text x="248" y="65" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">30</text>
+      <rect x="28" y="42" width="48" height="32" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
+      <text x="52" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">10</text>
+      <rect x="84" y="42" width="36" height="32" fill="url(#gapHatch)" stroke="#e65100" stroke-width="2" rx="2"/>
+      <text x="102" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" font-weight="700" fill="#e65100">gap</text>
+      <rect x="128" y="42" width="56" height="32" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.5" rx="3"/>
+      <text x="156" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#e65100">20</text>
+      <rect x="192" y="42" width="26" height="32" fill="#fff3e0" stroke="#ffcc80" stroke-dasharray="3 2" rx="2" opacity="0.5"/>
+      <rect x="226" y="42" width="44" height="32" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
+      <text x="248" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">30</text>
 
-      <path d="M156 86 L156 96 L102 96 L102 78" fill="none" stroke="#e65100" stroke-width="1.3" marker-end="url(#arrowOrange)"/>
-      <text x="168" y="100" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#e65100">bit on heap_no of 20</text>
+      <path d="M156 82 L156 92 L102 92 L102 74" fill="none" stroke="#e65100" stroke-width="1.3" marker-end="url(#arrowOrange)"/>
+      <text x="168" y="96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#e65100">bit on heap_no of 20</text>
 
-      <text x="149" y="122" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Covers gap (10,20) only</text>
-      <text x="149" y="142" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#e65100" font-weight="600">UPDATE id=20 not blocked by gap alone</text>
-      <text x="149" y="166" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">type_mode includes LOCK_GAP</text>
+      <text x="149" y="118" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Covers gap (10,20) only</text>
+      <text x="149" y="138" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#e65100" font-weight="600">Does not block UPDATE of id=20 alone</text>
+      <text x="149" y="160" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">type_mode includes LOCK_GAP</text>
     </g>
 
     <g transform="translate(628,0)" filter="url(#softShadow)">
-      <rect width="312" height="196" fill="#ffffff" stroke="#00695c" stroke-width="1.5" rx="6"/>
+      <rect width="312" height="188" fill="#ffffff" stroke="#00695c" stroke-width="1.5" rx="6"/>
       <rect width="312" height="24" fill="#00695c" rx="6"/>
       <rect y="14" width="312" height="12" fill="#00695c"/>
       <text x="156" y="17" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Next-key + INSERT into gap</text>
 
-      <rect x="18" y="42" width="44" height="32" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
-      <text x="40" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">20</text>
-      <rect x="68" y="42" width="40" height="32" fill="url(#gapHatch)" stroke="#00695c" stroke-width="2" rx="2"/>
-      <text x="88" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" font-weight="700" fill="#00695c">gap</text>
-      <rect x="114" y="40" width="56" height="36" fill="#b2dfdb" stroke="#004d40" stroke-width="2.2" rx="3"/>
-      <text x="142" y="56" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#004d40">30</text>
-      <text x="142" y="69" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="7" fill="#00695c">ORDINARY</text>
-      <rect x="180" y="42" width="44" height="32" fill="#eceff1" stroke="#90a4ae" rx="3"/>
-      <text x="202" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="7" fill="#546e7a">sup</text>
+      <rect x="18" y="40" width="44" height="30" fill="#e3f2fd" stroke="#90caf9" rx="3"/>
+      <text x="40" y="59" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#1565c0">20</text>
+      <rect x="68" y="40" width="40" height="30" fill="url(#gapHatch)" stroke="#00695c" stroke-width="2" rx="2"/>
+      <text x="88" y="59" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" font-weight="700" fill="#00695c">gap</text>
+      <rect x="114" y="38" width="56" height="34" fill="#b2dfdb" stroke="#004d40" stroke-width="2.2" rx="3"/>
+      <text x="142" y="53" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" font-weight="700" fill="#004d40">30</text>
+      <text x="142" y="66" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="7" fill="#00695c">ORDINARY</text>
+      <rect x="180" y="40" width="44" height="30" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+      <text x="202" y="59" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="7" fill="#546e7a">sup</text>
 
-      <path d="M88 80 L88 94 L142 94 L142 76" fill="none" stroke="#00695c" stroke-width="1.2" marker-end="url(#arrowTeal)"/>
-      <text x="158" y="88" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#00695c">next-key on heap_no(30)</text>
+      <path d="M88 76 L88 90 L142 90 L142 72" fill="none" stroke="#00695c" stroke-width="1.2" marker-end="url(#arrowTeal)"/>
+      <text x="158" y="84" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#00695c">next-key on heap_no(30)</text>
 
-      <text x="156" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">INSERT id=25: successor = id=30</text>
-      <text x="156" y="136" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#00695c" font-weight="600">conflict check on heap_no of 30</text>
-      <text x="156" y="156" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">wait: LOCK_X|LOCK_GAP|INSERT_INTENTION</text>
-      <text x="156" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">lock_rec_insert_check_and_lock()</text>
+      <text x="156" y="112" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">INSERT id=25: successor = id=30</text>
+      <text x="156" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#00695c" font-weight="600">Conflict check on heap_no of 30</text>
+      <text x="156" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">wait: LOCK_X|LOCK_GAP|INSERT_INTENTION</text>
+      <text x="156" y="172" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">lock_rec_insert_check_and_lock()</text>
     </g>
   </g>
 
   <!-- footer -->
-  <g transform="translate(20, 728)">
-    <rect width="920" height="152" fill="#ffffff" stroke="#cfd8dc" stroke-width="1" rx="6"/>
-    <text x="16" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Summary</text>
-    <text x="16" y="46" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no indexes the physical record slot on the leaf page; key order is defined by next-record pointers and need not match heap_no order.</text>
-    <text x="16" y="66" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">The lock bitmap resides immediately after lock_t in process memory (lock_heap / rec_pool), not in the tablespace page. bit[i] denotes heap_no i on rec_lock.page_id.</text>
-    <text x="16" y="86" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">type_mode = LOCK_S|LOCK_X combined with LOCK_REC_NOT_GAP / LOCK_GAP / LOCK_ORDINARY [/ LOCK_INSERT_INTENTION].</text>
-    <text x="16" y="106" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Gap before record R is not a separate object: it is the GAP or next-key flag on R's heap_no (or on supremum for the final gap).</text>
-    <text x="16" y="126" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">lock_sys-&gt;rec_hash lists lock_t by page_id; insert conflict examination uses the successor heap_no only.</text>
-    <text x="16" y="146" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">One lock_t may set multiple bits (locking range scan). Bits beyond n_bits are treated as unset if the page later allocates additional heap slots.</text>
+  <g transform="translate(20, 732)">
+    <rect width="920" height="168" fill="#ffffff" stroke="#cfd8dc" stroke-width="1" rx="6"/>
+    <text x="16" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Identity versus storage</text>
+    <text x="16" y="46" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">heap_no indexes the physical record slot on the leaf page. Key order is defined by next-record pointers and need not coincide with heap_no order.</text>
+    <text x="16" y="66" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">The lock bitmap is the contiguous byte array immediately following the lock_t header in process memory (lock_heap or rec_pool). It is not stored in the tablespace page image.</text>
+    <text x="16" y="86" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">bit[i] together with rec_lock.page_id denotes (page P, heap_no i). type_mode selects conflict semantics: LOCK_REC_NOT_GAP, LOCK_GAP, LOCK_ORDINARY, or LOCK_INSERT_INTENTION.</text>
+    <text x="16" y="106" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">The gap preceding record R is not a separate object; it is the GAP or next-key flag on R's heap_no (or on supremum for the final gap of the page).</text>
+    <text x="16" y="126" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">lock_sys-&gt;rec_hash chains lock_t by page_id. Insert conflict examination uses the successor heap_no only.</text>
+    <text x="16" y="146" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">One lock_t may set multiple bits (locking range scan). Indices beyond n_bits are treated as unset if the page later allocates additional heap slots.</text>
   </g>
 </svg>
