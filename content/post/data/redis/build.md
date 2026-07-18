@@ -1,7 +1,6 @@
 ---
 title: "Redis Build from Source"
-date: 2025-01-26T10:38:29+07:00
-draft: true
+date: 2026-07-18T10:38:29+07:00
 categories:
 - data
 - cache
@@ -14,7 +13,7 @@ keywords:
 - cache
 #thumbnailImage: //example.com/image.jpg
 ---
-This article introduces Redis config and usages
+How to build Redis from source on Fedora, configure a non-default port, and open the tree in CLion. For architecture and data types, see the [Redis internals overview](architecture/).
 <!--more-->
 
 # Build Redis from source (Fedora)
