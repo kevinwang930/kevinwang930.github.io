@@ -1014,6 +1014,150 @@ Subsections 3.4.1–3.4.4 instantiate the same storage mechanism with distinct `
 | `LOCK_ORDINARY` | bit on the scanned `heap_no`, covering the record and the preceding gap |
 | `LOCK_INSERT_INTENTION` | waiting bit on the **successor** `heap_no` of the insert position |
 
+### When gap locks are triggered
+
+A gap lock is not installed merely because a predicate mentions a range. InnoDB places `LOCK_GAP` or next-key (`LOCK_ORDINARY`, which includes the preceding gap) only when **all** of the following hold in substance: the statement is a **locking** read or write path (`select_lock_type != LOCK_NONE`, or an insert uniqueness / foreign-key probe), the transaction isolation level still permits gap locking, and the cursor decides that the **gap preceding the current leaf record** can intersect the search range (or that a uniqueness probe must close the gap before the first unequal / supremum record). Ordinary consistent reads never take these locks.
+
+#### Gate: isolation and `skip_gap_locks()`
+
+`trx_t::skip_gap_locks()` is the primary switch for ordinary locking scans. It is true under READ UNCOMMITTED and READ COMMITTED, and false under REPEATABLE READ and SERIALIZABLE:
+
+```cpp
+// storage/innobase/include/trx0trx.h
+bool skip_gap_locks() const {
+  switch (isolation_level) {
+    case READ_UNCOMMITTED:
+    case READ_COMMITTED:
+      return (true);
+    case REPEATABLE_READ:
+    case SERIALIZABLE:
+      return (false);
+  }
+  // ...
+}
+```
+
+When the flag is true, `row_compare_row_to_range()` forces `gap_can_intersect_range = false`, so the locking scan falls through to `LOCK_REC_NOT_GAP` rather than `LOCK_GAP` / `LOCK_ORDINARY`:
+
+```cpp
+// storage/innobase/row/row0sel.cc — row_compare_row_to_range()
+if (!set_also_gap_locks || trx->skip_gap_locks() ||
+    (unique_search && !rec_get_deleted_flag(rec, comp)) ||
+    dict_index_is_spatial(index) ||
+    (index == clust_index && mode == PAGE_CUR_GE && direction == 0 &&
+     /* … exact PK GE hit … */)) {
+  row_to_range_relation.gap_can_intersect_range = false;
+  return (row_to_range_relation);
+}
+```
+
+Thus under READ COMMITTED an `UPDATE … WHERE id > 20` still locks **matching records**, but does not, on this path, lock the open gaps that RR would protect against phantoms.
+
+#### Locking index scan: `LOCK_GAP` versus next-key versus record-only
+
+After the range relation is computed, `row_search_mvcc()` maps it to a precise mode and calls `sel_set_rec_lock()`:
+
+```cpp
+// storage/innobase/row/row0sel.cc — row_search_mvcc()
+if (prebuilt->select_lock_type != LOCK_NONE) {
+  auto row_to_range_relation = row_compare_row_to_range(...);
+  ulint lock_type;
+  if (row_to_range_relation.row_can_be_in_range) {
+    lock_type = row_to_range_relation.gap_can_intersect_range
+                    ? LOCK_ORDINARY      // record + preceding gap (next-key)
+                    : LOCK_REC_NOT_GAP;  // unique equality-style hit
+  } else {
+    lock_type = row_to_range_relation.gap_can_intersect_range
+                    ? LOCK_GAP           // gap only (e.g. past end of range)
+                    : /* not found */;
+  }
+  err = sel_set_rec_lock(..., prebuilt->select_lock_type, lock_type, ...);
+}
+```
+
+| Condition on the current leaf record | Precise mode | Typical SQL situation |
+|--------------------------------------|--------------|------------------------|
+| Row may match; gap may meet the range | `LOCK_ORDINARY` | RR range scan of matching keys (`id > 20` on visited rows) |
+| Row may match; gap need not be locked | `LOCK_REC_NOT_GAP` | Unique equality hit; RC ordinary scan |
+| Row cannot match; gap may meet the range | `LOCK_GAP` | Boundary / first record after the locked interval |
+| Neither | no lock; search ends | Cursor past a stop tuple with no residual gap |
+
+Pure `LOCK_GAP` (without the record) is therefore the case where the engine still needs to **close an open interval** but does not claim the boundary row itself—for example a record beyond `end_range`, or the first unequal key during certain insert probes.
+
+Additional explicit `LOCK_GAP` placements appear when scanning **downward** (to block phantoms for `ORDER BY … DESC`) and when locking the **supremum** gap at the end of a leaf while the range still extends:
+
+```cpp
+// row0sel.cc — after open, descending locking scan
+if (!moves_up && !page_rec_is_supremum(rec) && set_also_gap_locks &&
+    !trx->skip_gap_locks() && prebuilt->select_lock_type != LOCK_NONE &&
+    !dict_index_is_spatial(index)) {
+  const rec_t *next_rec = page_rec_get_next_const(rec);
+  err = sel_set_rec_lock(..., next_rec, ..., LOCK_GAP, thr, &mtr);
+}
+```
+
+```cpp
+// row0sel.cc — supremum encountered while moving up on a locking scan
+if (set_also_gap_locks && !trx->skip_gap_locks() &&
+    prebuilt->select_lock_type != LOCK_NONE &&
+    !dict_index_is_spatial(index)) {
+  err = sel_set_rec_lock(..., rec /* supremum */, ..., LOCK_ORDINARY, thr, &mtr);
+  // LOCK_ORDINARY on supremum is gap coverage for (+∞ on this page)
+}
+```
+
+Transactional gap / next-key bits attach only to **leaf** heap slots (user records or supremum). Internal B+tree pages are protected solely by short page latches inside mini-transactions, not by these `lock_t` modes.
+
+#### Insert uniqueness probe
+
+A plain `INSERT` that checks a unique index also takes gap / next-key locks so that a concurrent inserter cannot create a duplicate in an adjacent gap before the first transaction commits. On the first **unequal** (“next”) record the probe requests **gap only**; equal keys take next-key:
+
+```cpp
+// storage/innobase/row/row0ins.cc — duplicate-key scan
+} else if (is_supremum) {
+  /* Equivalent to LOCK_GAP on the final open gap. */
+  lock_type = LOCK_ORDINARY;
+} else if (is_next) {
+  /* Only gap lock is required on next record. */
+  lock_type = LOCK_GAP;
+} else {
+  /* Next key lock for all equal keys. */
+  lock_type = LOCK_ORDINARY;
+}
+err = row_ins_set_rec_lock(LOCK_S, lock_type, block, rec, index, offsets, thr);
+```
+
+For data-dictionary / SDI tables, `dict_table_t::skip_gap_locks()` forces record-only behaviour on this probe (MDL already serializes DD changes). That table-level helper is distinct from `trx_t::skip_gap_locks()`.
+
+#### When gap locks are *not* taken
+
+| Situation | Outcome |
+|-----------|---------|
+| Plain `SELECT` (consistent read, `LOCK_NONE`) | No record or gap locks |
+| RC / RU ordinary locking scan (`trx->skip_gap_locks()`) | Record locks without gap / next-key on this path |
+| Unique equality on a live clustered row under RR | Often `LOCK_REC_NOT_GAP` (gap bit cleared in `row_compare_row_to_range`) |
+| Spatial indexes | Predicate / page locks instead of ordinary gap heuristics |
+
+Inserts that later wait on an already protected gap enqueue `LOCK_GAP | LOCK_INSERT_INTENTION` on the **successor** (§3.4.4); that wait mode is triggered by a **prior** gap or next-key holder, not by the insert’s own range scan.
+
+**Example — trigger under RR versus skip under RC:**
+
+```sql
+-- Session A
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN;
+SELECT * FROM t WHERE id > 20 FOR UPDATE;
+-- locking scan: LOCK_ORDINARY / LOCK_GAP on visited leaf slots and supremums
+-- → INSERT id=25 in Session B waits
+
+-- Session A′ (same statement under READ COMMITTED)
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+BEGIN;
+SELECT * FROM t WHERE id > 20 FOR UPDATE;
+-- skip_gap_locks(): LOCK_REC_NOT_GAP on matching rows only
+-- → INSERT id=25 in Session B typically proceeds (no phantom gap held)
+```
+
 ### 3.4.1 Record lock only — `LOCK_REC_NOT_GAP`
 
 
@@ -1052,9 +1196,9 @@ COMMIT;
 
 ### 3.4.2 Gap lock — `LOCK_GAP`
 
-**Mechanism.** The lock covers only the open interval preceding an index record (or the supremum gap). It does not lock the boundary record. Its purpose is to prevent phantom inserts into that interval, not to exclude updates of the existing boundary row.
+**Mechanism.** The lock covers only the open interval preceding an index record (or the supremum gap). It does not lock the boundary record. Its purpose is to prevent phantom inserts into that interval, not to exclude updates of the existing boundary row. The conditions under which InnoDB selects `LOCK_GAP` (versus next-key or record-only) are detailed in **When gap locks are triggered** above; this subsection focuses on the semantics once that mode is chosen.
 
-Under REPEATABLE READ, gap locks arise when `!row_can_be_in_range && gap_can_intersect_range` in the scan decision above, and during uniqueness probes on the first unequal (“next”) record:
+Under REPEATABLE READ, pure gap locks arise when `!row_can_be_in_range && gap_can_intersect_range` in the scan decision, and during uniqueness probes on the first unequal (“next”) record:
 
 ```cpp
 // storage/innobase/row/row0ins.cc — duplicate-key scan (plain INSERT)
@@ -1068,7 +1212,7 @@ Under REPEATABLE READ, gap locks arise when `!row_can_be_in_range && gap_can_int
 err = row_ins_set_rec_lock(LOCK_S, lock_type, block, rec, index, offsets, thr);
 ```
 
-Under READ COMMITTED, `trx_t::skip_gap_locks()` is true and ordinary `UPDATE` scans omit most gap locks. Duplicate-key and foreign-key paths may still request them; when `skip_gap_locks` is set, the same routine forces `LOCK_REC_NOT_GAP` where a gap would otherwise be taken.
+Under READ COMMITTED, `trx_t::skip_gap_locks()` is true and ordinary locking scans omit most gap locks. Duplicate-key and foreign-key paths may still request them where correctness requires; when the table-level `dict_table_t::skip_gap_locks()` applies (DD / SDI), the insert probe forces `LOCK_REC_NOT_GAP` instead of gap coverage.
 
 **Example — range-boundary gaps under REPEATABLE READ:**
 
@@ -1258,6 +1402,84 @@ UPDATE t SET c = 100 WHERE id BETWEEN 10 AND 20;
 COMMIT;  -- releases (3)–(4); MDL is released when tables are closed
          -- or transactional MDL duration ends, as applicable
 ```
+
+### Overlapping ranges: serialization without a range-lock object
+
+Consider two concurrent locking statements under REPEATABLE READ:
+
+```sql
+-- A
+BEGIN;
+UPDATE t SET c = 1 WHERE id BETWEEN 10 AND 20;  -- holds X next-key on 10..20
+-- not committed
+
+-- B
+BEGIN;
+UPDATE t SET c = 2 WHERE id BETWEEN 15 AND 25;
+-- waits on first conflict with A's bits in [15,20]
+-- after A COMMITs, proceeds to lock and update 21..25
+```
+
+The predicates intersect on `[15, 20]`. InnoDB still has **no** lock object that represents an interval `[low, high]`. Each transaction walks leaf records that match its predicate and, for each visit, requests a precise lock on a single `(page_id, heap_no)` (§3.4). Serialization of the intersection follows from **wait queues on those shared slots**, not from promoting the work to a table or page exclusive lock.
+
+```text
+A scans id ∈ [10,20]     B scans id ∈ [15,25]
+        │                         │
+        ▼                         ▼
+  lock_rec_lock(X|ORDINARY)  lock_rec_lock(X|ORDINARY)
+  on each visited leaf slot  on each visited leaf slot
+        │                         │
+        └──── same heap_no in [15,20]? ────┘
+                    │
+                    ▼
+         lock_sys->rec_hash lookup
+         rec_lock_check_conflict()
+                    │
+         ┌──────────┴──────────┐
+         │ compatible          │ HAS_TO_WAIT
+         │ (distinct rows,     │ (same row X vs X,
+         │  or gap rules)      │  or insert vs gap)
+         ▼                     ▼
+      grant bit            enqueue WAIT
+                           on that heap_no
+                           B blocks until A COMMITs
+```
+
+**How “one by one” appears.** Suppose A has already locked the clustered records for `id = 10…20` (next-key: record plus preceding gap). When B’s cursor reaches the first index record that A already holds incompatibly—commonly `id = 15` if both update that row—`lock_rec_other_has_conflicting()` returns a waiter requirement and B suspends on that **one** `lock_t` bit. B does not need to “own `[15,25]` as a unit” first; it stops at the first conflicting acquisition. After A commits, the wait is granted and B continues locking further rows (`21…25`) that A never claimed. Concurrent progress remains possible **outside** the contested slots (for example another transaction on `id = 30`).
+
+```cpp
+// lock0lock.cc — conflict on one (page, heap_no), not on a key interval
+RecID rec_id{block, heap_no};
+const lock_t *wait_for =
+    lock_sys->rec_hash.find_on_record(rec_id, [&](const lock_t *lock) {
+      return locksys::rec_lock_check_conflict(
+                 trx, mode, lock, is_supremum, trx_locks_cache) ==
+             locksys::Conflict::HAS_TO_WAIT;
+    });
+```
+
+**Why per-row locks are enough.** Overlapping SQL ranges are dense sets of leaf slots. Whoever first installs an incompatible bit on a slot in the intersection forces later acquirers of that same slot to wait. The intersection `{15,16,…,20}` is thereby executed under mutual exclusion **slot by slot**, which is exactly the rows both statements must touch. Gaps in the intersection block **inserts** into those open intervals (insert-intention vs gap / next-key); they do not, by themselves, make two pure gap holders wait for each other:
+
+```cpp
+// lock0lock.cc — rec_lock_check_conflict() (gap / gap rule)
+if ((lock_is_on_supremum || (type_mode & LOCK_GAP)) &&
+    !(type_mode & LOCK_INSERT_INTENTION)) {
+  /* Gap locks without INSERT_INTENTION do not wait for anything. */
+  return Conflict::NO_CONFLICT;
+}
+```
+
+For these two `UPDATE`s, the decisive conflict is ordinarily **X next-key / record versus X** on the **shared matching rows**, not “range object A versus range object B.”
+
+**Deadlock.** If A and B lock overlapping key sets in opposite physical orders (or via different indexes), each may hold part of the intersection and wait for the other → deadlock detector aborts one transaction. That is still row-lock wait-graph scheduling, not range-lock scheduling.
+
+| What the SQL suggests | What InnoDB does |
+|----------------------|------------------|
+| Lock range `[10,20]` as one resource | Many leaf `lock_t` bits along visited pages |
+| Serialize intersecting ranges atomically | Wait on the first conflicting `(page_id, heap_no)` |
+| Exclude only the other range transaction | Exclude any trx needing an incompatible mode on those bits |
+
+READ COMMITTED changes the picture for ordinary scans (`skip_gap_locks()`): B may avoid waiting on gaps A would have held under RR, but **X versus X on the same matched row** still serializes updates of that row.
 
 ---
 

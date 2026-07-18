@@ -19,7 +19,7 @@ keywords:
 
 Spring Transaction is one of the most critical modules in the Spring Framework. Whether using the declarative `@Transactional` or the programmatic `TransactionTemplate`, the underlying system is built on a highly abstract and elegantly designed transaction management infrastructure.
 
-This post dissects the inner workings of Spring transactions across four dimensions: **architectural design**, **core components**, **transaction execution lifecycle**, and the **low-level source code implementation of nested transactions**.
+This post dissects the inner workings of Spring transactions across **architectural design**, **core components**, **transaction execution lifecycle**, **nested transaction mechanics**, and **transaction synchronizations** (`afterCommit` and related callbacks).
 
 <!--more-->
 
@@ -29,7 +29,24 @@ This post dissects the inner workings of Spring transactions across four dimensi
 
 Spring's transaction management is built on the philosophy of **decoupling transaction definitions from specific transactional resources** (such as JDBC `Connection`, Hibernate `Session`, or JPA `EntityManager`). Regardless of the underlying data access technology, developers interact with a unified transaction abstraction.
 
-### 1.1 Core Components Class Diagram
+### 1.1 Layered runtime architecture
+
+A class diagram alone does not show how a call moves through Spring TX. At runtime the stack is layered: the application enters via `@Transactional` or `TransactionTemplate`; AOP advice drives `getTransaction` / `commit` / `rollback` on `PlatformTransactionManager`; the abstract manager applies propagation and triggers synchronizations; a concrete manager binds a physical resource into `TransactionSynchronizationManager`’s ThreadLocal maps.
+
+![Spring Transaction layered architecture](images/transaction-architecture.svg)
+
+| Layer | Responsibility |
+|-------|----------------|
+| Application | Business methods; optional `registerSynchronization` for post-commit work |
+| AOP / Aspect | `TransactionInterceptor` → `TransactionAspectSupport.invokeWithinTransaction` |
+| Contract metadata | `TransactionDefinition` (attributes) and `TransactionStatus` (runtime state, savepoints) |
+| Transaction Manager | Template method propagation + `doBegin` / `doCommit` / `doRollback` on a concrete manager |
+| Thread-local hub | `TransactionSynchronizationManager`: bound resources and synchronization callbacks |
+| Resources & callbacks | JDBC/JPA/Hibernate handles; `afterCommit` / `afterCompletion` after physical commit |
+
+Declarative and programmatic APIs converge on the same manager and ThreadLocal hub; only the entry path differs.
+
+### 1.2 Core Components Class Diagram
 
 The following class diagram shows the collaboration and inheritance structure of the key classes and interfaces in Spring Transactions:
 
@@ -99,6 +116,17 @@ class TransactionSynchronizationManager {
     +bindResource(Object, Object)
     +unbindResource(Object) : Object
     +getResource(Object) : Object
+    +registerSynchronization(TransactionSynchronization)
+    +getSynchronizations() : List
+}
+
+interface TransactionSynchronization {
+    +beforeCommit(boolean)
+    +beforeCompletion()
+    +afterCommit()
+    +afterCompletion(int)
+    +suspend()
+    +resume()
 }
 
 TransactionManager <|-- PlatformTransactionManager
@@ -112,10 +140,12 @@ TransactionInterceptor --|> TransactionAspectSupport
 TransactionAspectSupport ..> PlatformTransactionManager : delegates to
 TransactionAspectSupport ..> TransactionSynchronizationManager : accesses
 DataSourceTransactionManager ..> TransactionSynchronizationManager : binds connections
+TransactionSynchronizationManager "1" o-- "0..*" TransactionSynchronization : registers
+AbstractPlatformTransactionManager ..> TransactionSynchronization : triggers
 @enduml
 ```
 
-### 1.2 Core Component Responsibilities
+### 1.3 Core Component Responsibilities
 
 1. **`PlatformTransactionManager`**:
    The core strategy interface of Spring's imperative transaction infrastructure. It defines the central contracts to fetch transaction status (`getTransaction`), commit (`commit`), and roll back (`rollback`).
@@ -128,7 +158,9 @@ DataSourceTransactionManager ..> TransactionSynchronizationManager : binds conne
 5. **`TransactionStatus` & `SavepointManager`**:
    `TransactionStatus` represents the state of the current transaction (such as whether it is new, has a savepoint, or is rollback-only). It extends `SavepointManager`, which exposes savepoint operations to the transaction manager to support nested transactions.
 6. **`TransactionSynchronizationManager`**:
-   A central delegate managing thread-bound resources (like `DataSource` -> `ConnectionHolder` mapping stored via `ThreadLocal`) and transaction synchronizations (callbacks invoked before/after commit or rollback).
+   A central delegate managing thread-bound resources (like `DataSource` -> `ConnectionHolder` mapping stored via `ThreadLocal`) and a thread-local set of `TransactionSynchronization` callbacks.
+7. **`TransactionSynchronization`**:
+   Callback interface for work around commit/rollback (`beforeCommit`, `afterCommit`, `afterCompletion`, and so on). Application code registers implementations via `TransactionSynchronizationManager.registerSynchronization`—most commonly to run logic in `afterCommit` only after a successful commit (see §5). `AbstractPlatformTransactionManager` invokes these callbacks during `commit` / `rollback`.
 
 ---
 
@@ -689,7 +721,191 @@ note right: No resumption or physical connection close since nested=true\nand su
 
 ---
 
-## 5. Summary
+## 5. Transaction Synchronizations (`afterCommit` and related callbacks)
+
+Business code often needs side effects that must run **only after the database transaction has successfully committed**—for example publishing a domain event, sending a message, or invalidating a cache. Doing that work inside the transactional method (before `commit`) risks observers seeing data that later rolls back. Spring’s answer is **`TransactionSynchronization`**: callbacks registered on the current thread and invoked by `AbstractPlatformTransactionManager` around commit and rollback.
+
+### 5.1 `TransactionSynchronization` contract
+
+```java
+// spring-tx — org.springframework.transaction.support.TransactionSynchronization
+public interface TransactionSynchronization extends Ordered, Flushable {
+
+  int STATUS_COMMITTED = 0;
+  int STATUS_ROLLED_BACK = 1;
+  int STATUS_UNKNOWN = 2;
+
+  default void beforeCommit(boolean readOnly) { }
+  default void beforeCompletion() { }
+  default void afterCommit() { }
+  default void afterCompletion(int status) { }
+  // also: suspend / resume / flush / savepoint / savepointRollback (6.2+)
+}
+```
+
+| Callback | When it runs | Typical use |
+|----------|--------------|-------------|
+| `beforeCommit` | Before the resource `commit`, while rollback is still possible | Flush ORM sessions / pending SQL |
+| `beforeCompletion` | Before commit or rollback completes (always attempted after `beforeCommit`) | Pre-completion resource cleanup |
+| **`afterCommit`** | **Only after a successful physical commit** | Events, messaging, cache updates that must not fire on rollback |
+| `afterCompletion` | After commit **or** rollback (`STATUS_*`) | Unconditional cleanup; branch on `status` |
+
+Callbacks may implement `Ordered` (or override `getOrder()`); Spring sorts them when reading the registration list. System synchronizations (for example connection holders) use reserved order values so application callbacks can interleave predictably.
+
+### 5.2 Registration on the current transaction
+
+Synchronizations are stored in a `ThreadLocal` set owned by `TransactionSynchronizationManager`. Registration is valid only while synchronization is active for the thread (i.e. an active Spring-managed transaction with synchronizations enabled—the default for `AbstractPlatformTransactionManager`):
+
+```java
+// TransactionSynchronizationManager.registerSynchronization
+public static void registerSynchronization(TransactionSynchronization synchronization) {
+  Assert.notNull(synchronization, "TransactionSynchronization must not be null");
+  Set<TransactionSynchronization> synchs = synchronizations.get();
+  if (synchs == null) {
+    throw new IllegalStateException("Transaction synchronization is not active");
+  }
+  synchs.add(synchronization);
+}
+```
+
+Application usage inside a `@Transactional` method (or any code running under an active transaction):
+
+```java
+@Service
+public class OrderService {
+
+  @Transactional
+  public void placeOrder(Order order) {
+    orderRepository.save(order);
+
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            // Runs only if the surrounding transaction commits successfully
+            eventPublisher.publishEvent(new OrderPlacedEvent(order.getId()));
+          }
+
+          @Override
+          public void afterCompletion(int status) {
+            if (status == STATUS_ROLLED_BACK) {
+              // optional: metrics / compensation that must run on rollback too
+            }
+          }
+        });
+  }
+}
+```
+
+Lambda-friendly form (Java 8+ default methods on the interface):
+
+```java
+TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+  @Override
+  public void afterCommit() {
+    messageSender.send("order-placed", orderId);
+  }
+});
+```
+
+If no transaction is active, `registerSynchronization` throws `IllegalStateException`. Guard with `TransactionSynchronizationManager.isSynchronizationActive()` when the call path may be non-transactional.
+
+### 5.3 When `afterCommit` is triggered (manager lifecycle)
+
+On the successful commit path, `AbstractPlatformTransactionManager.processCommit` commits the resource first, then triggers synchronizations. Exceptions from `afterCommit` propagate to the caller, but the transaction is **already committed**:
+
+```java
+// AbstractPlatformTransactionManager.processCommit (structure)
+// … beforeCommit / beforeCompletion …
+// … doCommit(status) — physical connection.commit() …
+
+// Trigger afterCommit callbacks, with an exception thrown there
+// propagated to callers but the transaction still considered as committed.
+try {
+  triggerAfterCommit(status);
+}
+finally {
+  triggerAfterCompletion(status, TransactionSynchronization.STATUS_COMMITTED);
+}
+
+private void triggerAfterCommit(DefaultTransactionStatus status) {
+  if (status.isNewSynchronization()) {
+    TransactionSynchronizationUtils.triggerAfterCommit();
+  }
+}
+```
+
+```java
+// TransactionSynchronizationUtils
+public static void triggerAfterCommit() {
+  invokeAfterCommit(TransactionSynchronizationManager.getSynchronizations());
+}
+
+public static void invokeAfterCommit(@Nullable List<TransactionSynchronization> synchronizations) {
+  if (synchronizations != null) {
+    for (TransactionSynchronization synchronization : synchronizations) {
+      synchronization.afterCommit();
+    }
+  }
+}
+```
+
+On rollback, `afterCommit` is **not** invoked; `afterCompletion(STATUS_ROLLED_BACK)` (or `STATUS_UNKNOWN`) runs instead. That asymmetry is exactly what makes `afterCommit` suitable for “publish only if persisted.”
+
+```text
+@Transactional method body
+        │  registerSynchronization(afterCommit → …)
+        ▼
+processCommit
+  beforeCommit → beforeCompletion
+  doCommit (JDBC / JPA commit)
+  afterCommit          ← success-only side effects
+  afterCompletion(STATUS_COMMITTED)
+  cleanup / unbind ThreadLocal
+```
+
+### 5.4 Participating resources and `PROPAGATION_REQUIRES_NEW`
+
+Javadoc on `afterCommit` / `afterCompletion` warns that transactional resources may still be bound when the callback runs. Data-access code invoked from `afterCommit` therefore still **participates in the just-committed transaction context** unless it starts a new one. For any further transactional work from a synchronization, use **`PROPAGATION_REQUIRES_NEW`** (or an equivalent programmatic new transaction):
+
+```java
+@Override
+public void afterCommit() {
+  // Wrong if auditService is @Transactional(REQUIRED): may see a closed/finished tx oddly
+  // Correct: REQUIRES_NEW so audit commits independently
+  auditService.writeAuditEntryRequiresNew(orderId);
+}
+```
+
+### 5.5 Higher-level alternative: transactional application events
+
+For application code that only needs “run after commit,” Spring’s event model wraps the same mechanism:
+
+```java
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void onOrderPlaced(OrderPlacedEvent event) {
+  notificationClient.notify(event.orderId());
+}
+```
+
+`@TransactionalEventListener` registers a synchronization (or equivalent) so the listener method runs according to `TransactionPhase` (`BEFORE_COMMIT`, `AFTER_COMMIT`, `AFTER_ROLLBACK`, `AFTER_COMPLETION`). Prefer this when the side effect is naturally modeled as an event; use explicit `TransactionSynchronization` when you need custom ordering, `beforeCommit` flushing, or non-event callbacks.
+
+### 5.6 Relation to the lifecycle in §2
+
+The sequence diagram in §2 shows `commit` → physical `connection.commit()` → ThreadLocal cleanup. Synchronizations slot into that path as:
+
+1. Target method returns (synchronizations already registered during the method).
+2. `beforeCommit` / `beforeCompletion`.
+3. Physical commit.
+4. **`afterCommit`** (success path only).
+5. `afterCompletion`.
+6. `cleanupAfterCompletion` (unbind resources).
+
+Thus “execute after the transaction succeeds” is not a separate transaction API: it is a registered `TransactionSynchronization#afterCommit` (or an `AFTER_COMMIT` transactional event listener) driven by `AbstractPlatformTransactionManager`.
+
+---
+
+## 6. Summary
 
 1. **Unified Interface**: Spring's `PlatformTransactionManager` decouples transaction logic from resource details, using `TransactionSynchronizationManager` and `ThreadLocal` variables to manage active connection sessions.
 2. **Lifecycle Control**: `TransactionInterceptor` coordinates method execution using `TransactionInfo` to preserve state context during nested execution chains.
@@ -697,3 +913,4 @@ note right: No resumption or physical connection close since nested=true\nand su
    * `REQUIRED` shares transaction state. A failure anywhere poisons the entire execution path, making it rollback-only.
    * `REQUIRES_NEW` suspends active connections and spawns a new physical connection for absolute transaction isolation.
    * `NESTED` utilizes database savepoints on a single shared connection, allowing localized rollbacks while leaving the outer transaction control intact.
+4. **Post-commit callbacks**: `TransactionSynchronizationManager.registerSynchronization` registers `TransactionSynchronization` instances; `afterCommit` runs only after a successful `doCommit`, which is the supported hook for success-only side effects (events, messaging). `@TransactionalEventListener(phase = AFTER_COMMIT)` is the declarative counterpart.

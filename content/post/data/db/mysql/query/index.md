@@ -848,38 +848,13 @@ end
 
 ---
 
-### 2.2.7 Physical Execution of Window Functions (`WindowIterator` & `BufferingWindowIterator`)
+### 2.2.7 Physical Execution of Window Functions
 
-*   **Location**: `sql/iterators/window_iterators.h` & `window_iterators.cc`
+Window-function and other physical operators are catalogued in the Volcano iterator post:
 
-In modern MySQL, Window Functions (like `ROW_NUMBER()`, `RANK()`, `SUM() OVER ()`, or `LEAD()`) are executed using specialized physical iterators that operate on partition boundaries. Depending on the window's requirements, MySQL selects one of two physical operators:
+→ [MySQL query Internals — Volcano model §3 Row iterators](/post/data/db/mysql/volcano/#3-row-iterators)
 
-```text
-                  [ Query_expression::m_root_iterator ]
-                                   │
-                 ┌─────────────────┴─────────────────┐
-                 ▼                                   ▼
-        [ WindowIterator ]               [ BufferingWindowIterator ]
-        - No buffering needed            - Buffers partition rows
-        - Evaluates WFs on-the-fly       - Operates a frame-buffer table
-        - O(1) memory overhead           - Compiles complex sliding frames
-```
-
-#### A. The On-The-Fly Operator: `WindowIterator`
-Used when the window attached to the query does not require buffering (e.g., simple cumulative calculations where rows are already returned in the correct sort order and no sliding lookahead frame is defined).
-*   During `DoRead()`, it reads a row directly from its source iterator.
-*   Calls `copy_funcs(CFT_HAS_NO_WF)` to evaluate non-window expressions.
-*   Calls `m_window->check_partition_boundary()` to detect partition changes.
-*   Directly evaluates the window function via `copy_funcs(CFT_WF)` and passes the result up the iterator chain with zero extra buffering, keeping memory overhead to $O(1)$.
-
-#### B. The Buffered Operator: `BufferingWindowIterator`
-Used when window functions require lookahead or lookbehind (e.g., sliding frames like `ROWS BETWEEN 1 PRECEDING AND 3 FOLLOWING`, `LEAD()`, `LAG()`, or `NTILE()` which requires knowing total partition cardinality).
-*   **The Accumulator Loop**: During `DoRead()`, it continuously pulls records from its child iterator and copies them into an internal **Frame-Buffer Temporary Table** (`Window::frame_buffer()`) using `buffer_windowing_record()`.
-*   **Partition Boundaries**: It monitors partition changes during buffering. If a partition boundary or EOF is hit, it pauses buffering to process and finalize the completed partition.
-*   **Evaluation & Sliding Frames**: It delegates evaluation to **`process_buffered_windowing_record()`**, which moves the frame cursor. It evaluates sliding frames using one of two strategies:
-    1.  *Naive Strategy*: Scans all rows in the active frame for each output row, leading to $O(N \times M)$ complexity.
-    2.  *Optimized Inversion Strategy*: Reuses the previous aggregate state and applies the *inverse* function (e.g., subtracting rows leaving the frame and adding rows entering), reducing complexity to a highly efficient $O(N)$.
-*   **Data Retrieval**: Once window functions are fully computed, `bring_back_frame_row()` reverses the field copies, loading the finalized values back into output table record buffers to be streamed to the user.
+Join, window, and DML mutation iterators (with SQL examples) appear under the same section (§3.4–§3.9).
 
 ---
 
