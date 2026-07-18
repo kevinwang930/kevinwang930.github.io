@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="100%">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#455a64"/>
+    </marker>
+    <marker id="arrMute" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#78909c"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="640" fill="#f7f9fb"/>
+
+  <text x="480" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">SQL statement &#8594; AccessPath &#8594; RowIterator &#8594; execution</text>
+  <text x="480" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Shared Volcano compilation spine for SELECT and iterator-backed DML</text>
+
+  <!-- Phase A -->
+  <g transform="translate(40, 72)">
+    <rect width="200" height="88" fill="#ffffff" stroke="#546e7a" stroke-width="1.4" rx="4"/>
+    <rect width="200" height="22" fill="#546e7a" rx="4"/>
+    <rect y="14" width="200" height="8" fill="#546e7a"/>
+    <text x="100" y="16" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Phase A &#183; Parse / resolve</text>
+    <text x="12" y="44" font-family="Consolas, monospace" font-size="10" fill="#37474f">sql_yacc.yy &#8594; LEX</text>
+    <text x="12" y="62" font-family="Consolas, monospace" font-size="10" fill="#37474f">Query_block / Item*</text>
+    <text x="12" y="80" font-family="Consolas, monospace" font-size="10" fill="#37474f">Query_result_*</text>
+  </g>
+
+  <line x1="240" y1="116" x2="278" y2="116" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase B -->
+  <g transform="translate(286, 72)">
+    <rect width="220" height="88" fill="#ffffff" stroke="#2e7d32" stroke-width="1.4" rx="4"/>
+    <rect width="220" height="22" fill="#2e7d32" rx="4"/>
+    <rect y="14" width="220" height="8" fill="#2e7d32"/>
+    <text x="110" y="16" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Phase B &#183; Optimize</text>
+    <text x="12" y="44" font-family="Consolas, monospace" font-size="10" fill="#37474f">JOIN::optimize / HG</text>
+    <text x="12" y="62" font-family="Consolas, monospace" font-size="10" fill="#37474f">costed AccessPath tree</text>
+    <text x="12" y="80" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">hand-off artifact</text>
+  </g>
+
+  <line x1="506" y1="116" x2="544" y2="116" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase C -->
+  <g transform="translate(552, 72)">
+    <rect width="220" height="88" fill="#ffffff" stroke="#1565c0" stroke-width="1.4" rx="4"/>
+    <rect width="220" height="22" fill="#1565c0" rx="4"/>
+    <rect y="14" width="220" height="8" fill="#1565c0"/>
+    <text x="110" y="16" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Phase C &#183; Compile</text>
+    <text x="12" y="44" font-family="Consolas, monospace" font-size="10" fill="#37474f">CreateIteratorFromAccessPath</text>
+    <text x="12" y="62" font-family="Consolas, monospace" font-size="10" fill="#37474f">NewIterator&lt;T&gt; / todo stack</text>
+    <text x="12" y="80" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">rooted RowIterator tree</text>
+  </g>
+
+  <line x1="772" y1="116" x2="810" y2="116" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Phase D -->
+  <g transform="translate(818, 72)">
+    <rect width="102" height="88" fill="#ffffff" stroke="#00838f" stroke-width="1.4" rx="4"/>
+    <rect width="102" height="22" fill="#00838f" rx="4"/>
+    <rect y="14" width="102" height="8" fill="#00838f"/>
+    <text x="51" y="16" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">Phase D</text>
+    <text x="51" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Init()</text>
+    <text x="51" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Read()</text>
+    <text x="51" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#006064">execute</text>
+  </g>
+
+  <!-- Branch label -->
+  <text x="480" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Phase B root AccessPath and Phase D sink depend on statement family</text>
+
+  <!-- Vertical stem from pipeline to fork -->
+  <line x1="396" y1="160" x2="396" y2="220" stroke="#78909c" stroke-width="1.2" marker-end="url(#arrMute)"/>
+
+  <!-- Three statement family panels -->
+  <!-- SELECT -->
+  <g transform="translate(24, 232)">
+    <rect width="290" height="280" fill="#ffffff" stroke="#455a64" stroke-width="1.3" rx="4"/>
+    <rect width="290" height="26" fill="#455a64" rx="4"/>
+    <rect y="16" width="290" height="10" fill="#455a64"/>
+    <text x="145" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">SELECT</text>
+
+    <text x="14" y="50" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#546e7a">AccessPath root (examples)</text>
+    <rect x="14" y="58" width="262" height="56" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="24" y="78" font-family="Consolas, monospace" font-size="10" fill="#263238">FILTER / JOIN / SORT / WINDOW</text>
+    <text x="24" y="96" font-family="Consolas, monospace" font-size="10" fill="#263238">LIMIT_OFFSET / &#8230;</text>
+
+    <text x="14" y="138" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#546e7a">RowIterator root</text>
+    <rect x="14" y="146" width="262" height="40" fill="#e3f2fd" stroke="#64b5f6" rx="3"/>
+    <text x="145" y="170" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">LimitOffsetIterator / &#8230;</text>
+
+    <text x="14" y="210" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#546e7a">ExecuteIteratorQuery</text>
+    <text x="14" y="230" font-family="Consolas, monospace" font-size="10" fill="#37474f">Read() &#8594; one result row</text>
+    <text x="14" y="248" font-family="Consolas, monospace" font-size="10" fill="#37474f">Query_result_send::send_data</text>
+    <text x="14" y="266" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">client protocol stream</text>
+    <text x="14" y="286" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">mutation: none</text>
+  </g>
+
+  <!-- UPDATE / DELETE -->
+  <g transform="translate(335, 232)">
+    <rect width="290" height="280" fill="#ffffff" stroke="#c62828" stroke-width="1.3" rx="4"/>
+    <rect width="290" height="26" fill="#c62828" rx="4"/>
+    <rect y="16" width="290" height="10" fill="#c62828"/>
+    <text x="145" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">UPDATE / DELETE</text>
+
+    <text x="14" y="50" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">AccessPath root</text>
+    <rect x="14" y="58" width="262" height="56" fill="#ffebee" stroke="#e57373" rx="3"/>
+    <text x="24" y="78" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">UPDATE_ROWS | DELETE_ROWS</text>
+    <text x="24" y="96" font-family="Consolas, monospace" font-size="10" fill="#37474f">child: join / scan subtree</text>
+
+    <text x="14" y="138" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">RowIterator root</text>
+    <rect x="14" y="146" width="262" height="40" fill="#ffcdd2" stroke="#ef5350" rx="3"/>
+    <text x="145" y="170" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">UpdateRowsIterator / DeleteRowsIterator</text>
+
+    <text x="14" y="210" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">ExecuteIteratorQuery</text>
+    <text x="14" y="230" font-family="Consolas, monospace" font-size="10" fill="#37474f">one Read() drains child</text>
+    <text x="14" y="248" font-family="Consolas, monospace" font-size="10" fill="#37474f">immediate + delayed mutate</text>
+    <text x="14" y="266" font-family="Consolas, monospace" font-size="10" fill="#37474f">send_eof &#8594; row counts</text>
+    <text x="14" y="286" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">send_data unused (UPDATE)</text>
+  </g>
+
+  <!-- INSERT SELECT -->
+  <g transform="translate(646, 232)">
+    <rect width="290" height="280" fill="#ffffff" stroke="#ef6c00" stroke-width="1.3" rx="4"/>
+    <rect width="290" height="26" fill="#ef6c00" rx="4"/>
+    <rect y="16" width="290" height="10" fill="#ef6c00"/>
+    <text x="145" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">INSERT &#8230; SELECT</text>
+
+    <text x="14" y="50" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">AccessPath root</text>
+    <rect x="14" y="58" width="262" height="56" fill="#fff3e0" stroke="#ffb74d" rx="3"/>
+    <text x="24" y="78" font-family="Consolas, monospace" font-size="10" fill="#e65100">SELECT plan only</text>
+    <text x="24" y="96" font-family="Consolas, monospace" font-size="10" fill="#37474f">no INSERT_ROWS AccessPath</text>
+
+    <text x="14" y="138" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">RowIterator root</text>
+    <rect x="14" y="146" width="262" height="40" fill="#ffe0b2" stroke="#ffa726" rx="3"/>
+    <text x="145" y="170" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">Filter / Scan / Join &#8230;</text>
+
+    <text x="14" y="210" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">ExecuteIteratorQuery</text>
+    <text x="14" y="230" font-family="Consolas, monospace" font-size="10" fill="#37474f">Read() &#8594; one source row</text>
+    <text x="14" y="248" font-family="Consolas, monospace" font-size="10" fill="#37474f">Query_result_insert::send_data</text>
+    <text x="14" y="266" font-family="Consolas, monospace" font-size="10" fill="#37474f">&#8594; write_record()</text>
+    <text x="14" y="286" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">write sink outside iterator</text>
+  </g>
+
+  <text x="480" y="546" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">Phases A&#8211;C are shared. Divergence is the optimizer root and the ExecuteIteratorQuery / Query_result interaction.</text>
+  <text x="480" y="566" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">sql/sql_union.cc &#183; Query_expression::ExecuteIteratorQuery</text>
+  <text x="480" y="586" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">sql/join_optimizer/access_path.cc &#183; CreateIteratorFromAccessPath</text>
+  <text x="480" y="614" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#90a4ae">Sources: LEX prepare, join optimizer AccessPath emit, iterator compile, ExecuteIteratorQuery</text>
+</svg>
