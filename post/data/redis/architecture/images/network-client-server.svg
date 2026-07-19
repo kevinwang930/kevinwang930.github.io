@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-label="I/O threads versus main thread">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="arrOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#00695c"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="480" fill="#f7f9fb"/>
+  <text x="480" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">I/O threads vs main thread</text>
+
+  <!-- Client -->
+  <g transform="translate(40, 180)">
+    <rect width="120" height="100" fill="#ffffff" stroke="#455a64" stroke-width="1.5" rx="5"/>
+    <text x="60" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Client</text>
+    <text x="60" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">RESP</text>
+    <text x="60" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">TCP socket</text>
+  </g>
+
+  <!-- request -->
+  <line x1="160" y1="210" x2="220" y2="210" stroke="#37474f" stroke-width="1.8" marker-end="url(#arr)"/>
+  <text x="190" y="198" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">bytes in</text>
+
+  <!-- reply -->
+  <line x1="220" y1="260" x2="160" y2="260" stroke="#00695c" stroke-width="1.8" marker-end="url(#arrTeal)"/>
+  <text x="190" y="280" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#00695c">bytes out</text>
+
+  <!-- I/O thread column -->
+  <g transform="translate(230, 70)">
+    <rect width="260" height="340" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.8" rx="6"/>
+    <text x="130" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e65100">I/O thread</text>
+    <text x="130" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">optional · iothread.c</text>
+
+    <rect x="24" y="72" width="212" height="70" fill="#ffffff" stroke="#ffb74d" rx="4"/>
+    <text x="130" y="100" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">1. read socket</text>
+    <text x="130" y="122" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">fill querybuf / parse argv</text>
+
+    <line x1="130" y1="142" x2="130" y2="168" stroke="#ef6c00" stroke-width="1.5" marker-end="url(#arrOrange)"/>
+
+    <rect x="24" y="170" width="212" height="70" fill="#ffe0b2" stroke="#ef6c00" rx="4"/>
+    <text x="130" y="198" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#bf360c">2. hand off client</text>
+    <text x="130" y="220" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#e65100">queue to main thread</text>
+
+    <line x1="130" y1="240" x2="130" y2="280" stroke="#ef6c00" stroke-width="1.5" opacity="0.4"/>
+
+    <rect x="24" y="282" width="212" height="40" fill="#ffffff" stroke="#ffb74d" rx="4"/>
+    <text x="130" y="308" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">4. write socket</text>
+  </g>
+
+  <!-- handoff to main -->
+  <line x1="490" y1="220" x2="560" y2="220" stroke="#ef6c00" stroke-width="2" marker-end="url(#arrOrange)"/>
+  <text x="525" y="208" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ef6c00">hand off</text>
+
+  <!-- return for write -->
+  <line x1="560" y1="320" x2="490" y2="320" stroke="#1565c0" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="525" y="344" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1565c0">reply ready</text>
+
+  <!-- Main thread column -->
+  <g transform="translate(570, 70)">
+    <rect width="350" height="340" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="175" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Main thread</text>
+    <text x="175" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">aeMain(server.el)</text>
+
+    <rect x="30" y="72" width="290" height="70" fill="#bbdefb" stroke="#1565c0" rx="4"/>
+    <text x="175" y="100" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">3. processCommand</text>
+    <text x="175" y="122" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">call → cmd-&gt;proc → keyspace</text>
+
+    <line x1="175" y1="142" x2="175" y2="168" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrBlue)"/>
+
+    <rect x="30" y="170" width="290" height="70" fill="#c8e6c9" stroke="#2e7d32" rx="4"/>
+    <text x="175" y="198" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">only here</text>
+    <text x="175" y="220" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">mutate keys · expire · MULTI/EXEC</text>
+
+    <rect x="30" y="270" width="290" height="48" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="175" y="300" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#0d47a1">Serial: one cmd-&gt;proc at a time</text>
+  </g>
+
+  <!-- footer rule -->
+  <text x="480" y="450" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#455a64">I/O thread = socket work · Main thread = command execution</text>
+  <text x="480" y="470" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">If io-threads is disabled, steps 1 and 4 also run on the main thread</text>
+</svg>
