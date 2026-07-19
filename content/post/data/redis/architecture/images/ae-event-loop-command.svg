@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="780" viewBox="0 0 1040 780" role="img" aria-label="Separate I/O and main aeEventLoop instances">
+  <defs>
+    <marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#e65100"/>
+    </marker>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+  </defs>
+
+  <rect width="1040" height="780" fill="#f7f9fb"/>
+  <text x="520" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Two separate aeEventLoop instances</text>
+  <text x="520" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Same ae library; different threads, different epoll/kqueue sets, different fds</text>
+
+  <!-- ========== I/O LOOP ========== -->
+  <g transform="translate(30, 70)">
+    <rect width="460" height="620" fill="#fff8f0" stroke="#ef6c00" stroke-width="2" rx="8"/>
+    <text x="230" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#e65100">I/O thread loop</text>
+    <text x="230" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#ef6c00">IOThreads[i].el · aeMain</text>
+
+    <rect x="40" y="70" width="380" height="44" fill="#ffffff" stroke="#ef6c00" rx="4"/>
+    <text x="230" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">aeProcessEvents</text>
+
+    <line x1="230" y1="114" x2="230" y2="138" stroke="#ef6c00" stroke-width="1.5" marker-end="url(#arrO)"/>
+
+    <rect x="40" y="140" width="380" height="56" fill="#ffffff" stroke="#ef6c00" rx="4"/>
+    <text x="230" y="162" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">IOThreadBeforeSleep</text>
+    <text x="230" y="180" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#ef6c00">flush pending to main · take clients back from main</text>
+
+    <line x1="230" y1="196" x2="230" y2="220" stroke="#ef6c00" stroke-width="1.5" marker-end="url(#arrO)"/>
+
+    <rect x="40" y="222" width="380" height="56" fill="#ffe0b2" stroke="#ef6c00" rx="4"/>
+    <text x="230" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">aeApiPoll</text>
+    <text x="230" y="262" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#bf360c">epoll set = client TCP fds + notifier from main</text>
+
+    <line x1="230" y1="278" x2="230" y2="302" stroke="#ef6c00" stroke-width="1.5" marker-end="url(#arrO)"/>
+
+    <rect x="40" y="304" width="380" height="120" fill="#ffffff" stroke="#ef6c00" rx="4"/>
+    <text x="230" y="328" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">Dispatch fired fds</text>
+    <text x="230" y="350" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">client AE_READABLE → readQueryFromClient</text>
+    <text x="230" y="368" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">client AE_WRITABLE → sendReplyToClient</text>
+    <text x="230" y="386" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">notifier ← main → processClientsFromMainThread</text>
+    <text x="230" y="408" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#bf360c">no processCommand here</text>
+
+    <rect x="40" y="450" width="380" height="140" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+    <text x="230" y="478" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">This loop owns</text>
+    <text x="230" y="500" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#bf360c">• assigned client TCP sockets</text>
+    <text x="230" y="520" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#bf360c">• pending_clients_notifier (from main)</text>
+    <text x="230" y="548" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">This loop does</text>
+    <text x="230" y="570" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#bf360c">read / parse / write · queue client* to main</text>
+  </g>
+
+  <!-- ========== MAIN LOOP ========== -->
+  <g transform="translate(550, 70)">
+    <rect width="460" height="620" fill="#f0f7ff" stroke="#1565c0" stroke-width="2" rx="8"/>
+    <text x="230" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Main thread loop</text>
+    <text x="230" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">server.el · aeMain</text>
+
+    <rect x="40" y="70" width="380" height="44" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="230" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">aeProcessEvents</text>
+
+    <line x1="230" y1="114" x2="230" y2="138" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrB)"/>
+
+    <rect x="40" y="140" width="380" height="56" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="230" y="162" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">beforeSleep</text>
+    <text x="230" y="180" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#1565c0">drain I/O queues if already awake · cron-adjacent work</text>
+
+    <line x1="230" y1="196" x2="230" y2="220" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrB)"/>
+
+    <rect x="40" y="222" width="380" height="56" fill="#bbdefb" stroke="#1565c0" rx="4"/>
+    <text x="230" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">aeApiPoll</text>
+    <text x="230" y="262" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#0d47a1">epoll set ≠ I/O client TCP fds</text>
+
+    <line x1="230" y1="278" x2="230" y2="302" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrB)"/>
+
+    <rect x="40" y="304" width="380" height="120" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="230" y="328" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">Dispatch fired fds</text>
+    <text x="230" y="350" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">listen fd → acceptTcpHandler</text>
+    <text x="230" y="368" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">notifier ← I/O → handleClientsFromIOThread</text>
+    <text x="230" y="386" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">tid==0 client fds · module pipe · …</text>
+    <text x="230" y="408" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">→ processCommand / cmd-&gt;proc</text>
+
+    <rect x="40" y="450" width="380" height="140" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="230" y="478" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">This loop owns</text>
+    <text x="230" y="500" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">• listen sockets · I/O notifiers · tid==0 clients</text>
+    <text x="230" y="520" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">• serverCron time event · module pipe</text>
+    <text x="230" y="548" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#0d47a1">This loop does</text>
+    <text x="230" y="570" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">accept · execute commands · return client* to I/O</text>
+  </g>
+
+  <!-- Cross-thread bridge (between panels, bottom center area via middle gap) -->
+  <path d="M 490 290 L 520 290 L 520 250 L 550 250" fill="none" stroke="#37474f" stroke-width="1.8" marker-end="url(#arrG)"/>
+  <text x="520" y="236" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">queue + notifier</text>
+  <text x="520" y="310" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">client* only</text>
+
+  <path d="M 550 560 L 520 560 L 520 600 L 490 600" fill="none" stroke="#37474f" stroke-width="1.8" marker-end="url(#arrG)"/>
+  <text x="520" y="584" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">reply + return</text>
+
+  <text x="520" y="720" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">Neither loop shares the other's epoll interest set; they only exchange client* via queues and notifier fds</text>
+</svg>
