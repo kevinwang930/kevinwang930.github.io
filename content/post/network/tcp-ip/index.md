@@ -79,6 +79,81 @@ Transmission Control Protocol is a communications standard that enables applicat
 ![tcp-handshake](images/tcp-handshake.png)
 ![tcp-handoff](images/tcp-handoff.png)
 
+### Conditions under which a TCP connection is terminated
+
+TCP recovers from transient segment loss by retransmission while the connection remains in `ESTABLISHED`. Termination occurs only when (1) either endpoint completes an orderly or abortive close, or (2) the local TCP implementation determines that the peer is no longer reachable within its retransmission or keepalive policy.
+
+A single discarded IP datagram is therefore not equivalent to connection failure. Connection failure is a transport-layer decision based on sustained non-acknowledgement, an explicit control segment (`FIN` / `RST`), or local/remote policy.
+
+#### Recovery that preserves the connection
+
+| Condition | TCP behavior |
+|-----------|--------------|
+| Isolated loss or reordering | Retransmission and reassembly; connection remains `ESTABLISHED` |
+| Transient congestion within retransmission limits | Retransmission with RTO backoff; congestion window may decrease |
+| Short path interruption if acknowledgements resume before give-up | Connection may remain `ESTABLISHED` |
+
+#### Explicit termination
+
+| Mechanism | Semantics |
+|-----------|-----------|
+| `FIN` | Orderly close: each side ceases sending after delivering remaining data according to the closing handshake |
+| `RST` | Abortive close: the connection control block is discarded; unacknowledged data is not guaranteed to be delivered |
+| Application `close()` or process termination | The local stack emits `FIN` or `RST` according to connection state and whether unread data remains |
+| Middlebox-generated `RST` | Observed by the endpoint as a peer reset; the connection is aborted |
+
+#### Path failure elevated to connection abort
+
+The following conditions convert prolonged network disruption into connection termination:
+
+| Cause | Outcome |
+|-------|---------|
+| Exhaustion of retransmission attempts | After unanswered retransmissions under RTO backoff, the implementation aborts the connection; the application typically observes a timeout or write error (e.g. `ETIMEDOUT`, `EPIPE`) |
+| Keepalive failure | With `SO_KEEPALIVE` (or an equivalent probe), unanswered keepalive probes cause the connection to be closed as dead |
+| Persistent unreachability (link or routing loss) | Retransmissions fail until the same give-up threshold; some implementations abort earlier on hard ICMP errors |
+| Half-open connection after peer crash | The surviving endpoint may remain `ESTABLISHED` until it transmits data or a keepalive and receives no acknowledgement (or receives `RST` if the peer port is closed) |
+| Local or intermediary policy | Local limits (e.g. retry caps comparable to Linux `tcp_retries2`), firewall rules, or idle timeouts on NAT or load balancers remove state; subsequent segments fail or elicit `RST` |
+
+```text
+IP datagram loss          -> retransmission; connection usually retained
+Sustained non-ACK         -> RTO give-up or keepalive failure -> abort
+Peer FIN / RST            -> orderly close or abort
+```
+
+#### Application-visible consequences
+
+After abort or close completes, further I/O on the socket fails. Data that was buffered locally and never acknowledged is not reliable delivery. A subsequent `connect()` establishes a **new** TCP connection with new sequence-number state; it does not resume the prior session. Application protocols layered on TCP (HTTP, WebSocket, MQTT, Redis RESP, and others) must reconnect and re-establish their own session semantics.
+
+```text
+Endpoint A  <--- TCP connection --->  Endpoint B
+                      |
+            path unusable beyond retry/keepalive budget
+                      |
+            local abort (or RST received)
+                      |
+            application I/O error; new handshake required for recovery
+```
+
+#### Parameters that govern detection latency
+
+Defaults below are the common **Linux** values (`sysctl` / `tcp(7)`). Other operating systems use different names and defaults.
+
+| Parameter | Linux default | Approximate effect on detection |
+|-----------|---------------|----------------------------------|
+| `net.ipv4.tcp_retries2` | `15` | Unanswered retransmissions on an established connection before abort. With exponential RTO backoff this is typically on the order of **~13–30 minutes** (depends on the current RTO), not seconds. |
+| `net.ipv4.tcp_keepalive_time` | `7200` s (2 h) | **System default** idle time before the first keepalive probe, used when `SO_KEEPALIVE` is on and the application has **not** set `TCP_KEEPIDLE`. Applications may override this per socket (Redis does; see below). |
+| `net.ipv4.tcp_keepalive_intvl` | `75` s | System default interval between subsequent keepalive probes (also overridable per socket via `TCP_KEEPINTVL`). |
+| `net.ipv4.tcp_keepalive_probes` | `9` | System default probe count before abort (overridable via `TCP_KEEPCNT`). With untouched defaults, worst-case idle detection ≈ `7200 + 75 × 9` = **7875 s (~2 h 11 min)**. |
+
+**Per-socket override (example: Redis).** Redis `tcp-keepalive` (default **300** in `redis.conf`) calls `anetKeepAlive`, which enables `SO_KEEPALIVE` and sets `TCP_KEEPIDLE = 300`, `TCP_KEEPINTVL = 100` (interval/3), `TCP_KEEPCNT = 3` on that fd—explicitly replacing the 7200 s system idle default for Redis client connections. Detection on those sockets is therefore on the order of a few minutes, not two hours. The `anet.c` comment notes that the OS defaults are otherwise too long to be useful.
+
+| NAT / load-balancer idle timeout | Implementation-defined (often **30 s–5 min** for TCP; highly variable) | Mapping removed while the application is idle; the next send fails or receives `RST`. Frequently **shorter** than Linux keepalive defaults, so middleboxes often fail the path before kernel keepalive does. |
+| Application-level heartbeat | None in TCP; set by the protocol or client library | Detects failure on the order of the heartbeat interval (seconds to tens of seconds is common), independent of kernel keepalive. |
+
+Keepalive probes are sent only when the socket option is enabled; many applications never enable `SO_KEEPALIVE` and instead rely on their own heartbeat or on the next write hitting retransmission give-up (`tcp_retries2`).
+
+**Conclusion.** Transient network errors are absorbed by retransmission. Connection drop results from sustained non-acknowledgement, explicit `FIN`/`RST`, or operating-system and middlebox policy—not from an individual lost packet.
+
 ## WebSocket
 
 WebSocket provides simultaneous two-way communication channel over a single TCP connection. 

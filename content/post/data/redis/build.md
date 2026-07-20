@@ -13,7 +13,7 @@ keywords:
 - cache
 #thumbnailImage: //example.com/image.jpg
 ---
-Build Redis from source on Fedora and debug `redis-server` in CLion. Architecture notes: [Redis internals](architecture/).
+Build Redis from source on Fedora and debug `redis-server` in CLion. Architecture notes: [Redis internals](architecture/), [Pub/Sub](pubsub/).
 
 <!--more-->
 

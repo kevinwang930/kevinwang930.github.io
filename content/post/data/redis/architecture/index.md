@@ -20,7 +20,7 @@ Redis stores keys in memory and serves RESP commands on a single-threaded event 
 
 <!--more-->
 
-Related: [Build Redis from source](../build/).
+Related: [Build Redis from source](../build/), [Pub/Sub internals](../pubsub/).
 
 ![Redis overall architecture](images/redis-architecture.svg)
 
@@ -37,11 +37,93 @@ struct redisServer server; /* Server global state */
 
 ## 1. Network
 
-The network subsystem accepts connections, multiplexes file descriptors through one or more `aeEventLoop` instances, accumulates RESP in `client->querybuf`, and emits replies. Command execution (§2) begins only after a complete command has been parsed on the main thread.
+The network subsystem speaks **RESP** over TCP (or Unix/TLS), accepts connections, multiplexes file descriptors through one or more `aeEventLoop` instances, accumulates request bytes in `client->querybuf`, and emits RESP replies. Command execution (§2) begins only after a complete command has been parsed on the main thread.
 
 ![I/O threads versus main thread](images/network-client-server.svg)
 
-### 1.1 Structures
+### 1.1 RESP protocol
+
+Redis client I/O sits on two layers:
+
+| Layer | What Redis uses |
+|-------|-----------------|
+| Transport | TCP (default port 6379), Unix domain socket, or TLS over TCP |
+| Application | **RESP** (REdis Serialization Protocol) — Redis’s own request/reply framing on the byte stream |
+
+Clients do not send opaque binary opcodes at L4. They open a stream connection and exchange RESP messages. The server accumulates bytes in `client->querybuf`, parses a complete command into `argc` / `argv`, then runs `processCommand` (§2). Replies are written back as RESP into the client output buffer and flushed on `AE_WRITABLE` (often on an I/O thread when `io-threads` is enabled).
+
+The cluster **bus** between nodes uses a separate Redis-defined binary gossip protocol; it is not client RESP.
+
+#### Request forms
+
+`client.reqtype` distinguishes how the current request is framed (`server.h`):
+
+| `reqtype` | Wire form | Typical client |
+|-----------|-----------|----------------|
+| `PROTO_REQ_MULTIBULK` | Array of bulk strings (`*` / `$`) | redis-cli, hiredis, most drivers |
+| `PROTO_REQ_INLINE` | Space-separated line ending in `\r\n` | telnet / simple scripts |
+
+Multibulk (RESP array) is the normal path. Example command `SET k v`:
+
+```text
+*3\r\n
+$3\r\n
+SET\r\n
+$1\r\n
+k\r\n
+$1\r\n
+v\r\n
+```
+
+| Token | Meaning |
+|-------|---------|
+| `*3` | Array of 3 elements (command name + two arguments) |
+| `$3` / `SET` | Bulk string length 3, then payload `SET` |
+| `$1` / `k`, `$1` / `v` | Remaining arguments |
+
+After parse, that becomes `argc = 3`, `argv = { SET, k, v }` on the `client`.
+
+Inline form of the same idea (less common in production drivers):
+
+```text
+SET k v\r\n
+```
+
+#### Common RESP2 reply types
+
+| Prefix | Type | Example |
+|--------|------|---------|
+| `+` | Simple string | `+OK\r\n` |
+| `-` | Error | `-ERR unknown command\r\n` |
+| `:` | Integer | `:1\r\n` |
+| `$` | Bulk string | `$5\r\nhello\r\n` (`$-1\r\n` = null bulk) |
+| `*` | Array | `*2\r\n$1\r\na\r\n$1\r\nb\r\n` |
+
+Server-side reply helpers (`addReply*`, `addReplyBulk*`, … in `networking.c`) encode these into the client buffer. Pipelining is multiple complete requests written back-to-back on one connection; Redis parses and executes them in order on that client.
+
+#### RESP2 vs RESP3
+
+| Version | Role |
+|---------|------|
+| RESP2 | Default for most connections; types above |
+| RESP3 | Negotiated with `HELLO 3` (or client option); richer types (map, set, bool, double, push, …) |
+
+`client.resp` records the negotiated version so reply encoding can differ (for example some commands emit nested structures in RESP3 and flattened arrays in RESP2).
+
+#### Parse path in the server
+
+```text
+socket read → client->querybuf
+       → processInputBuffer
+            → processInlineBuffer  or  processMultibulkBuffer
+            → argv / argc ready
+            → processCommand  (main thread; see §1.4 / §2)
+```
+
+Partial reads are normal: RESP lengths let the parser wait until `$N` bytes (plus CRLF) have arrived before finishing an argument. Large bulk arguments use `PROTO_MBULK_BIG_ARG` heuristics so the query buffer can align with the payload.
+
+### 1.2 Structures
+
 
 `struct redisServer` contains the main event loop pointer `el` (`server.el`) and the global client list. It does not embed I/O worker state. I/O workers are instances of `IOThread` stored in a file-static array in `iothread.c`. The server exposes only configuration fields (`io_threads_num`, `io_threads_active`, `io_threads_do_reads`).
 
@@ -132,7 +214,7 @@ static IOThread IOThreads[IO_THREADS_MAX_NUM];
 | `IOThreads[i]` | `iothread.c` | Dedicated pthread and `aeEventLoop` for socket I/O |
 | `server.clients` | `redisServer` | Canonical list of all `client` objects |
 
-### 1.2 Client object
+### 1.3 Client object
 
 Each accepted connection is represented by exactly one `struct client`, allocated once and linked from `server.clients`. I/O workers never allocate a second client for the same socket. Thread-local lists (`IOThreads[i].clients`, pending-transfer queues) hold that same pointer while work runs on a given loop.
 
@@ -147,9 +229,9 @@ Each accepted connection is represented by exactly one `struct client`, allocate
 
 `tid` is set when the connection is assigned (`assignClientToIOThread`, or left on main). `running_tid` tracks temporary ownership during a transfer: it becomes `0` while the main thread executes the command, even if `tid` still names an I/O worker as home.
 
-The payload for a command—bytes in `querybuf`, then `argv`—always travels inside this object. How I/O and main coordinate ownership of that object for command execution is the subject of §1.3.
+The payload for a command—bytes in `querybuf`, then `argv`—always travels inside this object. How I/O and main coordinate ownership of that object for command execution is the subject of §1.4.
 
-### 1.3 Two event loops: I/O and main
+### 1.4 Two event loops: I/O and main
 
 With `io-threads` enabled, Redis runs **more than one** `aeEventLoop`. Each is a full `aeMain` → `aeProcessEvents` → `aeApiPoll` cycle on its own thread, with its own epoll/kqueue interest set. They share the `ae` type and API (`ae.h` / `ae.c`); they do not share file-descriptor registrations.
 
@@ -174,7 +256,7 @@ typedef struct aeEventLoop {
 } aeEventLoop;
 ```
 
-#### 1.3.1 Accept on main; client I/O on an I/O thread
+#### 1.4.1 Accept on main; client I/O on an I/O thread
 
 **Listen sockets** stay on `server.el` for the life of the process. I/O threads never call `accept`.
 
@@ -232,7 +314,7 @@ if (!connHasEventLoop(c->conn)) {
 
 So: main’s permanent networking role for new connections is **listen + accept + assign**. The `connUnbindEventLoop` in `assignClientToIOThread` is not “moving listen interest”; it clears the temporary client-fd registration that `createClient` just put on `server.el`, so main does not perform that connection’s I/O.
 
-#### 1.3.2 I/O thread loop — `IOThreads[i].el`
+#### 1.4.2 I/O thread loop — `IOThreads[i].el`
 
 Each I/O worker calls `aeMain(IOThreads[i].el)` with `IOThreadBeforeSleep` / `IOThreadAfterSleep`.
 
@@ -288,7 +370,7 @@ if (c->io_thread_client_list_node) {
 
 The client TCP fd stays registered on the I/O loop; enable flags gate further I/O until main finishes.
 
-#### 1.3.3 Main thread loop — `server.el`
+#### 1.4.3 Main thread loop — `server.el`
 
 The main thread calls `aeMain(server.el)` with Redis `beforeSleep` / `afterSleep`.
 
@@ -322,7 +404,7 @@ if (aeCreateFileEvent(server.el,
 2. `aeApiPoll` on **this** loop's fds (not I/O-assigned client TCP sockets).
 3. Dispatch — notifier → `handleClientsFromIOThread` → `processCommand`; listen → accept; then time events.
 
-#### 1.3.4 Notifier mechanism (source)
+#### 1.4.4 Notifier mechanism (source)
 
 A notifier is a wake-up channel, not the client socket. Implementation is `eventfd` when available, otherwise a pipe:
 
@@ -414,7 +496,7 @@ int processClientsOfAllIOThreads(void) {
 | Asleep in `aeApiPoll` (`server.running == 0`) | `triggerEventNotifier` → notifier readable → `handleClientsFromIOThread` |
 | Busy (`server.running == 1`) | Queue only → next `beforeSleep` → `processClientsOfAllIOThreads` |
 
-#### 1.3.5 Race: “main looks busy” then enters `aeApiPoll`
+#### 1.4.5 Race: “main looks busy” then enters `aeApiPoll`
 
 Judging `server.running` and choosing notify vs queue-only is **not** one atomic “read state and dispatch” instruction. The safety comes from a fixed order on both sides plus a second drain after publishing “I am going to sleep.”
 
@@ -521,7 +603,7 @@ AE_WRITABLE / write path → reply
 
 `connUnbindEventLoop` / rebind onto `server.el` is for permanent home changes (`keepClientInMainThread`) or teardown — not the normal per-command path. When `io_threads_num <= 1`, only `server.el` exists for client I/O and commands.
 
-### 1.4 Example: `SET k v` through I/O thread then main thread
+### 1.5 Example: `SET k v` through I/O thread then main thread
 
 Assume `io-threads` is enabled and `assignClientToIOThread` has set `client.tid = 1`. The client sends:
 
@@ -543,7 +625,7 @@ Source anchors: `enqueuePendingClientsToMainThread(..., 0)`, `sendPendingClients
 
 ## 2. Command execution
 
-A command is a RESP array (for example `SET k v`), already in `client->argv` / `argc` after §1. There is no SQL planner: each command is a registered `redisCommand.proc`.
+A command is a RESP array (for example `SET k v`), already in `client->argv` / `argc` after RESP parse (§1.1) and any I/O→main hand-off (§1.4). There is no SQL planner: each command is a registered `redisCommand.proc`.
 
 ### 2.1 Structures
 
@@ -749,7 +831,7 @@ Commands are totally ordered on one process. Disjoint-key commands (for example 
 
 ### 3.3 I/O threads
 
-When `io-threads` is enabled (`iothread.c`), clients are assigned to an `IOThread` for socket I/O, transferred to the main thread for `processCommand` / `call`, and may be returned to the I/O thread for asynchronous write (§1.2). This arrangement parallelizes socket work only; keyspace updates remain on the main thread.
+When `io-threads` is enabled (`iothread.c`), clients are assigned to an `IOThread` for socket I/O, transferred to the main thread for `processCommand` / `call`, and may be returned to the I/O thread for asynchronous write (§1.3–§1.4). This arrangement parallelizes socket work only; keyspace updates remain on the main thread.
 
 ### 3.4 `MULTI` / `EXEC`
 
@@ -857,7 +939,7 @@ Replicas use `expireSlaveKeys` rather than owning primary deletes.
 
 | § | Mechanism |
 |---|-----------|
-| 1 Network | `aeEventLoop`, accept/read/write, hand-off into command path |
+| 1 Network | RESP over TCP; `aeEventLoop`; accept/read/write; I/O↔main hand-off |
 | 2 Command execution | `processCommand` → `call` → `cmd->proc` |
 | 3 Concurrency | One `aeEventLoop` serializes all commands (any keys); I/O threads; `MULTI`/`WATCH` |
 | 4 Expire | Lazy `expireIfNeeded`; active slow/fast `activeExpireCycle` |
