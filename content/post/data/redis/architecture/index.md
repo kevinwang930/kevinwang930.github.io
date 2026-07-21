@@ -20,7 +20,7 @@ Redis stores keys in memory and serves RESP commands on a single-threaded event 
 
 <!--more-->
 
-Related: [Build Redis from source](../build/), [Pub/Sub internals](../pubsub/).
+Related: [Build Redis from source](../build/), [Pub/Sub internals](../pubsub/), [Cluster bus gossip](../cluster-bus/).
 
 ![Redis overall architecture](images/redis-architecture.svg)
 

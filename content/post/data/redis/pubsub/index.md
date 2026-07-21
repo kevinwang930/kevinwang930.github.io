@@ -19,7 +19,7 @@ Redis Pub/Sub is an in-process fan-out over named channels and glob patterns. It
 
 <!--more-->
 
-Related: [Network / command path](../architecture/), [Build from source](../build/).
+Related: [Network / command path](../architecture/), [Cluster bus gossip](../cluster-bus/), [Build from source](../build/).
 
 ![Pub/Sub dual indexes and fan-out](images/pubsub-architecture.svg)
 
