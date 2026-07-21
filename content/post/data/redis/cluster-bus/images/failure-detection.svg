@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-label="Cluster failure detection PFAIL to FAIL">
+  <rect width="960" height="420" fill="#f7f9fb"/>
+  <text x="480" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Failure detection: PFAIL to FAIL (weak quorum)</text>
+  <text x="480" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Masters A, C, D; subject master X unreachable</text>
+
+  <!-- Step 1 -->
+  <rect x="30" y="80" width="200" height="130" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.5" rx="8"/>
+  <text x="130" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">1. Local PFAIL</text>
+  <text x="130" y="132" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#bf360c">Master A</text>
+  <text x="130" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">cannot reach X</text>
+  <text x="130" y="172" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">within node-timeout</text>
+  <text x="130" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#e65100">X flags |= PFAIL</text>
+
+  <line x1="230" y1="145" x2="270" y2="145" stroke="#37474f" stroke-width="2"/>
+  <polygon points="270,145 262,140 262,150" fill="#37474f"/>
+
+  <!-- Step 2 -->
+  <rect x="270" y="80" width="220" height="130" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="8"/>
+  <text x="380" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">2. Gossip reports</text>
+  <text x="380" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">PING/PONG sample</text>
+  <text x="380" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">carries X as PFAIL</text>
+  <text x="380" y="172" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">+ PFAIL bias in sample</text>
+  <text x="380" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">masters record reports</text>
+
+  <line x1="490" y1="145" x2="530" y2="145" stroke="#37474f" stroke-width="2"/>
+  <polygon points="530,145 522,140 522,150" fill="#37474f"/>
+
+  <!-- Step 3 -->
+  <rect x="530" y="80" width="200" height="130" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5" rx="8"/>
+  <text x="630" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#880e4f">3. Majority</text>
+  <text x="630" y="132" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ad1457">local PFAIL on X</text>
+  <text x="630" y="152" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ad1457">+ reports from masters</text>
+  <text x="630" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">count &gt;= (size/2)+1</text>
+  <text x="630" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#880e4f">markNodeAsFailing</text>
+
+  <line x1="730" y1="145" x2="770" y2="145" stroke="#37474f" stroke-width="2"/>
+  <polygon points="770,145 762,140 762,150" fill="#37474f"/>
+
+  <!-- Step 4 -->
+  <rect x="770" y="80" width="160" height="130" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="8"/>
+  <text x="850" y="108" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">4. FAIL flood</text>
+  <text x="850" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">X |= FAIL</text>
+  <text x="850" y="156" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">clear PFAIL</text>
+  <text x="850" y="180" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#558b2f">broadcast FAIL</text>
+  <text x="850" y="198" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">data.fail.nodename</text>
+
+  <!-- Bottom: who votes -->
+  <rect x="30" y="240" width="900" height="140" fill="#eceff1" stroke="#546e7a" stroke-width="1.2" rx="8"/>
+  <text x="480" y="268" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Example: 3 masters (A, C, D) - quorum = 2</text>
+
+  <rect x="60" y="290" width="120" height="60" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="120" y="315" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">A</text>
+  <text x="120" y="335" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">PFAIL + self</text>
+
+  <rect x="220" y="290" width="120" height="60" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="280" y="315" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">C</text>
+  <text x="280" y="335" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">gossip report</text>
+
+  <rect x="380" y="290" width="120" height="60" fill="#ffffff" stroke="#90a4ae" rx="4"/>
+  <text x="440" y="315" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#546e7a">D</text>
+  <text x="440" y="335" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">learns via FAIL</text>
+
+  <rect x="560" y="290" width="140" height="60" fill="#ffebee" stroke="#c62828" rx="4"/>
+  <text x="630" y="315" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#b71c1c">X</text>
+  <text x="630" y="335" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#c62828">unreachable</text>
+
+  <text x="800" y="318" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">A+C =&gt; FAIL</text>
+  <text x="800" y="338" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">then flood bus</text>
+
+  <text x="480" y="405" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">Without majority, X stays PFAIL only; no replica promotion authorized</text>
+</svg>
