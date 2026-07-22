@@ -10,9 +10,7 @@ tags:
 - redis
 keywords:
 - redis
-- cluster
 - gossip
-- cluster-bus
 #thumbnailImage: //example.com/image.jpg
 ---
 
@@ -39,6 +37,11 @@ Redis Cluster separates **data** traffic from **control** traffic. Clients stay 
 | Client / data | `:6379` RESP | Apps, replication client | Commands, keys, replication stream |
 | Cluster bus / control | `:16379` (base+10000) binary | Redis nodes only | Membership, health, slots/epochs, votes, selected events |
 
+```c
+/* cluster_legacy.h */
+#define CLUSTER_PORT_INCR 10000 /* Cluster port = baseport + PORT_INCR */
+```
+
 ```text
  clients --RESP--> [ Redis node: data + slots ]
                         |
@@ -57,6 +60,21 @@ Gossip is how Redis Cluster spreads **membership and health** without shipping a
 |---------|-------|---------|---------|
 | Continuous gossip | `PING`, `PONG`, `MEET` | Periodic / on meet | Liveness, membership rumors, slot/epoch in **header**, failure flags in gossip rows |
 | Discrete events | `FAIL`, `FAILOVER_AUTH_*`, `UPDATE`, `PUBLISH` / `PUBLISHSHARD`, `MFSTART`, `MODULE` | On demand | Explicit flood or unicast for one cluster action |
+
+```c
+/* cluster_legacy.h — message type ids */
+#define CLUSTERMSG_TYPE_PING 0
+#define CLUSTERMSG_TYPE_PONG 1
+#define CLUSTERMSG_TYPE_MEET 2
+#define CLUSTERMSG_TYPE_FAIL 3
+#define CLUSTERMSG_TYPE_PUBLISH 4
+#define CLUSTERMSG_TYPE_FAILOVER_AUTH_REQUEST 5
+#define CLUSTERMSG_TYPE_FAILOVER_AUTH_ACK 6
+#define CLUSTERMSG_TYPE_UPDATE 7
+#define CLUSTERMSG_TYPE_MFSTART 8
+#define CLUSTERMSG_TYPE_MODULE 9
+#define CLUSTERMSG_TYPE_PUBLISHSHARD 10
+```
 
 Wire layouts for those types are in [§2.3](#23-data-by-message-type).
 
@@ -91,6 +109,23 @@ sequenceDiagram
 
 So under defaults, a healthy peer is typically re-pinged on the order of **every ~7.5 s** when its last pong ages out, plus occasional random pings (~1/s cluster-wide toward the stalest sample). Manual-failover wait may ping the chosen replica continuously.
 
+```c
+/* cluster_legacy.c — clusterCron: per-peer refresh */
+mstime_t ping_interval = server.cluster_ping_interval ?
+    server.cluster_ping_interval : server.cluster_node_timeout/2;
+if (node->link &&
+    node->ping_sent == 0 &&
+    (now - node->pong_received) > ping_interval)
+{
+    clusterSendPing(node->link, CLUSTERMSG_TYPE_PING);
+}
+```
+
+```c
+/* cluster_legacy.c — clusterProcessPacket: reply to PING / MEET */
+clusterSendPing(link, CLUSTERMSG_TYPE_PONG);
+```
+
 Each successful exchange updates the sender from the peer’s header and merges the peer’s gossip rows into the local `nodes` dictionary.
 
 #### 1.2.2 Sampling
@@ -107,31 +142,122 @@ The body never lists the whole cluster. `clusterSendPing` builds a **bounded ran
 
 **Why ~1/10 (and at least three).** Source comment on `clusterSendPing`: within about two `cluster-node-timeout` windows, nodes exchange several pings/pongs. With ~`N/10` gossip slots per packet, the chance that a given master appears often enough in others’ samples is high enough that a node already in `PFAIL` can collect **majority** failure reports before reports expire—without paying full-membership bandwidth every round.
 
+```c
+/* cluster_legacy.c — clusterSendPing */
+wanted = floor(dictSize(server.cluster->nodes)/10);
+if (wanted < 3) wanted = 3;
+if (wanted > freshnodes) wanted = freshnodes;
+
+/* Include all the nodes in PFAIL state, so that failure reports are
+ * faster to propagate to go from PFAIL to FAIL state. */
+int pfail_wanted = server.cluster->stats_pfail_nodes;
+/* … random draw into gossipcount < wanted …
+ * … then append every PFAIL node via clusterSetGossipEntry … */
+hdr->count = htons(gossipcount);
+```
+
 **What each sampled row carries.** A rumor about one third party: id, coarse `ping_sent` / `pong_received` (seconds), IP and ports, and that peer’s `flags` as the **sender** sees them (`MASTER` / `SLAVE` / `PFAIL` / `FAIL` / `NOADDR`, …). Exact field sizes are under [§2.3.1](#231-ping--pong--meet-02--dataping).
 
 #### 1.2.3 Merge
 
-`clusterProcessGossipSection` validates node ids, then for each row:
+`clusterProcessGossipSection` applies each gossip row to the local `nodes` dictionary after validating node identifiers. Invalid identifiers cause rejection of the entire gossip section.
 
-1. **Corrupt ids** — reject the entire gossip section.
-2. **Known node, not myself** — if the packet sender is a master and the row has `PFAIL`/`FAIL`, record a failure report (and maybe promote to `FAIL`); if the row clears failure flags, drop that master’s report. Optionally refresh local `pong_received`. If the subject is down locally but gossip says it is up at a new address, update IP/ports and drop the old link.
-3. **Unknown node** — if the sender is a trusted cluster member, the row is not `NOADDR`, and the id is not blacklisted, insert a new `clusterNode`.
-4. **Gossip about myself** — ignored for state updates.
+For each row the subject is the node named in the row; the sender is the peer that transmitted the packet:
 
-Over many rounds, random samples plus PFAIL bias yield cluster-wide convergence on membership and failure views with \(O(N)\) rumor bytes per packet rather than \(O(N^2)\) full dumps.
+1. **Subject unknown** — if the sender is already a trusted member, the row is not `NOADDR`, and the subject id is not blacklisted, insert a new `clusterNode`.
+2. **Subject is myself** — ignore the row for state updates.
+3. **Subject known and not myself** — optionally record or clear a failure report when the sender is a master (rules below); may refresh `pong_received` from the row’s pong time when the subject has no failure flags and no outstanding reports; if the subject is locally `PFAIL`/`FAIL` but the row reports it reachable at a different address, update IP/ports and drop the old link.
+
+##### Failure reports
+
+A **failure report** is a local record that a given master recently advertised the subject as `PFAIL` or `FAIL` in gossip. Reports are not a bus message type and are not bits in `clusterNode.flags`. Each subject `clusterNode` holds a list `fail_reports` of `clusterNodeFailReport` entries `{reporter, time}` in this process only (`server.cluster->nodes`).
+
+```c
+/* cluster_legacy.h */
+typedef struct clusterNodeFailReport {
+    clusterNode *node;  /* master that reported the failure */
+    mstime_t time;      /* last refresh of this report */
+} clusterNodeFailReport;
+/* subject->fail_reports — list of reporters for that subject */
+```
+
+![Failure report storage and lifecycle](images/failure-report-storage.svg)
+
+| Event (master sender) | Local update |
+|-----------------------|--------------|
+| Gossip row with `PFAIL` or `FAIL` on the subject | `clusterNodeAddFailureReport(subject, sender)`: insert or refresh `time` for that reporter. No probe of the subject. Then `markNodeAsFailingIfNeeded(subject)`. |
+| Gossip row without failure flags on the subject | `clusterNodeDelFailureReport(subject, sender)`. |
+| Gossip from a replica | Failure-report list unchanged (only masters contribute reports). |
+| Same reporter sends `PFAIL`/`FAIL` again | Only `time` is refreshed; still one report per reporter. |
+| Report age exceeds `cluster-node-timeout × CLUSTER_FAIL_REPORT_VALIDITY_MULT` (2) | Entry removed by cleanup when the list is counted or edited. |
+
+| Field | Effect of a report add/refresh alone |
+|-------|--------------------------------------|
+| `subject->fail_reports` | Ledger grows or timestamps move. |
+| `subject->flags` (`PFAIL`, `FAIL`) | Unchanged. Local `PFAIL` is set only by this node’s unanswered ping / link delay in `clusterCron`. `FAIL` is set only by `markNodeAsFailingIfNeeded` (requires local `PFAIL` plus majority report count, including self if this node is a master) or by a discrete `FAIL` packet. |
+| Slot map, epochs, `cluster_state` | Unchanged by reports directly; they react after `FAIL` is set, after failover, or in `clusterUpdateState`. |
+| Gossip refresh of `pong_received` | Suppressed while any failure reports remain for the subject. |
+
+```c
+/* cluster_legacy.c — clusterProcessGossipSection (known subject, master sender) */
+if (sender && clusterNodeIsMaster(sender)) {
+    if (flags & (CLUSTER_NODE_FAIL|CLUSTER_NODE_PFAIL)) {
+        clusterNodeAddFailureReport(node, sender);
+        markNodeAsFailingIfNeeded(node);
+    } else {
+        clusterNodeDelFailureReport(node, sender);
+    }
+}
+```
+
+```c
+/* cluster_legacy.c — markNodeAsFailingIfNeeded */
+if (!nodeTimedOut(node)) return; /* local PFAIL required */
+/* count reports (+ self if master); on quorum: set FAIL, clear PFAIL, clusterSendFail */
+```
+
+**Invariants.** Gossip `PFAIL`/`FAIL` rows record the sender’s opinion in `fail_reports`; they do not copy those flags onto the subject and do not schedule an immediate probe of the subject. Reachability for local `PFAIL` continues to follow the ordinary ping schedule in `clusterCron`. A discrete `FAIL` message, by contrast, sets `FAIL` on reachable receivers without requiring local `PFAIL`—that path runs after quorum has already been reached on some node.
+
+Repeated merge of random samples with PFAIL bias converges membership and failure views with \(O(N)\) rumor bytes per packet rather than \(O(N^2)\) full dumps.
 
 #### 1.2.4 Failure detection (weak quorum)
 
 Failure is a **local opinion** that becomes a **cluster flag** only with majority support among masters that serve slots. Gossip sampling is what spreads those opinions:
 
-1. If A cannot reach X within `cluster-node-timeout`, A sets **local** `PFAIL` on X.
-2. Masters advertise `PFAIL`/`FAIL` in **gossip rows**; peers record **failure reports** from masters. PFAIL bias in [§1.2.2 Sampling](#122-sampling) accelerates this.
-3. If A already has `PFAIL` on X and reports from a **majority of masters** (quorum \((\mathit{cluster\_size}/2)+1\)), A sets `FAIL`, clears `PFAIL`, and broadcasts a discrete `FAIL` message (`data.fail`) so others can adopt the flag without waiting for another gossip round.
-4. Reachability again can clear `FAIL` under defined conditions (especially for replicas).
+1. If A cannot reach X within `cluster-node-timeout`, A sets **local** `PFAIL` on X (A’s own unanswered ping / link delay—not because gossip said so).
+2. Masters advertise `PFAIL`/`FAIL` in **gossip rows**. Peers that receive those rows from masters **record failure reports without probing X** (see [§1.2.3](#123-merge)); they still do not set their own `PFAIL` on X from the rumor alone. PFAIL bias in [§1.2.2 Sampling](#122-sampling) accelerates report collection.
+3. If A already has `PFAIL` on X and reports from a **majority of masters** (quorum \((\mathit{cluster\_size}/2)+1\)), A sets `FAIL`, clears `PFAIL`, and broadcasts a discrete `FAIL` message (`data.fail`) so others can adopt the flag without waiting for another gossip round (and without each peer needing local `PFAIL` first).
+4. Reachability again can clear `FAIL` under the recovery rules in [§1.2.6](#126-failure-recovery).
+
+```c
+/* cluster_legacy.c — clusterCron: local PFAIL */
+if (node_delay > server.cluster_node_timeout) {
+    if (!(node->flags & (CLUSTER_NODE_PFAIL|CLUSTER_NODE_FAIL))) {
+        node->flags |= CLUSTER_NODE_PFAIL;
+        /* … */
+    }
+}
+```
+
+```c
+/* cluster_legacy.c — markNodeAsFailingIfNeeded */
+int needed_quorum = (server.cluster->size / 2) + 1;
+if (!nodeTimedOut(node)) return;   /* need local PFAIL */
+if (nodeFailed(node)) return;
+
+failures = clusterNodeFailureReportsCount(node);
+if (clusterNodeIsMaster(myself)) failures++;
+if (failures < needed_quorum) return;
+
+node->flags &= ~CLUSTER_NODE_PFAIL;
+node->flags |= CLUSTER_NODE_FAIL;
+node->fail_time = mstime();
+clusterSendFail(node->name);       /* discrete FAIL flood */
+```
 
 ![Failure detection PFAIL to FAIL](images/failure-detection.svg)
 
-This agreement is intentionally weak and time-based: partitions may delay visibility, and without majority no replica promotion is authorized.
+This agreement is intentionally weak and time-based: partitions may delay visibility, and without majority no replica promotion is authorized. How partitions interact with that majority is covered in [§1.2.7](#127-split-brain-partitions).
 
 #### 1.2.5 Replica promotion (to master)
 
@@ -142,16 +268,120 @@ Once the failed master is `FAIL`, a replica of that master may try to take over 
 3. When `R` collects enough acks (`failover_auth_count` reaches quorum), it promotes: `SLAVE` → `MASTER`, claims the former master’s slots, bumps `configEpoch`.
 4. Peers learn the new owner through subsequent gossip headers and optional `UPDATE` packets so client `MOVED` targets point at `R`.
 
+```c
+/* cluster_legacy.c — clusterHandleSlaveFailover (excerpt) */
+int needed_quorum = (server.cluster->size / 2) + 1;
+/* Preconditions: we are a replica; master is FAIL (or manual failover);
+ * master still has slots; data not too stale per validity factor. */
+
+if (server.cluster->failover_auth_sent == 0) {
+    server.cluster->currentEpoch++;
+    server.cluster->failover_auth_epoch = server.cluster->currentEpoch;
+    clusterRequestFailoverAuth();   /* broadcast FAILOVER_AUTH_REQUEST */
+    server.cluster->failover_auth_sent = 1;
+    return;
+}
+
+if (server.cluster->failover_auth_count >= needed_quorum) {
+    if (myself->configEpoch < server.cluster->failover_auth_epoch)
+        myself->configEpoch = server.cluster->failover_auth_epoch;
+    clusterFailoverReplaceYourMaster();
+}
+```
+
+Masters that accept a request reply with `FAILOVER_AUTH_ACK` via `clusterSendFailoverAuthIfNeeded` (one vote per epoch, subject to the usual election rules).
+
 ![Replica promotion after master FAIL](images/replica-promote.svg)
 
 Wire layouts: [§2.3.4](#234-failover_auth_request-5--empty-data)–[§2.3.6](#236-update-7--dataupdate), [§2.3.7](#237-mfstart-8--empty-data).
 
-#### 1.2.6 Design properties (gossip)
+#### 1.2.6 Failure recovery
+
+`FAIL` is mostly one-way: gossip can elevate `PFAIL` → `FAIL`, but clearing `FAIL` is deliberate and rare. When a node becomes reachable again, `clearNodeFailureIfNeeded` applies:
+
+| Recovered node | When `FAIL` clears |
+|----------------|-------------------|
+| Replica, or master with **zero** slots | As soon as it is reachable again (replicas are not failed over; slotless masters are not yet part of slot ownership). |
+| Master that still owns slots locally | Only after `fail_time` is older than `cluster-node-timeout × CLUSTER_FAIL_UNDO_TIME_MULT` (mult = **2**), and no promotion has taken the slots from this node’s point of view. |
+
+```c
+/* cluster_legacy.h */
+#define CLUSTER_FAIL_REPORT_VALIDITY_MULT 2
+#define CLUSTER_FAIL_UNDO_TIME_MULT 2
+
+/* cluster_legacy.c — clearNodeFailureIfNeeded */
+if (nodeIsSlave(node) || node->numslots == 0) {
+    node->flags &= ~CLUSTER_NODE_FAIL;
+}
+if (clusterNodeIsMaster(node) && node->numslots > 0 &&
+    (now - node->fail_time) >
+    (server.cluster_node_timeout * CLUSTER_FAIL_UNDO_TIME_MULT))
+{
+    node->flags &= ~CLUSTER_NODE_FAIL;
+}
+```
+
+Failure reports themselves expire after `cluster-node-timeout × CLUSTER_FAIL_REPORT_VALIDITY_MULT` (also **2**), so a stale minority `PFAIL` view stops contributing to quorum.
+
+**After a successful failover.** The promoted replica owns the slots with a higher `configEpoch`. When the old master rejoins:
+
+1. Heartbeats still claim the old slots and the old epoch.
+2. Peers with the newer config reply with `UPDATE` (or equivalent header-driven slot ownership), so the rejoining node loses those slots one by one.
+3. When its last slot is gone, the node reconfigures as a **replica of whoever stole that last slot** (normally the promoted replica). Other replicas of the failed master do the same.
+
+**Cluster-level availability** (`clusterUpdateState`): local `cluster_state` becomes `ok` only when (with default `cluster-require-full-coverage`) every slot has a non-`FAIL` owner **and** this node can see a majority of slotted masters as neither `PFAIL` nor `FAIL`. Otherwise the node reports `fail` and refuses writes (`CLUSTERDOWN`). A master that was in a minority partition delays returning to `ok` after heal by a bounded rejoin delay (clamped from `cluster-node-timeout`) so it can absorb config updates before accepting queries again.
+
+```c
+/* cluster_legacy.c — clusterUpdateState (minority + rejoin delay) */
+int needed_quorum = (server.cluster->size / 2) + 1;
+if (reachable_masters < needed_quorum) {
+    new_state = CLUSTER_FAIL;
+    among_minority_time = mstime();
+}
+/* On heal to OK as a master: wait rejoin_delay (from node timeout,
+ * clamped) after among_minority_time before accepting queries. */
+```
+
+#### 1.2.7 Split-brain (partitions)
+
+A network partition splits the bus into sides that cannot exchange gossip. Redis Cluster does not allow both sides to remain fully writable for the same slots; majority among **slotted masters** is the gate.
+
+**Majority side.** Masters that can still reach each other form a quorum. They can elevate unreachable peers to `FAIL`, elect replicas, and keep serving slots that still have a reachable owner (or a successful promotion). Clients on this side continue after failover completes.
+
+**Minority side.** Reachable masters are fewer than \((\mathit{cluster\_size}/2)+1\). That side cannot:
+
+- collect enough failure reports to authorize a durable `FAIL` that leads to promotion, or
+- gather enough `FAILOVER_AUTH_ACK` votes for an election.
+
+`clusterUpdateState` therefore sets `cluster_state` to `fail` on the minority (snippet in [§1.2.6](#126-failure-recovery)). Writes stop after roughly `NODE_TIMEOUT` without majority contact, bounding how long minority-side acknowledged writes can be lost when the majority later fails those masters over.
+
+**Divergent `FAIL` views and convergence.** Because `FAIL` agreement is weak and `FAIL` messages may not cross the cut, temporary disagreement is possible:
+
+1. **Majority already marked `FAIL`** — gossip and chain effect eventually force the flag on the rest of the reachable cluster once the partition heals.
+2. **Only a minority marked `FAIL`** — no promotion is authorized (votes need majority votes). After the undo window with the node reachable again, nodes clear `FAIL` per [§1.2.6](#126-failure-recovery).
+
+**Epochs vs dual masters.** Automatic failover requires majority votes and a unique bumped `configEpoch`, so two partitions cannot both complete a legitimate election for the same slots. If two masters ever claim the same `configEpoch` (for example after forced / admin paths), `clusterHandleConfigEpochCollision` breaks the tie by node id so conflicting masters do not keep identical epochs indefinitely—the design treats lasting dual writers for the same slots as the worst outcome.
+
+```c
+/* cluster_legacy.c — clusterHandleConfigEpochCollision */
+if (sender->configEpoch != myself->configEpoch ||
+    !clusterNodeIsMaster(sender) || !clusterNodeIsMaster(myself)) return;
+/* Smaller node id keeps its epoch; larger id bumps itself. */
+if (memcmp(sender->name, myself->name, CLUSTER_NAMELEN) <= 0) return;
+server.cluster->currentEpoch++;
+myself->configEpoch = server.cluster->currentEpoch;
+```
+
+**Client write safety (partition window).** Writes on the majority side are retained with best effort; a short window of loss is still possible around failover because replication is asynchronous. Writes accepted on the minority before it goes `CLUSTERDOWN` can be discarded when the majority promotes a replica whose dataset never saw them.
+
+#### 1.2.8 Design properties (gossip)
 
 | Property | Consequence |
 |----------|-------------|
 | Sampled gossip + PFAIL bias | Bandwidth grows gently with \(N\); failures propagate faster than uniform random gossip |
 | Weak majority for `FAIL` | Avoids single-observer false failovers; still partition-sensitive |
+| Majority gate on elections + `cluster_state` | Minority partitions refuse writes; only one side can complete failover |
+| `FAIL` clear + epoch/`UPDATE` rejoin | False or stale failures unwind; old masters demote instead of fighting the new owner |
 | Header + sample each ping | Topology and health refresh continuously without a full membership dump |
 
 ---
@@ -172,7 +402,29 @@ typedef struct clusterLink {
 } clusterLink;
 ```
 
-`clusterCron` (and related paths) open outbound links and schedule pings. Inbound data accumulates in `rcvbuf` until a full `clusterMsg` is present; `clusterProcessPacket` branches on `type`.
+`clusterCron` (and related paths) open outbound links and schedule pings. Inbound data accumulates in `rcvbuf` until a full `clusterMsg` is present; `clusterProcessPacket` branches on `type`:
+
+```c
+/* cluster_legacy.c — clusterProcessPacket (shape) */
+uint16_t type = ntohs(hdr->type);
+if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_MEET) {
+    /* … MEET may create sender … */
+    clusterSendPing(link, CLUSTERMSG_TYPE_PONG);
+}
+if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_PONG ||
+    type == CLUSTERMSG_TYPE_MEET)
+{
+    /* apply header; then: */
+    clusterProcessGossipSection(hdr, link);
+} else if (type == CLUSTERMSG_TYPE_FAIL) {
+    /* force FAIL on named node */
+} else if (type == CLUSTERMSG_TYPE_FAILOVER_AUTH_REQUEST) {
+    clusterSendFailoverAuthIfNeeded(sender, hdr);
+} else if (type == CLUSTERMSG_TYPE_FAILOVER_AUTH_ACK) {
+    /* count vote toward failover_auth_count */
+}
+/* UPDATE, PUBLISH*, MFSTART, MODULE, … */
+```
 
 ### 2.2 Protocol design
 
@@ -450,12 +702,19 @@ Optional extensions (`CLUSTERMSG_FLAG0_EXT_DATA`): hostname, human nodename, for
 
 ### 2.7 Sending: `clusterSendPing`
 
+Mechanism rules are in [§1.2.2](#122-sampling). Implementation highlights:
+
 ```c
-/* cluster_legacy.c — behavior */
-wanted = max(3, floor(dictSize(nodes) / 10));
-/* random eligible nodes: not myself, not receiver, not HANDSHAKE/NOADDR/... */
-/* then append every PFAIL node */
-clusterSetGossipEntry(hdr, gossipcount++, node);
+/* cluster_legacy.c — clusterSendPing (structure) */
+if (!link->inbound && type == CLUSTERMSG_TYPE_PING)
+    link->node->ping_sent = mstime();
+
+wanted = floor(dictSize(server.cluster->nodes)/10);
+if (wanted < 3) wanted = 3;
+/* random eligible nodes → clusterSetGossipEntry;
+ * then append every PFAIL node; finally: */
+hdr->count = htons(gossipcount);
+/* send msgblock on link */
 ```
 
 | Implementation detail | Purpose |
@@ -467,20 +726,23 @@ clusterSetGossipEntry(hdr, gossipcount++, node);
 
 ### 2.8 Receiving: `clusterProcessGossipSection`
 
-Called for ping-family packets after length validation.
+Called for ping-family packets after length validation. Mechanism steps: [§1.2.3](#123-merge).
 
 | Entry | Implementation effect |
 |-------|------------------------|
-| Corrupt node id | Reject the entire gossip section |
-| Known node ≠ myself | Master sender + `PFAIL`/`FAIL` flags → `clusterNodeAddFailureReport`; clear report if gossip says up; `markNodeAsFailingIfNeeded`; may refresh `pong_received` or update address if a down node is reported reachable elsewhere |
-| Unknown node | May insert into `server.cluster->nodes` (membership growth via gossip/`MEET`) |
+| Corrupt node id | `verifyGossipSectionNodeIds` fails → reject the entire gossip section |
+| Known node ≠ myself | Master sender + `PFAIL`/`FAIL` → **unconditionally** `clusterNodeAddFailureReport` (no ping of the subject); clear report if gossip says up; `markNodeAsFailingIfNeeded` (requires **local** `PFAIL`); may refresh `pong_received` or update address if a down node is reported reachable elsewhere |
+| Unknown node | May `createClusterNode` / insert into `server.cluster->nodes` (membership growth via gossip/`MEET`) |
 
-```text
-markNodeAsFailingIfNeeded(node):
-  require local PFAIL
-  failures = reports from masters (+ self if master)
-  if failures >= (cluster_size/2)+1
-      set FAIL; clusterSendFail(name)
+```c
+/* cluster_legacy.c — markNodeAsFailingIfNeeded (receive path) */
+if (!nodeTimedOut(node)) return; /* gossip PFAIL did not set this */
+failures = clusterNodeFailureReportsCount(node);
+if (clusterNodeIsMaster(myself)) failures++;
+if (failures < (server.cluster->size / 2) + 1) return;
+node->flags &= ~CLUSTER_NODE_PFAIL;
+node->flags |= CLUSTER_NODE_FAIL;
+clusterSendFail(node->name);
 ```
 
 ### 2.9 Key files
@@ -496,5 +758,5 @@ markNodeAsFailingIfNeeded(node):
 
 | Topic | Summary |
 |-------|---------|
-| Architecture | Planes; gossip mechanism (exchange, sampling, failure, promotion) (§1) |
-| Implementation | Protocol design (header, data by type); wire structs; send/receive paths (§2) |
+| Architecture | Planes; gossip mechanism with source excerpts (exchange, sampling, merge, failure, promotion, recovery, split-brain) (§1) |
+| Implementation | Protocol design; wire structs; `clusterProcessPacket` / send/receive paths (§2) |
