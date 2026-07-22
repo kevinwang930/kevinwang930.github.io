@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="720" viewBox="0 0 980 720" role="img" aria-label="Failure report storage and lifecycle">
+  <rect width="980" height="720" fill="#f7f9fb"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Gossip failure votes: storage on one node (process A)</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Subject X in A.nodes; reports are local memory only (not a bus message type)</text>
+
+  <!-- ===== Storage layout ===== -->
+  <rect x="24" y="68" width="932" height="300" fill="#eceff1" stroke="#546e7a" stroke-width="1.2" rx="8"/>
+  <text x="40" y="92" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">How it is stored</text>
+
+  <!-- clusterState -->
+  <rect x="40" y="108" width="200" height="140" fill="#ffffff" stroke="#455a64" stroke-width="1.5" rx="6"/>
+  <text x="140" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#263238">clusterState</text>
+  <text x="52" y="152" font-family="Consolas, monospace" font-size="10" fill="#37474f">myself</text>
+  <text x="52" y="170" font-family="Consolas, monospace" font-size="10" fill="#37474f">size  (slotted masters)</text>
+  <text x="52" y="188" font-family="Consolas, monospace" font-size="10" fill="#1565c0">nodes  dict*</text>
+  <text x="52" y="206" font-family="Consolas, monospace" font-size="10" fill="#37474f">state  OK|FAIL</text>
+  <text x="52" y="224" font-family="Consolas, monospace" font-size="9" fill="#78909c">stats_pfail_nodes ...</text>
+  <text x="140" y="240" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">server.cluster</text>
+
+  <line x1="240" y1="188" x2="280" y2="188" stroke="#1565c0" stroke-width="2"/>
+  <polygon points="280,188 272,183 272,193" fill="#1565c0"/>
+
+  <!-- dict nodes -->
+  <rect x="280" y="120" width="150" height="120" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="6"/>
+  <text x="355" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">nodes (dict)</text>
+  <text x="295" y="166" font-family="Consolas, monospace" font-size="10" fill="#1565c0">name -&gt; clusterNode*</text>
+  <text x="295" y="188" font-family="Consolas, monospace" font-size="10" fill="#546e7a">... A, C, D ...</text>
+  <text x="295" y="210" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#c62828">X  ------------+</text>
+  <text x="355" y="230" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">keyed by 40-byte id</text>
+
+  <line x1="430" y1="205" x2="470" y2="205" stroke="#c62828" stroke-width="2"/>
+  <polygon points="470,205 462,200 462,210" fill="#c62828"/>
+
+  <!-- clusterNode X -->
+  <rect x="470" y="100" width="260" height="220" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.8" rx="6"/>
+  <text x="600" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">clusterNode  (subject X)</text>
+  <text x="485" y="146" font-family="Consolas, monospace" font-size="10" fill="#5d4037">name[40]</text>
+  <text x="485" y="166" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#e65100">flags   PFAIL | FAIL | ...</text>
+  <text x="485" y="186" font-family="Consolas, monospace" font-size="10" fill="#5d4037">fail_time     (when FAIL set)</text>
+  <text x="485" y="206" font-family="Consolas, monospace" font-size="10" fill="#5d4037">ping_sent / pong_received</text>
+  <text x="485" y="226" font-family="Consolas, monospace" font-size="10" fill="#5d4037">link / inbound_link</text>
+  <text x="485" y="250" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#6a1b9a">fail_reports  list* ----+</text>
+  <text x="485" y="272" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">vote ledger for X (on A only)</text>
+  <text x="485" y="292" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">slots / epochs unchanged by reports</text>
+  <text x="600" y="310" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">A's view of peer X</text>
+
+  <line x1="730" y1="245" x2="760" y2="245" stroke="#6a1b9a" stroke-width="2"/>
+  <polygon points="760,245 752,240 752,250" fill="#6a1b9a"/>
+
+  <!-- fail_reports list -->
+  <rect x="760" y="108" width="180" height="200" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="1.8" rx="6"/>
+  <text x="850" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#4a148c">fail_reports</text>
+  <text x="850" y="148" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#7b1fa2">list of votes</text>
+
+  <rect x="775" y="160" width="150" height="52" fill="#ffffff" stroke="#8e24aa" rx="4"/>
+  <text x="850" y="180" text-anchor="middle" font-family="Consolas, monospace" font-size="9" font-weight="700" fill="#6a1b9a">FailReport</text>
+  <text x="850" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">node -&gt; C</text>
+  <text x="850" y="208" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">time = t1</text>
+
+  <rect x="775" y="222" width="150" height="52" fill="#ffffff" stroke="#8e24aa" rx="4"/>
+  <text x="850" y="242" text-anchor="middle" font-family="Consolas, monospace" font-size="9" font-weight="700" fill="#6a1b9a">FailReport</text>
+  <text x="850" y="258" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">node -&gt; D</text>
+  <text x="850" y="270" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">time = t2</text>
+
+  <text x="850" y="295" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#7b1fa2">one entry per reporter</text>
+
+  <!-- ===== Timeline ===== -->
+  <rect x="24" y="384" width="932" height="310" fill="#ffffff" stroke="#546e7a" stroke-width="1.2" rx="8"/>
+  <text x="40" y="408" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">How it changes with time (on process A, subject X)</text>
+
+  <!-- timeline axis -->
+  <line x1="60" y1="460" x2="920" y2="460" stroke="#90a4ae" stroke-width="2"/>
+  <circle cx="100" cy="460" r="6" fill="#78909c"/>
+  <circle cx="280" cy="460" r="6" fill="#8e24aa"/>
+  <circle cx="460" cy="460" r="6" fill="#ef6c00"/>
+  <circle cx="660" cy="460" r="6" fill="#c62828"/>
+  <circle cx="860" cy="460" r="6" fill="#2e7d32"/>
+
+  <!-- t0 -->
+  <text x="100" y="448" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#455a64">t0</text>
+  <rect x="40" y="478" width="120" height="100" fill="#eceff1" stroke="#78909c" rx="5"/>
+  <text x="100" y="500" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#455a64">healthy</text>
+  <text x="100" y="520" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">flags: (none)</text>
+  <text x="100" y="538" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">fail_reports: []</text>
+  <text x="100" y="560" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#78909c">pong_received ok</text>
+
+  <!-- t1 -->
+  <text x="280" y="448" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#6a1b9a">t1</text>
+  <rect x="210" y="478" width="140" height="100" fill="#f3e5f5" stroke="#8e24aa" rx="5"/>
+  <text x="280" y="498" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#6a1b9a">gossip from C</text>
+  <text x="280" y="516" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#6a1b9a">X row has PFAIL</text>
+  <text x="280" y="534" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">+ report {C,t1}</text>
+  <text x="280" y="552" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">flags still clear</text>
+  <text x="280" y="568" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#7b1fa2">no probe of X</text>
+
+  <!-- t2 -->
+  <text x="460" y="448" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">t2</text>
+  <rect x="390" y="478" width="140" height="100" fill="#fff3e0" stroke="#ef6c00" rx="5"/>
+  <text x="460" y="498" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">A's own timeout</text>
+  <text x="460" y="516" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">flags |= PFAIL</text>
+  <text x="460" y="534" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#4a148c">reports: C, D</text>
+  <text x="460" y="552" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">cron unanswered ping</text>
+  <text x="460" y="568" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">not from gossip</text>
+
+  <!-- t3 -->
+  <text x="660" y="448" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">t3</text>
+  <rect x="580" y="478" width="160" height="100" fill="#ffebee" stroke="#c62828" rx="5"/>
+  <text x="660" y="498" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#b71c1c">majority reached</text>
+  <text x="660" y="516" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#c62828">count = reports + self</text>
+  <text x="660" y="534" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#b71c1c">&gt;= (size/2)+1</text>
+  <text x="660" y="552" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#c62828">flags: FAIL, clear PFAIL</text>
+  <text x="660" y="568" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#c62828">fail_time=now; SendFail</text>
+
+  <!-- t4 / expire branch -->
+  <text x="860" y="448" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#2e7d32">t4+</text>
+  <rect x="790" y="478" width="140" height="100" fill="#e8f5e9" stroke="#2e7d32" rx="5"/>
+  <text x="860" y="498" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1b5e20">other paths</text>
+  <text x="860" y="518" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#2e7d32">C gossips X up:</text>
+  <text x="860" y="534" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#2e7d32">DelReport(C)</text>
+  <text x="860" y="552" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#558b2f">or age &gt; timeout*2:</text>
+  <text x="860" y="568" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#2e7d32">CleanupReports</text>
+
+  <!-- footnotes -->
+  <text x="490" y="610" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">Same gossip again from C: only bumps FailReport.time (still one vote from C).</text>
+  <text x="490" y="630" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">At t1, without local PFAIL, markNodeAsFailingIfNeeded returns immediately: ledger grows, flags do not.</text>
+  <text x="490" y="650" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">Discrete FAIL packet (after someone else's quorum) sets flags |= FAIL without growing fail_reports first.</text>
+  <text x="490" y="678" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">clusterNodeFailReport = { clusterNode *node /* reporter */, mstime_t time }; TTL = cluster-node-timeout * CLUSTER_FAIL_REPORT_VALIDITY_MULT (2)</text>
+  <text x="490" y="700" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">Inspect count: CLUSTER COUNT-FAILURE-REPORTS &lt;node-id&gt; (external reports only; excludes this node's own PFAIL)</text>
+</svg>
