@@ -56,6 +56,8 @@ The bus does not carry ordinary key commands. Gossip scales membership and healt
 
 Gossip is how Redis Cluster spreads **membership and health** without shipping a full node list on every packet. It rides only on `PING` / `PONG` / `MEET`: the fixed **header** always describes the sender (epochs, `myslots`, flags, …); the **body** carries a **sample** of rumors about other nodes (`clusterMsgDataGossip` rows). Discrete types (`FAIL`, `UPDATE`, Pub/Sub, failover votes, …) are separate events on the same links—they are not the gossip sampler.
 
+![Gossip core idea](images/gossip-mechanism-overview.svg)
+
 | Pattern | Types | Cadence | Purpose |
 |---------|-------|---------|---------|
 | Continuous gossip | `PING`, `PONG`, `MEET` | Periodic / on meet | Liveness, membership rumors, slot/epoch in **header**, failure flags in gossip rows |
@@ -88,29 +90,25 @@ Wire layouts for those types are in [§2.3](#23-data-by-message-type).
 | `PONG` | Reply; completes the liveness round-trip and carries the receiver’s own gossip sample |
 | `MEET` | Like `PING`, but forces the receiver to **add** the sender if unknown |
 
-```mermaid
-sequenceDiagram
-  participant A as Node A
-  participant B as Node B
-  A->>B: MEET or PING
-  Note right of B: apply header, merge gossip sample
-  B->>A: PONG
-  Note left of A: apply header, merge gossip sample
-```
+**Default frequency.** `clusterCron` runs every **100 ms**. Both outbound `PING` paths below execute inside that same function; `PONG` is not cron-driven. Timing uses `cluster-node-timeout` (default **15000 ms** / 15 s in `redis.conf` / `config.c`):
 
-**Default frequency.** `clusterCron` runs every **100 ms**. Ping timing is driven by `cluster-node-timeout` (default **15000 ms** / 15 s in `redis.conf` / `config.c`):
+| Path | Where in `clusterCron` | Default behavior |
+|------|------------------------|------------------|
+| Random probe | Early: when `iteration % 10 == 0` (~once per second) | Sample a few random peers; `PING` the connected one with the oldest `pong_received` (skip self, handshake, outstanding ping). |
+| Per-peer refresh | Later: full iteration over `nodes` | If the link is up, there is no outstanding ping, and the last `PONG` is older than **`cluster-node-timeout / 2`** (**7500 ms** by default), send a `PING`. Override with hidden `cluster-ping-interval` (ms) when non-zero. Manual-failover wait may `PING` the chosen replica every pass. |
+| `PONG` | Not in cron — `clusterProcessPacket` | Immediate reply to `PING` or `MEET` (same packet shape). |
+| Local `PFAIL` | Same per-peer loop as refresh | If an outstanding ping (or data gap) exceeds **`cluster-node-timeout`**, set local `PFAIL` on that peer. |
 
-| Path | Default behavior |
-|------|------------------|
-| Per-peer refresh | If there is no outstanding ping and the last `PONG` from that peer is older than **`cluster-node-timeout / 2`** (**7500 ms** with the default timeout), send a `PING`. Override with hidden `cluster-ping-interval` (ms) when non-zero. |
-| Random probe | About once per **second** (`iteration % 10` in `clusterCron`), pick among a few random peers and `PING` the one with the oldest `pong_received`. |
-| `PONG` | Immediate reply to `PING` or `MEET` (same packet shape); not on a separate timer. |
-| `PFAIL` | If a ping is still unanswered for longer than **`cluster-node-timeout`** (15 s default), the peer is marked locally unreachable. |
-
-So under defaults, a healthy peer is typically re-pinged on the order of **every ~7.5 s** when its last pong ages out, plus occasional random pings (~1/s cluster-wide toward the stalest sample). Manual-failover wait may ping the chosen replica continuously.
+So under defaults, a healthy peer is typically re-pinged on the order of **every ~7.5 s** via per-peer refresh when its last pong ages out, and may also receive an extra random probe (~1/s toward the stalest among a small sample).
 
 ```c
-/* cluster_legacy.c — clusterCron: per-peer refresh */
+/* cluster_legacy.c — clusterCron: random probe (~1/s) */
+if (!(iteration % 10)) {
+    /* pick among a few random nodes; ping oldest pong_received */
+    clusterSendPing(min_pong_node->link, CLUSTERMSG_TYPE_PING);
+}
+
+/* cluster_legacy.c — clusterCron: per-peer refresh (same function, later loop) */
 mstime_t ping_interval = server.cluster_ping_interval ?
     server.cluster_ping_interval : server.cluster_node_timeout/2;
 if (node->link &&
