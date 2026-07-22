@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-label="Gossip core idea">
+  <rect width="920" height="420" fill="#f7f9fb"/>
+  <text x="460" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Gossip core idea</text>
+  <text x="460" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Each node keeps a local view; peers exchange a small random sample of that view until opinions converge</text>
+
+  <!-- Node A -->
+  <rect x="40" y="80" width="200" height="220" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.6" rx="8"/>
+  <text x="140" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Node A</text>
+  <text x="140" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">local view</text>
+  <rect x="60" y="148" width="160" height="128" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="140" y="172" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">knows: A, B, C, D, ...</text>
+  <text x="140" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">who is up / down</text>
+  <text x="140" y="216" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">who owns which slots</text>
+  <text x="140" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">send a few rumors</text>
+  <text x="140" y="262" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">not the whole list</text>
+
+  <!-- arrows -->
+  <line x1="240" y1="160" x2="360" y2="160" stroke="#37474f" stroke-width="2"/>
+  <polygon points="360,160 352,155 352,165" fill="#37474f"/>
+  <text x="300" y="148" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">PING</text>
+  <text x="300" y="178" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">sample about others</text>
+
+  <line x1="360" y1="220" x2="240" y2="220" stroke="#2e7d32" stroke-width="2"/>
+  <polygon points="240,220 248,215 248,225" fill="#2e7d32"/>
+  <text x="300" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">PONG</text>
+  <text x="300" y="238" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">B's own sample</text>
+
+  <!-- Bus middle -->
+  <rect x="360" y="120" width="200" height="140" fill="#eceff1" stroke="#546e7a" stroke-width="1.4" rx="8"/>
+  <text x="460" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Cluster bus</text>
+  <text x="460" y="176" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">about me (header)</text>
+  <text x="460" y="198" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">+ rumors (gossip rows)</text>
+  <text x="460" y="228" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">small random subset</text>
+  <text x="460" y="246" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">~N/10 peers</text>
+
+  <line x1="560" y1="160" x2="680" y2="160" stroke="#37474f" stroke-width="2"/>
+  <polygon points="680,160 672,155 672,165" fill="#37474f"/>
+  <line x1="680" y1="220" x2="560" y2="220" stroke="#2e7d32" stroke-width="2"/>
+  <polygon points="560,220 568,215 568,225" fill="#2e7d32"/>
+
+  <!-- Node B -->
+  <rect x="680" y="80" width="200" height="220" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="8"/>
+  <text x="780" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Node B</text>
+  <text x="780" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#558b2f">local view</text>
+  <rect x="700" y="148" width="160" height="128" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="780" y="172" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">knows: B, A, C, ...</text>
+  <text x="780" y="196" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">merge A's sample</text>
+  <text x="780" y="216" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">into B's dictionary</text>
+  <text x="780" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">reply with B's sample</text>
+  <text x="780" y="262" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">same idea both ways</text>
+
+  <!-- Bottom result -->
+  <rect x="40" y="328" width="840" height="72" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="8"/>
+  <text x="460" y="358" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#f57f17">After many such exchanges across the mesh</text>
+  <text x="460" y="382" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6d4c41">membership and health opinions spread and converge - without dumping the full node list each time</text>
+</svg>
