@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="320" viewBox="0 0 920 320" role="img" aria-label="Symmetric encryption with AES">
+  <rect width="920" height="320" fill="#f7f9fb"/>
+  <text x="460" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Symmetric encryption (AES)</text>
+  <text x="460" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Same secret key K encrypts and decrypts; mode (e.g. GCM) supplies IV/nonce and optional auth tag</text>
+
+  <!-- Sender -->
+  <rect x="40" y="80" width="160" height="180" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="8"/>
+  <text x="120" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">Sender</text>
+  <rect x="55" y="130" width="130" height="40" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="120" y="155" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">plaintext M</text>
+  <rect x="55" y="185" width="130" height="40" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+  <text x="120" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#f57f17">shared key K</text>
+
+  <!-- Encrypt box -->
+  <rect x="240" y="120" width="140" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="8"/>
+  <text x="310" y="155" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">AES-Encrypt</text>
+  <text x="310" y="180" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#33691e">K, IV/nonce</text>
+  <text x="310" y="200" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#33691e">mode (GCM/...)</text>
+
+  <line x1="200" y1="150" x2="240" y2="150" stroke="#37474f" stroke-width="2"/>
+  <polygon points="240,150 232,145 232,155" fill="#37474f"/>
+  <line x1="120" y1="185" x2="120" y2="230" stroke="#f9a825" stroke-width="1.5"/>
+  <line x1="120" y1="230" x2="280" y2="230" stroke="#f9a825" stroke-width="1.5"/>
+  <line x1="280" y1="230" x2="280" y2="220" stroke="#f9a825" stroke-width="1.5"/>
+
+  <!-- Ciphertext -->
+  <rect x="420" y="130" width="140" height="80" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5" rx="8"/>
+  <text x="490" y="165" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#880e4f">ciphertext C</text>
+  <text x="490" y="190" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#ad1457">(+ tag if AEAD)</text>
+
+  <line x1="380" y1="170" x2="420" y2="170" stroke="#37474f" stroke-width="2"/>
+  <polygon points="420,170 412,165 412,175" fill="#37474f"/>
+  <line x1="560" y1="170" x2="600" y2="170" stroke="#37474f" stroke-width="2"/>
+  <polygon points="600,170 592,165 592,175" fill="#37474f"/>
+
+  <!-- Decrypt -->
+  <rect x="600" y="120" width="140" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="8"/>
+  <text x="670" y="155" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">AES-Decrypt</text>
+  <text x="670" y="180" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#33691e">same key K</text>
+  <text x="670" y="200" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#33691e">same IV/nonce</text>
+
+  <!-- Receiver -->
+  <rect x="760" y="130" width="120" height="80" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="8"/>
+  <text x="820" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">Receiver</text>
+  <text x="820" y="190" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">plaintext M</text>
+
+  <line x1="740" y1="170" x2="760" y2="170" stroke="#37474f" stroke-width="2"/>
+  <polygon points="760,170 752,165 752,175" fill="#37474f"/>
+
+  <text x="460" y="300" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">Key K must be shared out of band or via a key-transport protocol (often RSA/ECDH)</text>
+</svg>

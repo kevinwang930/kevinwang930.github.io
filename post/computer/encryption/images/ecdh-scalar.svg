@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="460" viewBox="0 0 940 460" role="img" aria-label="ECDH private and public keys">
+  <rect width="940" height="460" fill="#f7f9fb"/>
+  <text x="470" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">ECDH: private scalars and public points</text>
+  <text x="470" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Private key = secret scalar. Public key = that scalar times base point G.</text>
+
+  <rect x="270" y="68" width="400" height="44" fill="#eceff1" stroke="#546e7a" rx="6"/>
+  <text x="470" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#37474f">public domain: curve E, base point G</text>
+
+  <!-- Alice -->
+  <rect x="40" y="140" width="280" height="200" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="8"/>
+  <text x="180" y="168" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Alice</text>
+  <rect x="60" y="185" width="240" height="48" fill="#ffebee" stroke="#c62828" rx="5"/>
+  <text x="180" y="205" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">private key</text>
+  <text x="180" y="223" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#b71c1c">a  (secret scalar)</text>
+  <rect x="60" y="245" width="240" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="5"/>
+  <text x="180" y="265" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#2e7d32">public key</text>
+  <text x="180" y="283" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#1b5e20">A = a · G</text>
+  <text x="180" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">S = a · B</text>
+
+  <!-- Bob -->
+  <rect x="620" y="140" width="280" height="200" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="8"/>
+  <text x="760" y="168" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Bob</text>
+  <rect x="640" y="185" width="240" height="48" fill="#ffebee" stroke="#c62828" rx="5"/>
+  <text x="760" y="205" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">private key</text>
+  <text x="760" y="223" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#b71c1c">b  (secret scalar)</text>
+  <rect x="640" y="245" width="240" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="5"/>
+  <text x="760" y="265" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#2e7d32">public key</text>
+  <text x="760" y="283" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#1b5e20">B = b · G</text>
+  <text x="760" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">S = b · A</text>
+
+  <line x1="320" y1="270" x2="620" y2="270" stroke="#90a4ae" stroke-width="2"/>
+  <polygon points="620,270 610,265 610,275" fill="#90a4ae"/>
+  <text x="470" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">public A --&gt;</text>
+  <line x1="620" y1="295" x2="320" y2="295" stroke="#90a4ae" stroke-width="2"/>
+  <polygon points="320,295 330,290 330,300" fill="#90a4ae"/>
+  <text x="470" y="318" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">&lt;-- public B</text>
+
+  <rect x="270" y="370" width="400" height="60" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="8"/>
+  <text x="470" y="396" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">shared secret S = aB = bA = (ab) G</text>
+  <text x="470" y="416" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#558b2f">Only public keys A, B are sent; private keys a, b stay local</text>
+</svg>
