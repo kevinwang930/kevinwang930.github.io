@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="360" viewBox="0 0 920 360" role="img" aria-label="Encoding conversion as value grows">
+  <rect width="920" height="360" fill="#f7f9fb"/>
+  <text x="460" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Encoding promotion (same type, larger representation)</text>
+  <text x="460" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Thresholds from server config; OBJECT ENCODING shows the current choice.</text>
+
+  <!-- LIST -->
+  <text x="80" y="90" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">LIST</text>
+  <rect x="40" y="105" width="140" height="50" fill="#e3f2fd" stroke="#1565c0" rx="5"/>
+  <text x="110" y="135" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">listpack</text>
+  <line x1="180" y1="130" x2="230" y2="130" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="230,130 222,126 222,134" fill="#546e7a"/>
+  <text x="205" y="118" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">grow</text>
+  <rect x="230" y="105" width="140" height="50" fill="#fff3e0" stroke="#ef6c00" rx="5"/>
+  <text x="300" y="135" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">quicklist</text>
+
+  <!-- HASH -->
+  <text x="80" y="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">HASH / ZSET</text>
+  <rect x="40" y="205" width="140" height="50" fill="#e3f2fd" stroke="#1565c0" rx="5"/>
+  <text x="110" y="235" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">listpack</text>
+  <line x1="180" y1="230" x2="230" y2="230" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="230,230 222,226 222,234" fill="#546e7a"/>
+  <text x="205" y="218" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">grow</text>
+  <rect x="230" y="205" width="200" height="50" fill="#fff3e0" stroke="#ef6c00" rx="5"/>
+  <text x="330" y="228" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">HT  /  skiplist+HT</text>
+  <text x="330" y="246" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">hash dict / zset dual index</text>
+
+  <!-- SET -->
+  <text x="520" y="90" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">SET</text>
+  <rect x="480" y="105" width="110" height="50" fill="#e3f2fd" stroke="#1565c0" rx="5"/>
+  <text x="535" y="135" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">intset</text>
+  <line x1="590" y1="120" x2="630" y2="120" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="630,120 622,116 622,124" fill="#546e7a"/>
+  <rect x="630" y="105" width="110" height="50" fill="#e8f5e9" stroke="#2e7d32" rx="5"/>
+  <text x="685" y="135" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">listpack</text>
+  <line x1="740" y1="120" x2="780" y2="120" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="780,120 772,116 772,124" fill="#546e7a"/>
+  <rect x="780" y="105" width="100" height="50" fill="#fff3e0" stroke="#ef6c00" rx="5"/>
+  <text x="830" y="135" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">HT</text>
+
+  <text x="460" y="300" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#455a64">Compact encodings minimize pointer overhead. Larger forms optimize random access and updates.</text>
+  <text x="460" y="325" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">Inspect: OBJECT ENCODING key   |   MEMORY USAGE key</text>
+</svg>

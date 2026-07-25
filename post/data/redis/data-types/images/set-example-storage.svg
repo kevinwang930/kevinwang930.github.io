@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="380" viewBox="0 0 920 380" role="img" aria-label="How SET greeting hello is stored">
+  <rect width="920" height="380" fill="#f7f9fb"/>
+  <text x="460" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Example: SET greeting hello</text>
+  <text x="460" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">dbDictType is a no-value dictionary: the STRING kvobj is the stored item.</text>
+
+  <rect x="40" y="80" width="200" height="60" fill="#e3f2fd" stroke="#1565c0" rx="6"/>
+  <text x="140" y="105" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">server.db[0]</text>
+  <text x="140" y="125" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">redisDb id=0</text>
+
+  <line x1="240" y1="110" x2="290" y2="110" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="290,110 282,106 282,114" fill="#546e7a"/>
+
+  <rect x="290" y="80" width="200" height="60" fill="#e8f5e9" stroke="#2e7d32" rx="6"/>
+  <text x="390" y="105" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">keys (kvstore)</text>
+  <text x="390" y="125" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#558b2f">dicts[0]  (standalone)</text>
+
+  <line x1="490" y1="110" x2="540" y2="110" stroke="#546e7a" stroke-width="2"/>
+  <polygon points="540,110 532,106 532,114" fill="#546e7a"/>
+
+  <rect x="540" y="70" width="340" height="80" fill="#fff8e1" stroke="#f9a825" rx="6"/>
+  <text x="710" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#f57f17">dict (no_value = 1)</text>
+  <text x="710" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#6d4c41">stored item: kvobj*</text>
+  <text x="710" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#6d4c41">lookup key: embedded "greeting"</text>
+
+  <rect x="200" y="200" width="520" height="140" fill="#f3e5f5" stroke="#6a1b9a" rx="8"/>
+  <text x="460" y="230" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">kvobj (iskvobj=1)</text>
+  <text x="460" y="258" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#4a148c">type = OBJ_STRING</text>
+  <text x="460" y="280" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#4a148c">encoding = OBJ_ENCODING_EMBSTR</text>
+  <text x="460" y="302" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#4a148c">embedded key: "greeting"</text>
+  <text x="460" y="324" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#4a148c">ptr -&gt; SDS "hello" (same allocation)</text>
+</svg>

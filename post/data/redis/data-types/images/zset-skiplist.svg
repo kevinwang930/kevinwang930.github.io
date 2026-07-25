@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-label="Redis zset skiplist and dict">
+  <rect width="960" height="520" fill="#f7f9fb"/>
+  <text x="480" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Redis zset: skiplist (order) + dict (member lookup)</text>
+  <text x="480" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Same SDS member is indexed by both structures. Higher levels skip farther; span counts nodes crossed at that level.</text>
+
+  <rect x="40" y="70" width="200" height="170" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="6"/>
+  <text x="140" y="94" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#0d47a1">dict *dict</text>
+  <text x="140" y="112" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">member -&gt; score (O(1))</text>
+  <line x1="55" y1="122" x2="225" y2="122" stroke="#bbdefb"/>
+  <text x="60" y="142" font-family="Consolas, monospace" font-size="11" fill="#37474f">a -&gt; 1.0</text>
+  <text x="60" y="162" font-family="Consolas, monospace" font-size="11" fill="#37474f">b -&gt; 2.0</text>
+  <text x="60" y="182" font-family="Consolas, monospace" font-size="11" fill="#37474f">c -&gt; 3.0</text>
+  <text x="60" y="202" font-family="Consolas, monospace" font-size="11" fill="#37474f">d -&gt; 4.0</text>
+  <text x="60" y="222" font-family="Consolas, monospace" font-size="11" fill="#37474f">e -&gt; 5.0</text>
+
+  <text x="140" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">ZSCORE / update by member</text>
+
+  <text x="600" y="78" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#e65100">zskiplist *zsl</text>
+  <text x="600" y="96" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">ordered by score (then member); header has all levels</text>
+
+  <text x="268" y="140" font-family="Consolas, monospace" font-size="10" fill="#78909c">L2</text>
+  <text x="268" y="200" font-family="Consolas, monospace" font-size="10" fill="#78909c">L1</text>
+  <text x="268" y="260" font-family="Consolas, monospace" font-size="10" fill="#78909c">L0</text>
+
+  <rect x="290" y="118" width="70" height="160" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+  <text x="325" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#e65100">HDR</text>
+  <circle cx="325" cy="160" r="8" fill="#ffe0b2" stroke="#ef6c00"/>
+  <circle cx="325" cy="200" r="8" fill="#ffe0b2" stroke="#ef6c00"/>
+  <circle cx="325" cy="240" r="8" fill="#ffe0b2" stroke="#ef6c00"/>
+  <text x="325" y="268" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">header</text>
+
+  <rect x="400" y="218" width="70" height="60" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+  <circle cx="435" cy="240" r="8" fill="#bbdefb" stroke="#1565c0"/>
+  <text x="435" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">a:1</text>
+
+  <rect x="510" y="178" width="70" height="100" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+  <circle cx="545" cy="200" r="8" fill="#c8e6c9" stroke="#2e7d32"/>
+  <circle cx="545" cy="240" r="8" fill="#c8e6c9" stroke="#2e7d32"/>
+  <text x="545" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">b:2</text>
+
+  <rect x="620" y="218" width="70" height="60" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+  <circle cx="655" cy="240" r="8" fill="#bbdefb" stroke="#1565c0"/>
+  <text x="655" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">c:3</text>
+
+  <rect x="730" y="118" width="70" height="160" fill="#fce4ec" stroke="#c2185b" rx="4"/>
+  <circle cx="765" cy="160" r="8" fill="#f8bbd0" stroke="#c2185b"/>
+  <circle cx="765" cy="200" r="8" fill="#f8bbd0" stroke="#c2185b"/>
+  <circle cx="765" cy="240" r="8" fill="#f8bbd0" stroke="#c2185b"/>
+  <text x="765" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#880e4f">d:4</text>
+
+  <rect x="840" y="218" width="70" height="60" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+  <circle cx="875" cy="240" r="8" fill="#bbdefb" stroke="#1565c0"/>
+  <text x="875" y="262" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">e:5</text>
+
+  <line x1="333" y1="240" x2="427" y2="240" stroke="#455a64" stroke-width="1.5"/>
+  <polygon points="427,240 419,236 419,244" fill="#455a64"/>
+  <text x="380" y="234" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#78909c">span 1</text>
+
+  <line x1="443" y1="240" x2="537" y2="240" stroke="#455a64" stroke-width="1.5"/>
+  <polygon points="537,240 529,236 529,244" fill="#455a64"/>
+
+  <line x1="553" y1="240" x2="647" y2="240" stroke="#455a64" stroke-width="1.5"/>
+  <polygon points="647,240 639,236 639,244" fill="#455a64"/>
+
+  <line x1="663" y1="240" x2="757" y2="240" stroke="#455a64" stroke-width="1.5"/>
+  <polygon points="757,240 749,236 749,244" fill="#455a64"/>
+
+  <line x1="773" y1="240" x2="867" y2="240" stroke="#455a64" stroke-width="1.5"/>
+  <polygon points="867,240 859,236 859,244" fill="#455a64"/>
+
+  <path d="M333,200 H537" fill="none" stroke="#2e7d32" stroke-width="1.5"/>
+  <polygon points="537,200 529,196 529,204" fill="#2e7d32"/>
+  <text x="430" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#2e7d32">span 2</text>
+
+  <path d="M553,200 H757" fill="none" stroke="#2e7d32" stroke-width="1.5"/>
+  <polygon points="757,200 749,196 749,204" fill="#2e7d32"/>
+  <text x="655" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#2e7d32">span 2</text>
+
+  <path d="M333,160 H757" fill="none" stroke="#c2185b" stroke-width="1.5"/>
+  <polygon points="757,160 749,156 749,164" fill="#c2185b"/>
+  <text x="545" y="154" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#c2185b">span 4</text>
+
+  <rect x="40" y="300" width="880" height="190" fill="#ffffff" stroke="#cfd8dc" rx="6"/>
+  <text x="60" y="326" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#263238">Search by score (e.g. find first node with score &gt;= 4)</text>
+  <text x="60" y="350" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">1. Start at header, top level (L2): forward span 4 lands on d:4 (candidate).</text>
+  <text x="60" y="370" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">2. Drop to L1 / L0 as needed to walk neighbors; higher levels skip nodes (express lanes).</text>
+  <text x="60" y="390" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">3. Rank queries sum spans along the descent (ZRANK). Level 0 is the full sorted chain; backward links L0 for reverse walks.</text>
+  <text x="60" y="418" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">Node height is chosen randomly at insert (geometric); expected search is O(log N).</text>
+  <text x="60" y="446" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">zskiplistNode: score | backward | level[i].{forward, span} | embedded SDS member</text>
+  <text x="60" y="470" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">zset = { dict *dict, zskiplist *zsl } - both point at the same members; ZADD updates both.</text>
+</svg>
