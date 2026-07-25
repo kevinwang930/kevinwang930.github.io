@@ -46,6 +46,12 @@ defaultContentLanguage = "en"
     endLevel = 3
     ordered = false
     startLevel = 1
+  # Preserve LaTeX so Goldmark does not treat _, *, etc. inside math as Markdown.
+  [markup.goldmark.extensions.passthrough]
+    enable = true
+    [markup.goldmark.extensions.passthrough.delimiters]
+      block = [['\[', '\]'], ['$$', '$$']]
+      inline = [['\(', '\)'], ['$', '$']]
 
 # ------
 # Author
@@ -115,6 +121,8 @@ defaultContentLanguage = "en"
   # Description
   # -----------
   description = "kevin wang's blog"
+  # Load MathJax on pages (theme partial script.html). Disable per page with math: false.
+  math = true
 
   # ------------------
   # Syntax highlighter

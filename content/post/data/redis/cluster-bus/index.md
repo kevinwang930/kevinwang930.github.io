@@ -18,7 +18,7 @@ Redis Cluster keeps a second network plane beside client RESP: the **cluster bus
 
 <!--more-->
 
-Related: [Network / command path](../architecture/), [Pub/Sub](../pubsub/), [Build from source](../build/).
+Related: [Network / command path](../architecture/), [Data types and encodings](../data-types/), [Pub/Sub](../pubsub/), [Build from source](../build/).
 
 ![Cluster bus gossip overview](images/cluster-bus-gossip.svg)
 

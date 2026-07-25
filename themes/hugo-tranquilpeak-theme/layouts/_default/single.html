@@ -80,38 +80,9 @@
       }
     }
 
-    const loadMathJaxIfNeeded = () => {
-      // Check for both inline and display math
-      if (document.body.textContent.includes('$')) {
-        // More precise check to avoid false positives
-        const hasMath = /\$[^\$]+\$/.test(document.body.textContent) ||
-          /\$\$[^\$]+\$\$/.test(document.body.textContent);
-
-        if (hasMath) {
-          loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML', () => {
-            MathJax.Hub.Config({
-              tex2jax: {
-                inlineMath: [['$', '$']],
-                displayMath: [['$$', '$$']],
-                processEscapes: true,
-                processEnvironments: true,
-              },
-              displayAlign: 'center',
-              "HTML-CSS": {
-                styles: { '.MathJax_Display': { "margin": 0 } },
-                linebreaks: { automatic: true }
-              }
-            });
-            MathJax.Hub.Queue(["Typeset", MathJax.Hub]);
-          });
-        }
-      }
-    }
-
     window.addEventListener('load', function (event) {
-      // load PlantUML
+      // PlantUML; MathJax is loaded site-wide via params.math in script.html
       loadPlantUMLOnNeed();
-      loadMathJaxIfNeeded();
     })
   </script>
 

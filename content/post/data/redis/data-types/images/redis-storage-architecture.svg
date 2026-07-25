@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-label="Redis storage: memory and disk">
+  <rect width="980" height="560" fill="#f7f9fb"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Redis storage architecture: memory and disk</text>
+  <text x="490" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Primary store is RAM. RDB/AOF persist snapshots or command logs to disk.</text>
+
+  <!-- Memory plane -->
+  <rect x="30" y="70" width="560" height="460" fill="#ffffff" stroke="#1565c0" stroke-width="1.8" rx="8"/>
+  <text x="310" y="98" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Memory (process)</text>
+
+  <rect x="60" y="120" width="500" height="50" fill="#e3f2fd" stroke="#1565c0" rx="6"/>
+  <text x="310" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#0d47a1">redisServer.db[0..N]  (redisDb)</text>
+
+  <rect x="60" y="195" width="500" height="70" fill="#e8f5e9" stroke="#2e7d32" rx="6"/>
+  <text x="310" y="225" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">kvstore *keys</text>
+  <text x="310" y="248" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#558b2f">unified kvobj indexed by embedded key name</text>
+
+  <rect x="60" y="290" width="500" height="55" fill="#fff8e1" stroke="#f9a825" rx="6"/>
+  <text x="310" y="315" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#f57f17">kvstore *expires   (keys with TTL)</text>
+  <text x="310" y="333" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#8d6e63">also dicts: blocking_keys, watched_keys, ...</text>
+
+  <rect x="60" y="370" width="500" height="130" fill="#f3e5f5" stroke="#6a1b9a" rx="6"/>
+  <text x="310" y="400" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">kvobj / robj value</text>
+  <text x="310" y="425" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#4a148c">type | encoding | ptr</text>
+  <text x="310" y="450" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">STRING LIST SET ZSET HASH STREAM MODULE</text>
+  <text x="310" y="475" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#9c27b0">encoding chooses SDS / listpack / dict / quicklist / ...</text>
+
+  <!-- Disk plane -->
+  <rect x="620" y="70" width="330" height="460" fill="#ffffff" stroke="#6d4c41" stroke-width="1.8" rx="8"/>
+  <text x="785" y="98" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#5d4037">Disk (persistence)</text>
+
+  <rect x="645" y="130" width="280" height="110" fill="#efebe9" stroke="#8d6e63" rx="6"/>
+  <text x="785" y="160" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#4e342e">RDB</text>
+  <text x="785" y="185" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#5d4037">dump.rdb</text>
+  <text x="785" y="210" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">point-in-time snapshot</text>
+  <text x="785" y="228" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">of keys + typed values</text>
+
+  <rect x="645" y="270" width="280" height="130" fill="#efebe9" stroke="#8d6e63" rx="6"/>
+  <text x="785" y="300" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#4e342e">AOF</text>
+  <text x="785" y="325" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#5d4037">appendonly dir</text>
+  <text x="785" y="350" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">BASE + INCR logs</text>
+  <text x="785" y="370" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">replay commands on restart</text>
+  <text x="785" y="388" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">rewrite compactifies</text>
+
+  <rect x="645" y="430" width="280" height="70" fill="#fff3e0" stroke="#ef6c00" rx="6"/>
+  <text x="785" y="460" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">Load path</text>
+  <text x="785" y="485" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">disk -&gt; rebuild keyspace in RAM</text>
+
+  <!-- arrows memory to disk -->
+  <line x1="590" y1="200" x2="640" y2="185" stroke="#90a4ae" stroke-width="1.8"/>
+  <polygon points="640,185 630,181 632,191" fill="#90a4ae"/>
+  <text x="615" y="175" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">SAVE</text>
+
+  <line x1="590" y1="340" x2="640" y2="320" stroke="#90a4ae" stroke-width="1.8"/>
+  <polygon points="640,320 630,316 632,326" fill="#90a4ae"/>
+  <text x="615" y="315" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">AOF</text>
+</svg>
