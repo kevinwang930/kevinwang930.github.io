@@ -78,7 +78,7 @@ To avoid expensive copying, allocation, and serialization overhead, MySQL uses a
 
 The Volcano compilation and execution pipeline applies to every statement whose run-time plan is represented by a `Query_expression` / `JOIN` rooted at an `AccessPath`: ordinary `SELECT` (and derived/source blocks), multi-table and hypergraph-optimized `UPDATE` / `DELETE`, and `INSERT … SELECT`. All such statements are lowered to a `RowIterator` tree and driven by the same `Init()` / `Read()` contract. Statement families differ in three places: the **AccessPath root** chosen by the optimizer, the attached **`Query_result`**, and whether mutation is performed **inside** a root mutation iterator or **outside** the iterator via `send_data`.
 
-![SQL statement to AccessPath to RowIterator execution](volcano/images/statement-to-iterator.svg)
+![SQL statement to AccessPath to RowIterator execution](images/statement-to-iterator.svg)
 
 ### Phase A — Parsing and semantic resolution
 
