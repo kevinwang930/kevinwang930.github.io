@@ -11,32 +11,36 @@ tags:
 keywords:
 - redis
 - storage
+- cluster
+- hash slot
 ---
 
-Redis stores the live keyspace in memory and may persist it to disk with RDB snapshots and AOF logs. Each value is a typed object (`robj` / `kvobj`): `type` is the client-visible contract, and `encoding` is the concrete in-memory representation. This post describes the storage architecture (memory hierarchy and disk persistence), then the per-type encodings and promotion rules (`git/redis`: `db.c`, `object.*`, `rdb.c`, `aof.c`, `t_*.c`).
+Redis stores the live keyspace in memory and may persist it to disk with RDB snapshots and AOF logs. In Cluster mode the keyspace is partitioned into 16384 hash slots before any local encoding applies. Each value is a typed object (`robj` / `kvobj`): `type` is the client-visible contract, and `encoding` is the concrete in-memory representation. This post describes the storage architecture (memory hierarchy—including Cluster hash slots—and disk persistence), then the per-type encodings and promotion rules (`git/redis`: `cluster.h`, `db.c`, `object.*`, `rdb.c`, `aof.c`, `t_*.c`).
 
 <!--more-->
 
 Related: [Network / command path](../architecture/), [Pub/Sub](../pubsub/), [Cluster bus](../cluster-bus/), [Build from source](../build/).
 
-![Redis storage: memory and disk](images/redis-storage-architecture.svg)
-
 ---
 
 ## 1. Storage architecture
 
-The server process is the authoritative store for live data. Persistence reconstructs that keyspace after restart; ordinary command execution always reads and writes the in-memory object graph.
+The server process is the authoritative store for live data. Ordinary command execution reads and writes the in-memory object graph; persistence reconstructs that graph after restart. Cluster hash-slot partitioning of the keyspace is described with `kvstore` in §1.1.4.
+
+![Redis storage: memory and disk](images/redis-storage-architecture.svg)
 
 ### 1.1 Memory hierarchy
 
+The in-memory keyspace is a fixed hierarchy: `redisServer` owns an array of `redisDb` instances; each database owns a `kvstore` of dictionaries; each dictionary entry is a unified `kvobj` (`robj` with an embedded key). Command execution reads and writes only this graph. Persistence and replication reconstruct or copy it; they are not a second live store. In Cluster mode the keyspace `kvstore` is indexed by hash slot (§1.1.4); otherwise it uses a single dictionary.
+
 | Layer | Structure | Role |
 |-------|-----------|------|
-| Process | `struct redisServer` | Server global state; owns `db` and `dbnum` |
-| Database | `redisDb` | One logical database (`id` in `0 .. dbnum-1`) |
-| Keyspace | `kvstore *keys` | Array of dictionaries indexing each unified `kvobj` |
-| Expiry index | `kvstore *expires` | Subset of keys that have a timeout |
+| Process | `struct redisServer` | Process-wide state; owns `db[0..dbnum-1]` |
+| Database | `redisDb` | One logical database and its indexes |
+| Keyspace | `kvstore *keys` | Array of dictionaries over unified `kvobj` entries; Cluster: one dictionary per hash slot |
+| Expiry index | `kvstore *expires` | Same `kvobj` instances that carry a timeout |
 | Hash table | `dict` | Power-of-two buckets, chaining, incremental rehash |
-| Value | `kvobj` / `robj` | `type`, `encoding`, `ptr`; key and metadata when `iskvobj` |
+| Value | `kvobj` / `robj` | `type`, `encoding`, `ptr`; embedded key and optional metadata when `iskvobj` |
 
 ```plantuml
 @startuml
@@ -97,11 +101,15 @@ kvobj --|> redisObject : iskvobj + embedded key
 @enduml
 ```
 
-In standalone mode, `num_dicts == 1` and every key resides in `dicts[0]`. In Cluster mode, `dicts` is sized for hash slots so that keys of one slot share one dictionary (`kvstore.h`, `kvstore.c`).
+#### 1.1.1 Usage
 
-#### 1.1.1 Process layer: `redisServer`
+- Clients address keys on the currently selected `redisDb` (default **0**). Handlers resolve `c->db` and operate on that database’s in-memory `kvobj` graph. On standalone instances `SELECT` may switch databases; Cluster keeps a single database and rejects `SELECT` other than `0`.
+- RDB and AOF restore or log that graph; they are not consulted on the ordinary read/write path.
+- Cluster hash-slot mapping, ownership, and redirection are part of the keyspace layer (§1.1.4).
 
-`server.c` declares a single global instance as the server global state. `struct redisServer` (`server.h`) holds process-wide configuration and runtime fields. For the keyspace hierarchy the relevant members are `db`, a contiguous array of logical databases, and `dbnum`, the total number of configured databases.
+#### 1.1.2 Process layer: `redisServer`
+
+`server.c` defines one global `struct redisServer` (`server.h`): process-wide configuration and runtime state. For the keyspace, the decisive members are `db`, a contiguous array of logical databases, and `dbnum`, the configured length of that array.
 
 ```c
 /* server.h — abbreviated */
@@ -117,7 +125,7 @@ struct redisServer {
 struct redisServer server; /* Server global state */
 ```
 
-A connected client does not own a database copy. `client.db` is a pointer to the currently selected `redisDb` (`SELECT`).
+A client does not hold a private database. `client.db` points at the `redisDb` selected by `SELECT` (initially `&server.db[0]`).
 
 ```c
 /* server.h — abbreviated */
@@ -127,7 +135,7 @@ typedef struct client {
 } client;
 ```
 
-At initialization Redis allocates `server.db` and constructs the indexes of each element:
+Initialization allocates `server.db` and creates each database’s indexes. When `cluster_enabled` is set, every `kvstore` is created with `CLUSTER_SLOT_MASK_BITS` (14), so `num_dicts == CLUSTER_SLOTS` (16384):
 
 ```c
 /* server.c — abbreviated initialization */
@@ -153,9 +161,9 @@ for (int j = 0; j < server.dbnum; j++) {
 
 Command handlers resolve keys through `c->db`.
 
-#### 1.1.2 Database layer: `redisDb`
+#### 1.1.3 Database layer: `redisDb`
 
-`redisDb` is the Redis database representation (`server.h`). Multiple logical databases are identified by integers from 0 (the default) up to the configured maximum; that identifier is the structure’s `id` field.
+`redisDb` (`server.h`) is one **logical keyspace** inside a single Redis process. Databases are numbered from `0` to `dbnum - 1`; that number is stored in `id`. They are not separate servers: they share memory, the event loop, persistence files, and replication. Isolation is only that keys in different `redisDb` instances do not collide by name.
 
 ```c
 /* server.h — abbreviated */
@@ -173,23 +181,142 @@ typedef struct redisDb {
 } redisDb;
 ```
 
-Field roles follow the source comments:
-
-| Field | Summary |
-|-------|---------|
-| `keys` | Authoritative keyspace for this database; also carries key-size histogram metadata |
-| `expires` | Index of keys that have a timeout set |
-| `subexpires` | Index of sub-key timeouts; currently used for hash fields |
-| `blocking_keys` / `ready_keys` | Coordinate clients blocked on keys (e.g. `BLPOP`) and wake them after a push |
-| `watched_keys` | Track `WATCH` keys for optimistic `MULTI`/`EXEC` |
-| `id` | Database number used by `SELECT`, persistence, and notifications |
+| Field | Role |
+|-------|------|
+| `keys` | Authoritative keyspace; also carries key-size histogram metadata |
+| `expires` | Index of keys that have a timeout |
+| `subexpires` | Index of sub-key timeouts (currently hash fields) |
+| `blocking_keys` / `ready_keys` | Block and wake clients waiting on keys (e.g. `BLPOP`) |
+| `watched_keys` | Keys watched for `MULTI` / `EXEC` |
+| `id` | Database number for `SELECT`, persistence, replication, and notifications |
 | `avg_ttl` / `expires_cursor` | Expiry statistics and active-expire progress |
 
-The remaining containers are secondary indexes or coordination structures; they do not duplicate value payloads. `expires` references the same `kvobj` instances stored in `keys`; the absolute expiry timestamp resides in metadata attached to that object (§1.1.6).
+`keys` holds the payloads. The other containers are secondary indexes or coordination structures: they reference the same `kvobj` instances and do not duplicate values. Absolute expiry timestamps live in metadata attached to the object (§1.1.7), not as a separate map of timestamps alone.
 
-#### 1.1.3 Keyspace layer: `kvstore`
+**How a client uses a database.** Every connection holds `client.db`, a pointer into `server.db[]`. New clients start on database **0**. Key commands (`GET`, `SET`, `DEL`, …), blocking indexes, and `WATCH` all resolve through that pointer; they never search other databases unless the command is explicitly cross-DB (`MOVE`, `SWAPDB`, `FLUSHALL`).
 
-`kvstore` is an index-based key-value store implemented as an array of dictionaries (`kvstore.h`). Its purpose is to group all keys that share the same dictionary index so that those keys can be accessed together. In Cluster mode that index is the hash slot: each slot’s keys reside in a separate dictionary inside the kvstore, which simplifies slot-local scans, migration, and accounting.
+```c
+/* db.c */
+int selectDb(client *c, int id) {
+    if (id < 0 || id >= server.dbnum)
+        return C_ERR;
+    c->db = &server.db[id];
+    return C_OK;
+}
+```
+
+`SELECT n` only rebinds `c->db`. It does not copy keys. Out of range yields `DB index is out of range`. The configured count is `databases` (default **16**, immutable after startup in `config.c`). URI form `redis://host:port/n` and `redis-cli -n n` select database `n` at connect time.
+
+| Command / surface | Scope |
+|-------------------|--------|
+| Ordinary key commands | Current `c->db` only |
+| `SELECT n` | Switch current database (standalone) |
+| `MOVE key n` | Relocate one key from the current DB to DB `n` |
+| `SWAPDB i j` | Exchange the two `redisDb` structures for all clients |
+| `FLUSHDB` | Empty the current database |
+| `FLUSHALL` | Empty every database |
+| RDB / AOF / replication | Emit `SELECT` (or RDB DB opcodes) when the stream changes database so replicas and reload see the same `id` |
+| Keyspace notifications | Channel names include the database id (e.g. `__keyspace@0__:…`) |
+
+**Why deployments seldom leave DB 0.** Multiple databases are a lightweight namespace inside one process, not tenancy. They share RAM and failure domains; a multi-key transaction cannot span databases; monitoring and ACL designs usually treat the instance as one unit. In practice most applications keep a single logical dataset on DB 0 and use key prefixes (or Cluster hash tags) for subdivision. Higher indexes appear mainly in legacy layouts, local test isolation, or rare “scratch” databases on standalone instances.
+
+**Cluster mode: only database 0.** Redis Cluster does not partition by database index. On config load, if `cluster_enabled` is set and `databases > 1`, the server forces `dbnum = 1` and logs a warning (`config.c`). `SELECT` with any id other than `0` is rejected:
+
+```c
+/* db.c — selectCommand (abbreviated) */
+if (server.cluster_enabled && id != 0) {
+    addReplyError(c, "SELECT is not allowed in cluster mode");
+    return;
+}
+```
+
+Thus a Cluster node still uses the `redisDb` type and `c->db`, but the array length is one: every key lives in `server.db[0]`, and horizontal partition is by **hash slot** (§1.1.4), not by database id.
+
+#### 1.1.4 Keyspace layer: `kvstore` and hash slots
+
+`kvstore` (`kvstore.h`, `kvstore.c`) is an array of dictionaries. Keys that share a dictionary index are stored together so scans, migration, and accounting can address one dictionary at a time. In standalone mode there is one dictionary. In Cluster mode the dictionary index **is** the key’s hash slot: each node stores only keys for slots it owns, and `kvstore.dicts[s]` holds the keys of slot \(s\).
+
+![Key to hash slot to owning master to local dictionary](images/cluster-slot-distribution.svg)
+
+**Usage (Cluster).**
+
+- The hash slot of a key is a deterministic function of the key name (or of a non-empty **hash tag** `{…}`).
+- **Node ownership (the restriction most deployments notice):** each command that names keys must run on the master that owns those keys’ slot. A wrong node replies `-MOVED` (stable owner) or `-ASK` (migration). Cluster-aware clients (Jedis, Lettuce, Redisson, `redis-cli -c`) follow the redirect or compute the slot first, so operators mainly see automatic routing rather than errors.
+- **Same-slot for multi-key (rarer in practice):** a multi-key command is allowed only when every key hashes to the **same slot id**, not merely to slots owned by the same node. Distinct slot numbers yield `-CROSSSLOT` even if one master owns all of those slots. Clients usually avoid this by issuing per-key commands, or by co-locating keys with a shared `{tag}`.
+- Operators assign and transfer slot ownership with `CLUSTER ADDSLOTS` and `CLUSTER SETSLOT` (and tools such as `redis-cli --cluster create` / `reshard`). Clients inspect the map with `CLUSTER KEYSLOT`, `CLUSTER SLOTS`, and `CLUSTER NODES`.
+
+**Command path: two checks.** Before a handler runs, `processCommand` (`server.c`) calls `getNodeByQuery`. That function first requires every key in the request to share one slot; then it requires that slot’s owner to be this node:
+
+```c
+/* server.c — processCommand (abbreviated) */
+if (server.cluster_enabled && /* … */) {
+    int error_code;
+    clusterNode *n = getNodeByQuery(c, c->cmd, c->argv, c->argc,
+        &c->slot, /* … */, &error_code);
+    if (n == NULL || !clusterNodeIsMyself(n)) {
+        clusterRedirectClient(c, n, c->slot, error_code);
+        return C_OK; /* command not executed locally */
+    }
+}
+```
+
+Same-slot check (`cluster.c`). Distinct slots among the command’s keys yield `CLUSTER_CROSSSLOT`:
+
+```c
+/* cluster.c — extractSlotFromKeysResult (abbreviated) */
+int first_slot = INVALID_CLUSTER_SLOT;
+for (int j = 0; j < keys_result->numkeys; j++) {
+    int this_slot = keyHashSlot(/* key */);
+    if (first_slot == INVALID_CLUSTER_SLOT)
+        first_slot = this_slot;
+    else if (first_slot != this_slot)
+        return CLUSTER_CROSSSLOT;
+}
+```
+
+```c
+/* cluster.c — getNodeByQuery (abbreviated) */
+if (slot != thisslot) {
+    *error_code = CLUSTER_REDIR_CROSS_SLOT;
+    return NULL;
+}
+/* … later, if owner is not myself: */
+if (n != myself && error_code) *error_code = CLUSTER_REDIR_MOVED;
+```
+
+Client-visible replies (`clusterRedirectClient`):
+
+```c
+/* cluster.c — clusterRedirectClient (abbreviated) */
+if (error_code == CLUSTER_REDIR_CROSS_SLOT) {
+    addReplyError(c,
+        "-CROSSSLOT Keys in request don't hash to the same slot");
+} else if (error_code == CLUSTER_REDIR_MOVED ||
+           error_code == CLUSTER_REDIR_ASK) {
+    addReplyErrorSds(c, sdscatprintf(sdsempty(),
+        "-%s %d %s:%d",
+        (error_code == CLUSTER_REDIR_ASK) ? "ASK" : "MOVED",
+        hashslot, /* host */, /* port */));
+}
+```
+
+So the everyday restriction is **which node may run the command** (`-MOVED` / `-ASK`). The multi-key rule is stricter than node ownership: keys must share one **slot number** (`-CROSSSLOT`), even when several slots already live on that same master. The check compares `keyHashSlot` results only; it does not consult whether `getNodeBySlot(a) == getNodeBySlot(b)`. Clients hide node routing for single-key traffic and often sidestep `-CROSSSLOT` by not sending multi-key commands across slot ids.
+
+**Multi-key commands.** “Multi-key” means multiple Redis key names, not fields, members, or stream IDs. Families that can name more than one key in one invocation (and thus need one shared slot if sent as a single Cluster command):
+
+| Family | Commands |
+|--------|----------|
+| Generic / string | `DEL`, `UNLINK`, `EXISTS`, `TOUCH`, `MGET`, `MSET`, `MSETNX`, `MSETEX`, `COPY`, `RENAME`, `RENAMENX`, `LCS`, `BITOP`, `WATCH` |
+| List | `BLPOP`, `BRPOP`, `LMPOP`, `BLMPOP`, `LMOVE`, `BLMOVE`, `RPOPLPUSH`, `BRPOPLPUSH` |
+| Set | `SINTER`, `SUNION`, `SDIFF`, `SINTERCARD`, `SINTERSTORE`, `SUNIONSTORE`, `SDIFFSTORE`, `SMOVE` |
+| Sorted set | `ZINTER`, `ZUNION`, `ZDIFF`, `ZINTERCARD`, `ZINTERSTORE`, `ZUNIONSTORE`, `ZDIFFSTORE`, `ZRANGESTORE`, `ZMPOP`, `BZMPOP`, `BZPOPMIN`, `BZPOPMAX` |
+| HyperLogLog | `PFCOUNT`, `PFMERGE` |
+| Geospatial | `GEOSEARCHSTORE`; `GEORADIUS` / `GEORADIUSBYMEMBER` when `STORE` or `STOREDIST` supplies a destination key |
+| Stream | `XREAD`, `XREADGROUP` when reading multiple stream keys |
+| Scripting / functions | `EVAL`, `EVALSHA`, `EVAL_RO`, `EVALSHA_RO`, `FCALL`, `FCALL_RO` when `numkeys > 1` |
+| Dynamic key discovery | `SORT` / `SORT_RO` with key-bearing `BY`, `GET`, or `STORE` arguments; `MIGRATE ... KEYS` |
+
+Example: `MGET user:{42}:name user:{42}:email` shares tag `42`, so both keys map to one slot and can run as a single command. `MGET a b` returns `-CROSSSLOT` whenever `keyHashSlot("a") != keyHashSlot("b")`, **even if both slots are assigned to the same master**. Same-node ownership does not relax the rule; only the same slot id (or splitting into per-key `GET`s) does. `HDEL hash field1 field2` remains single-key: fields are not Redis keys. Client libraries that implement `mGet` as separate `GET`s never hit this check for the logical batch.
 
 ```c
 /* kvstore.c — abbreviated */
@@ -210,7 +337,7 @@ struct _kvstore {
 };
 ```
 
-`num_dicts` is a power of two:
+`num_dicts` is always a power of two:
 
 ```c
 /* kvstore.c */
@@ -219,12 +346,33 @@ kvs->num_dicts = 1 << kvs->num_dicts_bits;
 kvs->dicts = zcalloc(sizeof(dict *) * kvs->num_dicts);
 ```
 
-- Standalone: `num_dicts_bits == 0`, hence `num_dicts == 1` and every key uses `dicts[0]`.
-- Cluster: the dictionary index equals the key’s hash slot.
-- `KVSTORE_ALLOCATE_DICTS_ON_DEMAND` defers allocation of empty dictionaries; Cluster mode additionally sets `KVSTORE_FREE_EMPTY_DICTS`.
-- `rehashing` tracks dictionaries undergoing incremental rehash; `dict_sizes` is a Fenwick tree of cumulative key frequencies used for size-weighted index selection when `num_dicts > 1`.
+| Mode | `num_dicts_bits` | `num_dicts` | Dictionary index |
+|------|------------------|-------------|------------------|
+| Standalone | `0` | `1` | Always `0` |
+| Cluster | `CLUSTER_SLOT_MASK_BITS` (14) | `16384` (`CLUSTER_SLOTS`) | Hash slot of the key |
 
-Lookup selects the slot, then queries that dictionary:
+`KVSTORE_ALLOCATE_DICTS_ON_DEMAND` defers allocation of empty dictionaries. Cluster mode also sets `KVSTORE_FREE_EMPTY_DICTS`. `rehashing` lists dictionaries under incremental rehash; `dict_sizes` is a Fenwick tree of per-dictionary key counts used for size-weighted index selection when `num_dicts > 1`.
+
+**Key to hash slot.** Redis Cluster defines 16384 hash slots (`cluster.h`). `keyHashSlot` returns the low 14 bits of CRC-16 over the bytes that participate in the hash:
+
+```c
+/* cluster.h — keyHashSlot (abbreviated) */
+static inline unsigned int keyHashSlot(const char *key, int keylen) {
+    /* Locate a {...} hash tag; if absent or empty, hash the whole key. */
+    /* ... */
+    return crc16(/* tagged or full key */, /* len */) & 0x3FFF; /* 0 .. 16383 */
+}
+```
+
+| Key form | Bytes hashed | Result |
+|----------|--------------|--------|
+| No `{` / `}` | Entire key | Default |
+| `{tag}` with non-empty `tag` | Bytes between `{` and `}` | All keys with the same tag share one slot |
+| Empty `{}` or missing `}` | Entire key | Tag ignored |
+
+Thus `user:{42}:cart` and `user:{42}:orders` both hash the substring `42` and share a slot; unrelated names generally do not.
+
+When `cluster_enabled` is set, `getKeySlot` and `calculateKeySlot` (`db.c`) return `keyHashSlot(...)`. Otherwise they return `0`. Lookup uses that index and then searches the chosen dictionary:
 
 ```c
 /* db.c */
@@ -239,11 +387,33 @@ kvobj *dbFind(redisDb *db, sds key) {
 }
 ```
 
-Outside Cluster mode, `getKeySlot` returns `0`, so the path selects `dicts[0]`.
+A key with hash slot \(s\) is stored in `dicts[s]` on the node that owns slot \(s\).
 
-#### 1.1.4 Hash-table layer: `dict`
+**Slot ownership.** Ownership is configuration; it is independent of CRC-16. Each node records:
 
-`dict` is Redis’s in-memory hash table (`dict.h`). It supports insert, delete, replace, find, and random-element operations; tables resize automatically, use power-of-two bucket counts, and resolve collisions by chaining.
+| Structure | Content |
+|-----------|---------|
+| `clusterState.slots[s]` | Owning `clusterNode *`, or `NULL` if the slot is unbound |
+| `clusterNode.slots` | 2048-byte bitmap (`CLUSTER_SLOTS/8`); bit \(s\) set means this node claims slot \(s\) |
+| Gossip header `myslots` | Same bitmap on the [cluster bus](../cluster-bus/), so peers refresh `-MOVED` targets |
+
+`clusterAddSlot(n, slot)` fails if `slots[slot]` is already assigned; on success it sets the node’s bit and `server.cluster->slots[slot] = n`. In a healthy map exactly one master owns each slot.
+
+`redis-cli --cluster create` assigns **contiguous** ranges of about \(16384 / N\) slots to each of \(N\) masters (`clusterManagerCommandCreate`), then issues `CLUSTER ADDSLOTS`. With three masters the ranges are approximately `0–5461`, `5462–10922`, and `10923–16383`. Replica anti-affinity rearranges replica placement only. Resharding and failover change ownership (`CLUSTER SETSLOT … MIGRATING|IMPORTING|NODE`, `clusterMoveNodeSlots`); they do not change `keyHashSlot`.
+
+| Server reply | Condition |
+|--------------|-----------|
+| Serve locally | This node owns the slot, or it is importing and the client sent `ASKING` |
+| `-MOVED slot host:port` | Another node is the stable owner |
+| `-ASK slot host:port` | Migration target for one request |
+| `-CROSSSLOT` | Keys map to more than one **slot id** (same owning node is not enough) |
+| `-CLUSTERDOWN` | Cluster state is not `OK`, or a required slot is unbound |
+
+**Invariants.** Every key name maps to exactly one hash slot in `0..16383`. A healthy cluster assigns every slot to exactly one master. Replicas replicate a master’s dataset; they do not hold an independent write-ownership bitmap for those slots. Gossip and discrete `UPDATE` messages propagate ownership bits; they do not recompute CRC-16.
+
+#### 1.1.5 Hash-table layer: `dict`
+
+`dict` (`dict.h`) is Redis’s generic in-memory hash table: insert, delete, replace, find, and random selection; automatic resize; power-of-two bucket counts; collision resolution by chaining.
 
 ```c
 /* dict.h — abbreviated */
@@ -259,7 +429,7 @@ struct dict {
 };
 ```
 
-Behavior is parameterized by `dictType` (`dict.h`). The source groups members as callbacks, data, and flags. Callbacks are function pointers; flags are bit-fields that change entry layout:
+Behavior is parameterized by `dictType`. The source groups members as callbacks, opaque data, and flags. Callbacks are function pointers; flags alter entry layout:
 
 ```c
 /* dict.h — abbreviated; section comments from source */
@@ -290,16 +460,16 @@ typedef struct dictType {
 } dictType;
 ```
 
-| Kind | Member | Role for the database keyspace |
-|------|--------|--------------------------------|
+| Kind | Member | Role in the database keyspace |
+|------|--------|-------------------------------|
 | Callback | `hashFunction` | Hash the lookup key (`dictSdsHash`) |
 | Callback | `keyCompare` | Compare lookup key to stored key (`dictSdsCompareKV`) |
 | Callback | `keyDestructor` | Free the stored `kvobj` (`dictDestructorKV`) |
-| Callback | `keyFromStoredKey` | Extract SDS from stored `kvobj` (`kvGetKey`) |
-| Flag | `no_value` | Values unused; stored item is the unified `kvobj` |
+| Callback | `keyFromStoredKey` | Extract SDS from the stored `kvobj` (`kvGetKey`) |
+| Flag | `no_value` | No separate value; the stored item is the unified `kvobj` |
 | Flag | `keys_are_odd` | Pointer-tagging mode for direct-key buckets |
 
-Two bucket tables support incremental rehashing: lookups may consult both `ht_table[0]` and `ht_table[1]`, and ordinary operations advance `rehashidx` in small steps. Collision chains use `dictEntry` nodes (`next` and `key` occupy the first two fields so the no-value layout can share the same prefix):
+Two bucket tables support incremental rehashing: lookups may consult both `ht_table[0]` and `ht_table[1]`, and ordinary operations advance `rehashidx` in small steps. Collision chains use `dictEntry` (`next` and `key` occupy the first two fields so the no-value layout can share the same prefix):
 
 ```c
 /* dict.c */
@@ -315,9 +485,9 @@ struct dictEntry {
 };
 ```
 
-The database keyspace departs from the usual key/value layout. With flag `no_value = 1`, the table behaves as a set: `dictEntry.v` is unused, and the **stored key** is the unified `kvobj` (a `redisObject`). A lone key in a bucket may be stored directly without allocating a `dictEntry` (pointer tagging distinguishes entry pointers from direct keys).
+The database keyspace does not use a separate key/value pair in `dictEntry`. With `no_value = 1`, `dictEntry.v` is unused and the **stored key** is the unified `kvobj`. A lone key in a bucket may be stored without allocating a `dictEntry` (pointer tagging distinguishes entry pointers from direct keys).
 
-`dictEntry` still uses `void *key` rather than `kvobj *` or `robj *` because `dict` is a generic hash table shared across Redis (SDS keys, hash fields, command tables, module maps, and so on). Polymorphism is provided by `dictType` callbacks, not by a typed pointer in `dictEntry`. For the keyspace specifically, the **lookup key** from a command is an SDS string (Simple Dynamic String — Redis’s length-prefixed, binary-safe string type; see §2.1), while the **stored key** is a `kvobj`; callback `keyFromStoredKey` (`kvGetKey`) extracts the embedded SDS so hash and compare can run on the lookup form. `dbDictType` in `server.c` wires that configuration:
+`dictEntry.key` remains `void *` because `dict` is shared across Redis (SDS keys, hash fields, command tables, module maps, and so on). Polymorphism is provided by `dictType` callbacks, not by a typed pointer. For the keyspace, the **lookup key** from a command is an SDS string (Simple Dynamic String — Redis’s length-prefixed, binary-safe string type; see §2.1), while the **stored key** is a `kvobj`. `keyFromStoredKey` (`kvGetKey`) extracts the embedded SDS so hash and compare operate on the lookup form. `dbDictType` in `server.c` installs that configuration:
 
 ```c
 /* server.c — abbreviated */
@@ -337,29 +507,29 @@ dictType dbDictType = {
 };
 ```
 
-#### 1.1.5 Value layer: `kvobj` / `robj`
+#### 1.1.6 Value layer: `kvobj` / `robj`
 
-`robj` (`struct redisObject`) is the fundamental in-memory container for Redis values (`object.h`). It carries:
+`robj` (`struct redisObject` in `object.h`) is the in-memory value container. It carries:
 
 - `type` — logical type (`OBJ_STRING`, `OBJ_LIST`, `OBJ_SET`, `OBJ_ZSET`, `OBJ_HASH`, `OBJ_STREAM`, `OBJ_MODULE`, …);
-- `encoding` — how that value is represented in memory for the given type (`OBJ_ENCODING_*`);
-- `lru` — LRU clock data, or LFU frequency/time bits when LFU eviction is enabled;
-- `refcount` — reference counting for lifetime management;
-- `ptr` — pointer to the underlying payload (SDS, dict, quicklist, …).
+- `encoding` — concrete representation for that type (`OBJ_ENCODING_*`);
+- `lru` — LRU clock, or LFU frequency and time when LFU eviction is enabled;
+- `refcount` — lifetime management;
+- `ptr` — payload (SDS, dict, quicklist, …).
 
-`kvobj` is the same structure used as a database key-value entry. When `iskvobj` is set, the **allocation** extends beyond `struct redisObject`:
+`kvobj` is the same structure used as a database entry. When `iskvobj` is set, the **allocation** extends beyond `struct redisObject`:
 
-- After the struct: the key SDS is embedded inline; for small strings the value SDS may follow the key.
-- Before the struct: optional metadata **slots** (not members of `redisObject`). Up to eight slots exist, each 8 bytes. Which slots are present is recorded only by the `metabits` bit-field inside the struct (bit *i* means slot *i* is attached). Slot 0 holds the expiration timestamp; slots 1–7 are available for module key-metadata. Attached slots are laid out immediately before the `redisObject` header with higher IDs at lower addresses. `kvobjCreate` returns a pointer to that header, so callers see a normal `kvobj *` while the metadata bytes sit at negative offsets from it.
+- After the struct: the key SDS is embedded; for small strings the value SDS may follow the key.
+- Before the struct: optional **metadata** regions (distinct from Cluster hash slots). Up to eight regions exist, each eight bytes. Presence is recorded only in the `metabits` field (bit \(i\) means region \(i\) is attached). Region 0 holds the expiration timestamp; regions 1–7 are reserved for module key metadata. Attached regions precede the `redisObject` header with higher IDs at lower addresses. `kvobjCreate` returns a pointer to that header; metadata bytes therefore sit at negative offsets from the `kvobj *`.
 
 ```text
-/* Allocation layout when metabits has slots 3 and 1 set (bit pattern 0b00001010): */
-| 8B slot 3 | 8B slot 1 | redisObject | key-hdr-size (1) | SDS key | [optional SDS value] |
-                            ^
-                            kvobj* returned here
+/* Allocation layout when metabits has regions 3 and 1 set (bit pattern 0b00001010): */
+| 8B region 3 | 8B region 1 | redisObject | key-hdr-size (1) | SDS key | [optional SDS value] |
+                                 ^
+                                 kvobj* returned here
 ```
 
-`kvobjCreate` decides that layout from `keyMetaBits` and the key length. The number of prepended slots is the popcount of the bit mask; each slot is one `uint64_t`. The returned pointer is skewed past those slots so it addresses the `redisObject` header:
+`kvobjCreate` sizes the allocation from `keyMetaBits` and the key length. The number of prepended regions is the popcount of the mask; each region is one `uint64_t`. The returned pointer skips those regions and addresses the `redisObject` header:
 
 ```c
 /* keymeta.h */
@@ -371,7 +541,7 @@ static inline uint32_t getNumMeta(uint16_t metabits) {
 /* object.c — abbreviated kvobjCreate */
 kvobj *kvobjCreate(int type, const sds key, void *ptr, uint32_t keyMetaBits) {
     size_t key_sds_len = sdslen(key);
-    /* Large keys reserve an expire slot even if EXPIRE is not set yet. */
+    /* Large keys reserve an expire region even if EXPIRE is not set yet. */
     if (key_sds_len >= KEY_SIZE_TO_INCLUDE_EXPIRE_THRESHOLD)
         keyMetaBits |= KEY_META_MASK_EXPIRE;
 
@@ -385,7 +555,7 @@ kvobj *kvobjCreate(int type, const sds key, void *ptr, uint32_t keyMetaBits) {
     min_size += 1 + key_sds_size; /* 1 byte: SDS header size of the embedded key */
 
     char *alloc = zmalloc(min_size);
-    kvobj *kv = (kvobj *)(alloc + sizeMetas); /* skip metadata slots */
+    kvobj *kv = (kvobj *)(alloc + sizeMetas); /* skip metadata regions */
     /* ... fill type/encoding/ptr/refcount/iskvobj ... */
     kv->metabits = keyMetaBits;
 
@@ -398,7 +568,7 @@ kvobj *kvobjCreate(int type, const sds key, void *ptr, uint32_t keyMetaBits) {
 }
 ```
 
-Accessors use the same convention. Metadata slot *i* is reached by counting how many lower IDs are set in `metabits` and indexing that many `uint64_t`s before `kv`. The embedded key starts one byte (header-size) after the struct:
+Accessors follow the same layout. Metadata region \(i\) is located by counting how many lower IDs are set in `metabits` and indexing that many `uint64_t`s before `kv`. The embedded key begins one byte (header size) after the struct:
 
 ```c
 /* object.c — abbreviated */
@@ -421,7 +591,7 @@ sds kvobjGetKey(const kvobj *kv) {
 }
 ```
 
-`kvobjCreateEmbedString` uses the same size formula and adds the embedded value SDS after the key when the total fits a cache line (`kvobjSet`).
+`kvobjCreateEmbedString` uses the same size formula and places the embedded value SDS after the key when the total fits a cache line (`kvobjSet`).
 
 ```c
 /* object.h */
@@ -446,9 +616,9 @@ typedef struct redisObject kvobj;  /* key-value object; see layout above */
 | `ptr` | Payload or inline integer |
 | `refcount` | Lifetime management; special values mark shared or stack objects |
 | `lru` | LRU clock, or LFU bits when LFU eviction is enabled |
-| `metabits` | Bitmap of which 8-byte metadata **slots** precede the struct in the allocation; bit 0 = expiration |
+| `metabits` | Bitmap of which 8-byte metadata regions precede the struct; bit 0 denotes expiration |
 
-On insertion, `kvobjSet` constructs the database form and transfers or duplicates the payload. The EMBSTR path may embed key and value in one allocation when the total size fits a cache line:
+On insertion, `kvobjSet` builds the database form and transfers or duplicates the payload. The EMBSTR path may embed key and value in one allocation when the total size fits a cache line:
 
 ```c
 /* object.c — abbreviated; EMBSTR branch of kvobjSet */
@@ -471,9 +641,9 @@ if (val->type == OBJ_STRING &&
 
 For other encodings, `kvobjSet` transfers or duplicates `val->ptr`, creates a `kvobj`, copies encoding and LRU fields, and decrements the previous value’s reference count. The resulting `kvobj` owns both the database key and the value representation.
 
-#### 1.1.6 Expiry index and metadata
+#### 1.1.7 Expiry index and metadata
 
-Expiry is not stored as a separate key-to-timestamp mapping in `db->expires`. Redis attaches the timestamp to metadata preceding the `kvobj`, then inserts that same object into the expiry index:
+Expiry is not a separate key-to-timestamp map inside `db->expires`. Redis stores the timestamp in metadata preceding the `kvobj`, then inserts that same object into the expiry index:
 
 ```c
 /* db.c — abbreviated */
@@ -491,9 +661,9 @@ if (kv != kvnew) {
 kvstoreDictAddRaw(db->expires, slot, kv, NULL);
 ```
 
-If attaching expiry metadata reallocates the object, Redis updates the `keys` index before inserting into `expires`, so both indexes refer to one current `kvobj` identity.
+If attaching expiry metadata reallocates the object, Redis updates `keys` before inserting into `expires`, so both indexes refer to one current `kvobj`.
 
-#### 1.1.7 Lookup and insertion
+#### 1.1.8 Lookup and insertion
 
 Read path:
 
@@ -506,7 +676,7 @@ client->db
   -> kvobj.type / encoding / ptr
 ```
 
-Insertion packages key and value, then stores the result:
+Insertion packages key and value, then stores the result under the key’s dictionary index:
 
 ```c
 /* db.c — abbreviated */
@@ -523,7 +693,7 @@ kvobj *dbAddInternal(redisDb *db, robj *key, robj **valref,
 }
 ```
 
-Subsequent steps may attach expiry or module metadata, emit readiness and keyspace notifications, update size histograms, and account per-slot memory when Cluster mode is enabled.
+Further steps may attach expiry or module metadata, emit readiness and keyspace notifications, update size histograms, and account per-slot memory when Cluster mode is enabled.
 
 #### Example: `SET greeting hello`
 
@@ -531,7 +701,7 @@ Subsequent steps may attach expiry or module metadata, emit readiness and keyspa
 SET greeting hello
 ```
 
-`setCommand` (`t_string.c`) constructs a string object for `hello` and calls `setKey` / `dbAdd*` so that the key is inserted into the selected database’s `keys` kvstore.
+`setCommand` (`t_string.c`) builds a string object for `hello` and calls `setKey` / `dbAdd*` so the key is inserted into the selected database’s `keys` kvstore.
 
 | Step | Location | Effect |
 |------|----------|--------|
@@ -609,7 +779,7 @@ Replication transmits a base dataset to replicas using RDB (and related channels
 
 - Pub/Sub messages are not keys; they do not appear in `keys`, RDB, or AOF as values (see [Pub/Sub](../pubsub/)).
 - Disk files are durable copies or logs; they do not maintain a live object graph beside RAM.
-- Cluster slot ownership moves keys between nodes; each node stores its subset with the same memory and disk design (see [Cluster bus](../cluster-bus/)).
+- Cluster hash-slot indexing and ownership are covered under the keyspace layer (§1.1.4); gossip that spreads the ownership map is [Cluster bus](../cluster-bus/). Each node stores only the keys for slots it owns, with the same memory and disk design as standalone.
 
 ---
 
@@ -1034,7 +1204,7 @@ Promotion and limits:
 | `hash-max-listpack-entries` | 512 | Maximum field count in a hash listpack |
 | `hash-max-listpack-value` | 64 | Maximum field or value bytes in a hash listpack |
 
-`hashTypeConvert` in `t_hash.c` converts listpack (or `LISTPACK_EX`) to `HT` when either limit is exceeded. The `HT` encoding reuses the `dict` structure defined in §1.1.4.
+`hashTypeConvert` in `t_hash.c` converts listpack (or `LISTPACK_EX`) to `HT` when either limit is exceeded. The `HT` encoding reuses the `dict` structure defined in §1.1.5.
 
 ### 2.6 Stream
 
@@ -1099,6 +1269,7 @@ Listpack replaced ziplist for newly written data. RDB may still load legacy zipl
 
 | Concern | Files |
 |---------|-------|
+| Hash slots / ownership | `cluster.h` (`keyHashSlot`, `CLUSTER_SLOTS`), `cluster_legacy.c` (`clusterAddSlot`), `redis-cli.c` (create ranges), `db.c` (`getKeySlot`) |
 | Database / keyspace | `db.c`, `kvstore.c`, `server.h` (`redisDb`) |
 | Objects | `object.h`, `object.c` |
 | Persistence | `rdb.c`, `aof.c` |
@@ -1113,6 +1284,9 @@ Factories in `object.c` establish the initial encoding (`createStringObject`, `c
 ### 3.3 Observability
 
 ```bash
+CLUSTER KEYSLOT mykey
+CLUSTER SLOTS
+CLUSTER NODES
 TYPE mykey
 OBJECT ENCODING mykey
 MEMORY USAGE mykey
@@ -1122,6 +1296,7 @@ LASTSAVE
 
 ### 3.4 Scope
 
+- Slot gossip, failure detection, and failover voting are covered in [Cluster bus](../cluster-bus/); §1.1.4 covers key→slot hashing and how ownership is recorded in `kvstore` / `clusterState.slots`.
 - Geo commands store geohash scores in sorted sets; they do not introduce a separate `OBJ_*` type.
 - Bitmaps and HyperLogLog are layered on strings or modules and lie outside the encoding matrix above.
 - This source tree also defines `OBJ_ARRAY` and `OBJ_GCRA`; those typed objects are outside the classic client types covered here.
@@ -1130,6 +1305,6 @@ LASTSAVE
 
 | Topic | Summary |
 |-------|---------|
-| Architecture | Memory: `redisDb` → `kvstore` → `kvobj`; disk: RDB snapshot and AOF log/replay |
+| Architecture | Memory hierarchy (`redisDb` → `kvstore` / hash slots → `kvobj`); disk: RDB / AOF |
 | Data types | Per-type encodings and promotion; stream rax; shared listpack, dict, and skiplist |
-| Implementation | `db` / `object` / `rdb` / `aof` / `t_*`; inspect with `TYPE` and `OBJECT ENCODING` |
+| Implementation | `cluster` / `db` / `object` / `rdb` / `aof` / `t_*`; inspect with `CLUSTER KEYSLOT`, `TYPE`, `OBJECT ENCODING` |

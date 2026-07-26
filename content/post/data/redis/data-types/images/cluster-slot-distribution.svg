@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-label="Redis Cluster hash-slot distribution">
+  <rect width="980" height="420" fill="#f7f9fb"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Redis Cluster: key to slot to master</text>
+  <text x="490" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">16384 slots (CRC16 &amp; 0x3FFF). Each slot owned by one master; local kvstore uses slot as dict index.</text>
+
+  <!-- Key -->
+  <rect x="40" y="80" width="180" height="70" fill="#e3f2fd" stroke="#1565c0" rx="6"/>
+  <text x="130" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#0d47a1">key</text>
+  <text x="130" y="132" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">user:{42}:cart</text>
+
+  <path d="M230 115 H270" stroke="#546e7a" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="250" y="105" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">hash tag</text>
+
+  <!-- Hash -->
+  <rect x="280" y="80" width="220" height="70" fill="#fff8e1" stroke="#f9a825" rx="6"/>
+  <text x="390" y="108" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#f57f17">keyHashSlot()</text>
+  <text x="390" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">CRC16(&quot;42&quot;) &amp; 0x3FFF</text>
+
+  <path d="M510 115 H550" stroke="#546e7a" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Slot -->
+  <rect x="560" y="80" width="160" height="70" fill="#e8f5e9" stroke="#2e7d32" rx="6"/>
+  <text x="640" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">slot s</text>
+  <text x="640" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#558b2f">0 .. 16383</text>
+
+  <path d="M730 115 H770" stroke="#546e7a" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Owner -->
+  <rect x="780" y="80" width="160" height="70" fill="#f3e5f5" stroke="#6a1b9a" rx="6"/>
+  <text x="860" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#6a1b9a">slots[s]</text>
+  <text x="860" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">master node</text>
+
+  <!-- Slot ring -->
+  <rect x="40" y="190" width="900" height="100" fill="#ffffff" stroke="#455a64" stroke-width="1.4" rx="8"/>
+  <text x="490" y="218" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#37474f">Initial ownership (redis-cli --cluster create): contiguous ranges</text>
+
+  <rect x="70" y="240" width="260" height="30" fill="#bbdefb" stroke="#1565c0" rx="4"/>
+  <text x="200" y="260" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">Master 0: 0 .. ~5461</text>
+
+  <rect x="360" y="240" width="260" height="30" fill="#c8e6c9" stroke="#2e7d32" rx="4"/>
+  <text x="490" y="260" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">Master 1: ~5462 .. ~10922</text>
+
+  <rect x="650" y="240" width="260" height="30" fill="#e1bee7" stroke="#6a1b9a" rx="4"/>
+  <text x="780" y="260" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#4a148c">Master 2: ~10923 .. 16383</text>
+
+  <!-- Local store -->
+  <rect x="40" y="320" width="900" height="80" fill="#eceff1" stroke="#546e7a" rx="8"/>
+  <text x="490" y="350" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#37474f">On the owning node</text>
+  <text x="490" y="375" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#455a64">kvstore.dicts[s]  holds all keys with hash slot s   (num_dicts = 16384)</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#546e7a"/>
+    </marker>
+  </defs>
+</svg>
