@@ -1,0 +1,457 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eElasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes \u003ccode\u003eClusterState\u003c\/code\u003e, and each data node stores Lucene-backed shard copies. This post covers \u003cstrong\u003ecluster management\u003c\/strong\u003e (topology and TCP transport) and \u003cstrong\u003ehow an index is modeled and opened\u003c\/strong\u003e, from the tree under \u003ccode\u003egit\/elasticsearch\u003c\/code\u003e (server \u003ccode\u003eVersion.CURRENT\u003c\/code\u003e = 9.6.0 on \u003ccode\u003emain\u003c\/code\u003e).\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/search\/elasticsearch-cluster-index\/","keywords":"[elasticsearch, cluster, transport, index, shard]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.164.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="elasticsearch,cluster,transport,index,shard"><meta name=description content="Elasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes ClusterState, and each data node stores Lucene-backed shard copies. This post covers cluster management (topology and TCP transport) and how an index is modeled and opened, from the tree under git/elasticsearch (server Version.CURRENT = 9.6.0 on main)."><meta property="og:description" content="Elasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes ClusterState, and each data node stores Lucene-backed shard copies. This post covers cluster management (topology and TCP transport) and how an index is modeled and opened, from the tree under git/elasticsearch (server Version.CURRENT = 9.6.0 on main)."><meta property="og:type" content="article"><meta property="og:title" content="Elasticsearch cluster network and indexes"><meta name=twitter:title content="Elasticsearch cluster network and indexes"><meta property="og:url" content="https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="Elasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes ClusterState, and each data node stores Lucene-backed shard copies. This post covers cluster management (topology and TCP transport) and how an index is modeled and opened, from the tree under git/elasticsearch (server Version.CURRENT = 9.6.0 on main)."><meta name=twitter:description content="Elasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes ClusterState, and each data node stores Lucene-backed shard copies. This post covers cluster management (topology and TCP transport) and how an index is modeled and opened, from the tree under git/elasticsearch (server Version.CURRENT = 9.6.0 on main)."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-08-01T21:10:00"><meta property="article:modified_time" content="2026-08-01T21:10:00"><meta property="article:section" content="data"><meta property="article:section" content="search"><meta property="article:tag" content="data"><meta property="article:tag" content="search"><meta property="article:tag" content="elasticsearch"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Elasticsearch cluster network and indexes</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Elasticsearch cluster network and indexes</h1><div class="postShorten-meta post-meta"><time datetime=2026-08-01T21:10:00+02:00>August 1, 2026
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/search>search</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>Elasticsearch is a distributed search engine: clients speak HTTP, nodes form a TCP mesh, a master publishes <code>ClusterState</code>, and each data node stores Lucene-backed shard copies. This post covers <strong>cluster management</strong> (topology and TCP transport) and <strong>how an index is modeled and opened</strong>, from the tree under <code>git/elasticsearch</code> (server <code>Version.CURRENT</code> = 9.6.0 on <code>main</code>).</p><p>Related: <a href=../elasticsearch/>Elasticsearch generals</a>, <a href=../lucene/>Lucene internals</a>.</p><p>Source grounding: <code>server/</code> and <code>modules/transport-netty4/</code>.</p><hr><h2 id=1-overview>1. Overview</h2><p>Elasticsearch exposes one logical cluster to clients while spreading work and data across nodes.</p><p><img src=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/images/es-overview-client-cluster-storage.svg alt="Client HTTP, internode TCP mesh, and per-node shard storage"></p><ol><li><strong>Client → server</strong> — applications call the REST API over <strong>HTTP</strong> (<code>http.port</code>, default <code>9200-9300</code>) to any node that accepts HTTP.</li><li><strong>Server ↔ server</strong> — nodes keep a <strong>TCP transport</strong> mesh (<code>transport.port</code>, default <code>9300-9399</code>) for discovery/join, cluster-state publish/commit, bulk replication, recovery, and search fan-out.</li><li><strong>Data storage</strong> — each data node holds <strong>shard copies</strong> on disk (<code>InternalEngine</code>: Lucene segments + translog). Cluster <strong>metadata</strong> (<code>IndexMetadata</code>, <code>RoutingTable</code>) describes placement; it is not the document store.</li></ol><p><strong>What this post covers</strong></p><ol><li>Overview — client, node mesh, storage</li><li>Cluster management — topology, class model, TCP transport channel types</li><li>Indexes — architecture (metadata vs local shards) and implementation (create / open / document→shard routing)</li></ol><p><strong>Usage facts</strong></p><ul><li>Creating or changing an index is a <strong>master</strong> <code>ClusterState</code> update (published on <code>Type.STATE</code>). Data nodes materialize <code>IndexService</code> / <code>IndexShard</code> only for copies assigned to them in the applied <code>RoutingTable</code>.</li><li>Defaults: <code>index.number_of_shards</code> = <strong>1</strong>, <code>index.number_of_replicas</code> = <strong>1</strong> (replicas are dynamic; shard count is final after create).</li><li>Prefer this post for internals; use <a href=../elasticsearch/>Elasticsearch generals</a> for REST API and query JSON fields.</li><li>Scope excludes X-Pack security, ingest pipelines in depth, aggregations internals, and the full allocation-decider catalog.</li></ul><hr><h2 id=2-cluster-management>2. Cluster management</h2><p>Cluster management is the control plane: <strong>cluster architecture</strong> (what is shared and who does what) and the <strong>TCP transport</strong> that carries membership and data-plane RPCs between nodes.</p><p><img src=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/images/es-cluster-mechanism.svg alt="Cluster mechanism: join, elect master, publish ClusterState, apply, leave"></p><h3 id=21-cluster-topology>2.1 Cluster topology</h3><p><strong>Topology</strong> is the membership and placement view carried in <code>ClusterState</code>. Two different “characters” appear in that view: <strong>node roles</strong> (who may be master, hold data, or only coordinate) and <strong>shard-copy roles</strong> (primary vs replica on a data node).</p><p><img src=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/images/es-cluster-topology-roles.svg alt="Cluster topology: master node, data nodes with primary/replica shards, coordinating-only node"></p><table><thead><tr><th>Character</th><th>Kind</th><th>Where recorded</th><th>Duty</th></tr></thead><tbody><tr><td><strong>Master</strong> (elected)</td><td>Node</td><td><code>DiscoveryNodes.masterNodeId</code>; node has <code>master</code> role</td><td>Runs <code>MasterService</code> / <code>Coordinator</code> publish; owns topology changes</td></tr><tr><td><strong>Data node</strong></td><td>Node</td><td><code>DiscoveryNode</code> with data-capable role</td><td>Hosts one or more <code>ShardRouting</code> copies</td></tr><tr><td><strong>Primary</strong></td><td>Shard copy</td><td><code>ShardRouting</code> (primary flag) on a data node</td><td>Accepts writes; replicates to in-sync replicas</td></tr><tr><td><strong>Replica</strong></td><td>Shard copy</td><td><code>ShardRouting</code> (non-primary) on another data node</td><td>Applies primary’s operations; may serve reads</td></tr><tr><td><strong>Coordinating-only</strong></td><td>Node</td><td>In <code>DiscoveryNodes</code> without data/master/ingest</td><td>Accepts HTTP and forwards actions; not a shard target</td></tr></tbody></table><p>The same JVM can be both master-eligible and a data node (combined roles). Primary/replica are <strong>not</strong> node types—they are placements of a given shard id across data nodes in the <code>RoutingTable</code>.</p><table><thead><tr><th>Topology facet</th><th>In <code>ClusterState</code></th><th>Meaning</th></tr></thead><tbody><tr><td>Node membership</td><td><code>DiscoveryNodes</code></td><td>Every live <code>DiscoveryNode</code> (id, address, roles)</td></tr><tr><td>Elected master</td><td><code>DiscoveryNodes.masterNodeId</code></td><td>Which member currently leads state publication</td></tr><tr><td>Index definitions</td><td><code>Metadata</code> / <code>IndexMetadata</code></td><td>Indexes and their settings (shard/replica counts, …)</td></tr><tr><td>Shard placement</td><td><code>RoutingTable</code> / <code>ShardRouting</code></td><td>Which node holds which primary or replica copy</td></tr><tr><td>Blocks</td><td><code>ClusterBlocks</code></td><td>Operations forbidden until topology is healthy</td></tr></tbody></table><p>The transport mesh is the wire that carries join, publish, and data RPCs; the <strong>topology itself</strong> is not a separate gossip map—it is the applied <code>ClusterState</code> on each JVM.</p><p>Every member process keeps a <strong>local copy</strong> of that state. Reads such as “who is master?” or “where is shard 2?” go through <code>ClusterService.state()</code> on <strong>that</strong> node (the last committed state the local <code>ClusterApplierService</code> applied). Nodes do not query a remote catalog for routine routing; they use their applied snapshot, which lags only until the next publish/commit.</p><h3 id=22-class-model-how-a-node-holds-cluster-info>2.2 Class model: how a node holds cluster info</h3><p>On each node, <code>ClusterService</code> is the façade. It owns <code>MasterService</code> (active for state updates only while this node is the elected master) and <code>ClusterApplierService</code> (always applies committed states). <code>ClusterApplierService</code> retains the current <code>ClusterState</code>. That object aggregates topology: <code>DiscoveryNodes</code> of <code>DiscoveryNode</code> instances, <code>Metadata</code>, routing tables, and blocks.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #ffffff
+  BorderColor #94a3b8
+}
+
+  class Node {
+    clusterService : ClusterService
+    coordinator : Coordinator
+    nodeConnectionsService : NodeConnectionsService
+    ---
+    start()
+  }
+
+  class ClusterService {
+    masterService : MasterService
+    clusterApplierService : ClusterApplierService
+    nodeName : String
+    clusterName : ClusterName
+    ---
+    state() : ClusterState
+    localNode() : DiscoveryNode
+  }
+
+  class MasterService {
+    nodeName : String
+    queuesByPriority
+    clusterStatePublisher : ClusterStatePublisher
+    ---
+    createTaskQueue(...)
+    publish(...)
+  }
+
+  class ClusterApplierService {
+    state : AtomicReference~ClusterState~
+    nodeName : String
+    highPriorityStateAppliers
+    clusterStateListeners
+    ---
+    state() : ClusterState
+    onNewClusterState(...)
+  }
+
+  class Coordinator {
+    masterService : MasterService
+    joinHelper : JoinHelper
+    peerFinder : PeerFinder
+    coordinationState : CoordinationState
+    applierState : ClusterState
+    publicationHandler : PublicationTransportHandler
+    nodeLeftQueue
+    ---
+    becomeLeader()
+    becomeFollower(...)
+    publish(...)
+    removeNode(...)
+  }
+
+  class NodeConnectionsService {
+    targetsByNode : Map~DiscoveryNode, ConnectionTarget~
+    transportService : TransportService
+    ---
+    connectToNodes(...)
+    disconnectFromNodesExcept(...)
+  }
+
+  class ClusterState {
+    version : long
+    stateUUID : String
+    clusterName : ClusterName
+    nodes : DiscoveryNodes
+    metadata : Metadata
+    routingTable : GlobalRoutingTable
+    blocks : ClusterBlocks
+    ---
+    nodes() : DiscoveryNodes
+    metadata() : Metadata
+    routingTable() : RoutingTable
+  }
+
+  class DiscoveryNodes {
+    nodes : Map~String, DiscoveryNode~
+    masterNodes : Map~String, DiscoveryNode~
+    dataNodes : Map~String, DiscoveryNode~
+    masterNodeId : String
+    localNodeId : String
+    ---
+    getMasterNode() : DiscoveryNode
+    getLocalNode() : DiscoveryNode
+    masterNodes() : Map
+    dataNodes() : Map
+  }
+
+  class DiscoveryNode {
+    nodeId : String
+    nodeName : String
+    address : TransportAddress
+    roles : Set~DiscoveryNodeRole~
+    attributes : Map~String, String~
+    ---
+    isMasterNode() : boolean
+    canContainData() : boolean
+    getRoles() : Set
+  }
+
+  class DiscoveryNodeRole {
+    roleName : String
+    roleNameAbbreviation : String
+    canContainData : boolean
+  }
+
+  class Metadata {
+    clusterUUID : String
+    indices : Map~... IndexMetadata~
+    coordinationMetadata : CoordinationMetadata
+  }
+
+  class IndexMetadata {
+    index : Index
+    numberOfShards : int
+    numberOfReplicas : int
+    primaryTerms : long[]
+    settings : Settings
+  }
+
+  class GlobalRoutingTable {
+    routingTables : Map~... RoutingTable~
+  }
+
+  class RoutingTable {
+    indicesRouting : Map~String, IndexRoutingTable~
+  }
+
+  class ShardRouting {
+    shardId : ShardId
+    currentNodeId : String
+    primary : boolean
+    state : ShardRoutingState
+    allocationId : AllocationId
+  }
+
+  class ClusterBlocks {
+    global
+    indices
+  }
+
+Node *-- ClusterService
+Node *-- Coordinator
+Node *-- NodeConnectionsService
+ClusterService *-- MasterService
+ClusterService *-- ClusterApplierService
+Coordinator o-- MasterService
+ClusterApplierService o-- ClusterState : applied state
+MasterService ..&gt; Coordinator : publisher
+Coordinator ..&gt; ClusterApplierService : commit / apply
+ClusterApplierService ..&gt; NodeConnectionsService : after apply
+
+ClusterState *-- DiscoveryNodes
+ClusterState *-- Metadata
+ClusterState *-- GlobalRoutingTable
+ClusterState *-- ClusterBlocks
+DiscoveryNodes o-- &#34;1..*&#34; DiscoveryNode
+DiscoveryNode o-- &#34;*&#34; DiscoveryNodeRole
+Metadata o-- &#34;*&#34; IndexMetadata
+GlobalRoutingTable *-- &#34;*&#34; RoutingTable
+RoutingTable o-- &#34;*&#34; ShardRouting
+@enduml
+</code></pre><p>Invariant: after a successful apply, <code>ClusterService.state().nodes()</code> on every healthy member describes the <strong>same</strong> membership and master id (same <code>version</code> / <code>stateUUID</code>). Shard routing and metadata match that version. A node that has not yet applied a commit still serves from its previous applied state until commit catches up—or is removed if it lags too far.</p><h3 id=23-tcp-transport-implementation>2.3 TCP transport implementation</h3><p>Internode traffic uses the <strong>TCP stack</strong>, not HTTP. Types and ownership:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class TransportService {
+  transport : Transport
+  responseHandlers : ResponseHandlers
+  ---
+  sendRequest(...)
+  registerRequestHandler(...)
+}
+
+class &#34;TcpTransport&#34; as TcpTransport {
+  outboundHandler : OutboundHandler
+  inboundHandler : InboundHandler
+  ---
+  openConnection(...)
+  inboundMessage(...)
+  sendRequest(...) 
+}
+
+class Netty4Transport {
+  ---
+  initiateChannel(...)
+  bind(...)
+}
+
+class OutboundHandler {
+  ---
+  sendRequest(requestId, action, request, ...)
+  sendResponse(...)
+}
+
+class InboundHandler {
+  requestHandlers
+  ---
+  messageReceived(...)
+}
+
+class NodeChannels {
+  typeMapping : Map~Type, ConnectionTypeHandle~
+  ---
+  sendRequest(requestId, action, request, options)
+}
+
+class TcpChannel {
+  ---
+  sendMessage(...)
+}
+
+class ConnectionProfile {
+  connections per Type
+}
+
+class &#34;TransportRequestOptions.Type&#34; as Type {
+  RECOVERY
+  BULK
+  REG
+  STATE
+  PING
+}
+
+class RequestHandlerRegistry {
+  action : String
+  executor
+  requestReader
+  handler
+}
+
+class NodeConnectionsService {
+  targetsByNode
+  transportService : TransportService
+  ---
+  connectToNodes(...)
+  disconnectFromNodesExcept(...)
+}
+
+class ClusterConnectionManager {
+  ---
+  getConnection(DiscoveryNode)
+  openConnection(...)
+}
+
+TransportService o-- TcpTransport : transport
+Netty4Transport --|&gt; TcpTransport
+TcpTransport *-- OutboundHandler
+TcpTransport *-- InboundHandler
+TcpTransport *-- NodeChannels : per peer
+NodeChannels o-- TcpChannel
+NodeChannels ..&gt; Type
+ConnectionProfile ..&gt; Type
+TcpTransport ..&gt; ConnectionProfile
+InboundHandler o-- RequestHandlerRegistry
+TransportService ..&gt; RequestHandlerRegistry : register
+NodeConnectionsService o-- TransportService
+NodeConnectionsService ..&gt; ClusterConnectionManager
+OutboundHandler ..&gt; TcpChannel
+@enduml
+</code></pre><table><thead><tr><th>Layer</th><th>Type</th><th>Role</th></tr></thead><tbody><tr><td>Façade</td><td><code>TransportService</code></td><td><code>sendRequest</code>, <code>registerRequestHandler</code>, handshake (<code>internal:transport/handshake</code>)</td></tr><tr><td>Engine</td><td><code>TcpTransport</code></td><td>Bind/connect, frame messages, map <code>Type</code> → <code>TcpChannel</code></td></tr><tr><td>Netty</td><td><code>Netty4Transport</code></td><td>Concrete TCP (<code>transport.port</code> default <code>9300-9399</code>)</td></tr><tr><td>Mesh</td><td><code>NodeConnectionsService</code> / <code>ClusterConnectionManager</code></td><td>Open/close peers to match applied <code>DiscoveryNodes</code></td></tr></tbody></table><p><img src=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/images/es-tcp-send-receive.svg alt="TCP send path and receive path"></p><p><strong>Send path.</strong> Caller → <code>TransportService.sendRequest</code> → connection’s <code>NodeChannels</code> selects a channel by <code>TransportRequestOptions.Type</code> → <code>OutboundHandler</code> writes <code>requestId</code>, action string, and <code>Writeable</code> body.</p><p><strong>Receive path.</strong> Netty read → <code>TcpTransport.inboundMessage</code> → <code>InboundHandler</code> resolves <code>RequestHandlerRegistry</code> by action → deserialize request → run handler on its executor → <code>channel.sendResponse</code>. The sender matches the response via <code>responseHandlers</code> and the same <code>requestId</code>.</p><p>Channel selection is the <code>options.type()</code> lookup on the peer’s <code>NodeChannels</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// TcpTransport.NodeChannels.sendRequest</span>
+</span></span><span style=display:flex><span>TcpChannel channel <span style=color:#f92672>=</span> channel(options.<span style=color:#a6e22e>type</span>());
+</span></span><span style=display:flex><span>outboundHandler.<span style=color:#a6e22e>sendRequest</span>(node, channel, requestId, action, request, options, ...);
+</span></span></code></pre></div><p><code>ConnectionProfile.buildDefaultConnectionProfile</code> opens a <strong>separate pool of TCP sockets per type</strong> (counts from <code>transport.connections_per_node.*</code>). TCP is a single ordered byte stream: a large bulk or recovery transfer on a shared socket would delay small cluster-state or fault-detection messages (head-of-line blocking). Isolating types keeps latency-sensitive control traffic off bandwidth-heavy data paths. Roles that never send a type open <strong>zero</strong> sockets for it:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ConnectionProfile.buildDefaultConnectionProfile (defaults: recovery=2, bulk=3, reg=6, state=1, ping=1)</span>
+</span></span><span style=display:flex><span>builder.<span style=color:#a6e22e>addConnections</span>(connectionsPerNodeBulk, Type.<span style=color:#a6e22e>BULK</span>);
+</span></span><span style=display:flex><span>builder.<span style=color:#a6e22e>addConnections</span>(connectionsPerNodePing, Type.<span style=color:#a6e22e>PING</span>);
+</span></span><span style=display:flex><span>builder.<span style=color:#a6e22e>addConnections</span>(DiscoveryNode.<span style=color:#a6e22e>isMasterNode</span>(settings) <span style=color:#f92672>?</span> connectionsPerNodeState : 0, Type.<span style=color:#a6e22e>STATE</span>);
+</span></span><span style=display:flex><span>builder.<span style=color:#a6e22e>addConnections</span>(DiscoveryNode.<span style=color:#a6e22e>canContainData</span>(settings) <span style=color:#f92672>?</span> connectionsPerNodeRecovery : 0, Type.<span style=color:#a6e22e>RECOVERY</span>);
+</span></span><span style=display:flex><span>builder.<span style=color:#a6e22e>addConnections</span>(connectionsPerNodeReg, Type.<span style=color:#a6e22e>REG</span>);
+</span></span></code></pre></div><h4 id=typerecovery><code>Type.RECOVERY</code></h4><p><strong>Usage.</strong> Peer recovery copies Lucene files and replays translog ops from a source shard to a recovering target. Transfers are large and long-lived; they must not stall publish or search on the same peer link. Default <strong>2</strong> sockets per data node (<code>transport.connections_per_node.recovery</code>). Non-data nodes open <strong>0</strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// RemoteRecoveryTargetHandler</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>fileChunkRequestOptions</span> <span style=color:#f92672>=</span> TransportRequestOptions.<span style=color:#a6e22e>of</span>(
+</span></span><span style=display:flex><span>    recoverySettings.<span style=color:#a6e22e>internalActionTimeout</span>(),
+</span></span><span style=display:flex><span>    TransportRequestOptions.<span style=color:#a6e22e>Type</span>.<span style=color:#a6e22e>RECOVERY</span>
+</span></span><span style=display:flex><span>);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>translogOpsRequestOptions</span> <span style=color:#f92672>=</span> TransportRequestOptions.<span style=color:#a6e22e>of</span>(
+</span></span><span style=display:flex><span>    recoverySettings.<span style=color:#a6e22e>internalActionLongTimeout</span>(),
+</span></span><span style=display:flex><span>    TransportRequestOptions.<span style=color:#a6e22e>Type</span>.<span style=color:#a6e22e>RECOVERY</span>
+</span></span><span style=display:flex><span>);
+</span></span><span style=display:flex><span><span style=color:#75715e>// later: transportService.sendRequest(..., fileChunkRequestOptions, ...)</span>
+</span></span></code></pre></div><h4 id=typebulk><code>Type.BULK</code></h4><p><strong>Usage.</strong> Primary → replica shard bulk writes (<code>TransportShardBulkAction</code> / <code>TransportReplicationAction</code>). Indexing volume is high; a few parallel sockets absorb concurrent bulk shards without sharing the <code>STATE</code> or <code>PING</code> pipes. Default <strong>3</strong> sockets (<code>transport.connections_per_node.bulk</code>).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// TransportShardBulkAction</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>final</span> TransportRequestOptions TRANSPORT_REQUEST_OPTIONS <span style=color:#f92672>=</span> TransportRequestOptions.<span style=color:#a6e22e>of</span>(
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>    TransportRequestOptions.<span style=color:#a6e22e>Type</span>.<span style=color:#a6e22e>BULK</span>
+</span></span><span style=display:flex><span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> TransportRequestOptions <span style=color:#a6e22e>transportOptions</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> TRANSPORT_REQUEST_OPTIONS;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#75715e>// TransportReplicationAction sends primary/replica requests with transportOptions</span>
+</span></span></code></pre></div><h4 id=typereg><code>Type.REG</code></h4><p><strong>Usage.</strong> Default / general-purpose channel: discovery probes, most internal actions that omit an explicit type, and search fan-out. <code>TransportRequestOptions.EMPTY</code> and <code>timeout(...)</code> both use <code>Type.REG</code>. Default <strong>6</strong> sockets (<code>transport.connections_per_node.reg</code>)—the largest pool, for concurrent unrelated RPCs.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// TransportRequestOptions</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>final</span> TransportRequestOptions EMPTY <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> TransportRequestOptions(<span style=color:#66d9ef>null</span>, Type.<span style=color:#a6e22e>REG</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// SearchTransportService (query / fetch phases)</span>
+</span></span><span style=display:flex><span>transportService.<span style=color:#a6e22e>sendRequest</span>(node, action, request, TransportRequestOptions.<span style=color:#a6e22e>EMPTY</span>, handler);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// HandshakingTransportAddressConnector — single-channel probe profile</span>
+</span></span><span style=display:flex><span>handshakeConnectionProfile <span style=color:#f92672>=</span> ConnectionProfile.<span style=color:#a6e22e>buildSingleChannelProfile</span>(
+</span></span><span style=display:flex><span>    Type.<span style=color:#a6e22e>REG</span>, connectTimeout, handshakeTimeout, TimeValue.<span style=color:#a6e22e>MINUS_ONE</span>, <span style=color:#66d9ef>null</span>, <span style=color:#66d9ef>null</span>
+</span></span><span style=display:flex><span>);
+</span></span></code></pre></div><h4 id=typestate><code>Type.STATE</code></h4><p><strong>Usage.</strong> Cluster-state publication and related coordination that must stay responsive while peers may be busy with bulk or recovery. Master-eligible nodes open <strong>1</strong> socket by default (<code>transport.connections_per_node.state</code>); other roles open <strong>0</strong>. <code>PublicationTransportHandler</code> sends <code>internal:cluster/coordination/publish_state</code> on this type (no send timeout—acks may arrive late).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// PublicationTransportHandler</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>final</span> TransportRequestOptions STATE_REQUEST_OPTIONS <span style=color:#f92672>=</span> TransportRequestOptions.<span style=color:#a6e22e>of</span>(
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>    TransportRequestOptions.<span style=color:#a6e22e>Type</span>.<span style=color:#a6e22e>STATE</span>
+</span></span><span style=display:flex><span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>transportService.<span style=color:#a6e22e>sendChildRequest</span>(
+</span></span><span style=display:flex><span>    connection,
+</span></span><span style=display:flex><span>    PUBLISH_STATE_ACTION_NAME,
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>new</span> BytesTransportRequest(bytes, connection.<span style=color:#a6e22e>getTransportVersion</span>()),
+</span></span><span style=display:flex><span>    task,
+</span></span><span style=display:flex><span>    STATE_REQUEST_OPTIONS,
+</span></span><span style=display:flex><span>    handler
+</span></span><span style=display:flex><span>);
+</span></span></code></pre></div><h4 id=typeping><code>Type.PING</code></h4><p><strong>Usage.</strong> Lightweight fault-detection RPCs (<code>LeaderChecker</code>, <code>FollowersChecker</code>) so leader/follower liveness checks are not queued behind bulk or recovery frames. Default <strong>1</strong> socket (<code>transport.connections_per_node.ping</code>). Separate from <code>TransportKeepAlive</code>, which writes a wire-level keep-alive on <strong>every</strong> open <code>TcpChannel</code> on a schedule; <code>Type.PING</code> is the application-level channel class for coordination ping <em>actions</em>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LeaderChecker / FollowersChecker</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>final</span> TransportRequestOptions PING_REQUEST_OPTIONS <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    TransportRequestOptions.<span style=color:#a6e22e>of</span>(<span style=color:#66d9ef>null</span>, Type.<span style=color:#a6e22e>PING</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>transportService.<span style=color:#a6e22e>sendRequest</span>(
+</span></span><span style=display:flex><span>    node,
+</span></span><span style=display:flex><span>    LEADER_CHECK_ACTION_NAME,  <span style=color:#75715e>// or FOLLOWER_CHECK_ACTION_NAME</span>
+</span></span><span style=display:flex><span>    request,
+</span></span><span style=display:flex><span>    PING_REQUEST_OPTIONS,
+</span></span><span style=display:flex><span>    handler
+</span></span><span style=display:flex><span>);
+</span></span></code></pre></div><hr><h2 id=3-indexes>3. Indexes</h2><p>An <strong>index</strong> is one logical namespace for documents. The cluster records its definition and shard placement in <code>ClusterState</code>; each data node that holds a copy runs a local <code>IndexShard</code> with a Lucene store. Document write and search paths assume that structure; this section covers the structure itself.</p><h3 id=31-architecture>3.1 Architecture</h3><p>Two planes share the same logical index:</p><table><thead><tr><th>Plane</th><th>Home</th><th>Holds</th></tr></thead><tbody><tr><td><strong>ClusterState</strong> (master-authored)</td><td><code>IndexMetadata</code> + <code>IndexRoutingTable</code></td><td>Identity, settings, mappings, primary terms, in-sync allocation ids, which node holds which copy</td></tr><tr><td><strong>Data plane</strong> (per data node)</td><td><code>IndicesService</code> → <code>IndexService</code> → <code>IndexShard</code></td><td>Lucene <code>Directory</code>, engine, recovery, primary/replica behavior for <strong>assigned</strong> copies only</td></tr></tbody></table><p><img src=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/images/es-index-planes.svg alt="Index metadata in ClusterState and IndexShard on a data node"></p><h4 id=the-index-in-clusterstate>The index in ClusterState</h4><p><code>Index</code> is a value type <code>(name, uuid)</code>. Equality uses both; after create, the UUID (setting <code>index.uuid</code>) is the stable key for maps and on-disk paths. Until a UUID is assigned, code may see the placeholder <code>_na_</code>.</p><p><code>IndexMetadata</code> is the authoritative definition for that UUID:</p><table><thead><tr><th>Field / aspect</th><th>Meaning</th></tr></thead><tbody><tr><td><code>index</code></td><td><code>Index(name, uuid)</code></td></tr><tr><td><code>numberOfShards</code> / <code>numberOfReplicas</code></td><td>From <code>index.number_of_shards</code> (default <strong>1</strong>, <strong>Final</strong>) and <code>index.number_of_replicas</code> (default <strong>1</strong>, <strong>Dynamic</strong>). <code>totalNumberOfShards = shards × (replicas + 1)</code>.</td></tr><tr><td><code>primaryTerms[]</code></td><td>One <code>long</code> per shard id. Starts at unassigned (<strong>0</strong>); increments when a primary is assigned after a full restart or a replica is promoted. Any shard that can accept writes has term greater than 0.</td></tr><tr><td><code>inSyncAllocationIds</code></td><td>Per shard id, the set of <code>AllocationId</code> strings for copies safe to promote or recover from.</td></tr><tr><td>Mapping / aliases / settings versions</td><td><code>mappingVersion</code>, <code>settingsVersion</code>, <code>aliasesVersion</code>, plus overall <code>version</code> for change detection.</td></tr><tr><td><code>state</code></td><td><code>OPEN</code> or <code>CLOSE</code> (closed indexes keep metadata but do not host started shards for traffic).</td></tr><tr><td>Creation / compatibility</td><td><code>getCreationVersion()</code> / <code>getCompatibilityVersion()</code> for N−1 and archive import checks.</td></tr></tbody></table><p><code>IndexRoutingTable</code> holds one <code>IndexShardRoutingTable</code> per shard id <code>0 .. numberOfShards-1</code>. Each group has exactly one primary <code>ShardRouting</code> and <code>numberOfReplicas</code> replica routings. A <code>ShardRouting</code> is one <strong>physical copy</strong>: assigned node (or none), <code>primary</code> flag, cluster state (<code>UNASSIGNED</code> → <code>INITIALIZING</code> → <code>STARTED</code>, or <code>RELOCATING</code>), recovery source (empty store, existing store, peer, snapshot, …), and <code>AllocationId</code>.</p><p><strong>Invariants</strong> (routing validated against metadata): <code>shards.length == numberOfShards</code>; copies per shard id equal <code>numberOfReplicas + 1</code>; every active promotable copy’s allocation id ∈ that shard’s in-sync set.</p><h4 id=the-index-on-a-data-node>The index on a data node</h4><p><code>IndicesService</code> keeps <code>Map&lt;uuid, IndexService></code> for indexes that have at least one local shard. One <code>IndexService</code> is shared by all local shards of that index: <code>IndexSettings</code> (live view of <code>IndexMetadata</code> settings), <code>MapperService</code>, analyzers, similarity, field-data / bitset caches, <code>EngineFactory</code>, and async tasks (global-checkpoint sync, retention-lease sync, translog trim). The shard map is <code>Map&lt;Integer, IndexShard></code> keyed by shard id—not every shard id exists on every node, only those the routing table assigns here.</p><p><code>ShardId</code> is <code>(Index, shardId)</code> and identifies a logical shard; each <strong>copy</strong> on a node is a separate <code>IndexShard</code> instance with its own store path.</p><h4 id=indexshard><code>IndexShard</code></h4><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class IndexShard {
+  shardRouting : ShardRouting
+  state : IndexShardState
+  pendingPrimaryTerm : long
+  path : ShardPath
+  ---
+  applyIndexOperationOnPrimary(...)
+  applyIndexOperationOnReplica(...)
+  updateShardState(...)
+  startRecovery(...)
+}
+
+class Store {
+  directory : Directory
+  shardLock : ShardLock
+}
+
+class Engine {
+  ---
+  index(...)
+  get(...)
+  refresh(...)
+}
+
+class InternalEngine {
+  IndexWriter
+  Translog
+  localCheckpointTracker
+}
+
+class ReplicationTracker {
+  primaryMode
+  inSyncAllocationIds
+  globalCheckpoint
+}
+
+class IndexShardOperationPermits {
+  ---
+  block / acquire for ops
+}
+
+IndexShard *-- Store
+IndexShard o-- Engine
+InternalEngine --|&gt; Engine
+IndexShard *-- ReplicationTracker
+IndexShard *-- IndexShardOperationPermits
+IndexShard ..&gt; ShardRouting
+@enduml
+</code></pre><p>An <code>IndexShard</code> is one local copy. Construction (<code>IndexService.createShard</code>) acquires a <code>ShardLock</code>, resolves or creates a <code>ShardPath</code> on disk, builds a Lucene <code>Directory</code>, wraps it in <code>Store</code>, and constructs <code>IndexShard</code> in state <strong><code>CREATED</code></strong>. The <code>Engine</code> reference stays empty until recovery opens <code>InternalEngine</code> (default) on <code>store.directory()</code> with an <code>IndexWriter</code> and a paired translog.</p><p>Two state axes must not be confused:</p><table><thead><tr><th>Axis</th><th>Type</th><th>Where</th><th>Role</th></tr></thead><tbody><tr><td>Cluster placement</td><td><code>ShardRouting.state()</code></td><td><code>ClusterState</code></td><td>Master’s view: unassigned / initializing / started / relocating</td></tr><tr><td>Local lifecycle</td><td><code>IndexShardState</code></td><td>JVM</td><td>This process’s shard object: created → recovering → post-recovery → started → closed</td></tr></tbody></table><p>Local lifecycle:</p><table><thead><tr><th><code>IndexShardState</code></th><th>Meaning</th></tr></thead><tbody><tr><td><code>CREATED</code></td><td>Object and store exist; no engine yet</td></tr><tr><td><code>RECOVERING</code></td><td><code>markAsRecovering</code>; engine opens; file/translog or peer recovery in progress</td></tr><tr><td><code>POST_RECOVERY</code></td><td>Recovery finished; reads allowed; waiting for master to mark routing active</td></tr><tr><td><code>STARTED</code></td><td><code>updateShardState</code> saw active routing; serving normal traffic</td></tr><tr><td><code>CLOSED</code></td><td>Shard closed / failed / removed</td></tr></tbody></table><p>Reads are allowed in <code>POST_RECOVERY</code> and <code>STARTED</code>. Writes are allowed in <code>RECOVERING</code>, <code>POST_RECOVERY</code>, and <code>STARTED</code> (replicas index during recovery; relocating primaries have additional rules). Operation admission goes through <code>IndexShardOperationPermits</code> so promotion and engine reset can block new ops briefly.</p><p><code>ReplicationTracker</code> is the local view of the replication group: whether this copy is in <strong>primary mode</strong>, which allocation ids are in-sync, global checkpoint, and retention leases. Primaries drive the group; replicas apply ops with primary-assigned sequence numbers.</p><p><strong>Primary vs replica</strong> use the same class. Gates are <code>shardRouting.primary()</code> and primary mode on the tracker:</p><ul><li><strong>Primary</strong> — <code>applyIndexOperationOnPrimary</code> (<code>Engine.Operation.Origin.PRIMARY</code>); activates primary mode when an initializing primary becomes started; receives master updates of in-sync sets into the tracker.</li><li><strong>Replica</strong> — almost always peer-recovers from the current primary (<code>Type.RECOVERY</code> channels); <code>applyIndexOperationOnReplica</code> (<code>Origin.REPLICA</code>); on promotion, primary term increases, history may be adjusted, primary–replica resync runs, then <code>activatePrimaryMode</code>.</li><li><strong>Demotion</strong> primary → replica on the <strong>same</strong> allocation is illegal (<code>updateShardState</code> rejects it).</li></ul><h3 id=32-implementation>3.2 Implementation</h3><p><strong>Create index (ClusterState only).</strong> HTTP/API create reaches the master as <code>TransportCreateIndexAction</code> → <code>MetadataCreateIndexService.createIndex</code>. The update task validates name/templates/settings, may use a temporary <code>IndexService</code> on the master to merge mappings, then builds <code>IndexMetadata</code> (<code>OPEN</code>) and <code>RoutingTable.addAsNew</code> / <code>IndexRoutingTable.initializeAsNew</code>: unassigned primary with empty-store recovery, unassigned replicas with peer recovery. <code>allocationService.reroute</code> assigns initializing shards. After publish/commit, every node applies the new metadata; only assigned data nodes open local objects. <code>IndexMetadataUpdater</code> (during allocation) fills in-sync ids as shards start and bumps primary terms on primary init/promotion.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>TransportCreateIndexAction
+</span></span><span style=display:flex><span>  -&gt; MetadataCreateIndexService.createIndex
+</span></span><span style=display:flex><span>       validate + build IndexMetadata
+</span></span><span style=display:flex><span>       RoutingTable.addAsNew / initializeAsNew
+</span></span><span style=display:flex><span>       allocationService.reroute(&#34;create-index&#34;)
+</span></span><span style=display:flex><span>  -&gt; publish / commit ClusterState
+</span></span><span style=display:flex><span>  -&gt; (optional) wait for active shards
+</span></span></code></pre></div><p><strong>Create <code>IndexService</code> / <code>IndexShard</code>.</strong> <code>IndicesClusterStateService.applyClusterState</code> reconciles local objects with the applied routing table. For each assigned initializing shard:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>IndicesService.createIndex(IndexMetadata)     // once per uuid on this node
+</span></span><span style=display:flex><span>IndexService.createShard(routing, ...)
+</span></span><span style=display:flex><span>  nodeEnv.shardLock(shardId)
+</span></span><span style=display:flex><span>  ShardPath.loadShardPath | selectNewPathForShard
+</span></span><span style=display:flex><span>  DirectoryFactory.newDirectory(...)
+</span></span><span style=display:flex><span>  new Store(shardId, settings, directory, lock, ...)
+</span></span><span style=display:flex><span>  new IndexShard(routing, settings, path, store, engineFactory, ...)  // state = CREATED
+</span></span><span style=display:flex><span>  shards.put(shardId.id(), indexShard)
+</span></span><span style=display:flex><span>IndexShard.startRecovery(...)
+</span></span><span style=display:flex><span>  markAsRecovering -&gt; RECOVERING
+</span></span><span style=display:flex><span>  EMPTY/EXISTING_STORE -&gt; recoverFromStore -&gt; open InternalEngine + translog
+</span></span><span style=display:flex><span>  PEER                  -&gt; PeerRecoveryTargetService
+</span></span><span style=display:flex><span>  -&gt; POST_RECOVERY when recovery completes
+</span></span><span style=display:flex><span>IndexShard.updateShardState(... active routing ...)
+</span></span><span style=display:flex><span>  -&gt; STARTED; if primary, replicationTracker.activatePrimaryMode(localCheckpoint)
+</span></span></code></pre></div><p><code>updateShardState</code> is the ongoing applier hook: new <code>ShardRouting</code>, new primary term, in-sync set, and <code>IndexShardRoutingTable</code>. Same allocation only; term increase on a non-primary routing triggers promotion (block permits, bump <code>pendingPrimaryTerm</code>, resync, activate primary mode). Stale “shard started” messages against a still-recovering replica fail the shard rather than skipping to <code>STARTED</code>.</p><p><strong>Shard a document on insert.</strong> Create-index fixes <code>number_of_shards</code>. Each index/update/delete must pick one shard id in <code>0 .. numberOfShards-1</code>, then the coordinating node groups items by <code>ShardId</code> and sends a <code>BulkShardRequest</code> to that shard’s <strong>primary</strong> (<code>TransportShardBulkAction</code> on <code>Type.BULK</code> channels). Placement is <strong>not</strong> load-balancing: it is a deterministic hash of routing key → shard number.</p><p>On the bulk coordinator (<code>BulkOperation</code>), after resolving the concrete write index:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// BulkOperation — per DocWriteRequest in the bulk</span>
+</span></span><span style=display:flex><span>IndexRouting indexRouting <span style=color:#f92672>=</span> concreteIndices.<span style=color:#a6e22e>routing</span>(concreteIndex); <span style=color:#75715e>// IndexRouting.fromIndexMetadata(...)</span>
+</span></span><span style=display:flex><span>docWriteRequest.<span style=color:#a6e22e>preRoutingProcess</span>(indexRouting);   <span style=color:#75715e>// may auto-generate _id</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> shardId <span style=color:#f92672>=</span> docWriteRequest.<span style=color:#a6e22e>route</span>(indexRouting); <span style=color:#75715e>// -&gt; IndexRouting.indexShard(...)</span>
+</span></span><span style=display:flex><span>docWriteRequest.<span style=color:#a6e22e>postRoutingProcess</span>(indexRouting);
+</span></span><span style=display:flex><span>requestsByShard.<span style=color:#a6e22e>computeIfAbsent</span>(<span style=color:#66d9ef>new</span> ShardId(concreteIndex, shardId), ...).<span style=color:#a6e22e>add</span>(bulkItemRequest);
+</span></span></code></pre></div><p><code>IndexRequest.route</code> delegates to <code>IndexRouting.indexShard</code>. The default strategy (<code>Unpartitioned</code>) hashes <code>_routing</code> if set, otherwise <code>_id</code> (Murmur3), then maps the hash to a shard:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// IndexRouting.IdAndRoutingOnly.preProcess — id required before hash</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (indexRequest.<span style=color:#a6e22e>id</span>() <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>    indexRequest.<span style=color:#a6e22e>autoGenerateId</span>();  <span style=color:#75715e>// or time-based id for some index modes</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// IndexRouting.indexShard (IdAndRoutingOnly)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> shardId <span style=color:#f92672>=</span> shardId(id, routing);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> rerouteWritesIfResharding(shardId);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// IndexRouting.Unpartitioned</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>shardId</span>(String id, <span style=color:#a6e22e>@Nullable</span> String routing) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> routingFunction.<span style=color:#a6e22e>shardNum</span>(effectiveRoutingToHash(routing <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> id : routing));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>effectiveRoutingToHash</span>(String effectiveRouting) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Murmur3HashFunction.<span style=color:#a6e22e>hash</span>(effectiveRouting);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>RoutingFunction</code> turns that hash into a shard id. Newer indexes use plain modulo on <code>numberOfShards</code>; older ones use <code>routingNumShards</code> / <code>routingFactor</code> so shard counts can grow via split while keeping document→shard affinity:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// RoutingFunction — chosen in IndexRouting.fromIndexMetadata by IndexVersion</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Modern:</span>
+</span></span><span style=display:flex><span>Math.<span style=color:#a6e22e>floorMod</span>(hash, numberOfShards);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Legacy (routingNumShards = numberOfShards * routingFactor, often for _split):</span>
+</span></span><span style=display:flex><span>Math.<span style=color:#a6e22e>floorMod</span>(hash, routingNumShards) <span style=color:#f92672>/</span> routingFactor;
+</span></span></code></pre></div><p><strong>Variants</strong> (same <code>IndexRouting</code> façade):</p><table><thead><tr><th>Strategy</th><th>When</th><th>Hash input</th></tr></thead><tbody><tr><td><code>Unpartitioned</code></td><td>Default</td><td><code>_routing</code> or else <code>_id</code></td></tr><tr><td><code>Partitioned</code></td><td><code>index.routing_partition_size</code> > 1</td><td>Requires <code>_routing</code>; mixes <code>hash(routing) + offset(hash(id))</code> so one routing key fans across a partition of shards</td></tr><tr><td><code>ExtractFromSource</code></td><td><code>index.routing_path</code> or time-series dimensions</td><td>Fields from the document source (not only <code>_id</code>)</td></tr></tbody></table><p>Optional <code>_routing</code> therefore pins related documents (e.g. same parent key) onto the same shard under the default strategy. With required routing in the mapping, missing <code>_routing</code> fails before a shard id is chosen (<code>RoutingMissingException</code>).</p><p>After grouping, each <code>BulkShardRequest</code> targets one primary; replication to in-sync replicas is a later step on that shard, not part of the hash.</p><p><strong>Key types</strong></p><table><thead><tr><th>Type</th><th>Path (under <code>server/.../java</code>)</th><th>Role</th></tr></thead><tbody><tr><td><code>Index</code> / <code>ShardId</code></td><td><code>org/elasticsearch/index/</code></td><td>Index identity; logical shard id</td></tr><tr><td><code>IndexMetadata</code></td><td><code>org/elasticsearch/cluster/metadata/</code></td><td>Authoritative settings, terms, in-sync sets</td></tr><tr><td><code>IndexRoutingTable</code> / <code>ShardRouting</code></td><td><code>org/elasticsearch/cluster/routing/</code></td><td>Placement and copy state in ClusterState</td></tr><tr><td><code>IndexRouting</code> / <code>RoutingFunction</code></td><td><code>org/elasticsearch/cluster/routing/</code></td><td>Document → shard id (hash / modulo)</td></tr><tr><td><code>BulkOperation</code></td><td><code>org/elasticsearch/action/bulk/</code></td><td>Group bulk items by <code>ShardId</code> for insert</td></tr><tr><td><code>MetadataCreateIndexService</code></td><td><code>org/elasticsearch/cluster/metadata/</code></td><td>Create-index cluster-state mutation</td></tr><tr><td><code>IndicesClusterStateService</code></td><td><code>org/elasticsearch/indices/cluster/</code></td><td>Apply routing → local create/update/remove</td></tr><tr><td><code>IndicesService</code> / <code>IndexService</code></td><td><code>org/elasticsearch/indices/</code>, <code>org/elasticsearch/index/</code></td><td>Node registry; per-index shared services + shard map</td></tr><tr><td><code>IndexShard</code> / <code>IndexShardState</code></td><td><code>org/elasticsearch/index/shard/</code></td><td>Local copy lifecycle and ops</td></tr><tr><td><code>Store</code> / <code>InternalEngine</code> / <code>ReplicationTracker</code></td><td><code>…/store/</code>, <code>…/engine/</code>, <code>…/seqno/</code></td><td>Directory, Lucene+translog, replication group</td></tr></tbody></table><hr><h2 id=scope>Scope</h2><p>This post covers cluster topology and how each node holds applied <code>ClusterState</code>, the internode TCP stack and per-type channels, how an index is represented in metadata versus opened as <code>IndexService</code> / <code>IndexShard</code>, and how insert traffic hashes documents onto shard ids. It does not cover the full primary→replica write pipeline, search execution trees, query DSL rewriting, aggregations, security plugins, or every allocation decider. For REST surface and query JSON fields, see <a href=../elasticsearch/>Elasticsearch generals</a>; for Lucene segment/writer detail, see <a href=../lucene/>Lucene internals</a>.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/search/>search</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/elasticsearch/>elasticsearch</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/redis/data-types/ data-tooltip="Redis Storage Architecture and Data Type Implementations" aria-label="PREVIOUS: Redis Storage Architecture and Data Type Implementations"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/",this.page.identifier="/post/data/search/elasticsearch-cluster-index/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/redis/data-types/ data-tooltip="Redis Storage Architecture and Data Type Implementations" aria-label="PREVIOUS: Redis Storage Architecture and Data Type Implementations"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/search/elasticsearch-cluster-index/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fsearch%2Felasticsearch-cluster-index%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fsearch%2Felasticsearch-cluster-index%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fsearch%2Felasticsearch-cluster-index%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+    MathJax.Hub.Config({
+      CommonHTML: { linebreaks: { automatic: true } },
+      tex2jax: {
+        inlineMath: [ ['$', '$'], ['\\(', '\\)'] ],
+        displayMath: [ ['$$', '$$'], ['\\[', '\\]'] ],
+        processEscapes: true,
+        processEnvironments: true,
+        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      },
+      messageStyle: 'none'
+    });
+  </script><script type=text/javascript async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_CHTML-full" integrity="sha256-GhM+5JHb6QUzOQPXSJLEWP7R73CbkisjzK5Eyij4U9w=" crossorigin=anonymous></script></body></html>

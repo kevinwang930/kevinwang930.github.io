@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="500" viewBox="0 0 920 500" role="img" aria-label="Index: ClusterState metadata and per-node IndexShard">
+  <defs>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 14px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, Menlo, monospace; font-size: 10px; fill: #334155; }
+    .h { font-size: 12px; font-weight: 700; fill: #0f172a; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .meta { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .data { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.25; }
+    .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.25; stroke-dasharray: 4 3; }
+  ]]></style>
+
+  <rect width="920" height="500" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="28" y="28" class="t">Index: cluster metadata vs local shard</text>
+  <text x="28" y="46" class="s">One logical index = IndexMetadata + IndexRoutingTable; each assigned copy is an IndexShard with Store and Engine.</text>
+
+  <!-- Left: ClusterState -->
+  <rect x="24" y="62" width="430" height="418" rx="10" class="meta" filter="url(#sh)"/>
+  <text x="40" y="86" class="lt" fill="#2563eb">ClusterState (master-authored)</text>
+
+  <rect x="40" y="100" width="398" height="70" rx="6" class="box"/>
+  <text x="56" y="124" class="h">IndexMetadata</text>
+  <text x="56" y="144" class="m">Index(name, uuid) | shards / replicas | mapping</text>
+  <text x="56" y="160" class="m">primaryTerms[] | inSyncAllocationIds</text>
+
+  <line x1="239" y1="170" x2="239" y2="188" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="40" y="188" width="398" height="56" rx="6" class="box"/>
+  <text x="56" y="212" class="h">IndexRoutingTable</text>
+  <text x="56" y="230" class="m">per shard id: IndexShardRoutingTable</text>
+
+  <line x1="135" y1="244" x2="135" y2="262" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+  <line x1="343" y1="244" x2="343" y2="262" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="40" y="262" width="190" height="78" rx="6" class="box"/>
+  <text x="56" y="286" class="h">ShardRouting</text>
+  <text x="56" y="306" class="m">primary = true</text>
+  <text x="56" y="322" class="m">node | state | AllocationId</text>
+
+  <rect x="248" y="262" width="190" height="78" rx="6" class="box"/>
+  <text x="264" y="286" class="h">ShardRouting</text>
+  <text x="264" y="306" class="m">primary = false</text>
+  <text x="264" y="322" class="m">node | state | AllocationId</text>
+
+  <rect x="40" y="360" width="398" height="100" rx="6" class="note"/>
+  <text x="56" y="384" class="h">Invariants</text>
+  <text x="56" y="404" class="m">routing.shards.length == numberOfShards</text>
+  <text x="56" y="420" class="m">copies per shard == numberOfReplicas + 1</text>
+  <text x="56" y="436" class="m">active AllocationId in inSyncAllocationIds</text>
+
+  <!-- Right: Data node -->
+  <rect x="470" y="62" width="426" height="418" rx="10" class="data" filter="url(#sh)"/>
+  <text x="486" y="86" class="lt" fill="#059669">Data node (assigned copies only)</text>
+
+  <rect x="486" y="100" width="394" height="48" rx="6" class="box"/>
+  <text x="502" y="122" class="h">IndicesService</text>
+  <text x="502" y="138" class="m">Map of index uuid to IndexService</text>
+
+  <line x1="683" y1="148" x2="683" y2="166" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="486" y="166" width="394" height="56" rx="6" class="box"/>
+  <text x="502" y="190" class="h">IndexService</text>
+  <text x="502" y="208" class="m">IndexSettings | MapperService | EngineFactory</text>
+
+  <line x1="683" y1="222" x2="683" y2="240" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="486" y="240" width="394" height="70" rx="6" class="box"/>
+  <text x="502" y="264" class="h">IndexShard</text>
+  <text x="502" y="284" class="m">ShardRouting | ReplicationTracker</text>
+  <text x="502" y="300" class="m">primary vs replica via routing + primary mode</text>
+
+  <line x1="579" y1="310" x2="579" y2="328" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+  <line x1="787" y1="310" x2="787" y2="328" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="486" y="328" width="186" height="56" rx="6" class="box"/>
+  <text x="502" y="352" class="h">Store</text>
+  <text x="502" y="370" class="m">Directory + ShardLock</text>
+
+  <rect x="694" y="328" width="186" height="56" rx="6" class="box"/>
+  <text x="710" y="352" class="h">InternalEngine</text>
+  <text x="710" y="370" class="m">IndexWriter + Translog</text>
+
+  <rect x="486" y="404" width="394" height="56" rx="6" class="note"/>
+  <text x="502" y="426" class="m">Engine opens during recovery, not at createShard.</text>
+  <text x="502" y="444" class="m">IndicesClusterStateService applies RoutingTable.</text>
+
+  <!-- Bridge: assignment -->
+  <path d="M230 301 C 340 301, 400 275, 486 275" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="330" y="268" class="s">assigned to this node</text>
+</svg>
