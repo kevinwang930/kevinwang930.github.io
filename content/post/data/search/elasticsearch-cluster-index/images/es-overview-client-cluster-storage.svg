@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480" role="img" aria-label="Client to Elasticsearch cluster and data storage">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#10b981"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .lab { font-size: 10px; font-weight: 700; fill: #64748b; letter-spacing: 0.04em; text-transform: uppercase; }
+    .client { fill: #faf5ff; stroke: #8b5cf6; stroke-width: 1.5; }
+    .node { fill: #fff; stroke: #3b82f6; stroke-width: 1.5; }
+    .master { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; }
+    .store { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .cluster { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 6 4; }
+  ]]></style>
+
+  <rect width="900" height="480" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="36" y="30" class="t">Overview: client, node mesh, and data storage</text>
+  <text x="36" y="48" class="s">Clients use HTTP; nodes form a TCP transport mesh; each data node stores shard copies (Lucene segments + translog) on disk.</text>
+
+  <!-- Client -->
+  <rect x="36" y="180" width="120" height="88" rx="10" class="client" filter="url(#sh)"/>
+  <text x="96" y="214" text-anchor="middle" class="t" style="font-size:12px">Client</text>
+  <text x="96" y="234" text-anchor="middle" class="m">REST / JSON</text>
+  <text x="96" y="250" text-anchor="middle" class="m">bulk, search, ...</text>
+
+  <!-- HTTP arrow -->
+  <line x1="156" y1="224" x2="230" y2="224" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="193" y="214" text-anchor="middle" class="m" fill="#7c3aed">HTTP</text>
+  <text x="193" y="246" text-anchor="middle" class="m" fill="#7c3aed">:9200</text>
+
+  <!-- Cluster box -->
+  <rect x="240" y="72" width="620" height="360" rx="12" class="cluster"/>
+  <text x="256" y="94" class="lab">Elasticsearch cluster</text>
+
+  <!-- Master node -->
+  <rect x="280" y="120" width="160" height="100" rx="10" class="master" filter="url(#sh)"/>
+  <text x="360" y="148" text-anchor="middle" class="t" style="font-size:12px">Master-eligible</text>
+  <text x="360" y="168" text-anchor="middle" class="m">Coordinator</text>
+  <text x="360" y="184" text-anchor="middle" class="m">ClusterState publish</text>
+  <text x="360" y="200" text-anchor="middle" class="m">transport :9300</text>
+
+  <!-- Data node A -->
+  <rect x="520" y="120" width="160" height="100" rx="10" class="node" filter="url(#sh)"/>
+  <text x="600" y="148" text-anchor="middle" class="t" style="font-size:12px">Data node A</text>
+  <text x="600" y="168" text-anchor="middle" class="m">HTTP + transport</text>
+  <text x="600" y="184" text-anchor="middle" class="m">IndexShard primary</text>
+  <text x="600" y="200" text-anchor="middle" class="m">:9200 / :9300</text>
+
+  <!-- Data node B -->
+  <rect x="700" y="120" width="140" height="100" rx="10" class="node" filter="url(#sh)"/>
+  <text x="770" y="148" text-anchor="middle" class="t" style="font-size:12px">Data node B</text>
+  <text x="770" y="168" text-anchor="middle" class="m">replica copy</text>
+  <text x="770" y="184" text-anchor="middle" class="m">IndexShard</text>
+  <text x="770" y="200" text-anchor="middle" class="m">:9200 / :9300</text>
+
+  <!-- Internode mesh arrows -->
+  <line x1="440" y1="155" x2="520" y2="155" stroke="#3b82f6" stroke-width="1.8" marker-end="url(#arrb)"/>
+  <line x1="520" y1="175" x2="440" y2="175" stroke="#3b82f6" stroke-width="1.8" marker-end="url(#arrb)"/>
+  <line x1="680" y1="155" x2="700" y2="155" stroke="#3b82f6" stroke-width="1.8" marker-end="url(#arrb)"/>
+  <line x1="700" y1="175" x2="680" y2="175" stroke="#3b82f6" stroke-width="1.8" marker-end="url(#arrb)"/>
+  <path d="M360 220 C360 250, 770 250, 770 220" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="565" y="112" text-anchor="middle" class="m" fill="#2563eb">TCP transport mesh (join, publish, bulk, recovery)</text>
+
+  <!-- Storage layer label -->
+  <text x="256" y="280" class="lab" fill="#059669">Data storage (per data node)</text>
+
+  <!-- Store A -->
+  <rect x="520" y="296" width="160" height="112" rx="10" class="store" filter="url(#sh)"/>
+  <text x="600" y="320" text-anchor="middle" class="t" style="font-size:11px">Shard store A</text>
+  <text x="600" y="340" text-anchor="middle" class="m">InternalEngine</text>
+  <text x="600" y="356" text-anchor="middle" class="m">Lucene segments</text>
+  <text x="600" y="372" text-anchor="middle" class="m">translog</text>
+  <text x="600" y="388" text-anchor="middle" class="m">disk path</text>
+
+  <!-- Store B -->
+  <rect x="700" y="296" width="140" height="112" rx="10" class="store" filter="url(#sh)"/>
+  <text x="770" y="320" text-anchor="middle" class="t" style="font-size:11px">Shard store B</text>
+  <text x="770" y="340" text-anchor="middle" class="m">replica engine</text>
+  <text x="770" y="356" text-anchor="middle" class="m">Lucene + translog</text>
+  <text x="770" y="372" text-anchor="middle" class="m">disk path</text>
+  <text x="770" y="388" text-anchor="middle" class="m">same index shard</text>
+
+  <!-- vertical arrows node to store -->
+  <line x1="600" y1="220" x2="600" y2="296" stroke="#10b981" stroke-width="1.8" marker-end="url(#arrg)"/>
+  <line x1="770" y1="220" x2="770" y2="296" stroke="#10b981" stroke-width="1.8" marker-end="url(#arrg)"/>
+
+  <!-- Master note: cluster state not doc store -->
+  <rect x="280" y="296" width="160" height="112" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="360" y="328" text-anchor="middle" class="t" style="font-size:11px">Cluster metadata</text>
+  <text x="360" y="348" text-anchor="middle" class="m">IndexMetadata</text>
+  <text x="360" y="364" text-anchor="middle" class="m">RoutingTable</text>
+  <text x="360" y="380" text-anchor="middle" class="m">persisted on master</text>
+  <text x="360" y="396" text-anchor="middle" class="m">(not document data)</text>
+
+  <line x1="360" y1="220" x2="360" y2="296" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <text x="36" y="460" class="s">1 Client HTTP  2 Internode TCP mesh  3 Local shard stores (Lucene + translog). Document writes hit a primary, then replicate to replica stores.</text>
+</svg>

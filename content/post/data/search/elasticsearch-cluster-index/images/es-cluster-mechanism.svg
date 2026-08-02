@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="540" viewBox="0 0 920 540" role="img" aria-label="Elasticsearch cluster management mechanism">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#10b981"/>
+    </marker>
+    <marker id="arra" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#d97706"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .panel { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .master { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; }
+    .follow { fill: #fff; stroke: #3b82f6; stroke-width: 1.5; }
+    .join { fill: #faf5ff; stroke: #8b5cf6; stroke-width: 1.5; }
+    .state { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .leave { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+  ]]></style>
+
+  <rect width="920" height="540" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="36" y="30" class="t">Cluster mechanism: join, elect, publish ClusterState, apply, leave</text>
+  <text x="36" y="48" class="s">Coordinator + MasterService on the elected master; every member applies committed state and syncs the TCP mesh to DiscoveryNodes.</text>
+
+  <!-- Step A: Join -->
+  <rect x="36" y="68" width="200" height="200" rx="10" class="panel"/>
+  <text x="52" y="90" class="lt" fill="#7c3aed">A. Formation / join</text>
+  <rect x="52" y="106" width="168" height="48" rx="6" class="join" filter="url(#sh)"/>
+  <text x="136" y="124" text-anchor="middle" class="t" style="font-size:11px">New / seed node</text>
+  <text x="136" y="142" text-anchor="middle" class="m">PeerFinder</text>
+  <line x1="136" y1="154" x2="136" y2="172" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="52" y="172" width="168" height="56" rx="6" class="join" filter="url(#sh)"/>
+  <text x="136" y="192" text-anchor="middle" class="m">start_join / join</text>
+  <text x="136" y="208" text-anchor="middle" class="m">CoordinationState votes</text>
+  <text x="136" y="252" text-anchor="middle" class="s">quorum -&gt; leader or follower</text>
+
+  <!-- Arrow A to B -->
+  <line x1="236" y1="168" x2="268" y2="168" stroke="#64748b" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <!-- Step B: Master -->
+  <rect x="268" y="68" width="280" height="200" rx="10" class="panel"/>
+  <text x="284" y="90" class="lt" fill="#2563eb">B. Elected master</text>
+  <rect x="284" y="106" width="248" height="148" rx="8" class="master" filter="url(#sh)"/>
+  <text x="408" y="130" text-anchor="middle" class="t" style="font-size:12px">Master node</text>
+  <text x="408" y="150" text-anchor="middle" class="m">Coordinator.becomeLeader()</text>
+  <rect x="300" y="164" width="100" height="36" rx="5" fill="#fff" stroke="#3b82f6"/>
+  <text x="350" y="178" text-anchor="middle" class="m">MasterService</text>
+  <text x="350" y="192" text-anchor="middle" class="m">task queue</text>
+  <rect x="416" y="164" width="100" height="36" rx="5" fill="#fff" stroke="#3b82f6"/>
+  <text x="466" y="178" text-anchor="middle" class="m">Coordinator</text>
+  <text x="466" y="192" text-anchor="middle" class="m">publish/commit</text>
+  <text x="408" y="230" text-anchor="middle" class="m">builds ClusterState + DiscoveryNodes</text>
+
+  <!-- Arrow B to C -->
+  <line x1="548" y1="168" x2="580" y2="168" stroke="#3b82f6" stroke-width="1.8" marker-end="url(#arrb)"/>
+  <text x="564" y="158" text-anchor="middle" class="m" fill="#2563eb">STATE</text>
+
+  <!-- Step C: Followers apply -->
+  <rect x="580" y="68" width="304" height="200" rx="10" class="panel"/>
+  <text x="596" y="90" class="lt" fill="#059669">C. Publish / commit / apply</text>
+  <rect x="596" y="106" width="272" height="28" rx="5" class="state"/>
+  <text x="732" y="124" text-anchor="middle" class="m">publish_state -&gt; quorum -&gt; commit_state</text>
+
+  <rect x="596" y="148" width="128" height="100" rx="6" class="follow" filter="url(#sh)"/>
+  <text x="660" y="170" text-anchor="middle" class="t" style="font-size:11px">Follower A</text>
+  <text x="660" y="188" text-anchor="middle" class="m">ClusterApplier</text>
+  <text x="660" y="204" text-anchor="middle" class="m">local ClusterState</text>
+  <text x="660" y="220" text-anchor="middle" class="m">NodeConnections</text>
+  <text x="660" y="236" text-anchor="middle" class="m">Service</text>
+
+  <rect x="740" y="148" width="128" height="100" rx="6" class="follow" filter="url(#sh)"/>
+  <text x="804" y="170" text-anchor="middle" class="t" style="font-size:11px">Follower B</text>
+  <text x="804" y="188" text-anchor="middle" class="m">ClusterApplier</text>
+  <text x="804" y="204" text-anchor="middle" class="m">local ClusterState</text>
+  <text x="804" y="220" text-anchor="middle" class="m">NodeConnections</text>
+  <text x="804" y="236" text-anchor="middle" class="m">Service</text>
+
+  <!-- Bottom: ClusterState content + leave -->
+  <rect x="36" y="292" width="512" height="200" rx="10" class="panel"/>
+  <text x="52" y="314" class="lt" fill="#059669">Shared ClusterState (on every member after apply)</text>
+  <rect x="52" y="330" width="150" height="64" rx="6" class="state" filter="url(#sh)"/>
+  <text x="127" y="354" text-anchor="middle" class="t" style="font-size:11px">DiscoveryNodes</text>
+  <text x="127" y="372" text-anchor="middle" class="m">membership + master id</text>
+  <rect x="218" y="330" width="150" height="64" rx="6" class="state" filter="url(#sh)"/>
+  <text x="293" y="354" text-anchor="middle" class="t" style="font-size:11px">Metadata</text>
+  <text x="293" y="372" text-anchor="middle" class="m">IndexMetadata, settings</text>
+  <rect x="384" y="330" width="148" height="64" rx="6" class="state" filter="url(#sh)"/>
+  <text x="458" y="354" text-anchor="middle" class="t" style="font-size:11px">RoutingTable</text>
+  <text x="458" y="372" text-anchor="middle" class="m">shard -&gt; node</text>
+  <text x="52" y="420" class="s">Master-only mutations: TransportMasterNodeAction -&gt; MasterService -&gt; publish.</text>
+  <text x="52" y="440" class="s">Mesh follows membership: connect to nodes in state, disconnect removed ids.</text>
+  <text x="52" y="460" class="s">Fault detection: leader/follower checks; lagging appliers may be removed.</text>
+  <text x="52" y="480" class="s">Roles (master/data/ingest/...) are on each DiscoveryNode via node.roles.</text>
+
+  <rect x="568" y="292" width="316" height="200" rx="10" class="panel"/>
+  <text x="584" y="314" class="lt" fill="#d97706">D. Node leave</text>
+  <rect x="584" y="330" width="284" height="48" rx="6" class="leave" filter="url(#sh)"/>
+  <text x="726" y="348" text-anchor="middle" class="t" style="font-size:11px">Fault / remove / lag</text>
+  <text x="726" y="366" text-anchor="middle" class="m">Coordinator.removeNode</text>
+  <line x1="726" y1="378" x2="726" y2="396" stroke="#d97706" stroke-width="1.5" marker-end="url(#arra)"/>
+  <rect x="584" y="396" width="284" height="72" rx="6" class="leave" filter="url(#sh)"/>
+  <text x="726" y="418" text-anchor="middle" class="m">NodeLeftExecutor</text>
+  <text x="726" y="436" text-anchor="middle" class="m">drop from DiscoveryNodes</text>
+  <text x="726" y="452" text-anchor="middle" class="m">reroute + publish again</text>
+</svg>

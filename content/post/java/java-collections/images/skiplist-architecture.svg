@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520" role="img" aria-label="ConcurrentSkipListMap architecture">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .layer { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .b-purple { stroke: #8b5cf6; }
+    .b-blue { stroke: #3b82f6; }
+    .b-green { stroke: #10b981; }
+    .b-amber { stroke: #f59e0b; }
+    .lt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+    .node { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .idx { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .hdr { fill: #f1f5f9; stroke: #94a3b8; stroke-width: 1.5; }
+  ]]></style>
+
+  <rect width="920" height="520" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="32" class="t">ConcurrentSkipListMap Architecture</text>
+  <text x="40" y="50" class="s">Sorted ConcurrentNavigableMap: base HM-list of Node + probabilistic Index towers; CAS on HEAD/NEXT/VAL/RIGHT</text>
+
+  <!-- Layer 1 -->
+  <rect x="40" y="68" width="840" height="72" rx="8" class="layer"/>
+  <text x="56" y="88" class="lt" fill="#7c3aed">1. ConcurrentNavigableMap API</text>
+  <rect x="56" y="98" width="150" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="131" y="118" text-anchor="middle" class="m">put / get / remove</text>
+  <rect x="222" y="98" width="170" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="307" y="118" text-anchor="middle" class="m">ceiling / floor / higher</text>
+  <rect x="408" y="98" width="200" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="508" y="118" text-anchor="middle" class="m">subMap / headMap / tailMap</text>
+  <rect x="624" y="98" width="236" height="32" rx="6" class="box b-purple" filter="url(#sh)"/>
+  <text x="742" y="118" text-anchor="middle" class="m">no null keys or values</text>
+
+  <!-- Layer 2 -->
+  <rect x="40" y="156" width="840" height="88" rx="8" class="layer"/>
+  <text x="56" y="176" class="lt" fill="#0891b2">2. Concurrency control</text>
+  <rect x="56" y="186" width="190" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="151" y="206" text-anchor="middle" class="t" style="font-size:11px">VarHandle CAS</text>
+  <text x="151" y="222" text-anchor="middle" class="m">HEAD NEXT VAL RIGHT ADDER</text>
+  <rect x="262" y="186" width="190" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="357" y="206" text-anchor="middle" class="t" style="font-size:11px">acquireFence</text>
+  <text x="357" y="222" text-anchor="middle" class="m">RCU-style publication</text>
+  <rect x="468" y="186" width="190" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="563" y="206" text-anchor="middle" class="t" style="font-size:11px">helping unlink</text>
+  <text x="563" y="222" text-anchor="middle" class="m">marker + skip deleted</text>
+  <rect x="674" y="186" width="186" height="48" rx="6" class="box b-blue" filter="url(#sh)"/>
+  <text x="767" y="206" text-anchor="middle" class="t" style="font-size:11px">LongAdder</text>
+  <text x="767" y="222" text-anchor="middle" class="m">lazy size counter</text>
+
+  <!-- Layer 3 structure sketch -->
+  <rect x="40" y="260" width="840" height="236" rx="8" class="layer"/>
+  <text x="56" y="280" class="lt" fill="#059669">3. Skip-list structure (Index towers over base Node list)</text>
+
+  <!-- L2 index -->
+  <text x="70" y="308" class="m">L2</text>
+  <rect x="100" y="292" width="56" height="28" rx="4" class="hdr"/>
+  <text x="128" y="310" text-anchor="middle" class="m">head</text>
+  <line x1="156" y1="306" x2="280" y2="306" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="280" y="292" width="56" height="28" rx="4" class="idx"/>
+  <text x="308" y="310" text-anchor="middle" class="m">3</text>
+  <line x1="336" y1="306" x2="520" y2="306" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="520" y="292" width="56" height="28" rx="4" class="idx"/>
+  <text x="548" y="310" text-anchor="middle" class="m">7</text>
+
+  <!-- down arrows L2->L1 -->
+  <line x1="128" y1="320" x2="128" y2="348" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="308" y1="320" x2="308" y2="348" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="548" y1="320" x2="548" y2="348" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- L1 index -->
+  <text x="70" y="368" class="m">L1</text>
+  <rect x="100" y="352" width="56" height="28" rx="4" class="hdr"/>
+  <text x="128" y="370" text-anchor="middle" class="m">head</text>
+  <line x1="156" y1="366" x2="220" y2="366" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="220" y="352" width="56" height="28" rx="4" class="idx"/>
+  <text x="248" y="370" text-anchor="middle" class="m">2</text>
+  <line x1="276" y1="366" x2="280" y2="366" stroke="#10b981" stroke-width="1.5"/>
+  <line x1="280" y1="366" x2="340" y2="366" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="340" y="352" width="56" height="28" rx="4" class="idx"/>
+  <text x="368" y="370" text-anchor="middle" class="m">3</text>
+  <line x1="396" y1="366" x2="460" y2="366" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="460" y="352" width="56" height="28" rx="4" class="idx"/>
+  <text x="488" y="370" text-anchor="middle" class="m">5</text>
+  <line x1="516" y1="366" x2="520" y2="366" stroke="#10b981" stroke-width="1.5"/>
+  <line x1="520" y1="366" x2="580" y2="366" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="580" y="352" width="56" height="28" rx="4" class="idx"/>
+  <text x="608" y="370" text-anchor="middle" class="m">7</text>
+
+  <!-- down L1->base -->
+  <line x1="128" y1="380" x2="128" y2="418" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="248" y1="380" x2="248" y2="418" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="368" y1="380" x2="368" y2="418" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="488" y1="380" x2="488" y2="418" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="608" y1="380" x2="608" y2="418" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- base nodes -->
+  <text x="56" y="438" class="m">base</text>
+  <rect x="100" y="422" width="56" height="28" rx="4" class="hdr"/>
+  <text x="128" y="440" text-anchor="middle" class="m">hdr</text>
+  <line x1="156" y1="436" x2="190" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="190" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="218" y="440" text-anchor="middle" class="m">1</text>
+  <line x1="246" y1="436" x2="250" y2="436" stroke="#3b82f6" stroke-width="1.5"/>
+  <line x1="250" y1="436" x2="280" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="280" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="308" y="440" text-anchor="middle" class="m">2</text>
+  <line x1="336" y1="436" x2="340" y2="436" stroke="#3b82f6" stroke-width="1.5"/>
+  <line x1="340" y1="436" x2="370" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="370" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="398" y="440" text-anchor="middle" class="m">3</text>
+  <line x1="426" y1="436" x2="460" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="460" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="488" y="440" text-anchor="middle" class="m">4</text>
+  <line x1="516" y1="436" x2="520" y2="436" stroke="#3b82f6" stroke-width="1.5"/>
+  <line x1="520" y1="436" x2="550" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="550" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="578" y="440" text-anchor="middle" class="m">5</text>
+  <line x1="606" y1="436" x2="640" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="640" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="668" y="440" text-anchor="middle" class="m">6</text>
+  <line x1="696" y1="436" x2="730" y2="436" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="730" y="422" width="56" height="28" rx="4" class="node"/>
+  <text x="758" y="440" text-anchor="middle" class="m">7</text>
+
+  <text x="100" y="478" class="s">Index.right / Index.down (green) over Node.next (blue). Search descends head then walks right; only ~1/4 of nodes carry an Index tower (p=0.5, k=1).</text>
+</svg>

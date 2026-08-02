@@ -185,6 +185,9 @@ class ArrayList {
 }
 ```
 ## LinkedList
+
+Doubly linked list implementing both `List` and `Deque`. `first` / `last` are sentinels-free pointers to the ends; each `Node` holds `prev` / `next`. Index access is $O(n)$ (walk from the nearer end); end insert/remove is $O(1)$. Not thread-safe. Prefer `ArrayList` for random access, `ArrayDeque` for a non-concurrent queue/deque.
+
 ```plantuml
 class LinkedList {
     transient int size = 0;
@@ -198,6 +201,8 @@ class Node<E> {
 }
 LinkedList *-- Node
 ```
+
+Core link helpers: `linkFirst` / `linkLast` / `linkBefore`, `unlink` / `unlinkFirst` / `unlinkLast`. Fail-fast iterators via `modCount`.
 ## ArrayDeque
 ```plantuml
 class ArrayDeque {
@@ -405,12 +410,40 @@ class CopyOnWriteArraySet<E> {
 CopyOnWriteArraySet *-- CopyOnWriteArrayList
 ```
 
+### ConcurrentSkipListMap / ConcurrentSkipListSet
+
+Lock-free sorted map (`ConcurrentNavigableMap`) based on a **skip list**: ordered base `Node` list plus probabilistic `Index` towers (`down` / `right`). Expected $O(\log n)$ for get/put/remove. No null keys or values. JDK has no non-concurrent `SkipListMap` — use `TreeMap` when single-threaded. `ConcurrentSkipListSet` is a `NavigableSet` facade over a map that stores `Boolean.TRUE`.
+
+![ConcurrentSkipListMap architecture: Index towers over base Node list](images/skiplist-architecture.svg)
+
+```plantuml
+class ConcurrentSkipListMap {
+    final Comparator comparator
+    transient Index head
+    transient LongAdder adder
+}
+class ConcurrentSkipListSet {
+    final ConcurrentNavigableMap m
+}
+class Node {
+    final K key
+    V val
+    Node next
+}
+class Index {
+    final Node node
+    final Index down
+    Index right
+}
+ConcurrentSkipListSet o-- ConcurrentSkipListMap : m
+ConcurrentSkipListMap o-- Index : head
+Index o-- Node : node
+Index o-- Index : down / right
+Node o-- Node : next
+```
+
 ### other concurrent collections
 * DelayQueue 
 * SynchronousQueue 
 * LinkedTransferQueue
-* ConcurrentSkipListSet
-* ConcurrentSkipListMap
-
-
 

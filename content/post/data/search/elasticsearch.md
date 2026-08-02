@@ -14,6 +14,8 @@ keywords:
 This article introduces general concept of Elastic search.
 <!--more-->
 
+Related: [Cluster network and indexes](../elasticsearch-cluster-index/), [Lucene internals](../lucene/).
+
 ElasticSearch is a distributed, open-source search and analytics engine built on Apache lucene
 
 

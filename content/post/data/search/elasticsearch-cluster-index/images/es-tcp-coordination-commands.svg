@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720" role="img" aria-label="Elasticsearch coordination TCP commands">
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5 Z" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #334155; }
+    .ms { font-family: ui-monospace, monospace; font-size: 8px; fill: #64748b; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .panel { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .act { fill: #fff; stroke: #94a3b8; stroke-width: 1.2; }
+    .req { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.2; }
+    .res { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.2; }
+    .emp { fill: #f1f5f9; stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 3 2; }
+  ]]></style>
+
+  <rect width="960" height="720" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="32" y="28" class="t">Coordination over TCP transport (sendRequest / registerRequestHandler)</text>
+  <text x="32" y="46" class="s">transport.port 9300-9399; publish uses STATE channels. Blue = request body, green = response body, dashed = Empty ack.</text>
+
+  <!-- header row -->
+  <text x="48" y="72" class="lt" fill="#64748b">Command (action)</text>
+  <text x="400" y="72" class="lt" fill="#3b82f6">Request</text>
+  <text x="620" y="72" class="lt" fill="#059669">Response</text>
+  <text x="800" y="72" class="lt" fill="#64748b">Direction</text>
+
+  <!-- row helper: y positions -->
+  <!-- DISCOVER -->
+  <rect x="32" y="84" width="896" height="72" rx="8" class="panel"/>
+  <text x="48" y="102" class="lt" fill="#7c3aed">1. Discover</text>
+  <rect x="48" y="112" width="330" height="32" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="132" class="m">internal:discovery/request_peers</text>
+  <rect x="400" y="112" width="200" height="32" rx="5" class="req"/>
+  <text x="410" y="132" class="m">PeersRequest</text>
+  <line x1="600" y1="128" x2="620" y2="128" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="112" width="160" height="32" rx="5" class="res"/>
+  <text x="630" y="132" class="m">PeersResponse</text>
+  <text x="800" y="124" class="ms">PeerFinder -&gt;</text>
+  <text x="800" y="138" class="ms">seed / peer</text>
+
+  <!-- JOIN -->
+  <rect x="32" y="168" width="896" height="200" rx="8" class="panel"/>
+  <text x="48" y="186" class="lt" fill="#7c3aed">2. Join</text>
+
+  <rect x="48" y="196" width="330" height="32" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="216" class="m">internal:cluster/coordination/start_join</text>
+  <rect x="400" y="196" width="200" height="32" rx="5" class="req"/>
+  <text x="410" y="216" class="m">StartJoinRequest</text>
+  <line x1="600" y1="212" x2="620" y2="212" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="196" width="160" height="32" rx="5" class="emp"/>
+  <text x="630" y="216" class="m">Empty</text>
+  <text x="800" y="208" class="ms">A -&gt; B; B then</text>
+  <text x="800" y="222" class="ms">sends join to A</text>
+
+  <rect x="48" y="240" width="330" height="32" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="260" class="m">internal:cluster/coordination/join</text>
+  <rect x="400" y="240" width="200" height="32" rx="5" class="req"/>
+  <text x="410" y="260" class="m">JoinRequest (+ Join)</text>
+  <line x1="600" y1="256" x2="620" y2="256" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="240" width="160" height="32" rx="5" class="emp"/>
+  <text x="630" y="260" class="m">Empty</text>
+  <text x="800" y="252" class="ms">vote / join -&gt;</text>
+  <text x="800" y="266" class="ms">destination</text>
+
+  <rect x="48" y="284" width="330" height="32" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="304" class="m">internal:cluster/coordination/join/ping</text>
+  <rect x="400" y="284" width="200" height="32" rx="5" class="emp"/>
+  <text x="410" y="304" class="m">(no body)</text>
+  <line x1="600" y1="300" x2="620" y2="300" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="284" width="160" height="32" rx="5" class="emp"/>
+  <text x="630" y="304" class="m">Empty</text>
+  <text x="800" y="304" class="ms">join liveness</text>
+
+  <text x="48" y="346" class="s">After join quorum: becomeLeader() or becomeFollower(leader); master may publish DiscoveryNodes + joiner.</text>
+
+  <!-- PUBLISH -->
+  <rect x="32" y="368" width="896" height="152" rx="8" class="panel"/>
+  <text x="48" y="386" class="lt" fill="#2563eb">3. Master publish / commit (STATE channel)</text>
+
+  <rect x="48" y="396" width="330" height="40" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="412" class="m">internal:cluster/coordination/</text>
+  <text x="58" y="426" class="m">publish_state</text>
+  <rect x="400" y="396" width="200" height="40" rx="5" class="req"/>
+  <text x="410" y="412" class="m">PublishRequest bytes</text>
+  <text x="410" y="426" class="ms">(ClusterState full/diff)</text>
+  <line x1="600" y1="416" x2="620" y2="416" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="396" width="160" height="40" rx="5" class="res"/>
+  <text x="630" y="412" class="m">PublishWithJoin</text>
+  <text x="630" y="426" class="m">Response</text>
+  <text x="800" y="412" class="ms">master -&gt; all</text>
+  <text x="800" y="426" class="ms">master-eligible</text>
+
+  <rect x="48" y="448" width="330" height="40" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="464" class="m">internal:cluster/coordination/</text>
+  <text x="58" y="478" class="m">commit_state</text>
+  <rect x="400" y="448" width="200" height="40" rx="5" class="req"/>
+  <text x="410" y="464" class="m">ApplyCommitRequest</text>
+  <text x="410" y="478" class="ms">(term + version)</text>
+  <line x1="600" y1="468" x2="620" y2="468" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="448" width="160" height="40" rx="5" class="emp"/>
+  <text x="630" y="472" class="m">Empty</text>
+  <text x="800" y="464" class="ms">after publish</text>
+  <text x="800" y="478" class="ms">quorum</text>
+
+  <text x="48" y="508" class="s">Receiver of publish_state: handlePublishRequest, often becomeFollower(master). Commit: ClusterApplierService applies state, then Empty ack.</text>
+
+  <!-- FAULT / LEAVE -->
+  <rect x="32" y="528" width="896" height="172" rx="8" class="panel"/>
+  <text x="48" y="546" class="lt" fill="#d97706">4. Fault detection (no dedicated leave command)</text>
+
+  <rect x="48" y="556" width="330" height="40" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="572" class="m">internal:coordination/fault_detection/</text>
+  <text x="58" y="586" class="m">leader_check</text>
+  <rect x="400" y="556" width="200" height="40" rx="5" class="req"/>
+  <text x="410" y="580" class="m">LeaderCheckRequest</text>
+  <line x1="600" y1="576" x2="620" y2="576" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="556" width="160" height="40" rx="5" class="emp"/>
+  <text x="630" y="580" class="m">Empty</text>
+  <text x="800" y="572" class="ms">follower -&gt;</text>
+  <text x="800" y="586" class="ms">master</text>
+
+  <rect x="48" y="608" width="330" height="40" rx="5" class="act" filter="url(#sh)"/>
+  <text x="58" y="624" class="m">internal:coordination/fault_detection/</text>
+  <text x="58" y="638" class="m">follower_check</text>
+  <rect x="400" y="608" width="200" height="40" rx="5" class="req"/>
+  <text x="410" y="632" class="m">FollowerCheckRequest</text>
+  <line x1="600" y1="628" x2="620" y2="628" stroke="#64748b" stroke-width="1.2" marker-end="url(#arr)"/>
+  <rect x="620" y="608" width="160" height="40" rx="5" class="emp"/>
+  <text x="630" y="632" class="m">Empty</text>
+  <text x="800" y="624" class="ms">master -&gt;</text>
+  <text x="800" y="638" class="ms">follower</text>
+
+  <text x="48" y="672" class="s">Missing Empty acks / lag: Coordinator.removeNode -&gt; NodeLeftExecutor -&gt; new ClusterState -&gt; publish_state + commit_state again. NodeConnectionsService drops TCP target after apply.</text>
+  <text x="48" y="692" class="s">Wire frame: TransportService action name + Writeable request bytes; handler returns Writeable response (or Empty).</text>
+</svg>

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-label="TCP transport send and receive path">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #334155; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .box { fill: #fff; stroke: #94a3b8; stroke-width: 1.5; }
+    .send { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .recv { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .wire { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 5 3; }
+  ]]></style>
+
+  <rect width="920" height="420" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="32" y="28" class="t">TCP request / response path</text>
+  <text x="32" y="46" class="s">Same stack on both nodes. Channel picked by TransportRequestOptions.Type (STATE for cluster publish).</text>
+
+  <!-- Sender column -->
+  <text x="48" y="72" class="lt" fill="#2563eb">Sender node</text>
+  <rect x="48" y="84" width="200" height="44" rx="6" class="send" filter="url(#sh)"/>
+  <text x="148" y="102" text-anchor="middle" class="m">Caller</text>
+  <text x="148" y="118" text-anchor="middle" class="s">JoinHelper / Coordinator</text>
+  <line x1="148" y1="128" x2="148" y2="148" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="48" y="148" width="200" height="44" rx="6" class="send" filter="url(#sh)"/>
+  <text x="148" y="166" text-anchor="middle" class="m">TransportService</text>
+  <text x="148" y="182" text-anchor="middle" class="m">sendRequest(...)</text>
+  <line x1="148" y1="192" x2="148" y2="212" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="48" y="212" width="200" height="52" rx="6" class="send" filter="url(#sh)"/>
+  <text x="148" y="232" text-anchor="middle" class="m">TcpTransport.NodeChannels</text>
+  <text x="148" y="248" text-anchor="middle" class="m">type -&gt; TcpChannel</text>
+  <line x1="148" y1="264" x2="148" y2="284" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="48" y="284" width="200" height="44" rx="6" class="send" filter="url(#sh)"/>
+  <text x="148" y="302" text-anchor="middle" class="m">OutboundHandler</text>
+  <text x="148" y="318" text-anchor="middle" class="m">action + Writeable</text>
+
+  <!-- Wire -->
+  <rect x="280" y="180" width="360" height="100" rx="8" class="wire"/>
+  <text x="460" y="208" text-anchor="middle" class="lt" fill="#64748b">TCP bytes</text>
+  <text x="460" y="228" text-anchor="middle" class="m">requestId | action | request body</text>
+  <text x="460" y="248" text-anchor="middle" class="m">... later response for same requestId</text>
+  <line x1="248" y1="306" x2="280" y2="250" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+  <line x1="640" y1="230" x2="672" y2="200" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <!-- Receiver column -->
+  <text x="672" y="72" class="lt" fill="#059669">Receiver node</text>
+  <rect x="672" y="84" width="200" height="44" rx="6" class="recv" filter="url(#sh)"/>
+  <text x="772" y="102" text-anchor="middle" class="m">Netty4Transport</text>
+  <text x="772" y="118" text-anchor="middle" class="m">TcpChannel read</text>
+  <line x1="772" y1="128" x2="772" y2="148" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="672" y="148" width="200" height="44" rx="6" class="recv" filter="url(#sh)"/>
+  <text x="772" y="166" text-anchor="middle" class="m">inboundMessage</text>
+  <text x="772" y="182" text-anchor="middle" class="m">InboundHandler</text>
+  <line x1="772" y1="192" x2="772" y2="212" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="672" y="212" width="200" height="52" rx="6" class="recv" filter="url(#sh)"/>
+  <text x="772" y="232" text-anchor="middle" class="m">RequestHandlerRegistry</text>
+  <text x="772" y="248" text-anchor="middle" class="m">action -&gt; handler</text>
+  <line x1="772" y1="264" x2="772" y2="284" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="672" y="284" width="200" height="44" rx="6" class="recv" filter="url(#sh)"/>
+  <text x="772" y="302" text-anchor="middle" class="m">Registered handler</text>
+  <text x="772" y="318" text-anchor="middle" class="m">channel.sendResponse</text>
+
+  <!-- Response back -->
+  <path d="M672 330 C 500 370, 420 370, 248 330" fill="none" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+  <text x="460" y="368" text-anchor="middle" class="m" fill="#059669">response (Empty or Writeable) -&gt; ResponseHandlers</text>
+
+  <text x="48" y="400" class="s">registerRequestHandler(action, executor, reader, handler) installs the registry entry used on the receive path.</text>
+</svg>

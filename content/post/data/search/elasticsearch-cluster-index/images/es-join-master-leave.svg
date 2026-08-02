@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" role="img" aria-label="Node join, master election, and leave">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8b5cf6"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arra" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#d97706"/>
+    </marker>
+    <filter id="sh" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 13px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, monospace; font-size: 9px; fill: #475569; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .lane { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+    .box { fill: #fff; stroke-width: 1.5; }
+    .join { stroke: #8b5cf6; }
+    .lead { stroke: #2563eb; }
+    .leave { stroke: #d97706; }
+    .ok { stroke: #059669; }
+  ]]></style>
+
+  <rect width="900" height="560" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="36" y="30" class="t">Join, become master / follower, leave</text>
+  <text x="36" y="48" class="s">Coordinator + JoinHelper + MasterService / NodeLeftExecutor on the transport mesh</text>
+
+  <!-- Lifelines -->
+  <rect x="40" y="68" width="200" height="28" rx="4" class="lane"/>
+  <text x="140" y="87" text-anchor="middle" class="m">Joining node</text>
+  <rect x="280" y="68" width="200" height="28" rx="4" class="lane"/>
+  <text x="380" y="87" text-anchor="middle" class="m">Peer / candidate</text>
+  <rect x="520" y="68" width="200" height="28" rx="4" class="lane"/>
+  <text x="620" y="87" text-anchor="middle" class="m">Elected master</text>
+  <rect x="740" y="68" width="120" height="28" rx="4" class="lane"/>
+  <text x="800" y="87" text-anchor="middle" class="m">All members</text>
+
+  <line x1="140" y1="96" x2="140" y2="520" stroke="#cbd5e1" stroke-width="1.5"/>
+  <line x1="380" y1="96" x2="380" y2="520" stroke="#cbd5e1" stroke-width="1.5"/>
+  <line x1="620" y1="96" x2="620" y2="520" stroke="#cbd5e1" stroke-width="1.5"/>
+  <line x1="800" y1="96" x2="800" y2="520" stroke="#cbd5e1" stroke-width="1.5"/>
+
+  <!-- JOIN phase -->
+  <text x="36" y="122" class="lt" fill="#7c3aed">1. Join</text>
+  <rect x="60" y="132" width="160" height="36" rx="5" class="box join" filter="url(#sh)"/>
+  <text x="140" y="148" text-anchor="middle" class="m">PeerFinder</text>
+  <text x="140" y="162" text-anchor="middle" class="m">request_peers</text>
+  <line x1="140" y1="168" x2="380" y2="190" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrp)"/>
+
+  <rect x="300" y="196" width="160" height="36" rx="5" class="box join" filter="url(#sh)"/>
+  <text x="380" y="212" text-anchor="middle" class="m">start_join / join</text>
+  <text x="380" y="226" text-anchor="middle" class="m">JoinHelper</text>
+  <line x1="300" y1="214" x2="140" y2="240" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arrp)"/>
+
+  <rect x="60" y="246" width="160" height="40" rx="5" class="box join" filter="url(#sh)"/>
+  <text x="140" y="262" text-anchor="middle" class="m">CoordinationState</text>
+  <text x="140" y="276" text-anchor="middle" class="m">accumulate votes</text>
+
+  <!-- MASTER phase -->
+  <text x="36" y="312" class="lt" fill="#2563eb">2. Master / follower</text>
+  <line x1="140" y1="286" x2="140" y2="328" stroke="#2563eb" stroke-width="1.5"/>
+  <rect x="60" y="328" width="160" height="48" rx="5" class="box lead" filter="url(#sh)"/>
+  <text x="140" y="346" text-anchor="middle" class="m">quorum?</text>
+  <text x="140" y="362" text-anchor="middle" class="m">becomeLeader()</text>
+
+  <line x1="220" y1="352" x2="520" y2="352" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <rect x="520" y="328" width="200" height="48" rx="5" class="box lead" filter="url(#sh)"/>
+  <text x="620" y="346" text-anchor="middle" class="m">or becomeFollower()</text>
+  <text x="620" y="362" text-anchor="middle" class="m">toward elected master</text>
+
+  <line x1="620" y1="376" x2="620" y2="400" stroke="#2563eb" stroke-width="1.5"/>
+  <rect x="520" y="400" width="200" height="48" rx="5" class="box ok" filter="url(#sh)"/>
+  <text x="620" y="418" text-anchor="middle" class="m">publish_state</text>
+  <text x="620" y="434" text-anchor="middle" class="m">+ commit_state</text>
+  <line x1="720" y1="424" x2="800" y2="424" stroke="#059669" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="740" y="400" width="120" height="48" rx="5" class="box ok" filter="url(#sh)"/>
+  <text x="800" y="418" text-anchor="middle" class="m">ClusterApplier</text>
+  <text x="800" y="434" text-anchor="middle" class="m">+ DiscoveryNodes</text>
+
+  <!-- LEAVE phase -->
+  <text x="36" y="478" class="lt" fill="#d97706">3. Leave</text>
+  <line x1="140" y1="458" x2="140" y2="492" stroke="#d97706" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <rect x="60" y="492" width="160" height="40" rx="5" class="box leave" filter="url(#sh)"/>
+  <text x="140" y="508" text-anchor="middle" class="m">fault / lag / remove</text>
+  <text x="140" y="522" text-anchor="middle" class="m">detected</text>
+  <line x1="220" y1="512" x2="520" y2="512" stroke="#d97706" stroke-width="1.5" marker-end="url(#arra)"/>
+  <rect x="520" y="492" width="200" height="40" rx="5" class="box leave" filter="url(#sh)"/>
+  <text x="620" y="508" text-anchor="middle" class="m">removeNode</text>
+  <text x="620" y="522" text-anchor="middle" class="m">NodeLeftExecutor</text>
+  <line x1="720" y1="512" x2="800" y2="512" stroke="#d97706" stroke-width="1.5" marker-end="url(#arra)"/>
+  <rect x="740" y="492" width="120" height="40" rx="5" class="box leave" filter="url(#sh)"/>
+  <text x="800" y="508" text-anchor="middle" class="m">publish again</text>
+  <text x="800" y="522" text-anchor="middle" class="m">drop node id</text>
+</svg>
