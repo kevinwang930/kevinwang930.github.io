@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-label="Numeric range query via BKD PointValues.intersect">
+  <defs>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 14px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, Menlo, monospace; font-size: 10px; fill: #334155; }
+    .h { font-size: 11px; font-weight: 700; fill: #0f172a; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.25; }
+    .q { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .bkd { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .out { fill: #fef3c7; stroke: #d97706; stroke-width: 1.25; }
+  ]]></style>
+
+  <rect width="920" height="420" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="28" y="28" class="t">Numeric range query (points / BKD)</text>
+  <text x="28" y="46" class="s">LongPoint.newRangeQuery -&gt; PointRangeQuery -&gt; PointValues.intersect. Live docs applied at BulkScorer, not inside BKD.</text>
+
+  <rect x="40" y="70" width="200" height="52" rx="6" class="q" filter="url(#sh)"/>
+  <text x="140" y="92" text-anchor="middle" class="h">LongPoint.newRangeQuery</text>
+  <text x="140" y="110" text-anchor="middle" class="m">field, lo, hi</text>
+  <line x1="140" y1="122" x2="140" y2="142" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="40" y="142" width="200" height="52" rx="6" class="q" filter="url(#sh)"/>
+  <text x="140" y="164" text-anchor="middle" class="h">PointRangeQuery</text>
+  <text x="140" y="182" text-anchor="middle" class="m">createWeight (constant score)</text>
+  <line x1="140" y1="194" x2="140" y2="214" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="40" y="214" width="200" height="52" rx="6" class="q" filter="url(#sh)"/>
+  <text x="140" y="236" text-anchor="middle" class="h">per LeafReader</text>
+  <text x="140" y="254" text-anchor="middle" class="m">getPointValues(field)</text>
+  <line x1="240" y1="240" x2="300" y2="240" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrb)"/>
+
+  <rect x="300" y="70" width="280" height="280" rx="8" class="bkd" filter="url(#sh)"/>
+  <text x="316" y="94" class="lt" fill="#059669">BKD tree walk</text>
+  <text x="316" y="116" class="m">PointValues.intersect(visitor)</text>
+
+  <rect x="316" y="132" width="248" height="48" rx="6" class="box"/>
+  <text x="328" y="152" class="h">CELL_OUTSIDE_QUERY</text>
+  <text x="328" y="168" class="m">skip subtree</text>
+
+  <rect x="316" y="192" width="248" height="48" rx="6" class="box"/>
+  <text x="328" y="212" class="h">CELL_INSIDE_QUERY</text>
+  <text x="328" y="228" class="m">accept all docIDs in cell</text>
+
+  <rect x="316" y="252" width="248" height="48" rx="6" class="box"/>
+  <text x="328" y="272" class="h">CELL_CROSSES_QUERY</text>
+  <text x="328" y="288" class="m">recurse / scan leaf values</text>
+
+  <text x="316" y="330" class="s">visitor.compare(minPacked, maxPacked)</text>
+
+  <line x1="580" y1="240" x2="640" y2="240" stroke="#059669" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="640" y="142" width="240" height="52" rx="6" class="out" filter="url(#sh)"/>
+  <text x="760" y="164" text-anchor="middle" class="h">DocIdSetBuilder</text>
+  <text x="760" y="182" text-anchor="middle" class="m">matching docIDs</text>
+  <line x1="760" y1="194" x2="760" y2="214" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="640" y="214" width="240" height="52" rx="6" class="out" filter="url(#sh)"/>
+  <text x="760" y="236" text-anchor="middle" class="h">DocIdSetIterator</text>
+  <text x="760" y="254" text-anchor="middle" class="m">ConstantScoreScorer</text>
+  <line x1="760" y1="266" x2="760" y2="286" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrg)"/>
+
+  <rect x="640" y="286" width="240" height="64" rx="6" class="box"/>
+  <text x="760" y="310" text-anchor="middle" class="h">BulkScorer.score</text>
+  <text x="760" y="328" text-anchor="middle" class="m">apply liveDocs</text>
+  <text x="760" y="344" text-anchor="middle" class="m">collect hits</text>
+
+  <text x="40" y="390" class="s">String ranges use TermRangeQuery (MultiTermQuery): enumerate terms in [lo,hi] and union postings -- slower than BKD for numerics.</text>
+</svg>

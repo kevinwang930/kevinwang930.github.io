@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="680" viewBox="0 0 920 680" role="img" aria-label="Worked 2D k-d tree example with leaf capacity 2">
+  <defs>
+    <marker id="kd-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="680" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <text x="28" y="30" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#0f172a">Worked example: 2D k-d tree (toy leaf size = 2)</text>
+  <text x="28" y="48" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">Six points; alternate x / y median splits. Lucene uses the same idea with leaf size 512.</text>
+
+  <!-- ===== Plane: origin (60, 290), scale sx=32, sy=20 for [0,10] ===== -->
+  <text x="40" y="74" font-family="system-ui,sans-serif" font-size="10" font-weight="700" letter-spacing="0.04em" fill="#2563eb">SPACE (x, y)</text>
+  <rect x="60" y="90" width="320" height="200" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.25"/>
+
+  <!-- axis ticks -->
+  <text x="60" y="310" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#64748b">0</text>
+  <text x="348" y="310" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#64748b">x -&gt;</text>
+  <text x="42" y="290" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#64748b">0</text>
+  <text x="42" y="100" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#64748b">y</text>
+
+  <!-- split1 x=5: X=60+5*32=220 -->
+  <line x1="220" y1="90" x2="220" y2="290" stroke="#d97706" stroke-width="2"/>
+  <text x="226" y="108" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#b45309">split1 x=5</text>
+  <!-- split2 y=4 left: Y=290-4*20=210 -->
+  <line x1="60" y1="210" x2="220" y2="210" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <text x="68" y="204" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#2563eb">split2 y=4</text>
+  <!-- split3 y=6 right: Y=290-6*20=170 -->
+  <line x1="220" y1="170" x2="380" y2="170" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <text x="270" y="164" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#2563eb">split3 y=6</text>
+
+  <!-- query [3,7]x[3,7]: X=60+96=156, Y=290-140=150, W=128, H=80 -->
+  <rect x="156" y="150" width="128" height="80" fill="#fecaca" fill-opacity="0.45" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="156" y="144" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#dc2626">query [3,7] x [3,7]</text>
+
+  <!-- Points: X=60+x*32, Y=290-y*20 -->
+  <!-- A(2,2)=124,250  B(2,6)=124,170  C(4,8)=188,130  D(6,3)=252,230  E(7,7)=284,150  F(9,5)=348,190 -->
+  <circle cx="124" cy="250" r="6" fill="#0f172a"/>
+  <text x="132" y="254" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">A(2,2)</text>
+  <circle cx="124" cy="170" r="6" fill="#0f172a"/>
+  <text x="132" y="166" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">B(2,6)</text>
+  <circle cx="188" cy="130" r="6" fill="#0f172a"/>
+  <text x="196" y="126" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">C(4,8)</text>
+  <circle cx="252" cy="230" r="7" fill="#059669" stroke="#047857" stroke-width="1.5"/>
+  <text x="262" y="246" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#047857">D(6,3) hit</text>
+  <circle cx="284" cy="150" r="7" fill="#059669" stroke="#047857" stroke-width="1.5"/>
+  <text x="292" y="144" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#047857">E(7,7) hit</text>
+  <circle cx="348" cy="190" r="6" fill="#0f172a"/>
+  <text x="318" y="208" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">F(9,5)</text>
+
+  <!-- ===== Tree: right of plane, no overlap (x >= 420) ===== -->
+  <text x="420" y="74" font-family="system-ui,sans-serif" font-size="10" font-weight="700" letter-spacing="0.04em" fill="#059669">TREE</text>
+
+  <rect x="520" y="90" width="240" height="40" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.4"/>
+  <text x="640" y="114" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">root: split x=5</text>
+
+  <line x1="580" y1="130" x2="500" y2="158" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+  <line x1="700" y1="130" x2="780" y2="158" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+
+  <rect x="420" y="160" width="160" height="40" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.4"/>
+  <text x="500" y="184" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">x&lt;5: split y=4</text>
+
+  <rect x="700" y="160" width="160" height="40" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.4"/>
+  <text x="780" y="184" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">x&gt;=5: split y=6</text>
+
+  <line x1="460" y1="200" x2="430" y2="228" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+  <line x1="540" y1="200" x2="570" y2="228" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+  <line x1="740" y1="200" x2="710" y2="228" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+  <line x1="820" y1="200" x2="850" y2="228" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#kd-arr)"/>
+
+  <rect x="400" y="232" width="120" height="52" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.4"/>
+  <text x="460" y="252" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">L1</text>
+  <text x="460" y="270" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">A(2,2)</text>
+
+  <rect x="540" y="232" width="120" height="52" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.4"/>
+  <text x="600" y="252" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">L2</text>
+  <text x="600" y="270" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">B(2,6) C(4,8)</text>
+
+  <rect x="680" y="232" width="120" height="52" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.4"/>
+  <text x="740" y="252" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">L3</text>
+  <text x="740" y="270" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">D(6,3) F(9,5)</text>
+
+  <rect x="820" y="232" width="80" height="52" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.4"/>
+  <text x="860" y="252" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">L4</text>
+  <text x="860" y="270" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">E(7,7)</text>
+
+  <!-- ===== Build steps ===== -->
+  <rect x="40" y="330" width="840" height="100" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.25"/>
+  <text x="56" y="356" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">Build</text>
+  <text x="56" y="378" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">1. Sort by x: A B C | D E F. Cut at x=5.</text>
+  <text x="56" y="396" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">2. Left (A B C): sort by y; cut at y=4 -&gt; L1={A}, L2={B,C}.</text>
+  <text x="56" y="414" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">3. Right (D E F): sort by y; cut at y=6 -&gt; L3={D,F}, L4={E}. Stop: each leaf has &lt;= 2 points.</text>
+
+  <!-- ===== Query walk ===== -->
+  <rect x="40" y="450" width="840" height="200" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.25"/>
+  <text x="56" y="476" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#0f172a">Query [3,7] x [3,7]: compare each cell box to the query</text>
+  <text x="56" y="500" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">Root CROSSES -&gt; descend both sides</text>
+  <text x="56" y="520" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">Left CROSSES -&gt; L1: test A -&gt; miss; L2: test B,C -&gt; miss</text>
+  <text x="56" y="540" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#334155">Right CROSSES -&gt; L3: test D,F -&gt; keep D, drop F; L4: test E -&gt; keep</text>
+  <text x="56" y="564" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#047857">Hits: D, E (green). OUTSIDE cells are skipped; INSIDE cells emit all docIDs with no per-value test.</text>
+  <text x="56" y="592" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">1D LongPoint / price uses the same walk on a number line, with leaf size 512 instead of 2.</text>
+  <text x="56" y="620" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">Lucene BKD is this structure, blocked for I/O: packed values + docIDs per leaf, tree mostly off-heap.</text>
+</svg>
