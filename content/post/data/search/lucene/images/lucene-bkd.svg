@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520" role="img" aria-label="BKD: 1D split, leaf blocks, and on-disk files">
+  <defs>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style type="text/css"><![CDATA[
+    text { font-family: system-ui, sans-serif; }
+    .t { font-size: 14px; font-weight: 700; fill: #0f172a; }
+    .s { font-size: 10px; fill: #64748b; }
+    .m { font-family: ui-monospace, Menlo, monospace; font-size: 9px; fill: #334155; }
+    .h { font-size: 11px; font-weight: 700; fill: #0f172a; }
+    .lt { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .cell { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .leaf { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+    .file { fill: #fef3c7; stroke: #d97706; stroke-width: 1.25; }
+    .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.25; }
+    .q { fill: none; stroke: #dc2626; stroke-width: 2; stroke-dasharray: 5 3; }
+  ]]></style>
+
+  <rect width="920" height="520" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="28" y="28" class="t">Blocked k-d tree (BKD)</text>
+  <text x="28" y="46" class="s">Recursive median splits until each leaf holds at most maxPointsInLeafNode (default 512). 1D example: LongPoint / price.</text>
+
+  <!-- 1D number line -->
+  <text x="40" y="78" class="lt" fill="#2563eb">1D value axis (price)</text>
+  <line x1="60" y1="100" x2="500" y2="100" stroke="#334155" stroke-width="2"/>
+  <circle cx="100" cy="100" r="5" fill="#3b82f6"/>
+  <circle cx="180" cy="100" r="5" fill="#3b82f6"/>
+  <circle cx="260" cy="100" r="5" fill="#3b82f6"/>
+  <circle cx="340" cy="100" r="5" fill="#3b82f6"/>
+  <circle cx="420" cy="100" r="5" fill="#3b82f6"/>
+  <text x="100" y="120" text-anchor="middle" class="m">10</text>
+  <text x="180" y="120" text-anchor="middle" class="m">25</text>
+  <text x="260" y="120" text-anchor="middle" class="m">42</text>
+  <text x="340" y="120" text-anchor="middle" class="m">70</text>
+  <text x="420" y="120" text-anchor="middle" class="m">100</text>
+  <line x1="260" y1="88" x2="260" y2="130" stroke="#d97706" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <text x="268" y="84" class="s">split (median)</text>
+
+  <!-- Tree -->
+  <rect x="200" y="150" width="200" height="40" rx="6" class="cell" filter="url(#sh)"/>
+  <text x="300" y="176" text-anchor="middle" class="h">inner: split dim + bound</text>
+
+  <line x1="250" y1="190" x2="160" y2="218" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="350" y1="190" x2="440" y2="218" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="60" y="220" width="180" height="56" rx="6" class="leaf" filter="url(#sh)"/>
+  <text x="150" y="244" text-anchor="middle" class="h">leaf block</text>
+  <text x="150" y="262" text-anchor="middle" class="m">packed values + docIDs</text>
+
+  <rect x="360" y="220" width="180" height="56" rx="6" class="leaf" filter="url(#sh)"/>
+  <text x="450" y="244" text-anchor="middle" class="h">leaf block</text>
+  <text x="450" y="262" text-anchor="middle" class="m">&lt;= 512 points</text>
+
+  <!-- Query AABB -->
+  <rect x="220" y="92" width="100" height="16" class="q"/>
+  <text x="560" y="108" class="m">query [40,50] as AABB</text>
+
+  <!-- Files -->
+  <text x="600" y="160" class="lt" fill="#b45309">On disk (per points field)</text>
+  <rect x="580" y="172" width="300" height="104" rx="8" class="file" filter="url(#sh)"/>
+  <text x="596" y="196" class="m">*.kdm  meta (dims, counts, min/max)</text>
+  <text x="596" y="216" class="m">*.kdi  packed inner-node index</text>
+  <text x="596" y="236" class="m">*.kdd  leaf blocks (values + docIDs)</text>
+  <text x="596" y="258" class="s">BKDReader: tree off-heap via IndexInput</text>
+
+  <!-- Intersect -->
+  <rect x="40" y="308" width="840" height="188" rx="8" class="box"/>
+  <text x="56" y="336" class="h">PointValues.intersect(visitor) — cell vs query AABB</text>
+  <text x="56" y="360" class="m">CELL_OUTSIDE_QUERY   skip subtree (no docs)</text>
+  <text x="56" y="380" class="m">CELL_INSIDE_QUERY    visitDocIDs — accept all docs in cell, no per-value test</text>
+  <text x="56" y="400" class="m">CELL_CROSSES_QUERY   recurse children; at leaf visitDocValues — test each packed value</text>
+  <text x="56" y="428" class="m">Live docs are NOT applied here; BulkScorer filters deletes afterward.</text>
+  <text x="56" y="456" class="s">1..8 index dims; leaf may store more data dims than are indexed. LongPoint = 1 dim, 8 bytes, sortable encoding.</text>
+  <text x="56" y="476" class="s">Boundary ties: a value exactly on a split may land in either child. Leaves are almost full (partially balanced).</text>
+</svg>
