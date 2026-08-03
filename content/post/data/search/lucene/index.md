@@ -1,6 +1,6 @@
 ---
 title: "Lucene internals"
-date: 2024-08-31T19:09:15+08:00
+date: 2026-08-31T19:09:15+08:00
 categories:
 - data
 - search
