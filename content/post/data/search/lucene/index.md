@@ -1,6 +1,6 @@
 ---
 title: "Lucene internals"
-date: 2026-08-31T19:09:15+08:00
+date: 2026-08-03T12:00:00+02:00
 categories:
 - data
 - search
@@ -9,12 +9,6 @@ tags:
 - search
 keywords:
 - lucene
-- inverted-index
-- bkd
-- doc-values
-- range-query
-- date
-- aggregation
 #thumbnailImage: //example.com/image.jpg
 ---
 Apache Lucene is the Java library behind each Elasticsearch shard’s on-disk store. This post walks how a Lucene index is laid out—segments, index types, and the in-memory reader—then runs a concrete query example: filter by `created_date`, aggregate `qty`. Grounded in `git/lucene` (`Version.LATEST` = **11.0.0**, default write codec **Lucene104**; points remain Lucene90 / BKD).
