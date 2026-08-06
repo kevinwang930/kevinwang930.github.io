@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="780" viewBox="0 0 1100 780" role="img" aria-label="TiDB cluster node relations and planes">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#f57f17"/>
+    </marker>
+    <marker id="arrGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#7b1fa2"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="780" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#263238">TiDB cluster: planes and node relations</text>
+  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Clients talk only to TiDB. TiDB talks to PD (meta/TSO) and TiKV leaders (data). TiKV peers replicate via Raft. PD schedules TiKV.</text>
+
+  <!-- ========== Plane A: Clients ========== -->
+  <g transform="translate(40, 70)">
+    <rect width="160" height="200" fill="#eceff1" stroke="#607d8b" stroke-width="1.2" rx="6"/>
+    <text x="80" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#455a64">CLIENTS</text>
+    <rect x="18" y="40" width="124" height="56" fill="#ffffff" stroke="#455a64" rx="4"/>
+    <text x="80" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">App / ORM</text>
+    <text x="80" y="80" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">MySQL protocol</text>
+    <rect x="18" y="110" width="124" height="56" fill="#ffffff" stroke="#455a64" rx="4"/>
+    <text x="80" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">mysql client</text>
+    <text x="80" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">SQL</text>
+    <text x="80" y="188" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#78909c">no TiKV / PD access</text>
+  </g>
+
+  <!-- Client -> TiDB arrows -->
+  <line x1="200" y1="130" x2="268" y2="130" stroke="#1565c0" stroke-width="1.8" marker-end="url(#arrBlue)"/>
+  <line x1="200" y1="200" x2="268" y2="200" stroke="#1565c0" stroke-width="1.8" marker-end="url(#arrBlue)"/>
+  <text x="234" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">SQL</text>
+
+  <!-- ========== Plane B: TiDB (stateless compute) ========== -->
+  <g transform="translate(270, 70)">
+    <rect width="300" height="200" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="150" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">COMPUTE plane  |  TiDB Server</text>
+    <text x="150" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#547d8b">stateless  -  scale by adding nodes</text>
+
+    <rect x="16" y="54" width="128" height="88" fill="#ffffff" stroke="#1976d2" stroke-width="1.4" rx="4"/>
+    <text x="80" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">TiDB-1</text>
+    <text x="80" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">parser / planner</text>
+    <text x="80" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">executor</text>
+    <text x="80" y="128" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">client-go / 2PC</text>
+
+    <rect x="156" y="54" width="128" height="88" fill="#ffffff" stroke="#1976d2" stroke-width="1.4" rx="4"/>
+    <text x="220" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">TiDB-2</text>
+    <text x="220" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">same role</text>
+    <text x="220" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">no shared state</text>
+    <text x="220" y="128" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">LB any node</text>
+
+    <text x="150" y="168" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Owns: SQL session, membuffer, RegionCache</text>
+    <text x="150" y="186" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Does not store: durable rows / Raft logs</text>
+  </g>
+
+  <!-- TiDB -> PD -->
+  <path d="M 420 270 L 420 300 L 250 300 L 250 328" fill="none" stroke="#f57f17" stroke-width="1.8" marker-end="url(#arrAmber)"/>
+  <text x="330" y="292" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#f57f17">TSO + Region locate</text>
+
+  <!-- TiDB -> TiKV -->
+  <path d="M 480 270 L 480 300 L 700 300 L 700 328" fill="none" stroke="#2e7d32" stroke-width="1.8" marker-end="url(#arrGreen)"/>
+  <text x="590" y="292" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">kvrpcpb (Get / Prewrite / Commit / Cop)</text>
+
+  <!-- ========== Plane C: PD (control) ========== -->
+  <g transform="translate(40, 330)">
+    <rect width="420" height="220" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="6"/>
+    <text x="210" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">CONTROL plane  |  PD (Placement Driver)</text>
+    <text x="210" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">stateful meta  -  etcd-backed  -  one leader serves TSO</text>
+
+    <rect x="16" y="54" width="120" height="100" fill="#ffffff" stroke="#f9a825" stroke-width="1.6" rx="4"/>
+    <text x="76" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">PD-1</text>
+    <text x="76" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#f57f17">LEADER</text>
+    <text x="76" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">TSO</text>
+    <text x="76" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">scheduler</text>
+
+    <rect x="150" y="54" width="120" height="100" fill="#ffffff" stroke="#ffb74d" stroke-width="1.2" rx="4"/>
+    <text x="210" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ef6c00">PD-2</text>
+    <text x="210" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8d6e63">follower</text>
+    <text x="210" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#8d6e63">etcd peer</text>
+    <text x="210" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#8d6e63">standby</text>
+
+    <rect x="284" y="54" width="120" height="100" fill="#ffffff" stroke="#ffb74d" stroke-width="1.2" rx="4"/>
+    <text x="344" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ef6c00">PD-3</text>
+    <text x="344" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8d6e63">follower</text>
+    <text x="344" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#8d6e63">etcd peer</text>
+    <text x="344" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#8d6e63">standby</text>
+
+    <!-- PD internal -->
+    <line x1="136" y1="104" x2="150" y2="104" stroke="#f57f17" stroke-width="1.2"/>
+    <line x1="270" y1="104" x2="284" y2="104" stroke="#f57f17" stroke-width="1.2"/>
+    <text x="210" y="172" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#5d4037">Owns: Region -&gt; peer map, store list, TSO</text>
+    <text x="210" y="190" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">Does not store: user row values</text>
+    <text x="210" y="208" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#8d6e63">TiDB path: tikv://pd1,pd2,pd3</text>
+  </g>
+
+  <!-- ========== Plane D: TiKV (data) ========== -->
+  <g transform="translate(500, 330)">
+    <rect width="560" height="220" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.8" rx="6"/>
+    <text x="280" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">DATA plane  |  TiKV stores</text>
+    <text x="280" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">stateful  -  Regions  -  Raft RF=3  -  MVCC / RocksDB</text>
+
+    <rect x="20" y="54" width="160" height="110" fill="#ffffff" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
+    <text x="100" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">TiKV-1</text>
+    <text x="100" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">Store ID 1</text>
+    <text x="100" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">peers: some LEADER</text>
+    <text x="100" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">some FOLLOWER</text>
+    <text x="100" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#558b2f">raftstore + MVCC</text>
+
+    <rect x="200" y="54" width="160" height="110" fill="#ffffff" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
+    <text x="280" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">TiKV-2</text>
+    <text x="280" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">Store ID 2</text>
+    <text x="280" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">peers: some LEADER</text>
+    <text x="280" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">some FOLLOWER</text>
+    <text x="280" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#558b2f">raftstore + MVCC</text>
+
+    <rect x="380" y="54" width="160" height="110" fill="#ffffff" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
+    <text x="460" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">TiKV-3</text>
+    <text x="460" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">Store ID 3</text>
+    <text x="460" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#37474f">peers: some LEADER</text>
+    <text x="460" y="132" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">some FOLLOWER</text>
+    <text x="460" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#558b2f">raftstore + MVCC</text>
+
+    <!-- Raft between TiKV -->
+    <line x1="180" y1="110" x2="200" y2="110" stroke="#1b5e20" stroke-width="1.6" stroke-dasharray="4 2"/>
+    <line x1="360" y1="110" x2="380" y2="110" stroke="#1b5e20" stroke-width="1.6" stroke-dasharray="4 2"/>
+    <path d="M 100 164 L 100 178 L 460 178 L 460 164" fill="none" stroke="#1b5e20" stroke-width="1.4" stroke-dasharray="4 2"/>
+    <text x="280" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Raft (per Region, between peers)</text>
+    <text x="280" y="210" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#558b2f">TiDB writes only to the current Region LEADER store</text>
+  </g>
+
+  <!-- PD <-> TiKV schedule / heartbeat -->
+  <path d="M 460 440 L 500 440" fill="none" stroke="#f57f17" stroke-width="1.6" marker-end="url(#arrAmber)"/>
+  <path d="M 500 460 L 460 460" fill="none" stroke="#f57f17" stroke-width="1.6" marker-end="url(#arrAmber)"/>
+  <text x="480" y="428" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#f57f17">schedule</text>
+  <text x="480" y="478" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#f57f17">heartbeat</text>
+
+  <!-- ========== Optional TiFlash ========== -->
+  <g transform="translate(500, 570)">
+    <rect width="560" height="100" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.4" rx="6"/>
+    <text x="280" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">ANALYTICS plane (optional)  |  TiFlash</text>
+    <rect x="40" y="40" width="200" height="44" fill="#ffffff" stroke="#ab47bc" rx="4"/>
+    <text x="140" y="66" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6a1b9a">TiFlash-1 (learner)</text>
+    <rect x="320" y="40" width="200" height="44" fill="#ffffff" stroke="#ab47bc" rx="4"/>
+    <text x="420" y="66" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6a1b9a">TiFlash-2 (learner)</text>
+  </g>
+
+  <!-- TiKV -> TiFlash -->
+  <line x1="780" y1="550" x2="780" y2="568" stroke="#7b1fa2" stroke-width="1.5" marker-end="url(#arrPurple)"/>
+  <text x="860" y="562" font-family="Consolas, monospace" font-size="9" fill="#7b1fa2">Raft learner replicate</text>
+
+  <!-- TiDB -> TiFlash (MPP / columnar read) dashed -->
+  <path d="M 570 270 L 570 290 L 1060 290 L 1060 620 L 1020 620" fill="none" stroke="#7b1fa2" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#arrPurple)"/>
+  <text x="1040" y="310" text-anchor="start" font-family="Consolas, monospace" font-size="8" fill="#7b1fa2">HTAP read</text>
+
+  <!-- Legend -->
+  <g transform="translate(40, 570)">
+    <rect width="420" height="160" fill="#ffffff" stroke="#b0bec5" stroke-width="1.2" rx="6"/>
+    <text x="16" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Edge legend (who talks to whom)</text>
+    <line x1="16" y1="44" x2="56" y2="44" stroke="#1565c0" stroke-width="2" marker-end="url(#arrBlue)"/>
+    <text x="66" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">Client -&gt; TiDB : MySQL / SQL</text>
+    <line x1="16" y1="68" x2="56" y2="68" stroke="#f57f17" stroke-width="2" marker-end="url(#arrAmber)"/>
+    <text x="66" y="72" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">TiDB -&gt; PD : TSO, Region meta; PD &lt;-&gt; TiKV : schedule / heartbeat</text>
+    <line x1="16" y1="92" x2="56" y2="92" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrGreen)"/>
+    <text x="66" y="96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">TiDB -&gt; TiKV leader : KV / 2PC / Coprocessor RPCs</text>
+    <line x1="16" y1="116" x2="56" y2="116" stroke="#1b5e20" stroke-width="2" stroke-dasharray="4 2"/>
+    <text x="66" y="120" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">TiKV &lt;-&gt; TiKV : Raft per Region</text>
+    <line x1="16" y1="140" x2="56" y2="140" stroke="#7b1fa2" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrPurple)"/>
+    <text x="66" y="144" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">TiKV -&gt; TiFlash learner; TiDB -&gt; TiFlash (optional HTAP)</text>
+  </g>
+
+  <text x="550" y="760" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">Node counts are examples (2 TiDB / 3 PD / 3 TiKV). Production sizes vary; roles and edges stay the same.</text>
+</svg>
