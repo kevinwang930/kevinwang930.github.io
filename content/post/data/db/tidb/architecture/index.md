@@ -12,10 +12,6 @@ tags:
 keywords:
 - tidb
 - tikv
-- raftstore
-- mvcc
-- primaryKey
-- rocksdb
 #thumbnailImage: //example.com/image.jpg
 ---
 
