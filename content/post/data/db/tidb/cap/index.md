@@ -281,11 +281,101 @@ func (m *Member) IsServing() bool {
 
 ### 3.5 Raft log (commit and apply)
 
-etcd owns the replicated log. A successful PD `Campaign` (or any other meta write) becomes one or more log entries; after majority match, `CommittedIndex` advances and the etcd state machine applies into its MVCC store (`AppliedIndex`).
+etcd owns the replicated log. A successful PD `Campaign` (or any other meta write) becomes one or more log entries; after majority match, `CommittedIndex` advances and the etcd state machine applies into its MVCC store (`AppliedIndex`). **Sending the log and transferring state happen inside etcd’s Raft**—PD only embeds the process and reads the indexes.
 
 The figure below is a **concrete cluster-714 slice**: after `pd1` becomes etcd leader it `Put`s `/pd/714/leader` (Campaign), persists `/pd/714/timestamp` (TSO window), and begins replicating Region 27 meta at `/pd/714/raft/r/…027`—real key shapes from `git/pd` `pkg/utils/keypath`.
 
 ![PD etcd Raft log example](images/pd-etcd-raft-log.svg)
+
+#### Send log entries (`MsgApp`) or snapshot (`MsgSnap`)
+
+After a propose (e.g. PD’s `OpPut /pd/714/leader`), the etcd Raft **leader** replicates to each follower. `bcastAppend` walks progress; `maybeSendAppend` either ships log entries or, if the follower is too far behind to get entries from the leader’s log, ships a **snapshot** (full state transfer).
+
+```go
+// go.etcd.io/etcd/raft: raft.go — leader replicates to all other peers
+func (r *raft) bcastAppend() {
+	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
+		if id == r.id {
+			return
+		}
+		r.sendAppend(id)
+	})
+}
+
+func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
+	pr := r.prs.Progress[to]
+	term, errt := r.raftLog.term(pr.Next - 1)
+	ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
+	if errt != nil || erre != nil {
+		// Follower is behind compacted log → state transfer via snapshot
+		m.Type = pb.MsgSnap
+		m.Snapshot = snapshot // from r.raftLog.snapshot()
+		pr.BecomeSnapshot(sindex)
+	} else {
+		m.Type = pb.MsgApp // AppendEntries
+		m.Index, m.LogTerm = pr.Next-1, term
+		m.Entries, m.Commit = ents, r.raftLog.committed
+	}
+	r.send(m)
+	return true
+}
+```
+
+Empty `MsgApp` / `MsgHeartbeat` also carry an updated `Commit` so followers can advance `commitIndex` without new data.
+
+#### Follower append and snapshot restore
+
+```go
+// go.etcd.io/etcd/raft: raft.go — follower handles AppendEntries
+func (r *raft) handleAppendEntries(m pb.Message) {
+	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
+		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
+	} else {
+		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, /* RejectHint */})
+	}
+}
+
+// State transfer when MsgApp cannot catch up
+func (r *raft) handleSnapshot(m pb.Message) {
+	if r.restore(m.Snapshot) {
+		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.lastIndex()})
+	} else {
+		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+	}
+}
+```
+
+On `MsgAppResp` without reject, the leader updates match progress and may commit:
+
+```go
+// go.etcd.io/etcd/raft: raft.go
+func (r *raft) maybeCommit() bool {
+	mci := r.prs.Committed() // highest index replicated to a majority
+	return r.raftLog.maybeCommit(mci, r.Term)
+}
+// After commit advances: bcastAppend() again so followers learn the new Commit
+```
+
+#### Ready loop: network send + apply (state machine)
+
+etcdserver’s raft node drains `Ready()`: persist hard state / entries, push **committed** entries (and optional snapshot) to the apply channel, and on the leader **send** outbound Raft messages on the wire.
+
+```go
+// go.etcd.io/etcd/server/etcdserver: raft.go — raftNode.start (excerpt)
+case rd := <-r.Ready():
+	ap := apply{
+		entries:  rd.CommittedEntries, // majority-committed → apply to etcd MVCC
+		snapshot: rd.Snapshot,           // install if state was transferred
+		notifyc:  notifyc,
+	}
+	updateCommittedIndex(&ap, rh)
+	r.applyc <- ap
+	if islead {
+		r.transport.Send(r.processMessages(rd.Messages)) // MsgApp / MsgSnap / heartbeats
+	}
+```
+
+Pipeline for the cluster-714 example: **propose** `Put /pd/714/leader` → leader **`MsgApp`** (or **`MsgSnap`**) → followers **`MsgAppResp`** → **`maybeCommit`** → **`CommittedEntries` applied** → PD’s `AppliedIndex` / `CommittedIndex` gauges move.
 
 | Pointer (etcd API) | Meaning for PD |
 |--------------------|----------------|
@@ -318,7 +408,8 @@ PD Raft does **not** replicate row values. Losing PD majority stalls TSO and met
 | `pkg/member/member.go` | `Campaign`, `GetEtcdLeader`, `IsServing`, `MoveEtcdLeader` |
 | `pkg/election/leadership.go` | lease `Campaign` / `Keep` / `Watch` |
 | `pkg/election/lease.go` | `Grant`, `KeepAlive` / `KeepAliveOnce` |
-| Embedded etcd (`go.etcd.io/etcd/raft`) | `MsgVote`, `MsgApp`, log commit / apply |
+| Embedded etcd (`go.etcd.io/etcd/raft`) | `bcastAppend` / `maybeSendAppend` (`MsgApp`/`MsgSnap`), `handleAppendEntries`, `handleSnapshot`, `maybeCommit` |
+| Embedded etcd (`go.etcd.io/etcd/server/etcdserver`) | `raftNode` Ready loop: `transport.Send`, apply `CommittedEntries` |
 
 ---
 
