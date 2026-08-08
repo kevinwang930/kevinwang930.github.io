@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="620" viewBox="0 0 1000 620" role="img" aria-label="Real-world PD etcd Raft log: Campaign leader then TSO and Region meta">
+  <defs>
+    <marker id="arrP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="620" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Real-world PD etcd Raft log</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Cluster 714, RF=3 (pd1, pd2, pd3). pd1 is etcd leader. Keys from git/pd pkg/utils/keypath</text>
+
+  <!-- Scenario -->
+  <g transform="translate(40, 60)">
+    <rect width="920" height="72" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="16" y="22" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Scenario (one minute on a live cluster)</text>
+    <text x="16" y="44" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">1. pd1 wins etcd leadership and Campaigns: Put /pd/714/leader = Member{name:pd1} with lease</text>
+    <text x="16" y="62" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">2. Serving PD persists TSO window, then Region 27 meta after a TiKV RegionHeartbeat</text>
+  </g>
+
+  <!-- Log table header -->
+  <g transform="translate(40, 150)">
+    <rect width="920" height="28" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="20" y="19" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">idx</text>
+    <text x="80" y="19" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">term</text>
+    <text x="150" y="19" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">command (etcd Put)</text>
+    <text x="620" y="19" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">value / note</text>
+    <text x="860" y="19" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">state</text>
+  </g>
+
+  <!-- Row 41 committed applied -->
+  <g transform="translate(40, 180)">
+    <rect width="920" height="44" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
+    <text x="20" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">41</text>
+    <text x="80" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">7</text>
+    <text x="150" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">Put /pd/714/alloc_id</text>
+    <text x="620" y="27" font-family="Consolas, monospace" font-size="10" fill="#37474f">10086 (next alloc)</text>
+    <text x="860" y="27" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">applied</text>
+  </g>
+
+  <!-- Row 42 Campaign -->
+  <g transform="translate(40, 228)">
+    <rect width="920" height="44" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
+    <text x="20" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">42</text>
+    <text x="80" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">7</text>
+    <text x="150" y="27" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">Put /pd/714/leader</text>
+    <text x="620" y="18" font-family="Consolas, monospace" font-size="10" fill="#37474f">pd1 + lease id</text>
+    <text x="620" y="34" font-family="Consolas, monospace" font-size="9" fill="#546e7a">Leadership.Campaign</text>
+    <text x="860" y="27" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">applied</text>
+  </g>
+
+  <!-- Row 43 TSO committed -->
+  <g transform="translate(40, 276)">
+    <rect width="920" height="44" fill="#fff9c4" stroke="#f9a825" rx="3"/>
+    <text x="20" y="27" font-family="Consolas, monospace" font-size="11" fill="#f57f17">43</text>
+    <text x="80" y="27" font-family="Consolas, monospace" font-size="11" fill="#f57f17">7</text>
+    <text x="150" y="27" font-family="Consolas, monospace" font-size="11" fill="#f57f17">Put /pd/714/timestamp</text>
+    <text x="620" y="18" font-family="Consolas, monospace" font-size="10" fill="#37474f">phys=1710000000</text>
+    <text x="620" y="34" font-family="Consolas, monospace" font-size="9" fill="#546e7a">TSO window persist</text>
+    <text x="860" y="27" font-family="Consolas, monospace" font-size="10" fill="#f57f17">committed</text>
+  </g>
+
+  <!-- Row 44 uncommitted -->
+  <g transform="translate(40, 324)">
+    <rect width="920" height="44" fill="#eceff1" stroke="#90a4ae" stroke-dasharray="4 2" rx="3"/>
+    <text x="20" y="27" font-family="Consolas, monospace" font-size="11" fill="#78909c">44</text>
+    <text x="80" y="27" font-family="Consolas, monospace" font-size="11" fill="#78909c">7</text>
+    <text x="150" y="18" font-family="Consolas, monospace" font-size="11" fill="#78909c">Put /pd/714/raft/r/00000000000000000027</text>
+    <text x="150" y="34" font-family="Consolas, monospace" font-size="9" fill="#90a4ae">RegionPath(27) after heartbeat</text>
+    <text x="620" y="27" font-family="Consolas, monospace" font-size="10" fill="#78909c">Region 27 meta</text>
+    <text x="860" y="27" font-family="Consolas, monospace" font-size="10" fill="#78909c">uncommitted</text>
+  </g>
+
+  <!-- Pointers -->
+  <line x1="40" y1="385" x2="960" y2="385" stroke="#cfd8dc" stroke-width="1"/>
+  <text x="40" y="408" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2e7d32">commitIndex = 43</text>
+  <text x="200" y="408" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">majority of pd1+pd2+pd3 matched through idx 43</text>
+  <text x="40" y="430" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1565c0">appliedIndex = 42</text>
+  <text x="200" y="430" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">pd1 local etcd KV has applied Campaign; timestamp apply in flight</text>
+
+  <!-- Followers strip -->
+  <g transform="translate(40, 450)">
+    <rect width="920" height="56" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="16" y="22" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">Followers pd2 / pd3 (MsgApp from pd1)</text>
+    <text x="16" y="42" font-family="Consolas, monospace" font-size="11" fill="#37474f">matchIndex = 43  |  idx 44 not yet stored  |  same CAP rule: no commit without majority</text>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(40, 520)">
+    <rect width="920" height="80" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="16" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Key paths (git/pd pkg/utils/keypath)</text>
+    <text x="16" y="46" font-family="Consolas, monospace" font-size="10" fill="#546e7a">/pd/{cluster_id}/leader   /pd/{cluster_id}/alloc_id   /pd/{cluster_id}/timestamp</text>
+    <text x="16" y="66" font-family="Consolas, monospace" font-size="10" fill="#546e7a">/pd/{cluster_id}/raft/r/{region_id:020d}   -- not TiKV Prewrite; meta only</text>
+  </g>
+</svg>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520" role="img" aria-label="TiDB join across TiKV Regions: compute join, range scan children">
+  <defs>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="520" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Join across TiKV ranges: join runs on TiDB, scans fan out to Region leaders</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">TiKV has no cross-Region join; HashJoin / MergeJoin / IndexJoin assemble rows in the TiDB process</text>
+
+  <!-- TiDB join -->
+  <g transform="translate(360, 70)">
+    <rect width="380" height="100" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="190" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">TiDB server (compute)</text>
+    <text x="190" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">HashJoin / MergeJoin / IndexJoin</text>
+    <text x="190" y="80" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">buildExecutor: children then join</text>
+  </g>
+
+  <!-- Left child -->
+  <g transform="translate(80, 220)">
+    <rect width="280" height="80" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="5"/>
+    <text x="140" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Left TableReader</text>
+    <text x="140" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#6d4c41">ranger ranges -&gt; BatchLocate</text>
+  </g>
+
+  <!-- Right child -->
+  <g transform="translate(740, 220)">
+    <rect width="280" height="80" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="5"/>
+    <text x="140" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Right TableReader / lookups</text>
+    <text x="140" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#6d4c41">HashJoin: full scan side</text>
+  </g>
+
+  <line x1="450" y1="170" x2="280" y2="220" stroke="#ef6c00" stroke-width="1.6" marker-end="url(#arrO)"/>
+  <line x1="650" y1="170" x2="820" y2="220" stroke="#ef6c00" stroke-width="1.6" marker-end="url(#arrO)"/>
+
+  <!-- TiKV stores -->
+  <g transform="translate(40, 350)">
+    <rect width="200" height="90" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="5"/>
+    <text x="100" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">TiKV R1 leader</text>
+    <text x="100" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">orders [t100_r1, r50)</text>
+    <text x="100" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">Coprocessor</text>
+  </g>
+  <g transform="translate(280, 350)">
+    <rect width="200" height="90" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="5"/>
+    <text x="100" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">TiKV R2 leader</text>
+    <text x="100" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">orders [t100_r50, ...)</text>
+    <text x="100" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">Coprocessor</text>
+  </g>
+  <g transform="translate(620, 350)">
+    <rect width="200" height="90" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="5"/>
+    <text x="100" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">TiKV R3 leader</text>
+    <text x="100" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">items ranges ...</text>
+    <text x="100" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">Coprocessor / Get</text>
+  </g>
+  <g transform="translate(860, 350)">
+    <rect width="200" height="90" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="5"/>
+    <text x="100" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">TiKV R4 leader</text>
+    <text x="100" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">items ranges ...</text>
+    <text x="100" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">Coprocessor / Get</text>
+  </g>
+
+  <line x1="180" y1="300" x2="140" y2="350" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrG)"/>
+  <line x1="220" y1="300" x2="380" y2="350" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrG)"/>
+  <line x1="880" y1="300" x2="720" y2="350" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrG)"/>
+  <line x1="920" y1="300" x2="960" y2="350" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrG)"/>
+
+  <text x="550" y="480" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">IndexJoin: outer chunks from left Regions; inner keys BatchLocate to whichever Region holds each lookup key</text>
+  <text x="550" y="502" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">Optional: TiFlash MPP hash join shuffles among TiFlash nodes (not TiKV Raft peers)</text>
+</svg>

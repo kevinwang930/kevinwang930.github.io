@@ -1,5 +1,5 @@
 ---
-title: "TiDB architecture: TiKV storage plane"
+title: "TiDB architecture: cluster and server"
 date: 2026-08-06T22:00:00+02:00
 categories:
 - data
@@ -11,48 +11,275 @@ tags:
 - tidb
 keywords:
 - tidb
+- pd
 - tikv
+- tiflash
 #thumbnailImage: //example.com/image.jpg
 ---
-
-TiDB is an open-source, MySQL-compatible distributed SQL database: the **TiDB** process handles SQL and transactions, **PD** places data and issues timestamps, and **TiKV** stores rows with Multi-Raft, MVCC, and RocksDB. This post covers architecture (planes and division of labor, Regions, TiKV store) then implementation of codecs, client-go, and `primaryKey` 2PC—illustrated with a small `orders` table. Grounded in `git/tidb` and `github.com/tikv/client-go/v2` (TiKV server raftstore/RocksDB at architecture level; in-tree **unistore** for MVCC behavior where the `tikv/tikv` tree is absent).
+TiDB is a MySQL-compatible distributed SQL system. A deployment is a **cluster** of TiDB servers (compute), **PD** (control), **TiKV** (row store), and optionally **TiFlash** (columnar). This post orients cluster roles, follows one TiDB server in `git/tidb` (dispatch → execute), then shows how **PD** in `git/pd` owns Region key ranges (split/merge), TSO, locate, and scheduling. TiKV store, Region Raft, and 2PC are in [TiKV](../tikv/); CAP theory and PD etcd Raft are in [CAP and Raft](../cap/).
 <!--more-->
 
-Related: [MySQL InnoDB](../../mysql/innodb/), [MySQL DML / locking](../../mysql/dml/).
+Related: [TiKV: store, Multi-Raft Regions, and 2PC](../tikv/), [CAP and Raft](../cap/).
 
 ![TiDB cluster planes and node relations](images/tidb-cluster-planes.svg)
 
 ---
 
-## 2. Architecture
+## 1. Overview
 
-### 2.1 Cluster planes and division of labor
+Clients speak the MySQL protocol only to **TiDB**. Durable rows live in **TiKV**. **PD** places Regions and issues timestamps. **TiFlash** is an optional analytics plane on the same keyspace.
 
-Clients speak **only** to TiDB. Durable rows live in **TiKV**. **PD** places data and issues timestamps. TiDB does not open RocksDB; it talks to PD and TiKV over RPC. See the figure at the top of this post.
+**What this post covers**
 
-| Plane | Nodes | Role | Division of labor |
-|-------|-------|------|-------------------|
-| **Clients** | apps / drivers | MySQL protocol | — |
-| **Compute** | TiDB-1, TiDB-2, … | SQL + 2PC client | Turn SQL into keys; drive Prewrite/Commit |
-| **Control** | PD (odd set, one leader) | Region meta, schedule, **TSO** | Where data is, what time it is, how peers move |
-| **Data** | TiKV stores | Regions, Raft, MVCC, RocksDB | Store and replicate bytes; execute KV RPCs |
-| **Analytics** (optional) | TiFlash | Columnar Raft learners | Raft learner replicate |
+1. Overview — cluster roles and content map  
+2. TiDB server — dispatch → execute, including cross-Region joins (`git/tidb`)  
+3. PD — Region key ranges / split, TSO, locate, heartbeats (`git/pd`)  
+
+**Cluster roles**
+
+| Plane | Nodes | Role |
+|-------|-------|------|
+| **Clients** | apps / drivers | MySQL protocol |
+| **Compute** | TiDB-1, TiDB-2, … | SQL + transaction client |
+| **Control** | PD (odd set, one leader) | Region ranges / meta, schedule, **TSO** |
+| **Data** | TiKV stores | Regions, Raft, MVCC, RocksDB |
+| **Analytics** (optional) | TiFlash | Columnar Raft learners; MPP reads |
+
+| Piece | Owns | Does not own |
+|-------|------|--------------|
+| **TiDB** | SQL session, plan, membuffer, 2PC client, RegionCache | Durable rows, Raft logs |
+| **PD** | Region meta, schedule, TSO | Row values |
+| **TiKV** | Regions, Raft, MVCC, RocksDB | SQL parsing |
+| **TiFlash** (optional) | Columnar learners / MPP | Transactional write authority |
 
 | Edge | Carries |
 |------|---------|
 | Client → TiDB | SQL / MySQL protocol |
 | TiDB → PD | TSO, Region locate, store list |
 | TiDB → TiKV leader | Get, Prewrite, Commit, Coprocessor, … |
+| TiDB → TiFlash | Analytical / MPP queries (when chosen by the optimizer) |
 | TiKV ↔ TiKV | Raft per Region |
 | TiKV ↔ PD | Heartbeat / schedule |
+| TiFlash ↔ TiKV | Learner replicate |
 
-**TiDB server** is the compute plane: it accepts the MySQL protocol, parses and plans SQL, encodes rows into keys (`tablecodec`), holds a per-session membuffer, and drives multi-Region transactions with `twoPhaseCommitter` / client-go. Nodes are interchangeable behind a load balancer; they own sessions and a `RegionCache`, not durable row storage.
+Clients never open TiKV or PD directly. TiDB nodes are interchangeable behind a load balancer. Store stack, Region Raft, and 2PC are in [TiKV](../tikv/); CAP and PD etcd Raft are in [CAP and Raft](../cap/). How PD answers TSO and Region locate is §3.
 
-**PD** is the control plane: it stores Region metadata, serves **TSO** (`startTS` / `commitTS`), answers Region locate requests, and schedules split / merge / transfer-leader from TiKV heartbeats. It never serves row values.
+---
 
-**TiKV** is the data plane: each store hosts Region peers (leader or follower), replicates with Raft, applies MVCC, and persists in local RocksDB. Client KV RPCs go to the **Region leader**; followers hold Raft copies and do not take writes for that Region.
+## 2. TiDB server
 
-**Example.** Schema used in later sections (`table_id = 100`, unique index `idx_user` = `index_id = 1`). Keys are logical; on the wire they are `tablecodec` bytes.
+A TiDB process accepts the MySQL protocol, parses SQL to AST, compiles a physical plan, builds executors, and talks to PD / TiKV (or TiFlash) over RPC. It does **not** run Raft or open RocksDB.
+
+![TiDB server: SQL parse and dispatch](images/tidb-server-architecture.svg)
+
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| Protocol | `pkg/server` | Accept connections; `dispatch` by command; write result sets |
+| Session | `pkg/session` | Per-connection state; `Parse` / `ExecuteStmt` / txn lifecycle |
+| Parser | `pkg/parser` | Text → `[]ast.StmtNode` (`ParseSQL` / `yyParse`) |
+| Planner | `pkg/planner` | Preprocess + `Optimize` (logical → physical) |
+| Executor | `pkg/executor` | `Compiler.Compile`, `ExecStmt`, executor tree |
+| Domain | `pkg/domain` | Process-wide InfoSchema, DDL, stats, `kv.Storage` |
+| Storage client | `pkg/store`, `distsql`, client-go | Region locate, Get / Coprocessor, 2PC |
+
+Statement handling follows the source call order below: **dispatch → parse → compile → execute**.
+
+### 2.1 Connection and command dispatch
+
+`Server.onConn` runs one goroutine per client. After handshake and `openSession`, `clientConn.Run` reads packets and calls **`dispatch`**. The first byte is the protocol command; the hot path is `ComQuery` → `handleQuery`.
+
+```go
+// git/tidb: pkg/server/conn.go — dispatch (simplified)
+func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
+	cmd := data[0]
+	data = data[1:]
+	dataStr := string(hack.String(data))
+	switch cmd {
+	case mysql.ComQuery: // Most frequently used command.
+		return cc.handleQuery(ctx, /* trimmed sql */)
+	case mysql.ComStmtPrepare:
+		return cc.HandleStmtPrepare(ctx, dataStr)
+	case mysql.ComStmtExecute:
+		return cc.handleStmtExecute(ctx, data)
+	// ComQuit, ComInitDB, ...
+	}
+}
+```
+
+`handleQuery` only routes into parse then per-statement execute; it does not plan or touch KV itself:
+
+```go
+// git/tidb: pkg/server/conn.go — handleQuery (simplified)
+func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
+	var stmts []ast.StmtNode
+	if stmts, err = cc.ctx.Parse(ctx, sql); err != nil { // §2.2
+		return err
+	}
+	for i, stmt := range stmts {
+		_, err = cc.handleStmt(ctx, stmt, /* warns */, i == len(stmts)-1)
+		// handleStmt → ExecuteStmt (§2.3–2.4) → writeResultSet / OK
+	}
+	return err
+}
+```
+
+`cc.ctx` is a `TiDBContext` wrapping `sessionapi.Session` (`pkg/server/driver_tidb.go`). Prepared statements use `ComStmtPrepare` / `ComStmtExecute`; they still enter `ExecuteStmt` after bind/resolve.
+
+### 2.2 Parse
+
+`session.Parse` → `ParseSQL` takes a pooled in-tree parser (`github.com/pingcap/tidb/pkg/parser` → `./pkg/parser` in `go.mod`), applies session SQL mode, and returns AST nodes.
+
+```go
+// git/tidb: pkg/session/session.go — ParseSQL (core)
+p := parserutil.GetParser()
+defer parserutil.DestroyParser(p)
+p.SetSQLMode(sqlMode)
+p.SetParserConfig(s.sessionVars.BuildParserConfig())
+tmp, warn, err := p.ParseSQL(sql, params...)
+res := slices.Clone(tmp) // copy so the parser can be reused
+return res, warn, err
+```
+
+```go
+// git/tidb: pkg/parser/yy_parser.go
+func (parser *Parser) ParseSQL(sql string, params ...ParseParam) (stmt []ast.StmtNode, warns []error, err error) {
+	parser.lexer.reset(sql)
+	var l yyLexer = &parser.lexer
+	yyParse(l, parser)
+	// ... errors / warns ...
+	for _, stmt := range parser.result {
+		ast.SetFlag(stmt)
+	}
+	return parser.result, warns, nil
+}
+```
+
+Output is `[]ast.StmtNode` (for example `*ast.SelectStmt`, `*ast.InsertStmt`). No plan and no KV I/O yet.
+
+### 2.3 Compile
+
+`handleStmt` calls `session.ExecuteStmt` → `executeStmtImpl`. After `PrepareTxnCtx` and `ResetContextOfStmt`, the session builds an **`executor.Compiler`** and calls **`Compile`**: `plannercore.Preprocess`, then **`planner.Optimize`**, then wrap the physical plan in **`ExecStmt`**.
+
+```go
+// git/tidb: pkg/executor/compiler.go — Compile (simplified)
+func (c *Compiler) Compile(ctx context.Context, stmtNode ast.StmtNode) (*ExecStmt, error) {
+	nodeW := resolve.NewNodeW(stmtNode)
+	err := plannercore.Preprocess(ctx, c.Ctx, nodeW, /* ... */)
+	is := sessiontxn.GetTxnManager(c.Ctx).GetTxnInfoSchema()
+	finalPlan, names, err := planner.Optimize(ctx, c.Ctx, nodeW, is)
+	stmt := &ExecStmt{Plan: finalPlan, StmtNode: stmtNode, Ctx: c.Ctx /* ... */}
+	return stmt, nil
+}
+```
+
+`Optimize` may hit plan cache or take a point-get fast path (`TryFastPlan`) before a full logical→physical search. Compile ends when an `ExecStmt` (or point-get plan handle) exists; it does not yet open executors or send RPCs.
+
+**Compile does not pick TiKV store addresses.** For a predicate such as `id >= 1`, the optimizer turns access conditions into **logical key ranges** on the plan (`PhysicalTableScan.Ranges` as `[]*ranger.Range`), via `ranger.BuildTableRange` / `DetachCondAndBuildRangeForIndex` (see `PhysicalTableScan.ResolveCorrelatedColumns` and path building during optimize). Those ranges are encoded later as `kv.KeyRange` bytes (`tablecodec` record prefix + handle bounds). The plan still does **not** list Region IDs or TiKV leader addresses—only “which key intervals to scan.” Which TiKV peers own those intervals is resolved at **execute** (§2.4) through `RegionCache`.
+
+```go
+// git/tidb: pkg/planner/.../physical_table_scan.go — ranges on the plan (not store addrs)
+// AccessCondition is used to calculate range.
+AccessCondition []expression.Expression
+Ranges          []*ranger.Range
+```
+
+```go
+// git/tidb: same file — rebuild ranges from access conditions (optimizer / correlated path)
+p.Ranges, _, _, err = ranger.BuildTableRange(access, ctx.GetRangerCtx(), &pkTP, 0)
+```
+
+### 2.4 Execute
+
+Still inside `executeStmtImpl`: if the compiled result is a point-get short path, `stmt.PointGet` runs; otherwise **`runStmt`** calls **`ExecStmt.Exec`**.
+
+`ExecStmt.Exec` (`pkg/executor/adapter.go`):
+
+1. `buildExecutor` — `executorBuilder.build(plan)`  
+2. `openExecutor`  
+3. `handleNoDelay` for DML, or return a record set whose `Next` pulls chunks  
+
+**TiKV targets are chosen here.** `TableReaderExecutor` turns `ranger.Range` into `[]kv.KeyRange`, then the coprocessor client (`pkg/store/copr`) splits those ranges by Region and looks up leaders:
+
+1. Encode logical ranges → `kv.KeyRange` (`tablecodec` for `t{tableID}_r…`)  
+2. `RegionCache.BatchLocateKeyRanges` / `LocateKey` — cache hit or PD Region locate  
+3. Build cop tasks per Region; send Coprocessor / KV RPCs to each **Region leader** store  
+
+```go
+// git/tidb: pkg/store/copr/region_cache.go — map key ranges → Region locations
+locs, err := c.BatchLocateKeyRanges(bo.TiKVBackoffer(), kvRanges, opts...)
+```
+
+A single `id >= 1` scan may therefore fan out to **several TiKV leaders** if the range crosses Region boundaries; compile only knew the key interval, not that fan-out. Cache misses go to PD; `NotLeader` / epoch errors refresh the cache and retry—see [TiKV](../tikv/). SQL `COMMIT` becomes Prewrite/Commit via `twoPhaseCommitter` on the same locate path—see [TiKV](../tikv/). After `Exec` returns, `handleStmt` writes the result set or OK packet to the client.
+
+**End-to-end (source order)**
+
+```text
+onConn → handshake → openSession → Run
+  → dispatch(ComQuery) → handleQuery
+  → Parse / ParseSQL → []ast.StmtNode
+  → handleStmt → ExecuteStmt / executeStmtImpl
+       → PrepareTxnCtx, ResetContextOfStmt
+       → Compiler.Compile
+            → Preprocess
+            → planner.Optimize
+                 → ranger ranges on PhysicalTableScan (logical keys only)
+            → ExecStmt
+       → runStmt → ExecStmt.Exec
+            → buildExecutor → openExecutor → Next | handleNoDelay
+            → kv.KeyRange + RegionCache.BatchLocateKeyRanges
+            → Coprocessor / Get / Prewrite → Region leader TiKVs
+  → writeResultSet / OK packet
+```
+
+### 2.5 Join across TiKV ranges
+
+TiKV data is partitioned by Region key ranges owned by PD (§3.3). A Region leader only serves keys in its `[start, end)`. There is **no** TiKV RPC that joins two tables across Regions. Cross-Region joins run in the **TiDB process**: the physical plan is a join operator whose children are readers/lookups; each child already fans out to multiple Region leaders via Coprocessor / Get (§2.4). TiDB then combines those row streams in memory.
+
+![Join across TiKV ranges](images/tidb-join-across-tikv.svg)
+
+```sql
+SELECT o.id, i.name
+FROM orders o
+JOIN items i ON o.item_id = i.id
+WHERE o.id >= 1;
+```
+
+| Strategy | Where the join runs | How TiKV is used |
+|----------|---------------------|------------------|
+| **HashJoin** / **MergeJoin** | TiDB (`HashJoinExec` / `MergeJoinExec`) | Each side’s `TableReader` / `IndexReader` scans its ranges; `BatchLocateKeyRanges` → many Region leaders; TiDB builds/probes the join |
+| **IndexJoin** (IndexLookUpJoin) | TiDB | Outer side scanned (multi-Region); for each outer chunk, encode inner keys, locate Regions, batch Get / index lookup on whatever leaders hold those keys |
+| **TiFlash MPP** (optional) | TiFlash nodes | Optimizer may choose MPP hash join; shuffle among TiFlash—still not a TiKV Raft-peer join |
+
+`executorBuilder` builds the join **after** its children, so each side’s multi-Region I/O is nested under the join:
+
+```go
+// git/tidb: pkg/executor/builder.go — HashJoin
+leftExec := b.build(v.Children()[0])  // e.g. TableReader → many TiKV leaders
+rightExec := b.build(v.Children()[1])
+return b.buildHashJoinFromChildExecs(leftExec, rightExec, v)
+```
+
+```go
+// git/tidb: pkg/executor/builder.go — IndexLookUpJoin
+outerExec := b.build(v.Children()[1-v.InnerChildIdx]) // outer scan (multi-Region)
+// inner side: dataReaderBuilder builds kv ranges / lookups from outer keys
+```
+
+```text
+HashJoin (TiDB memory)
+  ├─ TableReader(orders) ── Cop ──► R1 leader, R2 leader, …
+  └─ TableReader(items)  ── Cop ──► R3 leader, R4 leader, …
+
+IndexJoin (TiDB)
+  ├─ Outer TableReader(orders) ──► R1, R2, …
+  └─ per outer chunk: locate(item keys) ── Get/Cop ──► whichever Region leaders hold those keys
+```
+
+So “join across multiple TiKV” means: **parallel range I/O to many leaders, join logic on TiDB** (or MPP on TiFlash)—not a distributed join inside raftstore.
+
+### 2.6 Worked example: SQL → keys → locate
+
+Schema (`table_id = 100`, unique index `idx_user` = `index_id = 1`):
 
 ```sql
 CREATE TABLE orders (
@@ -72,295 +299,206 @@ INSERT INTO orders (id, user_id, amount) VALUES
 | 1 | 10 | 19.90 | `t100_r1` | `t100_i1_10` → 1 |
 | 2 | 20 | 5.00 | `t100_r2` | `t100_i1_20` → 2 |
 
-Initial commit at `commitTS = 400` (`startTS = 390`).
-
 ```sql
-SELECT id, amount FROM orders WHERE id = 1;
+SELECT id, amount FROM orders WHERE id >= 1;
 ```
 
 | id | amount |
 |----|--------|
 | 1 | 19.90 |
+| 2 | 5.00 |
 
-| Step | Edge | Action |
-|------|------|--------|
-| 1 | Client → TiDB | Encode handle `1` → `t100_r1` |
-| 2 | TiDB → PD | Locate Region for `t100_r1`; take snapshot TS if needed |
-| 3 | TiDB → TiKV leader | Point Get at that TS |
-| 4 | TiKV | Return `amount = 19.90` from MVCC on the leader |
+| Step | Phase | Inside TiDB | Knows TiKV stores? |
+|------|-------|-------------|--------------------|
+| 1 | Dispatch | `dispatch` / `handleQuery` | No |
+| 2 | Parse | `ParseSQL` → AST | No |
+| 3 | Compile | `Optimize` → TableReader; `ranger` range ≈ `[t100_r1, +∞)` | No — logical key range only |
+| 4 | Execute | Encode `kv.KeyRange`; `BatchLocateKeyRanges` → Region leader(s); Coprocessor scan | Yes — after RegionCache / PD |
 
-A write follows the same edges: TiDB buffers mutations and runs Prewrite/Commit; PD supplies TSO and leaders; TiKV leaders apply Lock / Write / Default. Region layout and the TiKV process stack are in §2.2–§2.3; `primaryKey` 2PC detail is in §3.
+### 2.7 Key files
 
-### 2.2 Keyspace and Regions
+| Path | Role |
+|------|------|
+| `git/tidb/pkg/server/server.go` | `Server`, `onConn` |
+| `git/tidb/pkg/server/conn.go` | `dispatch`, `handleQuery`, `handleStmt` |
+| `git/tidb/pkg/server/driver_tidb.go` | `TiDBDriver` / `TiDBContext` |
+| `git/tidb/pkg/session/session.go` | `ParseSQL`, `ExecuteStmt`, `runStmt` |
+| `git/tidb/pkg/parser/yy_parser.go` | `Parser.ParseSQL` / `yyParse` |
+| `git/tidb/pkg/executor/compiler.go` | `Compiler.Compile` |
+| `git/tidb/pkg/planner/optimize.go` | `Optimize` |
+| `git/tidb/pkg/util/ranger/...` | Build logical key ranges from predicates |
+| `git/tidb/pkg/executor/adapter.go` | `ExecStmt.Exec`, `buildExecutor` |
+| `git/tidb/pkg/executor/builder.go` | `buildHashJoin`, `buildIndexLookUpJoin`, … |
+| `git/tidb/pkg/executor/join/` | HashJoin / IndexJoin workers |
+| `git/tidb/pkg/store/copr/region_cache.go` | `BatchLocateKeyRanges` → Region leaders |
+| `git/tidb/pkg/domain/domain.go` | process-wide Domain |
+| `git/tidb/pkg/tablecodec/tablecodec.go` | Key encoding |
+| `git/tidb/pkg/store/driver/tikv_driver.go` | Open PD + `KVStore` |
 
-TiKV is one big sorted map. PD cuts it into **Regions**:
+---
+
+## 3. PD
+
+PD is the control plane in `git/pd`. An odd-sized PD membership elects **one leader** (etcd lease). That leader owns the **Region keyspace map** (ranges, split/merge), allocates **TSO**, answers **Region locate**, ingests **TiKV heartbeats**, and drives **schedule operators**. It never stores row values.
+
+![PD control plane](images/pd-architecture.svg)
+
+```text
+BOOT:  pd-server → CreateServer → embed etcd → startServer → leaderLoop
+LEAD:  Campaign lease → Keep → createRaftCluster / Coordinator
+
+TiDB:  Tso stream → Allocator.GenerateTSO
+       GetRegion(key) → RegionsInfo.GetRegionByKey → regionTree.search
+
+TiKV:  StoreHeartbeat / RegionHeartbeat → processRegionHeartbeat
+       → OperatorController.Dispatch → cmds on hbStreams
+```
+
+### 3.1 Leader election
+
+`Server.Run` starts etcd, then `leaderLoop`. Only the member that is also etcd leader campaigns for the PD leader key; followers watch until the lease changes.
+
+```go
+// git/pd: server/server.go — leaderLoop (simplified)
+leader, checkAgain := s.member.CheckLeader()
+if leader != nil {
+	leader.Watch(s.serverLoopCtx) // block until leader changes
+	continue
+}
+etcdLeader := s.member.GetEtcdLeader()
+if etcdLeader != s.member.ID() {
+	time.Sleep(200 * time.Millisecond)
+	continue
+}
+s.campaignLeader() // etcd lease Campaign + Keep; then createRaftCluster
+```
+
+TSO generation requires serving leadership (`Allocator.isServing`); otherwise clients see not-leader and retry against the current leader.
+
+### 3.2 TSO
+
+TiDB takes `startTS` / `commitTS` from a gRPC **`Tso`** stream. The leader’s `tso.Allocator` advances a physical (ms) + logical counter (`GenerateTSO` → `timestampOracle.getTS`). The allocation window is persisted so a new leader does not go backward.
+
+```go
+// git/pd: server/grpc_service.go — Tso (core path)
+ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
+response := &pdpb.TsoResponse{Timestamp: &ts, Count: count}
+stream.Send(response)
+```
+
+```go
+// git/pd: pkg/tso/allocator.go
+func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+	if !a.isServing() {
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(/* not leader */)
+	}
+	return a.timestampOracle.getTS(ctx, count)
+}
+```
+
+### 3.3 Keyspace and Region ranges
+
+TiKV is one global sorted keyspace. PD cuts it into **Regions**—half-open ranges `[startKey, endKey)`—and places each Region’s peers on TiKV stores (commonly RF=3). Epoch bumps on split, merge, or membership change. That layout is what TiDB’s `RegionCache` and join/scan fan-out (§2.4–2.5) consume.
 
 | Piece | Meaning |
 |-------|---------|
 | Range | `[startKey, endKey)` |
-| Peers | Copies on different stores; one **leader** serves writes |
-| Epoch | Bumps on split / merge / membership change |
+| Peers | Copies on different stores; one **leader** serves client KV RPCs |
+| Epoch | Version for split / merge / conf-change; stale cache must reload |
 
 ![Regions and Raft peers](images/tikv-region-raft.svg)
 
-TiDB encodes SQL rows into that map (`tablecodec`):
-
-| Kind | Pattern |
-|------|---------|
-| Row | `t{tableID}_r{handle}` |
-| Index | `t{tableID}_i{indexID}…` |
-| Meta | `m…` |
-
-A table’s rows sort together under `t{tableID}`, so splits and scans can follow table boundaries. The client caches Region→leader in **`RegionCache`** and refreshes on epoch / not-leader errors.
-
-Example split for `orders` (`table_id = 100`):
+Example after splits for `orders` (`table_id = 100`):
 
 | Region | Range | Holds |
 |--------|-------|-------|
-| R1 | `[t100_r1, t100_r2)` | `t100_r1` |
-| R2 | `[t100_r2, t100_i1)` | `t100_r2` |
+| R1 | `[t100_r1, t100_r50)` | early row keys |
+| R2 | `[t100_r50, t100_i1)` | later rows |
 | R3 | `[t100_i1, t101)` | `idx_user` |
 
-```sql
-SELECT * FROM orders WHERE id = 1;              -- one locate → R1 leader
-SELECT * FROM orders WHERE id >= 1 AND id <= 2; -- R1 then R2
-SELECT id FROM orders WHERE user_id = 20;       -- R3 index, then R2 row
-```
+`id >= 1` becomes a logical key range that may cover R1 and R2; execute locates each overlapping Region’s leader. How Raft replicates within one Region is in [TiKV](../tikv/); CAP and PD etcd Raft are in [CAP and Raft](../cap/).
 
-| id | user_id | amount |
-|----|---------|--------|
-| 1 | 10 | 19.90 |
-
-*(Point lookup `id = 1` result; range and index queries follow the Region comments above.)*
-
-### 2.3 Inside one TiKV store
-
-TiDB is **not** a coordinator on a shared RocksDB. Each TiKV process owns Multi-Raft, MVCC apply, and local engines.
-
-![TiKV store process architecture](images/tikv-store-architecture.svg)
-
-**Stack (top → bottom)**
-
-1. **gRPC** — `kvrpcpb` (Get, Prewrite, Commit, Coprocessor, …)  
-2. **Scheduler / latches** — conflict control before propose  
-3. **raftstore** — many Region peers (leader or follower) on this machine  
-4. **Apply + MVCC** — Lock / Write / Default after Raft majority  
-5. **kvdb + raftdb** — two RocksDB instances (data CFs vs Raft logs)  
-
-**kvdb column families (production)**
-
-| CF | Holds |
-|----|--------|
-| `lock` | Prewrite / pessimistic locks |
-| `write` | Commit records (and small values) |
-| `default` | Large values |
-| `raft` (meta) | Region metadata |
-
-One RocksDB batch is atomic **on one store**. Keys on **other** Regions/stores need the distributed txn protocol in §3 (`primaryKey` 2PC). Raft makes each Region’s replicas agree.
-
-| TiDB | TiKV |
-|------|------|
-| SQL, codecs, membuffer | Execute KV RPCs |
-| Choose `primaryKey`, send 2PC | Latch, Raft, apply MVCC |
-| RegionCache | Host peers; return not-leader |
-
-A write through that stack:
-
-```sql
-UPDATE orders SET amount = 21.00 WHERE id = 1;
--- Query OK, 1 row affected
-```
-
-| id | user_id | amount |
-|----|---------|--------|
-| 1 | 10 | 21.00 |
-| 2 | 20 | 5.00 |
-
-| Step | Component | Result |
-|------|-----------|--------|
-| 1 | Executor + `tablecodec` | `t100_r1` in membuffer |
-| 2 | `twoPhaseCommitter` | `primaryKey = t100_r1`, `startTS = 410` |
-| 3 | `RegionCache` | R1 leader |
-| 4 | Prewrite on TiKV | Latch → Raft propose → apply Lock + Default @410 |
-| 5 | Commit on TiKV | Write@420; Lock cleared |
-| 6 | Later SELECT | `21.00` if snapshot ≥ 420 |
-
-Path in one line: TiDB → gRPC Prewrite/Commit → **R1 leader** → latch → Raft → apply MVCC into kvdb. Wrong peer returns **not leader**. `primaryKey` atomicity and lock resolve details are in §3.
-
----
-
-## 3. Implementation
-
-### 3.1 TiDB storage façade
-
-`pkg/kv`: `Storage`, `Transaction`, `Snapshot`.  
-`TiKVDriver.OpenWithOptions` builds PD client + client-go `KVStore`.  
-`NewTiKVTxn` wraps `tikv.KVTxn`.
-
-```sql
-SELECT amount FROM orders WHERE id = 1;  -- → Get(EncodeRowKeyWithHandle(100, 1))
-```
-
-| amount |
-|--------|
-| 21.00 |
-
-### 3.2 Encoding rows (`tablecodec`)
+**Split.** When a Region grows too large or hot, PD (or TiKV via `AskSplit`) creates a **split operator**. The operator carries split keys; on the next heartbeat tick, TiKV applies the split and heartbeats report the new children—PD inserts them into `regionTree`.
 
 ```go
-tablePrefix     = []byte{'t'}
-recordPrefixSep = []byte("_r")
-indexPrefixSep  = []byte("_i")
-
-func EncodeRowKey(tableID int64, encodedHandle []byte) kv.Key { /* t + tableID + _r + handle */ }
+// git/pd: pkg/schedule/operator/create_operator.go
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind,
+	policy pdpb.CheckPolicy, keys [][]byte) (*Operator, error) {
+	step := SplitRegion{
+		StartKey:  region.GetStartKey(),
+		EndKey:    region.GetEndKey(),
+		Policy:    policy,
+		SplitKeys: keys,
+	}
+	brief := fmt.Sprintf("split: region %v use policy %s", region.GetID(), policy)
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(),
+		kind, region.GetApproximateSize(), step)
+	return op, nil
+}
 ```
 
-```sql
-SELECT id, user_id FROM orders ORDER BY id;
-```
+Merge is the inverse (`CreateMergeRegionOperator`). Transfer-leader moves which peer serves writes without changing the key range.
 
-| id | user_id | Row key | Index key |
-|----|---------|---------|-----------|
-| 1 | 10 | `t\|100\|_r\|1` | `t\|100\|_i\|1\|10` |
-| 2 | 20 | `t\|100\|_r\|2` | `t\|100\|_i\|1\|20` |
+### 3.4 Region locate
 
-### 3.3 RegionCache (`client-go`)
-
-`KVStore` holds PD client, oracle, `RegionCache`, lock resolver.
+TiDB’s `RegionCache` fills misses via PD **`GetRegion`** / scan RPCs. PD looks up the key in an in-memory **region tree** ordered by `StartKey` (`[start, end)`).
 
 ```go
-func (c *RegionCache) LocateKey(bo *retry.Backoffer, key []byte) (*KeyLocation, error)
+// git/pd: pkg/core/region.go
+func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
+	return r.tree.search(regionKey)
+}
 ```
 
-```sql
-SELECT amount FROM orders WHERE id = 2;
+```go
+// git/pd: pkg/utils/grpcutil/cluster.go — GetRegion helper
+region := rc.GetRegionByKey(request.GetRegionKey())
+return &pdpb.GetRegionResponse{
+	Region: region.GetMeta(),
+	Leader: region.GetLeader(),
+	// DownPeers / PendingPeers / ...
+}, nil
 ```
 
-| amount |
-|--------|
-| 5.00 |
+That is how execute-time `BatchLocateKeyRanges` (§2.4) learns Region leaders when the client cache misses.
 
-| Call | Result |
-|------|--------|
-| `LocateKey(t100_r2)` | Region R2, leader address |
-| `Get` | row → `amount = 5.00` |
+### 3.5 Heartbeats and schedule
 
-### 3.4 Distributed MVCC and `primaryKey` 2PC
+TiKV sends **`StoreHeartbeat`** and **`RegionHeartbeat`**. On each region heartbeat, `RaftCluster.HandleRegionHeartbeat` updates the region tree (`processRegionHeartbeat`), then **`OperatorController.Dispatch`** advances pending operators and may push `TransferLeader` / change-peer / **split** / **merge** commands back on the heartbeat stream.
 
-TiKV has **no** central txn table. Each Region stores MVCC locally. For multi-key writes, the client sets one mutated key as **`primaryKey`** (`twoPhaseCommitter.primaryKey` / Lock.`Primary`). That key’s Write is the durable commit bit. **Regions are not typed primary/secondary**—only keys in **this** txn are.
-
-![Distributed MVCC and primaryKey](images/tikv-distributed-mvcc-txn.svg)
-
-| Name | Meaning | Not |
-|------|---------|-----|
-| **`primaryKey`** | One mutation key; Write@`commitTS` = txn committed | Not SQL `PRIMARY KEY` column; not a Region class |
-| **Secondary keys** | Other mutations; Lock stores `Primary = primaryKey` | Not Raft followers |
-| **Lock / Write / Default** | Intent, commit record, value | — |
-
-```text
-Prewrite:  Lock[key] = { startTS, Primary: primaryKey, ... }
-Decision:  Commit(primaryKey) → Write@commitTS
-Others:    Commit(secondary) or resolve via Lock.Primary
+```go
+// git/pd: server/cluster/cluster_worker.go
+func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	if err := c.processRegionHeartbeat(ctx, region); err != nil {
+		return err
+	}
+	c.coordinator.GetOperatorController().Dispatch(
+		region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
+	return nil
+}
 ```
 
-| Property | How |
-|----------|-----|
-| **Atomicity** | Committed iff `primaryKey` has Write@`commitTS`; secondaries must match |
-| **Consistency (SI)** | Snapshot `startTS'`; resolve leftover Locks to the same commitTS (or hide txn if `startTS' < commitTS`) |
-| **Recovery** | Later Lock hit checks `primaryKey` and finishes Commit/Rollback |
+Schedulers and checkers (`balance_leader`, `balance_region`, **split** / **merge** checkers, …) create `Operator`s; heartbeats are the tick that applies them. TiDB does not participate in that loop—it only consumes the resulting Region meta and TSO.
 
-![2PC phases](images/tikv-2pc-mvcc.svg)
-
-**Flow:** Begin (TSO) → choose `primaryKey` → Prewrite per Region leader → Commit `primaryKey` first → Commit secondaries → cleanup/resolve.
-
-**Single-key example**
-
-```sql
-BEGIN;                                          -- startTS = 410
-UPDATE orders SET amount = 21.00 WHERE id = 1; -- primaryKey = t100_r1
-COMMIT;                                         -- commitTS = 420
-```
-
-| Phase | TiKV |
-|-------|------|
-| Prewrite | Lock@410; Default @410 |
-| Commit | Write@420; Lock cleared |
-
-```sql
-SELECT amount FROM orders WHERE id = 1;  -- startTS' = 430 → 21.00
-```
-
-Reader at `startTS' = 415` still sees **19.90**.
-
-**Multi-Region example** (R1 = `t100_r1`, R2 = `t100_r2`)
-
-```sql
-BEGIN;  -- startTS = 440
-UPDATE orders SET amount = amount + 1.00 WHERE id IN (1, 2);
--- primaryKey = t100_r1; secondary = t100_r2
-COMMIT; -- commitTS = 450
-```
-
-| Step | Result |
-|------|--------|
-| Prewrite R1+R2 | OK |
-| Commit `primaryKey` on R1 | OK → **txn committed** |
-| Commit secondary on R2 | may fail once |
-| Later op hitting `t100_r2` Lock | Check `primaryKey` → finish secondary Commit → then read/write |
-
-```sql
-SELECT id, amount FROM orders ORDER BY id;  -- after resolve
-```
-
-| id | amount |
-|----|--------|
-| 1 | 22.00 |
-| 2 | 6.00 |
-
-| Reader | `id=1` | `id=2` (Lock still present) |
-|--------|--------|------------------------------|
-| `startTS' ≥ 450` | **22.00** now | resolve → **6.00** |
-| `startTS' < 450` | **21.00** | **5.00** |
-
-Checking `primaryKey` runs on **Lock hit**, not on every query.
-
-### 3.5 Coprocessor
-
-```sql
-SELECT SUM(amount) FROM orders;
-```
-
-| SUM(amount) |
-|-------------|
-| 26.00 |
-
-*(Amounts 21.00 + 5.00 after the single-row update in §2.3, before the multi-Region `+1.00`.)* TiDB may push a DAG per Region; TiKV computes partial aggregates next to data. Same SQL result whether merged in TiDB or partially pushed down.
-
-### 3.6 Unistore (in-tree stand-in)
-
-`pkg/store/mockstore/unistore/tikv.MVCCStore`: LockStore + Badger, Prewrite/Commit aligned with `kvrpcpb`, **no** Multi-Raft. Use for lock/resolve behavior tests—not RocksDB CF layout.
-
-```sql
--- A: BEGIN; UPDATE orders SET amount = 30 WHERE id = 1;  -- holds Lock
--- B: BEGIN; UPDATE orders SET amount = 40 WHERE id = 1; COMMIT;
--- B waits / conflicts until A commits or rolls back
-```
-
-### 3.7 Key files
+### 3.6 Key files (`git/pd`)
 
 | Path | Role |
 |------|------|
-| `git/tidb/pkg/kv/kv.go` | `Storage`, `Transaction` |
-| `git/tidb/pkg/store/driver/tikv_driver.go` | Open PD + `KVStore` |
-| `git/tidb/pkg/store/driver/txn/txn_driver.go` | `tikvTxn` |
-| `git/tidb/pkg/tablecodec/tablecodec.go` | Key encoding |
-| `git/tidb/pkg/store/mockstore/unistore/tikv/mvcc.go` | Unistore MVCC |
-| `client-go/.../tikv/kv.go` | `KVStore` |
-| `client-go/.../internal/locate/region_cache.go` | `RegionCache` |
-| `client-go/.../txnkv/transaction/2pc.go` | `twoPhaseCommitter` |
-
-(`client-go` = module version in `git/tidb/go.mod`.)
+| `cmd/pd-server/main.go` | process entry |
+| `server/server.go` | `CreateServer`, `Run`, `leaderLoop`, `campaignLeader` |
+| `server/grpc_service.go` | `GrpcServer.Tso`, `GetRegion`, heartbeats, AskSplit |
+| `pkg/tso/allocator.go` | `GenerateTSO` |
+| `pkg/tso/tso.go` | `timestampOracle.getTS` |
+| `pkg/core/region.go` | `RegionsInfo.GetRegionByKey` |
+| `pkg/core/region_tree.go` | B-tree search by start key |
+| `server/cluster/cluster_worker.go` | `HandleRegionHeartbeat` |
+| `pkg/schedule/operator/create_operator.go` | `CreateSplitRegionOperator`, merge / transfer-leader |
+| `pkg/schedule/operator/operator_controller.go` | `Dispatch` |
+| `pkg/schedule/checker/split_checker.go` | size / rule driven splits |
+| `pkg/schedule/schedulers/` | balance / hot-region schedulers |
 
 ---
 
-*Production raftstore/RocksDB details live in `tikv/tikv`. SQL tables here are illustrative for `orders`; TSO and Region IDs are not from a live cluster.*
+## Scope
+
+Covered: cluster roles; TiDB server path (dispatch → parse → compile → execute); joins across TiKV ranges; PD Region key ranges and split/merge, TSO, locate, and heartbeat-driven schedule (`git/pd`). Not covered: Region Raft election/log and majority `CommitLog`, or `primaryKey` 2PC MVCC—[TiKV](../tikv/); CAP theory and PD etcd Raft—[CAP and Raft](../cap/). Optional PD microservices (independent TSO/scheduling MCS) are noted only where the classic monolithic path branches.

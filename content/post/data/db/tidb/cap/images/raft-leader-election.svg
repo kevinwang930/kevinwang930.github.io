@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Raft leader election with RequestVote and majority">
+  <defs>
+    <marker id="arrOr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arrGn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrGy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#546e7a"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Raft leader election (RF=3)</text>
+  <text x="500" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Election timeout -&gt; Candidate increments term, RequestVote; majority grants =&gt; Leader</text>
+
+  <!-- Step strip -->
+  <g transform="translate(40, 70)">
+    <rect width="140" height="48" fill="#eceff1" stroke="#90a4ae" rx="4"/>
+    <text x="70" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">1. timeout</text>
+    <text x="70" y="38" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">no heartbeat</text>
+
+    <line x1="140" y1="24" x2="170" y2="24" stroke="#546e7a" stroke-width="1.4" marker-end="url(#arrGy)"/>
+
+    <rect x="170" y="0" width="160" height="48" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="250" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">2. Candidate</text>
+    <text x="250" y="38" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">term = T+1, vote self</text>
+
+    <line x1="330" y1="24" x2="360" y2="24" stroke="#546e7a" stroke-width="1.4" marker-end="url(#arrGy)"/>
+
+    <rect x="360" y="0" width="200" height="48" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="460" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">3. RequestVote</text>
+    <text x="460" y="38" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">ask peers for votes</text>
+
+    <line x1="560" y1="24" x2="590" y2="24" stroke="#546e7a" stroke-width="1.4" marker-end="url(#arrGy)"/>
+
+    <rect x="590" y="0" width="160" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="670" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">4. majority</text>
+    <text x="670" y="38" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">2 of 3 votes</text>
+
+    <line x1="750" y1="24" x2="780" y2="24" stroke="#546e7a" stroke-width="1.4" marker-end="url(#arrGy)"/>
+
+    <rect x="780" y="0" width="140" height="48" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
+    <text x="850" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">5. Leader</text>
+    <text x="850" y="38" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">heartbeats</text>
+  </g>
+
+  <!-- Candidate -->
+  <g transform="translate(60, 160)">
+    <rect width="280" height="220" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="6"/>
+    <text x="140" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e65100">CANDIDATE (peer B)</text>
+    <text x="140" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">term = 4</text>
+    <rect x="24" y="70" width="232" height="128" fill="#ffffff" stroke="#ffcc80" rx="4"/>
+    <text x="140" y="98" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">election timeout fired</text>
+    <text x="140" y="120" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">increment currentTerm</text>
+    <text x="140" y="142" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">vote for self (1/3)</text>
+    <text x="140" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">RequestVote RPC</text>
+    <text x="140" y="182" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">include last log index/term</text>
+  </g>
+
+  <!-- Follower A -->
+  <g transform="translate(420, 160)">
+    <rect width="240" height="160" fill="#ffffff" stroke="#546e7a" stroke-width="1.4" rx="6"/>
+    <text x="120" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#37474f">FOLLOWER A</text>
+    <text x="120" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">term 3 -&gt; 4</text>
+    <text x="120" y="90" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">log at least as up-to-date?</text>
+    <text x="120" y="114" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">grant vote</text>
+    <text x="120" y="138" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">one vote per term</text>
+  </g>
+
+  <!-- Follower C -->
+  <g transform="translate(720, 160)">
+    <rect width="220" height="160" fill="#ffffff" stroke="#546e7a" stroke-width="1.4" rx="6"/>
+    <text x="110" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#37474f">FOLLOWER C</text>
+    <text x="110" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">term 3 -&gt; 4</text>
+    <text x="110" y="90" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">same checks</text>
+    <text x="110" y="114" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">grant vote</text>
+    <text x="110" y="138" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">(or deny if stale log)</text>
+  </g>
+
+  <!-- RequestVote arrows -->
+  <path d="M 340 230 L 420 230" fill="none" stroke="#ef6c00" stroke-width="1.8" marker-end="url(#arrOr)"/>
+  <path d="M 340 270 L 720 250" fill="none" stroke="#ef6c00" stroke-width="1.8" marker-end="url(#arrOr)"/>
+  <text x="380" y="218" font-family="Consolas, monospace" font-size="9" fill="#ef6c00">RequestVote</text>
+
+  <!-- Vote replies -->
+  <path d="M 420 300 L 340 310" fill="none" stroke="#2e7d32" stroke-width="1.4" stroke-dasharray="4 2" marker-end="url(#arrGn)"/>
+  <text x="390" y="328" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">vote granted</text>
+
+  <!-- Result -->
+  <g transform="translate(60, 420)">
+    <rect width="880" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="6"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Outcome</text>
+    <text x="20" y="52" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#37474f">Peer B has self-vote + A =&gt; majority (2/3). B becomes Leader for term 4 and starts AppendEntries heartbeats.</text>
+    <text x="20" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#546e7a">Split votes (two candidates) =&gt; no majority; randomized timeouts start another round. Minority partition cannot win.</text>
+  </g>
+</svg>
