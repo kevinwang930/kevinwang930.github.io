@@ -1,5 +1,5 @@
 ---
-title: "TiDB architecture: cluster and server"
+title: "TiDB architecture: cluster topology, TiDB server and Placement Driver"
 date: 2026-08-06T22:00:00+02:00
 categories:
 - data
