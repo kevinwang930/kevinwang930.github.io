@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640" role="img" aria-label="TiDB server: MySQL protocol, parse, compile, execute">
+  <defs>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arrP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#6a1b9a"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="640" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">TiDB server: SQL parse and dispatch</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">MySQL protocol -&gt; dispatch -&gt; ParseSQL -&gt; Compiler.Compile / Optimize -&gt; ExecStmt -&gt; KV / TiKV</text>
+
+  <!-- Client -->
+  <g transform="translate(40, 80)">
+    <rect width="140" height="100" fill="#eceff1" stroke="#607d8b" stroke-width="1.4" rx="6"/>
+    <text x="70" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Client</text>
+    <text x="70" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">MySQL protocol</text>
+    <text x="70" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">ComQuery</text>
+  </g>
+
+  <!-- Protocol layer -->
+  <g transform="translate(240, 70)">
+    <rect width="280" height="120" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="140" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">pkg/server</text>
+    <text x="140" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">Server.onConn</text>
+    <text x="140" y="70" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">clientConn.Run</text>
+    <text x="140" y="92" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">dispatch(cmd)</text>
+    <text x="140" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#547d8b">handleQuery / handleStmt</text>
+  </g>
+
+  <line x1="180" y1="130" x2="240" y2="130" stroke="#1565c0" stroke-width="1.8" marker-end="url(#arrB)"/>
+
+  <!-- Session -->
+  <g transform="translate(580, 70)">
+    <rect width="240" height="120" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="6"/>
+    <text x="120" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">pkg/session</text>
+    <text x="120" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">Parse / ParseSQL</text>
+    <text x="120" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">ExecuteStmt</text>
+    <text x="120" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">runStmt</text>
+    <text x="120" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">per-connection session</text>
+  </g>
+
+  <line x1="520" y1="130" x2="580" y2="130" stroke="#ef6c00" stroke-width="1.8" marker-end="url(#arrO)"/>
+
+  <!-- Domain -->
+  <g transform="translate(880, 70)">
+    <rect width="180" height="120" fill="#f3e5f5" stroke="#8e24aa" stroke-width="1.4" rx="6"/>
+    <text x="90" y="36" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">Domain</text>
+    <text x="90" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">InfoSchema</text>
+    <text x="90" y="80" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">DDL / stats</text>
+    <text x="90" y="100" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">kv.Storage</text>
+  </g>
+
+  <line x1="820" y1="110" x2="880" y2="110" stroke="#6a1b9a" stroke-width="1.4" stroke-dasharray="4 2" marker-end="url(#arrP)"/>
+
+  <!-- Pipeline boxes -->
+  <text x="550" y="230" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Statement pipeline (one ComQuery)</text>
+
+  <g transform="translate(40, 250)">
+    <rect width="190" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="5"/>
+    <text x="95" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">1. Parse</text>
+    <text x="95" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">pkg/parser</text>
+    <text x="95" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">ParseSQL / yyParse</text>
+    <text x="95" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">ast.StmtNode[]</text>
+  </g>
+
+  <line x1="230" y1="300" x2="270" y2="300" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#arrG)"/>
+
+  <g transform="translate(270, 250)">
+    <rect width="190" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="5"/>
+    <text x="95" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">2. Compile</text>
+    <text x="95" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">executor.Compiler</text>
+    <text x="95" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">Preprocess</text>
+    <text x="95" y="94" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">planner.Optimize</text>
+  </g>
+
+  <line x1="460" y1="300" x2="500" y2="300" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#arrG)"/>
+
+  <g transform="translate(500, 250)">
+    <rect width="190" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="5"/>
+    <text x="95" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">3. Execute</text>
+    <text x="95" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">ExecStmt.Exec</text>
+    <text x="95" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">buildExecutor</text>
+    <text x="95" y="94" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">Open / Next</text>
+  </g>
+
+  <line x1="690" y1="300" x2="730" y2="300" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#arrG)"/>
+
+  <g transform="translate(730, 250)">
+    <rect width="330" height="100" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="5"/>
+    <text x="165" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">4. Storage edge</text>
+    <text x="165" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">tablecodec / RegionCache</text>
+    <text x="165" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">distsql.Select / PointGet</text>
+    <text x="165" y="94" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">client-go -&gt; TiKV / TiFlash</text>
+  </g>
+
+  <!-- Bottom detail row -->
+  <g transform="translate(40, 390)">
+    <rect width="1020" height="210" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="6"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Dispatch vs parse</text>
+
+    <rect x="20" y="48" width="460" height="140" fill="#e3f2fd" stroke="#64b5f6" rx="4"/>
+    <text x="40" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">clientConn.dispatch</text>
+    <text x="40" y="100" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Routes by MySQL command byte</text>
+    <text x="40" y="122" font-family="Consolas, monospace" font-size="10" fill="#1565c0">ComQuery -&gt; handleQuery</text>
+    <text x="40" y="142" font-family="Consolas, monospace" font-size="10" fill="#1565c0">ComStmtPrepare / Execute -&gt; prepared</text>
+    <text x="40" y="162" font-family="Consolas, monospace" font-size="10" fill="#546e7a">token limits concurrent requests</text>
+
+    <rect x="520" y="48" width="480" height="140" fill="#fff8e1" stroke="#ffb74d" rx="4"/>
+    <text x="540" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">handleQuery -&gt; ExecuteStmt</text>
+    <text x="540" y="100" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Parse text to AST, then per-stmt execute</text>
+    <text x="540" y="122" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">ctx.Parse(sql) -&gt; []ast.StmtNode</text>
+    <text x="540" y="142" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">handleStmt -&gt; ExecuteStmt(stmt)</text>
+    <text x="540" y="162" font-family="Consolas, monospace" font-size="10" fill="#546e7a">Compile + Exec; write result set to client</text>
+  </g>
+</svg>

@@ -20,6 +20,7 @@
 </a><a class="tag tag--primary tag--small" href=#nio-list data-tag=nio>nio
 </a><a class="tag tag--primary tag--small" href=#rocketmq-list data-tag=rocketmq>rocketmq
 </a><a class="tag tag--primary tag--small" href=#spring-cloud-list data-tag=spring-cloud>spring-cloud
+</a><a class="tag tag--primary tag--small" href=#tidb-list data-tag=tidb>tidb
 </a><a class="tag tag--primary tag--small" href=#ai-list data-tag=ai>ai
 </a><a class="tag tag--primary tag--small" href=#annotation-list data-tag=annotation>annotation
 </a><a class="tag tag--primary tag--small" href=#aop-list data-tag=aop>aop
@@ -58,12 +59,11 @@
 </a><a class="tag tag--primary tag--small" href=#syntax-list data-tag=syntax>syntax
 </a><a class="tag tag--primary tag--small" href=#tcp%2fip-list data-tag=tcp/ip>tcp/ip
 </a><a class="tag tag--primary tag--small" href=#thread-list data-tag=thread>thread
-</a><a class="tag tag--primary tag--small" href=#tidb-list data-tag=tidb>tidb
 </a><a class="tag tag--primary tag--small" href=#time-list data-tag=time>time
 </a><a class="tag tag--primary tag--small" href=#tomcat-list data-tag=tomcat>tomcat
 </a><a class="tag tag--primary tag--small" href=#transaction-list data-tag=transaction>transaction
 </a><a class="tag tag--primary tag--small" href=#tree-list data-tag=tree>tree
-</a><a class="tag tag--primary tag--small" href=#webflux-list data-tag=webflux>webflux</a></section><section class=boxes><div id=data-list class="archive box" data-tag=data><h4 class=archive-title><a class=link-unstyled href=data>data (18)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
+</a><a class="tag tag--primary tag--small" href=#webflux-list data-tag=webflux>webflux</a></section><section class=boxes><div id=data-list class="archive box" data-tag=data><h4 class=archive-title><a class=link-unstyled href=data>data (19)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
 </a><span class=archive-post-date>-
 September 13, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/metadata/>Mysql internals - Metadata
 </a><span class=archive-post-date>-
@@ -97,9 +97,11 @@ July 23, 2026</span></li><li class=archive-post><a class=archive-post-title href
 </a><span class=archive-post-date>-
 August 1, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/search/lucene/>Lucene internals
 </a><span class=archive-post-date>-
-August 3, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: TiKV storage plane
+August 3, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: cluster and server
 </a><span class=archive-post-date>-
-August 6, 2026</span></li></ul></div><div id=java-list class="archive box" data-tag=java><h4 class=archive-title><a class=link-unstyled href=java>java (15)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
+August 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/cap/>CAP Theory and Raft implementation in TiDB placement driver
+</a><span class=archive-post-date>-
+August 8, 2026</span></li></ul></div><div id=java-list class="archive box" data-tag=java><h4 class=archive-title><a class=link-unstyled href=java>java (15)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
 </a><span class=archive-post-date>-
 February 24, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/scheduling/>Java Concurrency - Task Scheduling
 </a><span class=archive-post-date>-
@@ -153,7 +155,7 @@ March 29, 2026</span></li><li class=archive-post><a class=archive-post-title hre
 </a><span class=archive-post-date>-
 May 18, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring/transaction/>Spring Transaction Internals: Architecture, Lifecycle, and Nested Transaction Mechanics
 </a><span class=archive-post-date>-
-June 19, 2026</span></li></ul></div><div id=db-list class="archive box" data-tag=db><h4 class=archive-title><a class=link-unstyled href=db>db (7)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
+June 19, 2026</span></li></ul></div><div id=db-list class="archive box" data-tag=db><h4 class=archive-title><a class=link-unstyled href=db>db (8)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
 </a><span class=archive-post-date>-
 September 13, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/metadata/>Mysql internals - Metadata
 </a><span class=archive-post-date>-
@@ -165,9 +167,11 @@ June 16, 2026</span></li><li class=archive-post><a class=archive-post-title href
 </a><span class=archive-post-date>-
 June 17, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/dml/>MySQL DML Internals — INSERT / UPDATE, Locks & Transactions
 </a><span class=archive-post-date>-
-July 12, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: TiKV storage plane
+July 12, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: cluster and server
 </a><span class=archive-post-date>-
-August 6, 2026</span></li></ul></div><div id=concurrency-list class="archive box" data-tag=concurrency><h4 class=archive-title><a class=link-unstyled href=concurrency>concurrency (6)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/scheduling/>Java Concurrency - Task Scheduling
+August 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/cap/>CAP Theory and Raft implementation in TiDB placement driver
+</a><span class=archive-post-date>-
+August 8, 2026</span></li></ul></div><div id=concurrency-list class="archive box" data-tag=concurrency><h4 class=archive-title><a class=link-unstyled href=concurrency>concurrency (6)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/scheduling/>Java Concurrency - Task Scheduling
 </a><span class=archive-post-date>-
 February 25, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/>java concurrency - Synchronizer Framework
 </a><span class=archive-post-date>-
@@ -291,7 +295,11 @@ December 21, 2025</span></li></ul></div><div id=spring-cloud-list class="archive
 </a><span class=archive-post-date>-
 May 29, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring-cloud/nacos/>NACOS - service and configuration management
 </a><span class=archive-post-date>-
-June 10, 2024</span></li></ul></div><div id=ai-list class="archive box" data-tag=ai><h4 class=archive-title><a class=link-unstyled href=ai>ai (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/ai/mcp/>Model Context Protocol (MCP)
+June 10, 2024</span></li></ul></div><div id=tidb-list class="archive box" data-tag=tidb><h4 class=archive-title><a class=link-unstyled href=tidb>tidb (2)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: cluster and server
+</a><span class=archive-post-date>-
+August 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/cap/>CAP Theory and Raft implementation in TiDB placement driver
+</a><span class=archive-post-date>-
+August 8, 2026</span></li></ul></div><div id=ai-list class="archive box" data-tag=ai><h4 class=archive-title><a class=link-unstyled href=ai>ai (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/ai/mcp/>Model Context Protocol (MCP)
 </a><span class=archive-post-date>-
 June 23, 2026</span></li></ul></div><div id=annotation-list class="archive box" data-tag=annotation><h4 class=archive-title><a class=link-unstyled href=annotation>annotation (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/annotation/>JAVA Annotation
 </a><span class=archive-post-date>-
@@ -367,9 +375,7 @@ March 31, 2024</span></li></ul></div><div id=tcp/ip-list class="archive box" dat
 </a><span class=archive-post-date>-
 July 22, 2024</span></li></ul></div><div id=thread-list class="archive box" data-tag=thread><h4 class=archive-title><a class=link-unstyled href=thread>thread (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/jvm/thread/>JVM Thread internals
 </a><span class=archive-post-date>-
-August 7, 2024</span></li></ul></div><div id=tidb-list class="archive box" data-tag=tidb><h4 class=archive-title><a class=link-unstyled href=tidb>tidb (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/tidb/architecture/>TiDB architecture: TiKV storage plane
-</a><span class=archive-post-date>-
-August 6, 2026</span></li></ul></div><div id=time-list class="archive box" data-tag=time><h4 class=archive-title><a class=link-unstyled href=time>time (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/time/>Java Date Time Objects
+August 7, 2024</span></li></ul></div><div id=time-list class="archive box" data-tag=time><h4 class=archive-title><a class=link-unstyled href=time>time (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/time/>Java Date Time Objects
 </a><span class=archive-post-date>-
 February 3, 2026</span></li></ul></div><div id=tomcat-list class="archive box" data-tag=tomcat><h4 class=archive-title><a class=link-unstyled href=tomcat>tomcat (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/tomcat/>Tomcat- Servlet Container
 </a><span class=archive-post-date>-

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-label="CAP under network partition: choose consistency or availability">
+  <rect width="920" height="420" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <text x="28" y="32" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#0f172a">CAP under partition: C or A (P has already happened)</text>
+  <text x="28" y="52" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">When replicas cannot agree, the system either refuses unsafe answers (CP) or keeps serving possibly stale/divergent answers (AP).</text>
+
+  <!-- Nodes -->
+  <rect x="60" y="90" width="160" height="70" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="140" y="120" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#0f172a">Replica A</text>
+  <text x="140" y="142" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">value = 1</text>
+
+  <rect x="360" y="90" width="160" height="70" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="440" y="120" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#0f172a">Replica B</text>
+  <text x="440" y="142" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">value = 1</text>
+
+  <line x1="220" y1="125" x2="360" y2="125" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="290" y="116" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#b45309">PARTITION</text>
+
+  <!-- Client -->
+  <rect x="200" y="200" width="180" height="50" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.25"/>
+  <text x="290" y="230" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#0f172a">Client write(value=2)</text>
+
+  <line x1="240" y1="200" x2="140" y2="160" stroke="#64748b" stroke-width="1.4"/>
+  <line x1="340" y1="200" x2="440" y2="160" stroke="#64748b" stroke-width="1.4" stroke-dasharray="4 3"/>
+
+  <!-- CP box -->
+  <rect x="60" y="280" width="380" height="110" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="80" y="308" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#047857">CP choice</text>
+  <text x="80" y="332" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">Refuse or delay until quorum can agree.</text>
+  <text x="80" y="352" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">Minority side: error / unavailable.</text>
+  <text x="80" y="372" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">Example in this post: Raft majority (TiKV Region)</text>
+
+  <!-- AP box -->
+  <rect x="480" y="280" width="380" height="110" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="500" y="308" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#b45309">AP choice</text>
+  <text x="500" y="332" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">Accept write on reachable replica(s).</text>
+  <text x="500" y="352" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#334155">Sides may diverge; reconcile later.</text>
+  <text x="500" y="372" font-family="system-ui,sans-serif" font-size="10" fill="#64748b">Examples: Cassandra, Dynamo-style stores</text>
+</svg>
