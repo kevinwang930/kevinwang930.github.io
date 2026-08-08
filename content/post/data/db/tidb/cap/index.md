@@ -16,80 +16,75 @@ keywords:
 - etcd
 #thumbnailImage: //example.com/image.jpg
 ---
-The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** is a consensus algorithm that implements CAP’s **CP** choice via majority quorum. This post defines C, A, and P, explains how Raft relates to that trade-off, then details **PD’s** embedded-etcd Raft (control-plane membership). TiKV Region Multi-Raft (`raft-rs`) is in [TiKV: store, Multi-Raft Regions, and 2PC](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
+The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** implements CAP’s **CP** choice via majority quorum. This post introduces that theory (C, A, P, partition trade-off, Raft as CP), then details **PD’s** embedded-etcd Raft. TiKV Region Multi-Raft is in [TiKV](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
 <!--more-->
 
-Related: [TiKV: store, Multi-Raft Regions, and 2PC](../tikv/), [TiDB architecture: cluster and server](../architecture/).
-
-Source grounding: Raft as design and protocol; PD embedded etcd in `git/pd`. Region Multi-Raft runs in **TiKV** ([TiKV post](../tikv/)); PD membership Raft runs in **PD**—neither in the TiDB server process.
 
 ---
 
-## 1. Overview
+## 1. Theory
 
-Brewer conjectured CAP in 2000; Gilbert and Lynch proved a formal version in 2002. Under unbounded message delay or loss between replicas, a system cannot offer both **linearizable** reads/writes to every live node and **non-error responses** from every live node.
+Brewer conjectured CAP in 2000; Gilbert and Lynch gave a formal proof in 2002. On a network that can **partition**—messages between some replicas delayed or lost for an unbounded time—a shared-data system cannot simultaneously guarantee:
 
-Raft answers the CP side for one replicated object: at most one leader per term, and a write commits only when a **majority** of voters have stored it. In a TiDB cluster that object is either a **Region** (TiKV—[TiKV post](../tikv/)) or the **PD / etcd membership log** (this post, §3).
+- **linearizable** reads and writes for the replicated object, and  
+- a **non-error response** from **every** non-failed node that receives a request.
 
-**What this post covers**
+That is the theorem. The design question under partition is which guarantee to keep: **C** or **A**. **P** is not optional on real multi-node deployments; partitions occur.
 
-1. Overview — CAP and where Raft appears  
-2. Theory — C, A, P, then Raft as the CP mechanism  
-3. PD Raft — two leaders (etcd vs PD), start, election, keep-alive, log (`git/pd`)  
+### 1.1 Scope of the theorem
 
-**When CAP applies**
+| CAP applies to | CAP does not decide alone |
+|----------------|---------------------------|
+| Multi-replica read/write of **one logical object** | Single-node stores (no replica set to partition) |
+| Behavior **while** replicas cannot communicate | Latency / throughput when the network is healthy (that is closer to PACELC’s “else”) |
+| Whether a client operation **succeeds or errors** | SQL isolation levels, foreign keys, or application invariants by themselves |
+| Replicated state machines / quorum logs | Whether the product is “highly available” in the ops sense (nines) |
 
-| Applies | Does not decide alone |
-|---------|------------------------|
-| Multi-replica read/write of one logical object | Single-node stores |
-| Behavior while replicas cannot communicate | Latency when the network is healthy |
-| Success vs error of client operations | SQL isolation levels by themselves |
+### 1.2 The three properties
 
-**Facts**
+| Property | Formal meaning in CAP |
+|----------|------------------------|
+| **Consistency (C)** | A successful read reflects the latest successful write (**linearizability** for that object): there is a single history all clients agree on. |
+| **Availability (A)** | Every request to a **non-failing** node eventually receives a **non-error** response. The node must not wait forever for unreachable peers. |
+| **Partition tolerance (P)** | The system continues to function under arbitrary message loss or delay between subsets of nodes. |
 
-- On a real multi-node network, **partitions happen**; the design question is **C or A** while P holds.  
-- **CP**: one agreed value; the minority side often errors or stalls.  
-- **AP**: each side may accept work; values can diverge until repair.  
-- Raft majority commit ⇒ **CP per Raft group**. PD: one etcd group for the PD members. TiKV: one group per Region ([TiKV](../tikv/)).
+Precise distinctions that are often blurred:
 
----
+- CAP **C** is **not** ACID “consistency” (constraints across rows or tables). It is the **single-copy illusion** for one replicated object.  
+- CAP **A** is **not** “three nines uptime.” A node that is up but returns `NotLeader` / timeout while waiting for quorum is **unavailable** in CAP’s sense for that request.  
+- **P** is assumed once you deploy across failure domains; the interesting choice is **CP vs AP** when the cut happens.
 
-## 2. Theory
+### 1.3 The partition model
 
-### 2.1 The three properties
-
-| Property | Meaning |
-|----------|---------|
-| **Consistency (C)** | A successful read reflects the latest successful write (linearizability for that object). |
-| **Availability (A)** | Every request to a non-failing node eventually gets a non-error response (no unbounded wait for unreachable peers). |
-| **Partition tolerance (P)** | The system still operates when messages between node subsets are lost or delayed arbitrarily. |
-
-CAP’s **C** is not ACID “consistency” (constraints across rows). It is the **single-copy illusion** for a replicated object. CAP’s **A** is not “three nines uptime”; it is whether a live node answers or waits forever for quorum.
-
-### 2.2 The partition model
-
-Split the replicas so **no message crosses** the cut for an unbounded time. Clients may still reach nodes inside each component.
+Split the replica set so **no message crosses** the cut for an unbounded time. Clients may still reach nodes inside each component.
 
 ![CAP under partition: CP vs AP](images/cap-partition-choice.svg)
 
-| Choice | Behavior | Client on the minority side |
-|--------|----------|-----------------------------|
-| **CP** | Commit only with a rule that preserves linearizability (typically a **majority quorum**). | Error, timeout, or “not leader” |
-| **AP** | Accept locally; reconcile later (LWW, vector clocks, CRDTs, …). | Success; histories may fork |
+| Choice | Rule during the cut | Client on the minority side | Histories |
+|--------|---------------------|-----------------------------|-----------|
+| **CP** | Commit only with a rule that preserves linearizability (typically a **majority quorum** of the original voter set). | Error, timeout, or “not leader” | One history; minority does not invent a second |
+| **AP** | Accept locally without waiting for the other side. | Success | Histories may **fork**; repair later (LWW, vector clocks, CRDTs, …) |
 
-There is no option that keeps linearizability for all clients **and** non-error answers on every live node for the whole partition. That is the theorem.
+There is no design that keeps linearizability for **all** clients **and** non-error answers on **every** live node for the whole duration of the partition. That impossibility is the theorem—not a product slogan.
 
-### 2.3 Raft Protocol
+**Worked quorum (RF=3).** Voters {A, B, C}; majority = 2. Cut isolates C from {A, B}.
 
-CAP asks what is possible under partition. **Raft** is one concrete answer: choose **C** by requiring a **majority** before a write is committed, and allow at most one leader per term so histories do not fork.
+| Side | Can elect / commit under CP (Raft-style majority)? | Under AP? |
+|------|-----------------------------------------------------|-----------|
+| {A, B} | Yes (2 ≥ majority) | Yes (and may diverge from C) |
+| {C} | No (1 < majority) → stall or error | Yes locally → fork possible |
+
+### 1.4 Raft as a CP mechanism
+
+CAP states the trade-off; it does not name an algorithm. **Raft** is one concrete CP answer for a single replicated log: commit only when a **majority** of voters have stored the entry, and allow at most one **Leader** per term so histories do not fork.
 
 | CAP question | Raft answer |
 |--------------|-------------|
-| How to keep one history? | Commit only prefixes a majority has stored |
-| What happens on the minority side? | Cannot elect or commit → error / stall |
-| Split-brain? | One vote per term + majority ⇒ at most one leader per term |
+| How to keep one history? | Commit only prefixes a majority has stored (`commitIndex`) |
+| What happens on the minority side? | Cannot elect or commit → client error / stall |
+| Split-brain? | One vote per term per peer + majority ⇒ at most one leader per term |
 
-A Raft group of `N` voters has at most one **Leader** per term. Followers replicate; they do not accept client writes for that group. Quorum size is `majority(N) = ⌊N/2⌋ + 1`. Election and log commit use the same rule—**no split-brain**. That is CAP’s **CP** outcome for the group.
+A Raft group of `N` voters has quorum size `majority(N) = ⌊N/2⌋ + 1`. For `N = 3`, majority is 2. **Election and log commit use the same quorum**—that shared rule is why Raft yields CAP’s **CP** outcome for the group.
 
 ![Raft protocol: roles, AppendEntries, majority](images/raft-protocol.svg)
 
@@ -100,16 +95,16 @@ A Raft group of `N` voters has at most one **Leader** per term. Followers replic
 | Commit | Leader | Advance `commitIndex` when a **majority** of voters have matched that index |
 | Redirect | Follower / old leader | Tell the client who the leader is (or that there is none during election) |
 
-**Election.** The leader periodically sends `AppendEntries` (with new log entries, or empty as a **heartbeat**). Each follower keeps a randomized **election timeout**. Receiving a valid `AppendEntries` from the current leader proves the leader is still alive, so the follower **resets** that timer. Followers do not probe the leader; silence is the signal. If no valid `AppendEntries` arrives before the timeout—leader crash, long GC pause, or a partition that blocks heartbeats—the follower treats the leader as gone: it becomes a **Candidate**, increments `currentTerm`, votes for itself, and sends `RequestVote`. A peer grants at most one vote per term, and only if the candidate’s log is at least as up-to-date. Majority votes ⇒ **Leader**, which resumes `AppendEntries` heartbeats.
+**Election and liveness detection.** The leader periodically sends `AppendEntries` (with new entries, or empty as a **heartbeat**). Each follower keeps a randomized **election timeout**. Receiving a valid `AppendEntries` from the current leader proves the leader is alive, so the follower **resets** that timer. Followers do not probe the leader; **silence** is the signal. If no valid `AppendEntries` arrives before the timeout—crash, long pause, or a partition that blocks heartbeats—the follower becomes a **Candidate**: increments `currentTerm`, votes for itself, sends `RequestVote`. A peer grants at most one vote per term, and only if the candidate’s log is at least as up-to-date. Majority votes ⇒ **Leader**.
 
 ![Raft leader election](images/raft-leader-election.svg)
 
-| Rule | Effect |
-|------|--------|
-| Majority of votes required | Split votes → randomized timeouts → another round |
-| One vote per term per peer | At most one leader per term |
-| Log up-to-date check | Prefers peers with longer history |
-| Minority partition | Cannot elect |
+| Rule | Effect under partition |
+|------|------------------------|
+| Majority of votes required | Minority component cannot elect |
+| One vote per term per peer | At most one leader per term cluster-wide |
+| Log up-to-date check | Prefers peers with longer committed history |
+| Randomized timeouts | Breaks split votes (two candidates, no majority) |
 
 **Log.** Each entry is `(term, index, command)`. Safety is committing only prefixes a majority has stored.
 
@@ -121,13 +116,13 @@ A Raft group of `N` voters has at most one **Leader** per term. Followers replic
 | `lastApplied` | Applied to the local state machine (`≤ commitIndex`) |
 | Match index | Per-follower agreement with the leader |
 
-Pipeline: **propose** → **persist + replicate** → **commit** (majority) → **apply** (state machine).
+Pipeline: **propose** → **persist + replicate** → **commit** (majority) → **apply** (state machine). The majority wait on commit is CAP’s **C** cost on the write path; the minority’s inability to elect is CAP’s sacrificed **A**.
 
-Raft is not CAP itself; it is a **CP implementation** of consensus for one replicated log. Two deployments in this cluster use that pattern with different libraries and objects: **PD** (§3, etcd Raft) and **TiKV** Regions ([TiKV post](../tikv/), `raft-rs`).
+Raft is not CAP itself; it is a **CP implementation** of consensus for one replicated log. In a TiDB cluster that pattern appears twice with different libraries and objects: **PD** (§2, etcd Raft for control-plane meta) and **TiKV** Regions ([TiKV post](../tikv/), `raft-rs` for row data).
 
 ---
 
-## 3. PD Raft implementation
+## 2. PD Raft implementation
 
 Each PD member embeds **etcd**; the PD servers form **one** Raft group whose log holds control-plane state (membership, Region meta keys, leases). The library is Go **`go.etcd.io/etcd/raft`**, inside embedded etcd. PD does **not** call `RequestVote` / `AppendEntries` itself—those RPCs live in etcd. PD **starts** etcd, **observes** term / commit / apply, and layers a **PD leader** lease (`/pd/{cluster}/leader`) on top of that quorum.
 
@@ -139,9 +134,9 @@ Each PD member embeds **etcd**; the PD servers form **one** Raft group whose log
 | **Peers** | PD servers (odd set, typically 3 or 5) | TiKV stores |
 | **Client surface** | **PD leader** (TSO / locate / schedule) | Region **leader** (`NotLeader`) |
 
-Same CAP rule from §2.3: majority commit, minority cannot elect a second leader. Different object and different library.
+Same CAP rule from §1.4: majority commit, minority cannot elect a second leader. Different object and different library.
 
-### 3.1 Two leaders: etcd Raft leader vs PD leader
+### 2.1 Two leaders: etcd Raft leader vs PD leader
 
 **etcd runs its own Raft.** PD embeds etcd (`go.etcd.io/etcd`); etcd’s consensus library (`go.etcd.io/etcd/raft`) forms **one** Raft group among the PD members. That group must elect a Raft leader—the peer that appends entries, sends `MsgApp` / `MsgVote`, and advances `commitIndex`. PD did not invent a second Raft for meta; it **inherits** etcd’s. “etcd Raft leader” means leader of **etcd’s** Raft group.
 
@@ -168,7 +163,7 @@ PD-A (usual steady state)          PD-B / PD-C
          ^ writes meta via local etcd Lead()
 ```
 
-### 3.2 Start embedded etcd
+### 2.2 Start embedded etcd
 
 `Server.Run` → `startEtcd` boots one etcd peer per PD process (`GenEmbedEtcdConfig` sets tick / election intervals and PreVote). Raft peers then exchange votes and appends **inside** etcd—this elects the **etcd Raft leader**, not yet the PD leader.
 
@@ -197,9 +192,9 @@ cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 ```
 
-### 3.3 Election (align etcd leader, then campaign PD leader)
+### 2.3 Election (align etcd leader, then campaign PD leader)
 
-After §3.1: first become **etcd Raft leader**, then **Campaign** for the **PD leader** key. `leaderLoop` skips campaigning unless this member is etcd leader; otherwise it watches an existing PD leader or waits.
+After §2.1: first become **etcd Raft leader**, then **Campaign** for the **PD leader** key. `leaderLoop` skips campaigning unless this member is etcd leader; otherwise it watches an existing PD leader or waits.
 
 ```go
 // git/pd: server/server.go — leaderLoop (simplified)
@@ -243,9 +238,9 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 }
 ```
 
-That `OpPut` is how PD leadership is **recorded**: the etcd Raft leader appends it, replicates with `MsgApp` (AppendEntries), and commits only with a majority—same CP rule as §2.3. Winning the key does not replace Raft; it depends on it.
+That `OpPut` is how PD leadership is **recorded**: the etcd Raft leader appends it, replicates with `MsgApp` (AppendEntries), and commits only with a majority—same CP rule as §1.4. Winning the key does not replace Raft; it depends on it.
 
-### 3.4 Heartbeat and leadership keep-alive
+### 2.4 Heartbeat and leadership keep-alive
 
 **Raft heartbeats** (`MsgApp` with no new entries) are sent by the **etcd Raft leader** on its tick; PD never issues them.
 
@@ -279,7 +274,7 @@ func (m *Member) IsServing() bool {
 }
 ```
 
-### 3.5 Raft log (commit and apply)
+### 2.5 Raft log (commit and apply)
 
 etcd owns the replicated log. A successful PD `Campaign` (or any other meta write) becomes one or more log entries; after majority match, `CommittedIndex` advances and the etcd state machine applies into its MVCC store (`AppliedIndex`). **Sending the log and transferring state happen inside etcd’s Raft**—PD only embeds the process and reads the indexes.
 
@@ -399,7 +394,7 @@ Under partition, the minority PD side cannot advance this log or keep the PD lea
 
 PD Raft does **not** replicate row values. Losing PD majority stalls TSO and meta updates; existing TiKV Region majorities can still commit until the client needs a fresh TSO or cache fill from PD.
 
-### 3.6 Key files (`git/pd`)
+### 2.6 Key files (`git/pd`)
 
 | Location | Role |
 |----------|------|
@@ -415,4 +410,4 @@ PD Raft does **not** replicate row values. Losing PD majority stalls TSO and met
 
 ## Scope
 
-Covered: CAP definitions; Raft as a CP majority-quorum mechanism; PD embedded-etcd Raft and why etcd Raft leader ≠ PD leader; start, election, keep-alive, log commit/apply with source snippets. TiKV Region Multi-Raft (`raft-rs`), `NotLeader`, and `CommitLog`: [TiKV](../tikv/). Region key ranges, TSO allocation, and schedule operators: [architecture §3](../architecture/). Not covered: PACELC, Dynamo/AP designs, Byzantine faults, or a full etcd FSM walkthrough.
+Covered: CAP theory (properties, partition model, CP vs AP, Raft as CP); PD embedded-etcd Raft and why etcd Raft leader ≠ PD leader; start, election, keep-alive, log send/commit/apply with source snippets. TiKV Region Multi-Raft (`raft-rs`), `NotLeader`, and `CommitLog`: [TiKV](../tikv/). Region key ranges, TSO allocation, and schedule operators: [architecture §3](../architecture/). Not covered: PACELC, Dynamo/AP designs, Byzantine faults, or a full etcd FSM walkthrough.

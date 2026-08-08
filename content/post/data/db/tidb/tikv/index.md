@@ -74,7 +74,7 @@ Each TiKV process hosts many Region peers (leader or follower). Keyspace partiti
 | `write` | Commit records (and small values) |
 | `default` | Large values |
 
-One RocksDB batch is atomic **on one store**. Keys on other Regions need 2PC (§4). Raft makes each Region’s replicas agree (§3). CAP’s majority rule is stated in [CAP §2.3](../cap/).
+One RocksDB batch is atomic **on one store**. Keys on other Regions need 2PC (§4). Raft makes each Region’s replicas agree (§3). CAP’s majority rule is stated in [CAP §1.4](../cap/).
 
 ### 2.1 Key files (store)
 
@@ -87,7 +87,7 @@ One RocksDB batch is atomic **on one store**. Keys on other Regions need 2PC (§
 
 ## 3. TiKV Raft
 
-TiKV runs **Multi-Raft**: each Region is an independent Raft group (commonly `N = 3` voters on three stores), implemented with Rust **`raft-rs`** inside raftstore. Protocol roles, election rules, and log pointers match [CAP §2.3](../cap/); this section is the TiKV deployment—many groups per store, client `NotLeader`, and `CommitLog` wait.
+TiKV runs **Multi-Raft**: each Region is an independent Raft group (commonly `N = 3` voters on three stores), implemented with Rust **`raft-rs`** inside raftstore. Protocol roles, election rules, and log pointers match [CAP §1.4](../cap/); this section is the TiKV deployment—many groups per store, client `NotLeader`, and `CommitLog` wait.
 
 A store runs **many** independent Raft groups (one per Region peer). Failover is per Region: losing the leader of R1 does not elect a new leader for R2.
 
@@ -199,7 +199,7 @@ Pipeline: **propose** → **persist + replicate** → **commit** (majority) → 
 | `client-go` `internal/locate/replica_selector.go` | `onNotLeader` |
 | `client-go` `internal/client/client.go` | `CommitLog` / `PersistLog` / `ApplyLog` |
 
-PD’s separate etcd Raft (membership / meta, not Region data) is in [CAP §3](../cap/).
+PD’s separate etcd Raft (membership / meta, not Region data) is in [CAP §2](../cap/).
 
 ---
 
