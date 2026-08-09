@@ -233,7 +233,7 @@ onConn → handshake → openSession → Run
 
 ### 2.5 Join across TiKV ranges
 
-TiKV data is partitioned by Region key ranges owned by PD (§3.3). A Region leader only serves keys in its `[start, end)`. There is **no** TiKV RPC that joins two tables across Regions. Cross-Region joins run in the **TiDB process**: the physical plan is a join operator whose children are readers/lookups; each child already fans out to multiple Region leaders via Coprocessor / Get (§2.4). TiDB then combines those row streams in memory.
+TiKV data is partitioned by Region key ranges owned by PD (§3.3). A Region leader only serves keys in its `[start, end)`. There is **no** TiKV RPC that joins two tables across Regions. Cross-Region joins run in the **TiDB process** as volcano-style executors (`Next` returns a `chunk.Chunk`): a join operator pulls child readers; each reader already fans one logical scan into **parallel Coprocessor RPCs** to many Region leaders (§2.4). TiDB then joins those row streams in memory.
 
 ![Join across TiKV ranges](images/tidb-join-across-tikv.svg)
 
@@ -246,36 +246,70 @@ WHERE o.id >= 1;
 
 | Strategy | Where the join runs | How TiKV is used |
 |----------|---------------------|------------------|
-| **HashJoin** / **MergeJoin** | TiDB (`HashJoinExec` / `MergeJoinExec`) | Each side’s `TableReader` / `IndexReader` scans its ranges; `BatchLocateKeyRanges` → many Region leaders; TiDB builds/probes the join |
-| **IndexJoin** (IndexLookUpJoin) | TiDB | Outer side scanned (multi-Region); for each outer chunk, encode inner keys, locate Regions, batch Get / index lookup on whatever leaders hold those keys |
-| **TiFlash MPP** (optional) | TiFlash nodes | Optimizer may choose MPP hash join; shuffle among TiFlash—still not a TiKV Raft-peer join |
+| **HashJoin** / **MergeJoin** | TiDB (`HashJoinExec` / `MergeJoinExec`) | Each side’s `TableReader` / `IndexReader` splits its ranges and runs concurrent cop tasks; TiDB builds/probes the join |
+| **IndexJoin** (IndexLookUpJoin) | TiDB | Outer reader: multi-Region parallel scan; per outer chunk, encode inner keys, `BatchLocate`, batched Get / index lookup on the leaders that hold those keys |
+| **TiFlash MPP** (optional) | TiFlash nodes | MPP hash join + exchange among TiFlash—still not a TiKV Raft-peer join |
+
+#### Reader path: one scan → many parallel Region RPCs
+
+For each join child (`TableReaderExecutor` / `IndexReaderExecutor`), DistSQL does not issue a single RPC for the whole table. It:
+
+1. Encodes the planner’s `ranger` intervals as `[]kv.KeyRange`.
+2. **`RegionCache.SplitKeyRangesByLocations`** (via `BatchLocateKeyRanges`) cuts those ranges at Region (or bucket) boundaries.
+3. **`buildCopTasks`** builds one **`copTask`** per location: `{region, ranges, storeAddr}`.
+4. **`CopClient.Send`** starts up to `min(tidb_distsql_scan_concurrency, len(tasks))` workers (default concurrency **15**) that each send a Coprocessor RPC to that Region’s leader; responses merge into the reader’s `Next` chunks.
+
+```go
+// git/tidb: pkg/store/copr/region_cache.go
+locs, err := c.BatchLocateKeyRanges(bo.TiKVBackoffer(), kvRanges, opts...)
+// SplitKeyRangesByLocations → []*LocationKeyRanges
+
+// git/tidb: pkg/store/copr/coprocessor.go
+type copTask struct {
+	region    tikv.RegionVerID
+	ranges    *KeyRanges
+	storeAddr string
+	...
+}
+tasks, err := buildCopTasks(bo, ranges, opt)  // one task per Region/bucket
+// then workers: for i := range concurrency { go handle copTask → TiKV RPC }
+```
+
+```go
+// git/tidb: pkg/distsql/distsql.go
+func Select(...) (SelectResult, error) {
+	...
+	resp := dctx.Client.Send(ctx, kvReq, dctx.KVVars, option)  // CopClient, parallel tasks
+```
+
+So a join child is still an iterator leaf from HashJoin’s point of view; underneath, that leaf is a **merge of concurrent Region RPCs**, not a local `TABLE` buffer.
+
+#### Join tree: children first, then join in TiDB
 
 `executorBuilder` builds the join **after** its children, so each side’s multi-Region I/O is nested under the join:
 
 ```go
 // git/tidb: pkg/executor/builder.go — HashJoin
-leftExec := b.build(v.Children()[0])  // e.g. TableReader → many TiKV leaders
+leftExec := b.build(v.Children()[0])  // TableReader → buildCopTasks → parallel leaders
 rightExec := b.build(v.Children()[1])
 return b.buildHashJoinFromChildExecs(leftExec, rightExec, v)
 ```
 
-```go
-// git/tidb: pkg/executor/builder.go — IndexLookUpJoin
-outerExec := b.build(v.Children()[1-v.InnerChildIdx]) // outer scan (multi-Region)
-// inner side: dataReaderBuilder builds kv ranges / lookups from outer keys
-```
-
 ```text
-HashJoin (TiDB memory)
-  ├─ TableReader(orders) ── Cop ──► R1 leader, R2 leader, …
-  └─ TableReader(items)  ── Cop ──► R3 leader, R4 leader, …
+HashJoin.Next (TiDB memory)
+  ├─ TableReader(orders).Next
+  │     KeyRange → SplitKeyRangesByLocations → copTasks
+  │     ├── worker ─ Cop RPC ─► store A (R1 leader)
+  │     ├── worker ─ Cop RPC ─► store B (R2 leader)
+  │     └── …  (capped by DistSQLScanConcurrency)
+  └─ TableReader(items).Next   — same fan-out on items Regions
 
-IndexJoin (TiDB)
-  ├─ Outer TableReader(orders) ──► R1, R2, …
-  └─ per outer chunk: locate(item keys) ── Get/Cop ──► whichever Region leaders hold those keys
+IndexJoin.Next
+  ├─ Outer TableReader — parallel cop as above
+  └─ per outer chunk: BatchLocate(inner keys) → batched Get/Cop to those leaders
 ```
 
-So “join across multiple TiKV” means: **parallel range I/O to many leaders, join logic on TiDB** (or MPP on TiFlash)—not a distributed join inside raftstore.
+“Join across multiple TiKV” therefore means: **parallel range I/O to many leaders under each reader, join logic on TiDB** (or MPP on TiFlash)—not a distributed join inside raftstore. RPC cost is overlapped by that concurrency and by chunked `Next`; it is not free for tiny lookups (see §2.4 locate path).
 
 ### 2.6 Worked example: SQL → keys → locate
 
@@ -330,7 +364,9 @@ SELECT id, amount FROM orders WHERE id >= 1;
 | `git/tidb/pkg/executor/adapter.go` | `ExecStmt.Exec`, `buildExecutor` |
 | `git/tidb/pkg/executor/builder.go` | `buildHashJoin`, `buildIndexLookUpJoin`, … |
 | `git/tidb/pkg/executor/join/` | HashJoin / IndexJoin workers |
-| `git/tidb/pkg/store/copr/region_cache.go` | `BatchLocateKeyRanges` → Region leaders |
+| `git/tidb/pkg/store/copr/region_cache.go` | `SplitKeyRangesByLocations` / `BatchLocateKeyRanges` |
+| `git/tidb/pkg/store/copr/coprocessor.go` | `buildCopTasks`, parallel `copTask` workers / Cop RPC |
+| `git/tidb/pkg/distsql/distsql.go` | `Select` → `CopClient.Send` |
 | `git/tidb/pkg/domain/domain.go` | process-wide Domain |
 | `git/tidb/pkg/tablecodec/tablecodec.go` | Key encoding |
 | `git/tidb/pkg/store/driver/tikv_driver.go` | Open PD + `KVStore` |
