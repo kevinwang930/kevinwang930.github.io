@@ -877,7 +877,89 @@ int DoRead() { return m_table_iterator->Read(); }
 
 ### 3.4 Joins
 
-**Family generation.** Two children (`outer`, `inner`) are compiled first; join type and predicates come from the AccessPath / `JoinPredicate`.
+Join iterators compile from an AccessPath with two children (`outer`, `inner`). Join type and predicates come from the AccessPath / `JoinPredicate`. The important contract for every join in this executor is not a fused “joined row” object: **each side keeps its own `TABLE::record[0]`**, and a successful `Read()` means both buffers currently hold a matching pair. The SELECT list (`fields`) does not receive that pair as a new structure; it is a list of **fixed pointers** into those buffers, bound once at resolve time.
+
+#### Two table buffers, one SELECT list of pointers
+
+For a two-table nested loop, the outer leaf writes `employees.record[0]` and the inner leaf writes `departments.record[0]`. `NestedLoopIterator::DoRead` returns `0` only when both sides have a current row (or a null-complemented inner for outer join). `RowIterator::Read` documents that row data is never returned from the call; it is left in the table record buffer(s):
+
+```cpp
+// sql/iterators/row_iterator.h
+  /**
+    Read a single row. The row data is not actually returned from the function;
+    it is put in the table's (or tables', in case of a join) record buffer, ie.,
+    table->records[0].
+      0   OK
+      -1   End of records
+      1   Error
+   */
+  int Read() {
+    const int error = DoRead();
+    ...
+    return error;
+  }
+```
+
+```text
+  employees.record[0]          departments.record[0]
+  ┌──────────────────┐         ┌──────────────────┐
+  │ current outer row│         │ current inner row│
+  └────────▲─────────┘         └────────▲─────────┘
+           │  Field::ptr                │  Field::ptr
+           │                            │
+  Item_field (e.name) ──────────┐       │
+  Item_field (d.name) ──────────┼───────┘
+                                │
+                         JOIN::fields  (== Query_block::fields)
+                                │
+                    send_data(thd, *fields)   // same list every iteration
+```
+
+At table open, each `Field` is positioned into that table’s `record[0]`. At resolve, each SELECT `Item_field` stores that `Field*` once via `set_field`. At execute, `get_field_list()` returns `JOIN::fields` (alias of `Query_block::fields`) **once** before the pull loop. Each iteration only overwrites the two buffers; the `Item*` / `Field*` pointers stay the same, so the next `send_data` sees the new values through the old pointers.
+
+```cpp
+// sql/table.cc — Field::ptr into TABLE::record[0]
+    outparam->record[0] = record;
+    // make all new fields' pointers point into the new TABLE's record[0]
+    new_field->move_field_offset(move_offset);
+
+// sql/item.cc — bound once at resolve
+  field = result_field = field_par;
+
+// sql/sql_optimizer.cc — JOIN::JOIN
+      fields(&select->fields),
+
+// sql/sql_union.cc — ExecuteIteratorQuery
+  mem_root_deque<Item *> *fields = get_field_list();  // once
+  ...
+    for (;;) {
+      int error = m_root_iterator->Read();   // fills outer + inner record[0]
+      ...
+      if (query_result->send_data(thd, *fields)) {  // same Item* list
+```
+
+Leaf iterators write the buffers the pointers already address:
+
+```cpp
+// outer scan — sql/iterators/basic_row_iterators.cc
+      m_record(table->record[0]),
+    while ((tmp = table()->file->ha_rnd_next(m_record))) {
+
+// inner eq_ref — sql/iterators/ref_row_iterators.cc
+    int error = table()->file->ha_index_read_map(
+        table()->record[0], key_buff_and_map.first, key_buff_and_map.second,
+```
+
+Projection walks those fixed `Item_field`s:
+
+```cpp
+// sql/item.cc
+bool Item_field::send(Protocol *protocol, String *) {
+  return protocol->store_field(field);  // Field::ptr → current record[0]
+}
+```
+
+---
 
 #### `NestedLoopIterator` (`NESTED_LOOP_JOIN`)
 
@@ -893,27 +975,57 @@ iterator = NewIterator<NestedLoopIterator>(
     param.join_type, param.pfs_batch_mode);
 ```
 
+`DoRead` only coordinates the two children. When it returns `0`, outer and inner `record[0]` already hold the current pair; it does not assemble a joined tuple for `fields`.
+
+Where the ON / residual conditions actually run:
+
+| Kind of predicate | Where it is checked |
+|-------------------|---------------------|
+| Equijoin usable as ref / eq_ref (e.g. `e.department_id = d.id`) | **Pushed into the inner access path.** Outer values are bound when `m_source_inner->Init()` runs; the inner `RefIterator` / `EQRefIterator` only returns matching keys. Nested loop never re-tests that equality. |
+| Residual join / WHERE predicates not pushed into the inner lookup | **`FilterIterator` (or a filter on a child path) above or beside the join**—`m_condition->val_int()` after pulling a joined pair. Rejected pairs call `UnlockRow()` and pull again. |
+| Outer / anti / semi cardinality | **Inside** `NestedLoopIterator` via `m_join_type` only (null-complement, stop after first match, skip matches)—still no boolean join `Item`. |
+
 ```cpp
 int NestedLoopIterator::DoRead() {
   for (;;) {
     if (m_state == NEEDS_OUTER_ROW) {
       int err = m_source_outer->Read();
       if (err == -1) { m_state = END_OF_ROWS; return -1; }
+      // Bind outer columns into the inner lookup (ref/eq_ref), then scan matches.
       if (m_source_inner->Init()) return 1;
       m_state = READING_FIRST_INNER_ROW;
     }
     int err = m_source_inner->Read();
     if (err == -1) {
+      // No (more) inner rows for this outer.
       if (m_join_type == JoinType::OUTER && m_state == READING_FIRST_INNER_ROW) {
-        m_source_inner->SetNullRowFlag(true);
+        m_source_inner->SetNullRowFlag(true);  // LEFT JOIN null-extend
         m_state = NEEDS_OUTER_ROW;
-        return 0;
+        return 0;  // one output row: outer + NULLs
       }
       m_state = NEEDS_OUTER_ROW;
       continue;
     }
+    // Both TABLE::record[0] buffers hold the current pair.
+    if (m_join_type == JoinType::ANTI) { m_state = NEEDS_OUTER_ROW; continue; }
     if (m_join_type == JoinType::SEMI) m_state = NEEDS_OUTER_ROW;
     else m_state = READING_INNER_ROWS;
+    return 0;
+  }
+}
+```
+
+Residual / WHERE predicates sit in a parent `FilterIterator`, not in the join:
+
+```cpp
+int FilterIterator::DoRead() {
+  for (;;) {
+    int err = m_source->Read();  // often NestedLoopIterator
+    if (err != 0) return err;
+    if (!m_condition->val_int()) {
+      m_source->UnlockRow();
+      continue;
+    }
     return 0;
   }
 }
@@ -943,7 +1055,7 @@ int NestedLoopSemiJoinWithDuplicateRemovalIterator::DoRead() {
     err = m_source_inner->Read();
     if (err == -1) continue;          // no match
     key_copy(m_key_buf, ...);         // remember outer key
-    return 0;                         // first match only
+    return 0;                         // first match only → up to send_data
   }
 }
 ```
