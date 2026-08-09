@@ -531,31 +531,188 @@ In this post we examine the architecture of MySQL’s Volcano iterator model: ho
 </span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;                         <span style=color:#75715e>// first match only → up to send_data
 </span></span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h4 id=hashjoiniterator-hash_join><code>HashJoinIterator</code> (<code>HASH_JOIN</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> o.id, <span style=color:#66d9ef>c</span>.name
-</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o <span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.customer_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id;
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>HashJoinIterator<span style=color:#f92672>&gt;</span>(
+</span></span></code></pre></div><h4 id=hashjoiniterator-hash_join><code>HashJoinIterator</code> (<code>HASH_JOIN</code>)</h4><p><strong>When it fits.</strong> Hash join is the executor’s replacement for classical <strong>block nested-loop (BNL)</strong> join buffering. In <code>ConnectJoins</code>, <code>UseHashJoin(qep_tab)</code> is true when <code>qep_tab->op_type == OT_BNL</code>. That op type is set when join buffering is enabled for an inner table whose access method is a <strong>scan without a usable join-key lookup</strong>: <code>JT_ALL</code>, <code>JT_INDEX_SCAN</code>, <code>JT_RANGE</code>, or <code>JT_INDEX_MERGE</code>, and <code>block_nested_loop</code> / <code>BNL</code> hint is on (<code>setup_join_buffering</code> in <code>sql/sql_optimizer.cc</code>). Equijoin predicates become hash keys; residual predicates stay as filters after the join. With the hypergraph optimizer, <code>HASH_JOIN</code> is also proposed when its cost beats nested loop for the same edge.</p><p>It does <strong>not</strong> fit the ordinary PK lookup. If the join is <code>orders.customer_id = customers.id</code> and <code>customers.id</code> is <code>PRIMARY KEY</code>, the plan is almost always <strong>nested loop + <code>eq_ref</code></strong>, not hash join.</p><p>Hash join fits a normal equijoin when the <strong>join columns are not indexed</strong> (or no usable index exists for that lookup), so the inner access stays <code>JT_ALL</code> / scan and BNL → <code>HASH_JOIN</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#75715e>-- No index on either join column → HashJoinIterator (not NestedLoop + eq_ref)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> t1 (id INT <span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>, val INT);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> t2 (id INT <span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>, val INT);
+</span></span><span style=display:flex><span><span style=color:#75715e>-- join is on val, not on the primary keys
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> t1.id, t2.id
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> t1 <span style=color:#66d9ef>JOIN</span> t2 <span style=color:#66d9ef>ON</span> t1.val <span style=color:#f92672>=</span> t2.val;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/sql_executor.cc — ConnectJoins chooses hash join for OT_BNL
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>bool</span> <span style=color:#a6e22e>UseHashJoin</span>(QEP_TAB <span style=color:#f92672>*</span>qep_tab) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> qep_tab<span style=color:#f92672>-&gt;</span>op_type <span style=color:#f92672>==</span> QEP_TAB<span style=color:#f92672>::</span>OT_BNL;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>...
+</span></span><span style=display:flex><span>          path <span style=color:#f92672>=</span> CreateHashJoinAccessPath(...);  <span style=color:#75715e>// AccessPath::HASH_JOIN
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// sql/sql_optimizer.cc — setup_join_buffering (BNL → later HashJoinIterator)
+</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>switch</span> (tab<span style=color:#f92672>-&gt;</span>type()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_ALL:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_INDEX_SCAN:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_RANGE:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_INDEX_MERGE:
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>bnl_on) <span style=color:#66d9ef>goto</span> no_join_cache;
+</span></span><span style=display:flex><span>      tab<span style=color:#f92672>-&gt;</span>set_use_join_cache(JOIN_CACHE<span style=color:#f92672>::</span>ALG_BNL);
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/join_optimizer/access_path.cc
+</span></span></span><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>HashJoinIterator<span style=color:#f92672>&gt;</span>(
 </span></span><span style=display:flex><span>    thd, mem_root, std<span style=color:#f92672>::</span>move(outer), std<span style=color:#f92672>::</span>move(inner),
 </span></span><span style=display:flex><span>    <span style=color:#75715e>/*build=*/</span>inner estimate, conditions, extra_conditions, join_type, ...);
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> HashJoinIterator<span style=color:#f92672>::</span>DoRead() {
+</span></span></code></pre></div><h5 id=how-it-is-implemented>How it is implemented</h5><p>Files: <code>sql/iterators/hash_join_iterator.{h,cc}</code>, <code>hash_join_buffer.{h,cc}</code>, <code>hash_join_chunk.{h,cc}</code>. The header states the in-memory algorithm: designate <strong>build</strong> vs <strong>probe</strong>, load the build side into an in-memory map keyed by equijoin attributes (size limited by <code>join_buffer_size</code>), then for each probe row look up matches and restore the stored build row into its <code>TABLE::record[0]</code>. If the build side does not fit, the iterator spills into <strong>on-disk chunk</strong> partitions (<code>HashJoinChunk</code>) and continues chunk-pair by chunk-pair.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>  probe input ──Read()──► ConstructJoinKey ──find()──► hash map
+</span></span><span style=display:flex><span>                                                         │
+</span></span><span style=display:flex><span>  build input ──Read()──► StoreRow (key + packed row) ───┘
+</span></span><span style=display:flex><span>                                                         │
+</span></span><span style=display:flex><span>                              LoadImmutableStringIntoTableBuffers(build)
+</span></span><span style=display:flex><span>                              probe already in its record[0]
+</span></span><span style=display:flex><span>                              → return 0 (same fields pointers as NLJ)
+</span></span></code></pre></div><p><strong>1. Build — fill <code>HashJoinRowBuffer</code>.</strong> <code>InitHashTable()</code> calls <code>BuildHashTable()</code>, which pulls the build iterator and stores each row:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/iterators/hash_join_iterator.cc
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> HashJoinIterator<span style=color:#f92672>::</span>BuildHashTable() {
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (InitRowBuffer()) <span style=color:#66d9ef>return</span> true;
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> res <span style=color:#f92672>=</span> m_build_input<span style=color:#f92672>-&gt;</span>Read();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#ae81ff>1</span>) <span style=color:#66d9ef>return</span> true;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) {
+</span></span><span style=display:flex><span>      m_build_iterator_has_more_rows <span style=color:#f92672>=</span> false;
+</span></span><span style=display:flex><span>      ...
+</span></span><span style=display:flex><span>      SetReadingProbeRowState();
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>return</span> false;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    m_build_input_tables.RequestRowId();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>const</span> hash_join_buffer<span style=color:#f92672>::</span>StoreRowResult store_row_result <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        m_row_buffer.StoreRow(thd(), reject_duplicate_keys);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>switch</span> (store_row_result) {
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> hash_join_buffer<span style=color:#f92672>::</span>StoreRowResult<span style=color:#f92672>::</span>ROW_STORED:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> hash_join_buffer<span style=color:#f92672>::</span>StoreRowResult<span style=color:#f92672>::</span>BUFFER_FULL:
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// spill to chunk files if m_allow_spill_to_disk, else probe what fits
+</span></span></span><span style=display:flex><span>        ...
+</span></span></code></pre></div><p><code>StoreRow</code> builds the hash key from equijoin <code>Item</code>s, packs the build-side row bytes, and inserts into an <code>unordered_dense</code> map (<code>ImmutableStringWithLength</code> → linked list of packed rows for duplicate keys):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/iterators/hash_join_buffer.cc
+</span></span></span><span style=display:flex><span>StoreRowResult HashJoinRowBuffer<span style=color:#f92672>::</span>StoreRow(THD <span style=color:#f92672>*</span>thd,
+</span></span><span style=display:flex><span>                                           <span style=color:#66d9ef>bool</span> reject_duplicate_keys) {
+</span></span><span style=display:flex><span>  m_buffer.length(<span style=color:#ae81ff>0</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>const</span> HashJoinCondition <span style=color:#f92672>&amp;</span>hash_join_condition : m_join_conditions) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>bool</span> null_in_join_condition <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        hash_join_condition.join_condition()<span style=color:#f92672>-&gt;</span>append_join_key_for_hash_join(
+</span></span><span style=display:flex><span>            thd, m_tables.tables_bitmap(), hash_join_condition,
+</span></span><span style=display:flex><span>            m_join_conditions.size() <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>1</span>, <span style=color:#f92672>&amp;</span>m_buffer);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (null_in_join_condition)
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>return</span> StoreRowResult<span style=color:#f92672>::</span>ROW_STORED;  <span style=color:#75715e>// skip; NULL = never matches
+</span></span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  key_it_and_inserted <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>      m_hash_map<span style=color:#f92672>-&gt;</span>emplace(key, LinkedImmutableString{<span style=color:#66d9ef>nullptr</span>});
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// pack TABLE record[0] bytes after the key; may return BUFFER_FULL
+</span></span></span></code></pre></div><p><strong>2. Probe — one row, then look up.</strong> After the build phase, <code>DoRead</code> enters <code>READING_ROW_FROM_PROBE_ITERATOR</code>. Each successful probe <code>Read()</code> calls <code>LookupProbeRowInHashTable()</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/iterators/hash_join_iterator.cc
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> HashJoinIterator<span style=color:#f92672>::</span>ReadRowFromProbeIterator() {
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  result <span style=color:#f92672>=</span> m_probe_input<span style=color:#f92672>-&gt;</span>Read();
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (result <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>    m_probe_input_tables.RequestRowId();
+</span></span><span style=display:flex><span>    LookupProbeRowInHashTable();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> false;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> HashJoinIterator<span style=color:#f92672>::</span>LookupProbeRowInHashTable() {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> null_in_join_key <span style=color:#f92672>=</span> ConstructJoinKey(
+</span></span><span style=display:flex><span>      thd(), m_join_conditions, m_probe_input_tables.tables_bitmap(),
+</span></span><span style=display:flex><span>      <span style=color:#f92672>&amp;</span>m_temporary_row_and_join_key_buffer);
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  hash_join_buffer<span style=color:#f92672>::</span>Key key{m_temporary_row_and_join_key_buffer.ptr(),
+</span></span><span style=display:flex><span>                            m_temporary_row_and_join_key_buffer.length()};
+</span></span><span style=display:flex><span>  m_current_row <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>      m_row_buffer.find(key).value_or(LinkedImmutableString{<span style=color:#66d9ef>nullptr</span>});
+</span></span><span style=display:flex><span>  m_state <span style=color:#f92672>=</span> State<span style=color:#f92672>::</span>READING_FIRST_ROW_FROM_HASH_TABLE;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>3. Emit — restore build row into its table buffer.</strong> Matches walk the linked list for that key; each hit unpacks into the build tables’ <code>record[0]</code>. The probe row is already in the probe tables’ buffers. Residual (non-equijoin) predicates run as <code>m_extra_condition</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> HashJoinIterator<span style=color:#f92672>::</span>ReadJoinedRow() {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (m_current_row <span style=color:#f92672>==</span> <span style=color:#66d9ef>nullptr</span>) <span style=color:#66d9ef>return</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>  LoadImmutableStringIntoTableBuffers(m_build_input_tables, m_current_row);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> HashJoinIterator<span style=color:#f92672>::</span>ReadNextJoinedRowFromHashTable() {
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  res <span style=color:#f92672>=</span> ReadJoinedRow();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>    passes_extra_conditions <span style=color:#f92672>=</span> JoinedRowPassesExtraConditions();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>passes_extra_conditions)
+</span></span><span style=display:flex><span>      m_current_row <span style=color:#f92672>=</span> m_current_row.Decode().next;  <span style=color:#75715e>// next build row for key
+</span></span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>4. Driver state machine.</strong> <code>DoRead</code> only returns <code>0</code> when a joined pair is ready in the two sides’ buffers (same <code>fields</code> pointer model as nested loop):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> HashJoinIterator<span style=color:#f92672>::</span>DoRead() {
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (;;) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>switch</span> (m_state) {
 </span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>LOADING_NEXT_CHUNK_PAIR:
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReadNextHashJoinChunk()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>; <span style=color:#66d9ef>break</span>;       <span style=color:#75715e>// build
-</span></span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_ROW_FROM_PROBE_ITERATOR:
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReadRowFromProbeIterator()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>; <span style=color:#66d9ef>break</span>;    <span style=color:#75715e>// probe
-</span></span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_FROM_HASH_TABLE: {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReadNextHashJoinChunk()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;   <span style=color:#75715e>// on-disk: rebuild map from chunk
+</span></span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_ROW_FROM_PROBE_ITERATOR:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReadRowFromProbeIterator()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_ROW_FROM_PROBE_CHUNK_FILE:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReadRowFromProbeChunkFile()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_FIRST_ROW_FROM_HASH_TABLE:
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>READING_FROM_HASH_TABLE: {
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>const</span> <span style=color:#66d9ef>int</span> res <span style=color:#f92672>=</span> ReadNextJoinedRowFromHashTable();
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) <span style=color:#66d9ef>continue</span>;
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> res;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;   <span style=color:#75715e>// build + probe record[0] co-positioned
+</span></span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (res <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) <span style=color:#66d9ef>continue</span>;  <span style=color:#75715e>// next probe row
+</span></span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> res;
 </span></span><span style=display:flex><span>      }
-</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>END_OF_ROWS: <span style=color:#66d9ef>return</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> State<span style=color:#f92672>::</span>END_OF_ROWS:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>;
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h4 id=bkaiterator-bka_join><code>BKAIterator</code> (<code>BKA_JOIN</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> o.<span style=color:#f92672>*</span>, <span style=color:#66d9ef>c</span>.name <span style=color:#66d9ef>FROM</span> orders o <span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.customer_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id;
-</span></span><span style=display:flex><span><span style=color:#75715e>-- EXPLAIN may show Batched Key Access; inner path includes MRR
-</span></span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>BKAIterator<span style=color:#f92672>&gt;</span>(
+</span></span></code></pre></div><p>Same two-buffer rule as nested loop: probe stays in its <code>TABLE::record[0]</code>; each match reloads the build side from the hash map into the build <code>record[0]</code>. <code>fields</code> remain fixed <code>Item_field</code> → <code>Field*</code> pointers into those buffers. The hash map stores <strong>packed copies</strong> of build rows so the build iterator can move on; it is not a third “joined row” object for <code>send_data</code>.</p><h4 id=bkaiterator-bka_join><code>BKAIterator</code> (<code>BKA_JOIN</code>)</h4><p><strong>When it fits.</strong> Batched Key Access is join buffering for the opposite access pattern: the inner table <strong>does</strong> have a usable index lookup (<code>JT_REF</code>, <code>JT_EQ_REF</code>, also <code>JT_SYSTEM</code> / <code>JT_CONST</code> in the same switch), and <code>batched_key_access</code> / <code>BKA</code> hint is on. <code>setup_join_buffering</code> then sets <code>JOIN_CACHE::ALG_BKA</code> only if the storage engine’s <strong>MRR</strong> interface accepts the multi-range plan (not <code>HA_MRR_USE_DEFAULT_IMPL</code>, not <code>HA_MRR_NO_ASSOCIATION</code>). <code>ConnectJoins</code> maps that to <code>CreateBKAAccessPath</code> when <code>UseBKA(qep_tab)</code> (<code>op_type == OT_BKA</code>). BKA is skipped for materializable derived tables, guarded IN-subquery refs, and some multi-table outer-join shapes that would not stay left-deep.</p><p>Typical shape: many outer keys, index on the inner join column, engine can batch MRR (e.g. InnoDB). Outer rows are buffered; keys are handed to <code>MultiRangeRowIterator</code>; matched inner rows stream back with association to the buffered outers.</p><p><strong>Example that suits BKA</strong> (index nested-loop candidate, with batching enabled). Default plan for this SQL is plain nested loop + <code>eq_ref</code>. BKA only appears after turning on <code>batched_key_access</code> (off by default) or using the <code>BKA</code> hint:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> customers (
+</span></span><span style=display:flex><span>  id   INT <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span> <span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>,
+</span></span><span style=display:flex><span>  name VARCHAR(<span style=color:#ae81ff>64</span>) <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span>
+</span></span><span style=display:flex><span>) ENGINE<span style=color:#f92672>=</span>InnoDB;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
+</span></span><span style=display:flex><span>  id          INT <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span> <span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>,
+</span></span><span style=display:flex><span>  customer_id INT <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span>,
+</span></span><span style=display:flex><span>  amount      DECIMAL(<span style=color:#ae81ff>10</span>, <span style=color:#ae81ff>2</span>) <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span>,
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>KEY</span> idx_orders_customer_id (customer_id)
+</span></span><span style=display:flex><span>) ENGINE<span style=color:#f92672>=</span>InnoDB;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Default: NestedLoopIterator + eq_ref on customers PRIMARY
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> o.id, <span style=color:#66d9ef>c</span>.name
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o
+</span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.customer_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Enable BKA (session), then the same join can use BKAIterator + MRR
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SET</span> <span style=color:#66d9ef>SESSION</span> optimizer_switch <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;batched_key_access=on,mrr=on,mrr_cost_based=off&#39;</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>EXPLAIN</span> FORMAT<span style=color:#f92672>=</span>TREE
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#75715e>/*+ BKA(c) */</span> o.id, <span style=color:#66d9ef>c</span>.name
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o
+</span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.customer_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id;
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Expect: Batched key access / BKA join; inner Multi-Range Read on customers
+</span></span></span></code></pre></div><p>Contrast with hash join: that path needs <strong>no</strong> usable join-key index (<code>JT_ALL</code>). BKA needs the <strong>opposite</strong> — a real <code>ref</code>/<code>eq_ref</code> into <code>customers.id</code>, plus MRR that can associate ranges back to buffered outer rows.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/sql_executor.cc
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>bool</span> <span style=color:#a6e22e>UseBKA</span>(QEP_TAB <span style=color:#f92672>*</span>qep_tab) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (qep_tab<span style=color:#f92672>-&gt;</span>op_type <span style=color:#f92672>!=</span> QEP_TAB<span style=color:#f92672>::</span>OT_BKA) <span style=color:#66d9ef>return</span> false;
+</span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> true;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// sql/sql_optimizer.cc — setup_join_buffering
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_SYSTEM:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_CONST:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_REF:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> JT_EQ_REF:
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>bka_on) <span style=color:#66d9ef>goto</span> no_join_cache;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (tab<span style=color:#f92672>-&gt;</span>table_ref<span style=color:#f92672>-&gt;</span>uses_materialization()) <span style=color:#66d9ef>goto</span> no_join_cache;
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (tab<span style=color:#f92672>-&gt;</span>has_guarded_conds()) <span style=color:#66d9ef>goto</span> no_join_cache;
+</span></span><span style=display:flex><span>      rows <span style=color:#f92672>=</span> tab<span style=color:#f92672>-&gt;</span>table()<span style=color:#f92672>-&gt;</span>file<span style=color:#f92672>-&gt;</span>multi_range_read_info(...);
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> ((rows <span style=color:#f92672>==</span> HA_POS_ERROR) <span style=color:#f92672>||</span>
+</span></span><span style=display:flex><span>          (join_cache_flags <span style=color:#f92672>&amp;</span> HA_MRR_USE_DEFAULT_IMPL) <span style=color:#f92672>||</span>
+</span></span><span style=display:flex><span>          (join_cache_flags <span style=color:#f92672>&amp;</span> HA_MRR_NO_ASSOCIATION))
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>goto</span> no_join_cache;
+</span></span><span style=display:flex><span>      tab<span style=color:#f92672>-&gt;</span>set_use_join_cache(JOIN_CACHE<span style=color:#f92672>::</span>ALG_BKA);
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>BKAIterator<span style=color:#f92672>&gt;</span>(
 </span></span><span style=display:flex><span>    thd, mem_root, std<span style=color:#f92672>::</span>move(outer), outer_tables, std<span style=color:#f92672>::</span>move(inner),
 </span></span><span style=display:flex><span>    join_buff_size, ..., mrr_iterator, param.join_type);
 </span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> BKAIterator<span style=color:#f92672>::</span>DoRead() {
@@ -573,7 +730,7 @@ In this post we examine the architecture of MySQL’s Volcano iterator model: ho
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><hr><h3 id=35-filter-sort-aggregate-limit>3.5 Filter, sort, aggregate, limit</h3><h4 id=filteriterator-filter><code>FilterIterator</code> (<code>FILTER</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> employees <span style=color:#66d9ef>WHERE</span> salary <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>50000</span>;
+</span></span></code></pre></div><table><thead><tr><th>Algorithm</th><th>Inner access</th><th>Optimizer switch / hint</th><th>Executor</th></tr></thead><tbody><tr><td>Nested loop (plain)</td><td><code>ref</code> / <code>eq_ref</code> without BKA</td><td>default when buffering off</td><td><code>NestedLoopIterator</code></td></tr><tr><td>Hash join</td><td><code>ALL</code> / index scan / range (BNL)</td><td><code>block_nested_loop</code> / <code>BNL</code></td><td><code>HashJoinIterator</code></td></tr><tr><td>BKA</td><td><code>ref</code> / <code>eq_ref</code> + real MRR</td><td><code>batched_key_access</code> / <code>BKA</code></td><td><code>BKAIterator</code> + MRR</td></tr></tbody></table><hr><h3 id=35-filter-sort-aggregate-limit>3.5 Filter, sort, aggregate, limit</h3><h4 id=filteriterator-filter><code>FilterIterator</code> (<code>FILTER</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span> <span style=color:#66d9ef>FROM</span> employees <span style=color:#66d9ef>WHERE</span> salary <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>50000</span>;
 </span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>FilterIterator<span style=color:#f92672>&gt;</span>(
 </span></span><span style=display:flex><span>    thd, mem_root, std<span style=color:#f92672>::</span>move(child), path<span style=color:#f92672>-&gt;</span>filter().condition);
 </span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> FilterIterator<span style=color:#f92672>::</span>DoRead() {
