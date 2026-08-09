@@ -1,118 +1,122 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="540" viewBox="0 0 1000 540" role="img" aria-label="Raft log: entries, commitIndex, apply">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Raft log: Entry.data is RaftCmdRequest Put">
   <defs>
     <marker id="arrDk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
     </marker>
   </defs>
 
-  <rect width="1000" height="540" fill="#f7f9fb"/>
-  <text x="500" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Raft log: replicate, commit, then apply</text>
-  <text x="500" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Each entry is (term, index, command). commitIndex advances with majority; apply is local and ordered</text>
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Raft log: Entry.data = RaftCmdRequest (raft-rs)</text>
+  <text x="500" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Leader appends; MsgAppend replicates; commitIndex advances with majority; apply decodes Put/Delete to MVCC</text>
 
   <!-- Entry anatomy -->
-  <g transform="translate(40, 70)">
-    <rect width="920" height="72" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
-    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Log entry</text>
-    <rect x="20" y="40" width="70" height="22" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
-    <text x="55" y="55" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term</text>
-    <rect x="100" y="40" width="70" height="22" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
-    <text x="135" y="55" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">index</text>
-    <rect x="180" y="40" width="200" height="22" fill="#fff8e1" stroke="#f9a825" rx="3"/>
-    <text x="280" y="55" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">command (e.g. Prewrite)</text>
-    <text x="420" y="55" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Leader appends; followers store the same sequence</text>
+  <g transform="translate(40, 66)">
+    <rect width="920" height="88" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="20" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Log entry (eraftpb.Entry)</text>
+    <rect x="20" y="36" width="70" height="22" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+    <text x="55" y="51" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term=3</text>
+    <rect x="100" y="36" width="70" height="22" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+    <text x="135" y="51" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">index=7</text>
+    <rect x="180" y="36" width="520" height="40" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+    <text x="190" y="54" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">data: RaftCmdRequest { Put cf=lock key=... value=Lock{start_ts,...} }</text>
+    <text x="190" y="70" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6d4c41">opaque bytes to raft-rs; TiKV apply parses protobuf and writes kvdb</text>
+    <text x="720" y="51" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">EntryNormal</text>
   </g>
 
   <!-- Leader log -->
-  <text x="80" y="180" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Leader log</text>
-  <g transform="translate(80, 195)">
-    <rect x="0" y="0" width="80" height="56" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
-    <text x="40" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 4</text>
-    <text x="40" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">term 2</text>
+  <text x="80" y="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Leader log</text>
+  <g transform="translate(80, 205)">
+    <rect x="0" y="0" width="100" height="64" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
+    <text x="50" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 4 t2</text>
+    <text x="50" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Put write</text>
+    <text x="50" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Commit</text>
 
-    <rect x="90" y="0" width="80" height="56" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
-    <text x="130" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 5</text>
-    <text x="130" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">term 2</text>
+    <rect x="110" y="0" width="100" height="64" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
+    <text x="160" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 5 t2</text>
+    <text x="160" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Put lock</text>
+    <text x="160" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Prewrite</text>
 
-    <rect x="180" y="0" width="80" height="56" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
-    <text x="220" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 6</text>
-    <text x="220" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">term 3</text>
+    <rect x="220" y="0" width="100" height="64" fill="#c8e6c9" stroke="#2e7d32" rx="3"/>
+    <text x="270" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 6 t3</text>
+    <text x="270" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Del lock</text>
+    <text x="270" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">+Put write</text>
 
-    <rect x="270" y="0" width="80" height="56" fill="#fff9c4" stroke="#f9a825" stroke-width="1.6" rx="3"/>
-    <text x="310" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">idx 7</text>
-    <text x="310" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">term 3</text>
+    <rect x="330" y="0" width="100" height="64" fill="#fff9c4" stroke="#f9a825" stroke-width="1.6" rx="3"/>
+    <text x="380" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">idx 7 t3</text>
+    <text x="380" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Put lock</text>
+    <text x="380" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#e65100">not committed</text>
 
-    <rect x="360" y="0" width="80" height="56" fill="#eceff1" stroke="#90a4ae" stroke-dasharray="4 2" rx="3"/>
-    <text x="400" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#78909c">idx 8</text>
-    <text x="400" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">pending</text>
+    <rect x="440" y="0" width="100" height="64" fill="#eceff1" stroke="#90a4ae" stroke-dasharray="4 2" rx="3"/>
+    <text x="490" y="28" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#78909c">idx 8</text>
+    <text x="490" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">pending</text>
   </g>
 
   <!-- commit / apply markers under leader -->
-  <line x1="80" y1="270" x2="340" y2="270" stroke="#2e7d32" stroke-width="2"/>
-  <text x="210" y="288" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">commitIndex = 6  (majority matched)</text>
-  <line x1="80" y1="300" x2="250" y2="300" stroke="#1565c0" stroke-width="2" stroke-dasharray="5 3"/>
-  <text x="165" y="318" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">lastApplied &lt;= commitIndex</text>
+  <line x1="80" y1="286" x2="320" y2="286" stroke="#2e7d32" stroke-width="2"/>
+  <text x="200" y="304" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">commitIndex = 6  (majority matched)</text>
+  <line x1="80" y1="316" x2="250" y2="316" stroke="#1565c0" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="165" y="334" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">lastApplied &lt;= commitIndex</text>
 
   <!-- Follower A log -->
-  <text x="580" y="180" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Follower A (matched through 6)</text>
-  <g transform="translate(580, 195)">
+  <text x="600" y="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Follower A (matched through 6)</text>
+  <g transform="translate(600, 205)">
     <rect x="0" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="35" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">4</text>
-    <text x="35" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t2</text>
+    <text x="35" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Put w</text>
     <rect x="80" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="115" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">5</text>
-    <text x="115" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t2</text>
+    <text x="115" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Put L</text>
     <rect x="160" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="195" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">6</text>
-    <text x="195" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t3</text>
+    <text x="195" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Del L</text>
     <rect x="240" y="0" width="70" height="56" fill="#eceff1" stroke="#b0bec5" rx="3"/>
     <text x="275" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#90a4ae">-</text>
   </g>
 
   <!-- Follower B log -->
-  <text x="580" y="290" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Follower B (matched through 7)</text>
-  <g transform="translate(580, 305)">
+  <text x="600" y="300" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Follower B (matched through 7)</text>
+  <g transform="translate(600, 315)">
     <rect x="0" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="35" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">4</text>
-    <text x="35" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t2</text>
+    <text x="35" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Put w</text>
     <rect x="80" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="115" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">5</text>
-    <text x="115" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t2</text>
+    <text x="115" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Put L</text>
     <rect x="160" y="0" width="70" height="56" fill="#c8e6c9" stroke="#66bb6a" rx="3"/>
     <text x="195" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">6</text>
-    <text x="195" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t3</text>
+    <text x="195" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#37474f">Del L</text>
     <rect x="240" y="0" width="70" height="56" fill="#fff9c4" stroke="#f9a825" rx="3"/>
     <text x="275" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">7</text>
-    <text x="275" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">t3</text>
+    <text x="275" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#e65100">Put L</text>
   </g>
 
-  <!-- Legend / pipeline -->
-  <g transform="translate(80, 360)">
-    <rect width="840" height="140" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
-    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Pipeline on the leader</text>
+  <!-- Pipeline -->
+  <g transform="translate(40, 400)">
+    <text x="0" y="18" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Ready pipeline (raft-rs RawNode)</text>
 
-    <rect x="20" y="50" width="160" height="60" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
-    <text x="100" y="75" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">Propose</text>
-    <text x="100" y="95" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">append entry</text>
+    <rect x="0" y="36" width="150" height="56" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="75" y="58" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">propose(data)</text>
+    <text x="75" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">RaftCmdRequest bytes</text>
 
-    <line x1="180" y1="80" x2="220" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+    <line x1="150" y1="64" x2="190" y2="64" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
 
-    <rect x="220" y="50" width="160" height="60" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
-    <text x="300" y="75" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">Persist + replicate</text>
-    <text x="300" y="95" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">WAL + AppendEntries</text>
+    <rect x="190" y="36" width="150" height="56" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="265" y="58" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">Ready + MsgAppend</text>
+    <text x="265" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">raftdb + replicate</text>
 
-    <line x1="380" y1="80" x2="420" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+    <line x1="340" y1="64" x2="380" y2="64" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
 
-    <rect x="420" y="50" width="160" height="60" fill="#fff8e1" stroke="#f9a825" rx="4"/>
-    <text x="500" y="75" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">CommitLog</text>
-    <text x="500" y="95" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">majority matched</text>
+    <rect x="380" y="36" width="150" height="56" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="455" y="58" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">commitIndex++</text>
+    <text x="455" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">majority matched</text>
 
-    <line x1="580" y1="80" x2="620" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+    <line x1="530" y1="64" x2="570" y2="64" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
 
-    <rect x="620" y="50" width="160" height="60" fill="#f3e5f5" stroke="#8e24aa" rx="4"/>
-    <text x="700" y="75" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#6a1b9a">ApplyLog</text>
-    <text x="700" y="95" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">MVCC / state machine</text>
+    <rect x="570" y="36" width="150" height="56" fill="#f3e5f5" stroke="#8e24aa" rx="4"/>
+    <text x="645" y="58" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#6a1b9a">apply Entry.data</text>
+    <text x="645" y="76" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Put/Delete on CFs</text>
 
-    <text x="20" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">idx 7 is on leader + follower B only =&gt; not yet committed. Client success waits for CommitLog (majority), then ApplyLog.</text>
+    <text x="0" y="118" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">idx 7 is on leader + follower B only =&gt; not yet committed. Client success waits for majority commit, then apply.</text>
   </g>
 </svg>

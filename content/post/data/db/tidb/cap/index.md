@@ -408,6 +408,3 @@ PD Raft does **not** replicate row values. Losing PD majority stalls TSO and met
 
 ---
 
-## Scope
-
-Covered: CAP theory (properties, partition model, CP vs AP, Raft as CP); PD embedded-etcd Raft and why etcd Raft leader ≠ PD leader; start, election, keep-alive, log send/commit/apply with source snippets. TiKV Region Multi-Raft (`raft-rs`), `NotLeader`, and `CommitLog`: [TiKV](../tikv/). Region key ranges, TSO allocation, and schedule operators: [architecture §3](../architecture/). Not covered: PACELC, Dynamo/AP designs, Byzantine faults, or a full etcd FSM walkthrough.

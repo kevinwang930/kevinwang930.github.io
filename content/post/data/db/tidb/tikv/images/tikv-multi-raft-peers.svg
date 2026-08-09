@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="580" viewBox="0 0 1100 580" role="img" aria-label="Multi-Raft: many Region peers per TiKV store">
+  <defs>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="580" fill="#f7f9fb"/>
+  <text x="550" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Multi-Raft: PD divides the keyspace; each store hosts many Region peers</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">PD owns [startKey, endKey) ranges and peer placement; TiKV runs one Raft peer FSM per assigned Region</text>
+
+  <!-- Keyspace -->
+  <g transform="translate(80, 70)">
+    <rect width="940" height="56" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="4"/>
+    <text x="470" y="20" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">Global keyspace (sorted) — divided by PD into Regions</text>
+    <text x="120" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">R1 [a, b)</text>
+    <text x="320" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">R2 [b, c)</text>
+    <text x="520" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">R3 [c, d)</text>
+    <text x="720" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#6a1b9a">R4 [d, e)</text>
+    <text x="880" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">...</text>
+  </g>
+
+  <!-- Store 1 -->
+  <g transform="translate(40, 160)">
+    <rect width="320" height="280" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.8" rx="6"/>
+    <text x="160" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">TiKV store 1</text>
+    <text x="160" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#558b2f">gRPC + scheduler + raftstore + RocksDB</text>
+
+    <rect x="20" y="64" width="280" height="44" fill="#ffffff" stroke="#66bb6a" rx="4"/>
+    <text x="160" y="82" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Store FSM routes by region_id</text>
+    <text x="160" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">fsm/store.rs</text>
+
+    <rect x="20" y="120" width="130" height="50" fill="#c8e6c9" stroke="#2e7d32" rx="4"/>
+    <text x="85" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">R1 peer</text>
+    <text x="85" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">LEADER</text>
+
+    <rect x="170" y="120" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="235" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R3 peer</text>
+    <text x="235" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <rect x="20" y="184" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="85" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R4 peer</text>
+    <text x="85" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <rect x="170" y="184" width="130" height="50" fill="#eceff1" stroke="#90a4ae" rx="4"/>
+    <text x="235" y="214" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#607d8b">... more peers</text>
+
+    <text x="160" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">shared kvdb + raftdb</text>
+  </g>
+
+  <!-- Store 2 -->
+  <g transform="translate(390, 160)">
+    <rect width="320" height="280" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="160" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">TiKV store 2</text>
+    <text x="160" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1976d2">same stack; different peer set</text>
+
+    <rect x="20" y="64" width="280" height="44" fill="#ffffff" stroke="#64b5f6" rx="4"/>
+    <text x="160" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">Store FSM</text>
+
+    <rect x="20" y="120" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="85" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R1 peer</text>
+    <text x="85" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <rect x="170" y="120" width="130" height="50" fill="#bbdefb" stroke="#1565c0" rx="4"/>
+    <text x="235" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">R2 peer</text>
+    <text x="235" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">LEADER</text>
+
+    <rect x="20" y="184" width="130" height="50" fill="#bbdefb" stroke="#1565c0" rx="4"/>
+    <text x="85" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">R3 peer</text>
+    <text x="85" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">LEADER</text>
+
+    <rect x="170" y="184" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="235" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R4 peer</text>
+    <text x="235" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <text x="160" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">shared kvdb + raftdb</text>
+  </g>
+
+  <!-- Store 3 -->
+  <g transform="translate(740, 160)">
+    <rect width="320" height="280" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="6"/>
+    <text x="160" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e65100">TiKV store 3</text>
+    <text x="160" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#f57f17">RF=3: third voter for each Region</text>
+
+    <rect x="20" y="64" width="280" height="44" fill="#ffffff" stroke="#ffb74d" rx="4"/>
+    <text x="160" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">Store FSM</text>
+
+    <rect x="20" y="120" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="85" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R1 peer</text>
+    <text x="85" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <rect x="170" y="120" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="235" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R2 peer</text>
+    <text x="235" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <rect x="20" y="184" width="130" height="50" fill="#ffe0b2" stroke="#ef6c00" rx="4"/>
+    <text x="85" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">R4 peer</text>
+    <text x="85" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ef6c00">LEADER</text>
+
+    <rect x="170" y="184" width="130" height="50" fill="#ffffff" stroke="#546e7a" rx="4"/>
+    <text x="235" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">R3 peer</text>
+    <text x="235" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#78909c">FOLLOWER</text>
+
+    <text x="160" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">shared kvdb + raftdb</text>
+  </g>
+
+  <!-- Raft messages between stores for R1 -->
+  <line x1="360" y1="300" x2="390" y2="300" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrG)"/>
+  <line x1="710" y1="300" x2="740" y2="300" stroke="#1565c0" stroke-width="1.4" marker-end="url(#arrB)"/>
+  <text x="550" y="292" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">Raft msgs per Region (AppendEntries / RequestVote)</text>
+
+  <text x="550" y="480" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#37474f">PD: split keyspace into R1..Rn, place peers on stores</text>
+  <text x="550" y="505" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#37474f">Example: R4 = store3 LEADER + store1 FOLLOWER + store2 FOLLOWER; leaders can sit on different stores</text>
+  <text x="550" y="535" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">One TiKV process multiplexes many peers; failover and quorum are per Region</text>
+  <text x="550" y="558" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#90a4ae">TiKV does not divide the global map itself — it runs peer FSMs for PD-assigned ranges</text>
+</svg>

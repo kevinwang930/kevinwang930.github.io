@@ -19,7 +19,7 @@ keywords:
 TiDB is a MySQL-compatible distributed SQL system. A deployment is a **cluster** of TiDB servers (compute), **PD** (control), **TiKV** (row store), and optionally **TiFlash** (columnar). This post orients cluster roles, follows one TiDB server in `git/tidb` (dispatch → execute), then shows how **PD** in `git/pd` owns Region key ranges (split/merge), TSO, locate, and scheduling. TiKV store, Region Raft, and 2PC are in [TiKV](../tikv/); CAP theory and PD etcd Raft are in [CAP and Raft](../cap/).
 <!--more-->
 
-Related: [TiKV: store, Multi-Raft Regions, and 2PC](../tikv/), [CAP and Raft](../cap/).
+Related: [TiKV: store stack, Multi-Raft, and MVCC](../tikv/), [CAP and Raft](../cap/).
 
 ![TiDB cluster planes and node relations](images/tidb-cluster-planes.svg)
 
@@ -534,7 +534,3 @@ Schedulers and checkers (`balance_leader`, `balance_region`, **split** / **merge
 | `pkg/schedule/schedulers/` | balance / hot-region schedulers |
 
 ---
-
-## Scope
-
-Covered: cluster roles; TiDB server path (dispatch → parse → compile → execute); joins across TiKV ranges; PD Region key ranges and split/merge, TSO, locate, and heartbeat-driven schedule (`git/pd`). Not covered: Region Raft election/log and majority `CommitLog`, or `primaryKey` 2PC MVCC—[TiKV](../tikv/); CAP theory and PD etcd Raft—[CAP and Raft](../cap/). Optional PD microservices (independent TSO/scheduling MCS) are noted only where the classic monolithic path branches.
