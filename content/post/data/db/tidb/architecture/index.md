@@ -19,7 +19,7 @@ keywords:
 TiDB is a MySQL-compatible distributed SQL system. A deployment is a **cluster** of TiDB servers (compute), **PD** (control), **TiKV** (row store), and optionally **TiFlash** (columnar). This post orients cluster roles, follows one TiDB server in `git/tidb` (dispatch → execute), then shows how **PD** in `git/pd` owns Region key ranges (split/merge), TSO, locate, and scheduling. TiKV store, Region Raft, and 2PC are in [TiKV](../tikv/); CAP theory and PD etcd Raft are in [CAP and Raft](../cap/).
 <!--more-->
 
-Related: [TiKV: store stack, Multi-Raft, and MVCC](../tikv/), [CAP and Raft](../cap/).
+Related: [TiKV architecture: Multi-Raft Regions, peer Raft, and MVCC](../tikv/), [CAP and Raft](../cap/).
 
 ![TiDB cluster planes and node relations](images/tidb-cluster-planes.svg)
 
@@ -434,17 +434,25 @@ func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timesta
 
 ### 3.3 Keyspace and Region ranges
 
-TiKV is one global sorted keyspace. PD cuts it into **Regions**—half-open ranges `[startKey, endKey)`—and places each Region’s peers on TiKV stores (commonly RF=3). Epoch bumps on split, merge, or membership change. That layout is what TiDB’s `RegionCache` and join/scan fan-out (§2.4–2.5) consume.
+TiKV presents **one global sorted keyspace**, not one table per store. TiDB SQL tables and indexes are **encoded into that keyspace** (e.g. record keys `t{table_id}_r…`, index keys `t{table_id}_i{index_id}_…`). PD does **not** assign “table T → TiKV N.” It cuts the byte keyspace into **Regions**—half-open ranges `[startKey, endKey)`—and places each Region’s peers on TiKV stores (commonly RF=3).
+
+Consequences:
+
+- One **TiKV store** hosts **many Region peers** for whatever ranges PD placed there. Those ranges can cover fragments of **many tables** (and indexes), plus system keys—not a single table.
+- One **table** is usually split into **many Regions** across **many stores** as it grows; a scan or join may hit several Region leaders (§2.4–2.5).
+- Scheduling moves or splits **Regions** (key ranges), not whole tables.
+
+Epoch bumps on split, merge, or membership change. That Region layout is what TiDB’s `RegionCache` and join/scan fan-out consume.
 
 | Piece | Meaning |
 |-------|---------|
-| Range | `[startKey, endKey)` |
+| Range | `[startKey, endKey)` in the global keyspace |
 | Peers | Copies on different stores; one **leader** serves client KV RPCs |
 | Epoch | Version for split / merge / conf-change; stale cache must reload |
 
 ![Regions and Raft peers](images/tikv-region-raft.svg)
 
-Example after splits for `orders` (`table_id = 100`):
+Example after splits for `orders` (`table_id = 100`)—still only key ranges, not “this TiKV owns orders”:
 
 | Region | Range | Holds |
 |--------|-------|-------|
@@ -452,7 +460,7 @@ Example after splits for `orders` (`table_id = 100`):
 | R2 | `[t100_r50, t100_i1)` | later rows |
 | R3 | `[t100_i1, t101)` | `idx_user` |
 
-`id >= 1` becomes a logical key range that may cover R1 and R2; execute locates each overlapping Region’s leader. How Raft replicates within one Region is in [TiKV](../tikv/); CAP and PD etcd Raft are in [CAP and Raft](../cap/).
+R1–R3’s peers sit on different TiKV stores; another table’s keys (`t101_…`) are other ranges that may share those same stores. `id >= 1` becomes a logical key range that may cover R1 and R2; execute locates each overlapping Region’s leader. How Raft replicates within one Region is in [TiKV](../tikv/); CAP and PD etcd Raft are in [CAP and Raft](../cap/).
 
 **Split.** When a Region grows too large or hot, PD (or TiKV via `AskSplit`) creates a **split operator**. The operator carries split keys; on the next heartbeat tick, TiKV applies the split and heartbeats report the new children—PD inserts them into `regionTree`.
 

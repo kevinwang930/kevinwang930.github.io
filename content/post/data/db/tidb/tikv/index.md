@@ -1,5 +1,5 @@
 ---
-title: "TiKV: store stack, Multi-Raft, and MVCC"
+title: "TiKV : Multi-Raft Regions, peer Raft, and MVCC"
 date: 2026-08-08T16:00:00+02:00
 draft: true
 categories:
@@ -12,6 +12,9 @@ tags:
 - tidb
 keywords:
 - tikv
+- multi-raft
+- mvcc
+- raft-rs
 #thumbnailImage: //example.com/image.jpg
 ---
 **TiKV** is the distributed row store: one sorted keyspace, many **Regions** (each a Raft group), **MVCC** in RocksDB, and Raft-backed apply for every durable write.
