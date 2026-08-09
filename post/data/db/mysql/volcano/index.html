@@ -414,32 +414,102 @@ In this post we examine the architecture of MySQL’s Volcano iterator model: ho
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> m_table_iterator<span style=color:#f92672>-&gt;</span>Init();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> <span style=color:#a6e22e>DoRead</span>() { <span style=color:#66d9ef>return</span> m_table_iterator<span style=color:#f92672>-&gt;</span>Read(); }
-</span></span></code></pre></div><hr><h3 id=34-joins>3.4 Joins</h3><p><strong>Family generation.</strong> Two children (<code>outer</code>, <code>inner</code>) are compiled first; join type and predicates come from the AccessPath / <code>JoinPredicate</code>.</p><h4 id=nestedloopiterator-nested_loop_join><code>NestedLoopIterator</code> (<code>NESTED_LOOP_JOIN</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> e.name, d.name
+</span></span></code></pre></div><hr><h3 id=34-joins>3.4 Joins</h3><p>Join iterators compile from an AccessPath with two children (<code>outer</code>, <code>inner</code>). Join type and predicates come from the AccessPath / <code>JoinPredicate</code>. The important contract for every join in this executor is not a fused “joined row” object: <strong>each side keeps its own <code>TABLE::record[0]</code></strong>, and a successful <code>Read()</code> means both buffers currently hold a matching pair. The SELECT list (<code>fields</code>) does not receive that pair as a new structure; it is a list of <strong>fixed pointers</strong> into those buffers, bound once at resolve time.</p><h4 id=two-table-buffers-one-select-list-of-pointers>Two table buffers, one SELECT list of pointers</h4><p>For a two-table nested loop, the outer leaf writes <code>employees.record[0]</code> and the inner leaf writes <code>departments.record[0]</code>. <code>NestedLoopIterator::DoRead</code> returns <code>0</code> only when both sides have a current row (or a null-complemented inner for outer join). <code>RowIterator::Read</code> documents that row data is never returned from the call; it is left in the table record buffer(s):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/iterators/row_iterator.h
+</span></span></span><span style=display:flex><span>  <span style=color:#75715e>/**
+</span></span></span><span style=display:flex><span><span style=color:#75715e>    Read a single row. The row data is not actually returned from the function;
+</span></span></span><span style=display:flex><span><span style=color:#75715e>    it is put in the table&#39;s (or tables&#39;, in case of a join) record buffer, ie.,
+</span></span></span><span style=display:flex><span><span style=color:#75715e>    table-&gt;records[0].
+</span></span></span><span style=display:flex><span><span style=color:#75715e>      0   OK
+</span></span></span><span style=display:flex><span><span style=color:#75715e>      -1   End of records
+</span></span></span><span style=display:flex><span><span style=color:#75715e>      1   Error
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   */</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>Read</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>const</span> <span style=color:#66d9ef>int</span> error <span style=color:#f92672>=</span> DoRead();
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> error;
+</span></span><span style=display:flex><span>  }
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>  employees.record[0]          departments.record[0]
+</span></span><span style=display:flex><span>  ┌──────────────────┐         ┌──────────────────┐
+</span></span><span style=display:flex><span>  │ current outer row│         │ current inner row│
+</span></span><span style=display:flex><span>  └────────▲─────────┘         └────────▲─────────┘
+</span></span><span style=display:flex><span>           │  Field::ptr                │  Field::ptr
+</span></span><span style=display:flex><span>           │                            │
+</span></span><span style=display:flex><span>  Item_field (e.name) ──────────┐       │
+</span></span><span style=display:flex><span>  Item_field (d.name) ──────────┼───────┘
+</span></span><span style=display:flex><span>                                │
+</span></span><span style=display:flex><span>                         JOIN::fields  (== Query_block::fields)
+</span></span><span style=display:flex><span>                                │
+</span></span><span style=display:flex><span>                    send_data(thd, *fields)   // same list every iteration
+</span></span></code></pre></div><p>At table open, each <code>Field</code> is positioned into that table’s <code>record[0]</code>. At resolve, each SELECT <code>Item_field</code> stores that <code>Field*</code> once via <code>set_field</code>. At execute, <code>get_field_list()</code> returns <code>JOIN::fields</code> (alias of <code>Query_block::fields</code>) <strong>once</strong> before the pull loop. Each iteration only overwrites the two buffers; the <code>Item*</code> / <code>Field*</code> pointers stay the same, so the next <code>send_data</code> sees the new values through the old pointers.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/table.cc — Field::ptr into TABLE::record[0]
+</span></span></span><span style=display:flex><span>    outparam<span style=color:#f92672>-&gt;</span>record[<span style=color:#ae81ff>0</span>] <span style=color:#f92672>=</span> record;
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// make all new fields&#39; pointers point into the new TABLE&#39;s record[0]
+</span></span></span><span style=display:flex><span>    new_field<span style=color:#f92672>-&gt;</span>move_field_offset(move_offset);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// sql/item.cc — bound once at resolve
+</span></span></span><span style=display:flex><span>  field <span style=color:#f92672>=</span> result_field <span style=color:#f92672>=</span> field_par;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// sql/sql_optimizer.cc — JOIN::JOIN
+</span></span></span><span style=display:flex><span>      fields(<span style=color:#f92672>&amp;</span>select<span style=color:#f92672>-&gt;</span>fields),
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// sql/sql_union.cc — ExecuteIteratorQuery
+</span></span></span><span style=display:flex><span>  mem_root_deque<span style=color:#f92672>&lt;</span>Item <span style=color:#f92672>*&gt;</span> <span style=color:#f92672>*</span>fields <span style=color:#f92672>=</span> get_field_list();  <span style=color:#75715e>// once
+</span></span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>int</span> error <span style=color:#f92672>=</span> m_root_iterator<span style=color:#f92672>-&gt;</span>Read();   <span style=color:#75715e>// fills outer + inner record[0]
+</span></span></span><span style=display:flex><span>      ...
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (query_result<span style=color:#f92672>-&gt;</span>send_data(thd, <span style=color:#f92672>*</span>fields)) {  <span style=color:#75715e>// same Item* list
+</span></span></span></code></pre></div><p>Leaf iterators write the buffers the pointers already address:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// outer scan — sql/iterators/basic_row_iterators.cc
+</span></span></span><span style=display:flex><span>      m_record(table<span style=color:#f92672>-&gt;</span>record[<span style=color:#ae81ff>0</span>]),
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>while</span> ((tmp <span style=color:#f92672>=</span> table()<span style=color:#f92672>-&gt;</span>file<span style=color:#f92672>-&gt;</span>ha_rnd_next(m_record))) {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// inner eq_ref — sql/iterators/ref_row_iterators.cc
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> error <span style=color:#f92672>=</span> table()<span style=color:#f92672>-&gt;</span>file<span style=color:#f92672>-&gt;</span>ha_index_read_map(
+</span></span><span style=display:flex><span>        table()<span style=color:#f92672>-&gt;</span>record[<span style=color:#ae81ff>0</span>], key_buff_and_map.first, key_buff_and_map.second,
+</span></span></code></pre></div><p>Projection walks those fixed <code>Item_field</code>s:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// sql/item.cc
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> Item_field<span style=color:#f92672>::</span>send(Protocol <span style=color:#f92672>*</span>protocol, String <span style=color:#f92672>*</span>) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> protocol<span style=color:#f92672>-&gt;</span>store_field(field);  <span style=color:#75715e>// Field::ptr → current record[0]
+</span></span></span><span style=display:flex><span>}
+</span></span></code></pre></div><hr><h4 id=nestedloopiterator-nested_loop_join><code>NestedLoopIterator</code> (<code>NESTED_LOOP_JOIN</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> e.name, d.name
 </span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> employees e
 </span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> departments d <span style=color:#66d9ef>ON</span> e.department_id <span style=color:#f92672>=</span> d.id;
 </span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span>iterator <span style=color:#f92672>=</span> NewIterator<span style=color:#f92672>&lt;</span>NestedLoopIterator<span style=color:#f92672>&gt;</span>(
 </span></span><span style=display:flex><span>    thd, mem_root, std<span style=color:#f92672>::</span>move(outer), std<span style=color:#f92672>::</span>move(inner),
 </span></span><span style=display:flex><span>    param.join_type, param.pfs_batch_mode);
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> NestedLoopIterator<span style=color:#f92672>::</span>DoRead() {
+</span></span></code></pre></div><p><code>DoRead</code> only coordinates the two children. When it returns <code>0</code>, outer and inner <code>record[0]</code> already hold the current pair; it does not assemble a joined tuple for <code>fields</code>.</p><p>Where the ON / residual conditions actually run:</p><table><thead><tr><th>Kind of predicate</th><th>Where it is checked</th></tr></thead><tbody><tr><td>Equijoin usable as ref / eq_ref (e.g. <code>e.department_id = d.id</code>)</td><td><strong>Pushed into the inner access path.</strong> Outer values are bound when <code>m_source_inner->Init()</code> runs; the inner <code>RefIterator</code> / <code>EQRefIterator</code> only returns matching keys. Nested loop never re-tests that equality.</td></tr><tr><td>Residual join / WHERE predicates not pushed into the inner lookup</td><td><strong><code>FilterIterator</code> (or a filter on a child path) above or beside the join</strong>—<code>m_condition->val_int()</code> after pulling a joined pair. Rejected pairs call <code>UnlockRow()</code> and pull again.</td></tr><tr><td>Outer / anti / semi cardinality</td><td><strong>Inside</strong> <code>NestedLoopIterator</code> via <code>m_join_type</code> only (null-complement, stop after first match, skip matches)—still no boolean join <code>Item</code>.</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> NestedLoopIterator<span style=color:#f92672>::</span>DoRead() {
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (;;) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (m_state <span style=color:#f92672>==</span> NEEDS_OUTER_ROW) {
 </span></span><span style=display:flex><span>      <span style=color:#66d9ef>int</span> err <span style=color:#f92672>=</span> m_source_outer<span style=color:#f92672>-&gt;</span>Read();
 </span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (err <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) { m_state <span style=color:#f92672>=</span> END_OF_ROWS; <span style=color:#66d9ef>return</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>; }
-</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (m_source_inner<span style=color:#f92672>-&gt;</span>Init()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>      <span style=color:#75715e>// Bind outer columns into the inner lookup (ref/eq_ref), then scan matches.
+</span></span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (m_source_inner<span style=color:#f92672>-&gt;</span>Init()) <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;
 </span></span><span style=display:flex><span>      m_state <span style=color:#f92672>=</span> READING_FIRST_INNER_ROW;
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> err <span style=color:#f92672>=</span> m_source_inner<span style=color:#f92672>-&gt;</span>Read();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (err <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) {
-</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (m_join_type <span style=color:#f92672>==</span> JoinType<span style=color:#f92672>::</span>OUTER <span style=color:#f92672>&amp;&amp;</span> m_state <span style=color:#f92672>==</span> READING_FIRST_INNER_ROW) {
-</span></span><span style=display:flex><span>        m_source_inner<span style=color:#f92672>-&gt;</span>SetNullRowFlag(true);
-</span></span><span style=display:flex><span>        m_state <span style=color:#f92672>=</span> NEEDS_OUTER_ROW;
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;
-</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>      <span style=color:#75715e>// No (more) inner rows for this outer.
+</span></span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (m_join_type <span style=color:#f92672>==</span> JoinType<span style=color:#f92672>::</span>OUTER <span style=color:#f92672>&amp;&amp;</span> m_state <span style=color:#f92672>==</span> READING_FIRST_INNER_ROW) {
+</span></span><span style=display:flex><span>        m_source_inner<span style=color:#f92672>-&gt;</span>SetNullRowFlag(true);  <span style=color:#75715e>// LEFT JOIN null-extend
+</span></span></span><span style=display:flex><span>        m_state <span style=color:#f92672>=</span> NEEDS_OUTER_ROW;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;  <span style=color:#75715e>// one output row: outer + NULLs
+</span></span></span><span style=display:flex><span>      }
 </span></span><span style=display:flex><span>      m_state <span style=color:#f92672>=</span> NEEDS_OUTER_ROW;
 </span></span><span style=display:flex><span>      <span style=color:#66d9ef>continue</span>;
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Both TABLE::record[0] buffers hold the current pair.
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (m_join_type <span style=color:#f92672>==</span> JoinType<span style=color:#f92672>::</span>ANTI) { m_state <span style=color:#f92672>=</span> NEEDS_OUTER_ROW; <span style=color:#66d9ef>continue</span>; }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (m_join_type <span style=color:#f92672>==</span> JoinType<span style=color:#f92672>::</span>SEMI) m_state <span style=color:#f92672>=</span> NEEDS_OUTER_ROW;
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> m_state <span style=color:#f92672>=</span> READING_INNER_ROWS;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Residual / WHERE predicates sit in a parent <code>FilterIterator</code>, not in the join:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#66d9ef>int</span> FilterIterator<span style=color:#f92672>::</span>DoRead() {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> err <span style=color:#f92672>=</span> m_source<span style=color:#f92672>-&gt;</span>Read();  <span style=color:#75715e>// often NestedLoopIterator
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (err <span style=color:#f92672>!=</span> <span style=color:#ae81ff>0</span>) <span style=color:#66d9ef>return</span> err;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>m_condition<span style=color:#f92672>-&gt;</span>val_int()) {
+</span></span><span style=display:flex><span>      m_source<span style=color:#f92672>-&gt;</span>UnlockRow();
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
@@ -458,7 +528,7 @@ In this post we examine the architecture of MySQL’s Volcano iterator model: ho
 </span></span><span style=display:flex><span>    err <span style=color:#f92672>=</span> m_source_inner<span style=color:#f92672>-&gt;</span>Read();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (err <span style=color:#f92672>==</span> <span style=color:#f92672>-</span><span style=color:#ae81ff>1</span>) <span style=color:#66d9ef>continue</span>;          <span style=color:#75715e>// no match
 </span></span></span><span style=display:flex><span>    key_copy(m_key_buf, ...);         <span style=color:#75715e>// remember outer key
-</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;                         <span style=color:#75715e>// first match only
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>0</span>;                         <span style=color:#75715e>// first match only → up to send_data
 </span></span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><h4 id=hashjoiniterator-hash_join><code>HashJoinIterator</code> (<code>HASH_JOIN</code>)</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> o.id, <span style=color:#66d9ef>c</span>.name
