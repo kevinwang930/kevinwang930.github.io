@@ -1062,42 +1062,250 @@ int NestedLoopSemiJoinWithDuplicateRemovalIterator::DoRead() {
 
 #### `HashJoinIterator` (`HASH_JOIN`)
 
+**When it fits.** Hash join is the executor’s replacement for classical **block nested-loop (BNL)** join buffering. In `ConnectJoins`, `UseHashJoin(qep_tab)` is true when `qep_tab->op_type == OT_BNL`. That op type is set when join buffering is enabled for an inner table whose access method is a **scan without a usable join-key lookup**: `JT_ALL`, `JT_INDEX_SCAN`, `JT_RANGE`, or `JT_INDEX_MERGE`, and `block_nested_loop` / `BNL` hint is on (`setup_join_buffering` in `sql/sql_optimizer.cc`). Equijoin predicates become hash keys; residual predicates stay as filters after the join. With the hypergraph optimizer, `HASH_JOIN` is also proposed when its cost beats nested loop for the same edge.
+
+It does **not** fit the ordinary PK lookup. If the join is `orders.customer_id = customers.id` and `customers.id` is `PRIMARY KEY`, the plan is almost always **nested loop + `eq_ref`**, not hash join.
+
+Hash join fits a normal equijoin when the **join columns are not indexed** (or no usable index exists for that lookup), so the inner access stays `JT_ALL` / scan and BNL → `HASH_JOIN`:
+
 ```sql
-SELECT o.id, c.name
-FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- No index on either join column → HashJoinIterator (not NestedLoop + eq_ref)
+CREATE TABLE t1 (id INT PRIMARY KEY, val INT);
+CREATE TABLE t2 (id INT PRIMARY KEY, val INT);
+-- join is on val, not on the primary keys
+SELECT t1.id, t2.id
+FROM t1 JOIN t2 ON t1.val = t2.val;
 ```
 
 ```cpp
+// sql/sql_executor.cc — ConnectJoins chooses hash join for OT_BNL
+static bool UseHashJoin(QEP_TAB *qep_tab) {
+  return qep_tab->op_type == QEP_TAB::OT_BNL;
+}
+...
+          path = CreateHashJoinAccessPath(...);  // AccessPath::HASH_JOIN
+
+// sql/sql_optimizer.cc — setup_join_buffering (BNL → later HashJoinIterator)
+  switch (tab->type()) {
+    case JT_ALL:
+    case JT_INDEX_SCAN:
+    case JT_RANGE:
+    case JT_INDEX_MERGE:
+      if (!bnl_on) goto no_join_cache;
+      tab->set_use_join_cache(JOIN_CACHE::ALG_BNL);
+```
+
+```cpp
+// sql/join_optimizer/access_path.cc
 iterator = NewIterator<HashJoinIterator>(
     thd, mem_root, std::move(outer), std::move(inner),
     /*build=*/inner estimate, conditions, extra_conditions, join_type, ...);
 ```
+
+##### How it is implemented
+
+Files: `sql/iterators/hash_join_iterator.{h,cc}`, `hash_join_buffer.{h,cc}`, `hash_join_chunk.{h,cc}`. The header states the in-memory algorithm: designate **build** vs **probe**, load the build side into an in-memory map keyed by equijoin attributes (size limited by `join_buffer_size`), then for each probe row look up matches and restore the stored build row into its `TABLE::record[0]`. If the build side does not fit, the iterator spills into **on-disk chunk** partitions (`HashJoinChunk`) and continues chunk-pair by chunk-pair.
+
+```text
+  probe input ──Read()──► ConstructJoinKey ──find()──► hash map
+                                                         │
+  build input ──Read()──► StoreRow (key + packed row) ───┘
+                                                         │
+                              LoadImmutableStringIntoTableBuffers(build)
+                              probe already in its record[0]
+                              → return 0 (same fields pointers as NLJ)
+```
+
+**1. Build — fill `HashJoinRowBuffer`.** `InitHashTable()` calls `BuildHashTable()`, which pulls the build iterator and stores each row:
+
+```cpp
+// sql/iterators/hash_join_iterator.cc
+bool HashJoinIterator::BuildHashTable() {
+  ...
+  if (InitRowBuffer()) return true;
+  ...
+  for (;;) {
+    int res = m_build_input->Read();
+    if (res == 1) return true;
+    if (res == -1) {
+      m_build_iterator_has_more_rows = false;
+      ...
+      SetReadingProbeRowState();
+      return false;
+    }
+    m_build_input_tables.RequestRowId();
+    const hash_join_buffer::StoreRowResult store_row_result =
+        m_row_buffer.StoreRow(thd(), reject_duplicate_keys);
+    switch (store_row_result) {
+      case hash_join_buffer::StoreRowResult::ROW_STORED:
+        break;
+      case hash_join_buffer::StoreRowResult::BUFFER_FULL:
+        // spill to chunk files if m_allow_spill_to_disk, else probe what fits
+        ...
+```
+
+`StoreRow` builds the hash key from equijoin `Item`s, packs the build-side row bytes, and inserts into an `unordered_dense` map (`ImmutableStringWithLength` → linked list of packed rows for duplicate keys):
+
+```cpp
+// sql/iterators/hash_join_buffer.cc
+StoreRowResult HashJoinRowBuffer::StoreRow(THD *thd,
+                                           bool reject_duplicate_keys) {
+  m_buffer.length(0);
+  for (const HashJoinCondition &hash_join_condition : m_join_conditions) {
+    bool null_in_join_condition =
+        hash_join_condition.join_condition()->append_join_key_for_hash_join(
+            thd, m_tables.tables_bitmap(), hash_join_condition,
+            m_join_conditions.size() > 1, &m_buffer);
+    if (null_in_join_condition)
+      return StoreRowResult::ROW_STORED;  // skip; NULL = never matches
+  }
+  ...
+  key_it_and_inserted =
+      m_hash_map->emplace(key, LinkedImmutableString{nullptr});
+  // pack TABLE record[0] bytes after the key; may return BUFFER_FULL
+```
+
+**2. Probe — one row, then look up.** After the build phase, `DoRead` enters `READING_ROW_FROM_PROBE_ITERATOR`. Each successful probe `Read()` calls `LookupProbeRowInHashTable()`:
+
+```cpp
+// sql/iterators/hash_join_iterator.cc
+bool HashJoinIterator::ReadRowFromProbeIterator() {
+  ...
+  result = m_probe_input->Read();
+  ...
+  if (result == 0) {
+    m_probe_input_tables.RequestRowId();
+    LookupProbeRowInHashTable();
+    return false;
+  }
+  ...
+}
+
+void HashJoinIterator::LookupProbeRowInHashTable() {
+  bool null_in_join_key = ConstructJoinKey(
+      thd(), m_join_conditions, m_probe_input_tables.tables_bitmap(),
+      &m_temporary_row_and_join_key_buffer);
+  ...
+  hash_join_buffer::Key key{m_temporary_row_and_join_key_buffer.ptr(),
+                            m_temporary_row_and_join_key_buffer.length()};
+  m_current_row =
+      m_row_buffer.find(key).value_or(LinkedImmutableString{nullptr});
+  m_state = State::READING_FIRST_ROW_FROM_HASH_TABLE;
+}
+```
+
+**3. Emit — restore build row into its table buffer.** Matches walk the linked list for that key; each hit unpacks into the build tables’ `record[0]`. The probe row is already in the probe tables’ buffers. Residual (non-equijoin) predicates run as `m_extra_condition`:
+
+```cpp
+int HashJoinIterator::ReadJoinedRow() {
+  if (m_current_row == nullptr) return -1;
+  LoadImmutableStringIntoTableBuffers(m_build_input_tables, m_current_row);
+  return 0;
+}
+
+int HashJoinIterator::ReadNextJoinedRowFromHashTable() {
+  ...
+  res = ReadJoinedRow();
+  if (res == 0) {
+    passes_extra_conditions = JoinedRowPassesExtraConditions();
+    if (!passes_extra_conditions)
+      m_current_row = m_current_row.Decode().next;  // next build row for key
+  }
+  ...
+}
+```
+
+**4. Driver state machine.** `DoRead` only returns `0` when a joined pair is ready in the two sides’ buffers (same `fields` pointer model as nested loop):
 
 ```cpp
 int HashJoinIterator::DoRead() {
   for (;;) {
     switch (m_state) {
       case State::LOADING_NEXT_CHUNK_PAIR:
-        if (ReadNextHashJoinChunk()) return 1; break;       // build
+        if (ReadNextHashJoinChunk()) return 1;   // on-disk: rebuild map from chunk
+        break;
       case State::READING_ROW_FROM_PROBE_ITERATOR:
-        if (ReadRowFromProbeIterator()) return 1; break;    // probe
+        if (ReadRowFromProbeIterator()) return 1;
+        break;
+      case State::READING_ROW_FROM_PROBE_CHUNK_FILE:
+        if (ReadRowFromProbeChunkFile()) return 1;
+        break;
+      case State::READING_FIRST_ROW_FROM_HASH_TABLE:
       case State::READING_FROM_HASH_TABLE: {
         const int res = ReadNextJoinedRowFromHashTable();
-        if (res == 0) return 0;
-        if (res == -1) continue;
+        if (res == 0) return 0;   // build + probe record[0] co-positioned
+        if (res == -1) continue;  // next probe row
         return res;
       }
-      case State::END_OF_ROWS: return -1;
+      case State::END_OF_ROWS:
+        return -1;
     }
   }
 }
 ```
 
+Same two-buffer rule as nested loop: probe stays in its `TABLE::record[0]`; each match reloads the build side from the hash map into the build `record[0]`. `fields` remain fixed `Item_field` → `Field*` pointers into those buffers. The hash map stores **packed copies** of build rows so the build iterator can move on; it is not a third “joined row” object for `send_data`.
+
 #### `BKAIterator` (`BKA_JOIN`)
 
+**When it fits.** Batched Key Access is join buffering for the opposite access pattern: the inner table **does** have a usable index lookup (`JT_REF`, `JT_EQ_REF`, also `JT_SYSTEM` / `JT_CONST` in the same switch), and `batched_key_access` / `BKA` hint is on. `setup_join_buffering` then sets `JOIN_CACHE::ALG_BKA` only if the storage engine’s **MRR** interface accepts the multi-range plan (not `HA_MRR_USE_DEFAULT_IMPL`, not `HA_MRR_NO_ASSOCIATION`). `ConnectJoins` maps that to `CreateBKAAccessPath` when `UseBKA(qep_tab)` (`op_type == OT_BKA`). BKA is skipped for materializable derived tables, guarded IN-subquery refs, and some multi-table outer-join shapes that would not stay left-deep.
+
+Typical shape: many outer keys, index on the inner join column, engine can batch MRR (e.g. InnoDB). Outer rows are buffered; keys are handed to `MultiRangeRowIterator`; matched inner rows stream back with association to the buffered outers.
+
+**Example that suits BKA** (index nested-loop candidate, with batching enabled). Default plan for this SQL is plain nested loop + `eq_ref`. BKA only appears after turning on `batched_key_access` (off by default) or using the `BKA` hint:
+
 ```sql
-SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id;
--- EXPLAIN may show Batched Key Access; inner path includes MRR
+CREATE TABLE customers (
+  id   INT NOT NULL PRIMARY KEY,
+  name VARCHAR(64) NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE orders (
+  id          INT NOT NULL PRIMARY KEY,
+  customer_id INT NOT NULL,
+  amount      DECIMAL(10, 2) NOT NULL,
+  KEY idx_orders_customer_id (customer_id)
+) ENGINE=InnoDB;
+
+-- Default: NestedLoopIterator + eq_ref on customers PRIMARY
+SELECT o.id, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Enable BKA (session), then the same join can use BKAIterator + MRR
+SET SESSION optimizer_switch = 'batched_key_access=on,mrr=on,mrr_cost_based=off';
+
+EXPLAIN FORMAT=TREE
+SELECT /*+ BKA(c) */ o.id, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+-- Expect: Batched key access / BKA join; inner Multi-Range Read on customers
+```
+
+Contrast with hash join: that path needs **no** usable join-key index (`JT_ALL`). BKA needs the **opposite** — a real `ref`/`eq_ref` into `customers.id`, plus MRR that can associate ranges back to buffered outer rows.
+
+```cpp
+// sql/sql_executor.cc
+static bool UseBKA(QEP_TAB *qep_tab) {
+  if (qep_tab->op_type != QEP_TAB::OT_BKA) return false;
+  ...
+  return true;
+}
+
+// sql/sql_optimizer.cc — setup_join_buffering
+    case JT_SYSTEM:
+    case JT_CONST:
+    case JT_REF:
+    case JT_EQ_REF:
+      if (!bka_on) goto no_join_cache;
+      if (tab->table_ref->uses_materialization()) goto no_join_cache;
+      if (tab->has_guarded_conds()) goto no_join_cache;
+      rows = tab->table()->file->multi_range_read_info(...);
+      if ((rows == HA_POS_ERROR) ||
+          (join_cache_flags & HA_MRR_USE_DEFAULT_IMPL) ||
+          (join_cache_flags & HA_MRR_NO_ASSOCIATION))
+        goto no_join_cache;
+      tab->set_use_join_cache(JOIN_CACHE::ALG_BKA);
 ```
 
 ```cpp
@@ -1123,6 +1331,12 @@ int BKAIterator::DoRead() {
   }
 }
 ```
+
+| Algorithm | Inner access | Optimizer switch / hint | Executor |
+|-----------|--------------|-------------------------|----------|
+| Nested loop (plain) | `ref` / `eq_ref` without BKA | default when buffering off | `NestedLoopIterator` |
+| Hash join | `ALL` / index scan / range (BNL) | `block_nested_loop` / `BNL` | `HashJoinIterator` |
+| BKA | `ref` / `eq_ref` + real MRR | `batched_key_access` / `BKA` | `BKAIterator` + MRR |
 
 ---
 
