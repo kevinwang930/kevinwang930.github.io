@@ -16,7 +16,7 @@ keywords:
 - etcd
 #thumbnailImage: //example.com/image.jpg
 ---
-The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** implements CAP’s **CP** choice via majority quorum. This post introduces that theory (C, A, P, partition trade-off, Raft as CP), then details **PD’s** embedded-etcd Raft. TiKV Region Multi-Raft is in [TiKV](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
+The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** implements CAP’s **CP** choice via majority quorum. This post introduces that theory (C, A, P, partition trade-off, Raft as CP), then details TiDB **Placement Driver (PD)’s** embedded-etcd Raft. TiKV Region Multi-Raft is in [TiKV](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
 <!--more-->
 
 
@@ -24,23 +24,14 @@ The **CAP theorem** states what a replicated store can guarantee when the networ
 
 ## 1. Theory
 
-Brewer conjectured CAP in 2000; Gilbert and Lynch gave a formal proof in 2002. On a network that can **partition**—messages between some replicas delayed or lost for an unbounded time—a shared-data system cannot simultaneously guarantee:
+On a network that can **partition**—messages between some replicas delayed or lost for an unbounded time—a shared-data system cannot simultaneously guarantee:
 
 - **linearizable** reads and writes for the replicated object, and  
 - a **non-error response** from **every** non-failed node that receives a request.
 
 That is the theorem. The design question under partition is which guarantee to keep: **C** or **A**. **P** is not optional on real multi-node deployments; partitions occur.
 
-### 1.1 Scope of the theorem
-
-| CAP applies to | CAP does not decide alone |
-|----------------|---------------------------|
-| Multi-replica read/write of **one logical object** | Single-node stores (no replica set to partition) |
-| Behavior **while** replicas cannot communicate | Latency / throughput when the network is healthy (that is closer to PACELC’s “else”) |
-| Whether a client operation **succeeds or errors** | SQL isolation levels, foreign keys, or application invariants by themselves |
-| Replicated state machines / quorum logs | Whether the product is “highly available” in the ops sense (nines) |
-
-### 1.2 The three properties
+### 1.1 The three properties
 
 | Property | Formal meaning in CAP |
 |----------|------------------------|
@@ -54,7 +45,7 @@ Precise distinctions that are often blurred:
 - CAP **A** is **not** “three nines uptime.” A node that is up but returns `NotLeader` / timeout while waiting for quorum is **unavailable** in CAP’s sense for that request.  
 - **P** is assumed once you deploy across failure domains; the interesting choice is **CP vs AP** when the cut happens.
 
-### 1.3 The partition model
+### 1.2 The partition model
 
 Split the replica set so **no message crosses** the cut for an unbounded time. Clients may still reach nodes inside each component.
 
@@ -74,7 +65,7 @@ There is no design that keeps linearizability for **all** clients **and** non-er
 | {A, B} | Yes (2 ≥ majority) | Yes (and may diverge from C) |
 | {C} | No (1 < majority) → stall or error | Yes locally → fork possible |
 
-### 1.4 Raft as a CP mechanism
+### 1.3 Raft as a CP mechanism
 
 CAP states the trade-off; it does not name an algorithm. **Raft** is one concrete CP answer for a single replicated log: commit only when a **majority** of voters have stored the entry, and allow at most one **Leader** per term so histories do not fork.
 
@@ -134,7 +125,7 @@ Each PD member embeds **etcd**; the PD servers form **one** Raft group whose log
 | **Peers** | PD servers (odd set, typically 3 or 5) | TiKV stores |
 | **Client surface** | **PD leader** (TSO / locate / schedule) | Region **leader** (`NotLeader`) |
 
-Same CAP rule from §1.4: majority commit, minority cannot elect a second leader. Different object and different library.
+Same CAP rule from §1.3: majority commit, minority cannot elect a second leader. Different object and different library.
 
 ### 2.1 Two leaders: etcd Raft leader vs PD leader
 
@@ -238,7 +229,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 }
 ```
 
-That `OpPut` is how PD leadership is **recorded**: the etcd Raft leader appends it, replicates with `MsgApp` (AppendEntries), and commits only with a majority—same CP rule as §1.4. Winning the key does not replace Raft; it depends on it.
+That `OpPut` is how PD leadership is **recorded**: the etcd Raft leader appends it, replicates with `MsgApp` (AppendEntries), and commits only with a majority—same CP rule as §1.3. Winning the key does not replace Raft; it depends on it.
 
 ### 2.4 Heartbeat and leadership keep-alive
 
