@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-label="Peer Raft overview: Ready to raftdb, apply to kvdb">
+  <defs>
+    <marker id="arrDk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="arrGn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrPu" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#6a1b9a"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="480" fill="#f7f9fb"/>
+  <text x="500" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">One Region peer: raft-rs Ready loop</text>
+  <text x="500" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Raft protocol state persists to raftdb; only committed user commands apply to kvdb</text>
+
+  <!-- Peer box -->
+  <g transform="translate(40, 70)">
+    <rect width="920" height="200" fill="#ffffff" stroke="#90a4ae" stroke-width="1.4" rx="6"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Peer FSM (raftstore) + RawNode (raft-rs)</text>
+
+    <rect x="20" y="48" width="160" height="64" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="100" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">step(Message)</text>
+    <text x="100" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">votes / append / heartbeat</text>
+
+    <line x1="180" y1="80" x2="220" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+
+    <rect x="220" y="48" width="160" height="64" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="300" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">RawNode</text>
+    <text x="300" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">roles, log, commit</text>
+
+    <line x1="380" y1="80" x2="420" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+
+    <rect x="420" y="48" width="160" height="64" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="500" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">Ready</text>
+    <text x="500" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">hs, entries, messages</text>
+
+    <line x1="500" y1="112" x2="500" y2="140" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrGn)"/>
+
+    <rect x="380" y="140" width="240" height="44" fill="#c8e6c9" stroke="#2e7d32" rx="4"/>
+    <text x="500" y="168" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">persist to raftdb</text>
+
+    <line x1="580" y1="80" x2="640" y2="80" stroke="#37474f" stroke-width="1.4" marker-end="url(#arrDk)"/>
+
+    <rect x="640" y="48" width="160" height="64" fill="#eceff1" stroke="#78909c" rx="4"/>
+    <text x="720" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#455a64">send Messages</text>
+    <text x="720" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">to other TiKV peers</text>
+
+    <line x1="720" y1="112" x2="720" y2="160" stroke="#6a1b9a" stroke-width="1.4" marker-end="url(#arrPu)"/>
+    <text x="820" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#6a1b9a">committed entries</text>
+    <line x1="800" y1="160" x2="860" y2="160" stroke="#6a1b9a" stroke-width="1.4" marker-end="url(#arrPu)"/>
+  </g>
+
+  <!-- Engines -->
+  <g transform="translate(40, 300)">
+    <rect width="440" height="140" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="6"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">raftdb (Raft engine)</text>
+    <text x="20" y="54" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">HardState (term, vote, commit)</text>
+    <text x="20" y="76" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">Raft log entries (term, index, data)</text>
+    <text x="20" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Every Ready that changes hs or appends entries</text>
+    <text x="20" y="120" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">writes here. Network Messages are not the DB rows.</text>
+
+    <rect x="480" y="0" width="440" height="140" fill="#f3e5f5" stroke="#8e24aa" stroke-width="1.6" rx="6"/>
+    <text x="500" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6a1b9a">kvdb (user MVCC)  see 3.</text>
+    <text x="500" y="54" font-family="Consolas, monospace" font-size="11" fill="#6a1b9a">lock / write / default CFs</text>
+    <text x="500" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Only after majority commit: apply FSM</text>
+    <text x="500" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">decodes Entry.data and mutates user keys.</text>
+    <text x="500" y="120" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Election and replication do not write kvdb.</text>
+  </g>
+</svg>

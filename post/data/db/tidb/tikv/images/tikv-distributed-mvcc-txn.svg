@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="820" viewBox="0 0 1100 820" role="img" aria-label="Distributed MVCC and primaryKey atomicity across TiKV Regions">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="aOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="aGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c62828"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="820" fill="#f7f9fb"/>
+  <text x="550" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Distributed MVCC: primaryKey enforces txn atomicity</text>
+  <text x="550" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">R1/R2 are equal ranges. primaryKey is one mutation key (client-go); secondaries point at it via Lock.Primary</text>
+
+  <g transform="translate(40, 60)">
+    <rect width="1020" height="56" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="16" y="22" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Code names</text>
+    <text x="16" y="42" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">primaryKey / Lock.Primary = durable commit bit   |   secondary keys = other mutations   |   not SQL PRIMARY KEY column   |   Region leader = Raft</text>
+  </g>
+
+  <g transform="translate(40, 135)">
+    <rect width="220" height="150" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.6" rx="5"/>
+    <text x="110" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">TiDB / client-go</text>
+    <text x="110" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">twoPhaseCommitter</text>
+    <text x="110" y="74" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">pick primaryKey</text>
+    <text x="110" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Prewrite all (Primary=..)</text>
+    <text x="110" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Commit primaryKey first</text>
+    <text x="110" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Commit secondaries</text>
+  </g>
+
+  <line x1="260" y1="180" x2="318" y2="180" stroke="#ef6c00" stroke-width="1.8" marker-end="url(#aOrange)"/>
+  <text x="288" y="168" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#ef6c00">Prewrite</text>
+  <line x1="260" y1="220" x2="318" y2="250" stroke="#2e7d32" stroke-width="1.8" marker-end="url(#aGreen)"/>
+  <text x="275" y="248" font-family="Consolas, monospace" font-size="8" fill="#2e7d32">Commit</text>
+  <line x1="260" y1="250" x2="318" y2="400" stroke="#2e7d32" stroke-width="1.5" marker-end="url(#aGreen)"/>
+
+  <g transform="translate(320, 135)">
+    <rect width="360" height="180" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" rx="5"/>
+    <text x="180" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Region R1  [t100_r1, t100_r2)</text>
+    <text x="180" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">Raft LEADER serves this range</text>
+
+    <rect x="16" y="58" width="328" height="48" fill="#c8e6c9" stroke="#1b5e20" rx="4"/>
+    <text x="180" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">this txn primaryKey: t100_r1</text>
+    <text x="180" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#33691e">Write@commitTS exists =&gt; txn COMMITTED</text>
+
+    <rect x="16" y="118" width="100" height="44" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+    <text x="66" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#f57f17">Lock CF</text>
+    <text x="66" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">cleared on commit</text>
+
+    <rect x="128" y="118" width="100" height="44" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+    <text x="178" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">Write CF</text>
+    <text x="178" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#546e7a">decision bit</text>
+
+    <rect x="240" y="118" width="104" height="44" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+    <text x="292" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#6a1b9a">Default CF</text>
+    <text x="292" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6a1b9a">value @startTS</text>
+  </g>
+
+  <g transform="translate(320, 335)">
+    <rect width="360" height="180" fill="#fff3e0" stroke="#ef6c00" stroke-width="2" rx="5"/>
+    <text x="180" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Region R2  [t100_r2, t100_i1)</text>
+    <text x="180" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">equal range; may be other TiKV node</text>
+
+    <rect x="16" y="58" width="328" height="48" fill="#ffe0b2" stroke="#ef6c00" rx="4"/>
+    <text x="180" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">this txn secondary: t100_r2</text>
+    <text x="180" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#bf360c">Lock.Primary = t100_r1</text>
+
+    <rect x="16" y="118" width="100" height="44" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+    <text x="66" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#f57f17">Lock CF</text>
+    <text x="66" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6d4c41">may linger</text>
+
+    <rect x="128" y="118" width="100" height="44" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+    <text x="178" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">Write CF</text>
+    <text x="178" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#546e7a">after resolve</text>
+
+    <rect x="240" y="118" width="104" height="44" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+    <text x="292" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#6a1b9a">Default CF</text>
+    <text x="292" y="152" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#6a1b9a">value @startTS</text>
+  </g>
+
+  <path d="M 700 425 L 780 425 L 780 225 L 680 225" fill="none" stroke="#c62828" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#aRed)"/>
+  <text x="800" y="300" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#c62828">lock resolve</text>
+  <text x="800" y="318" font-family="Consolas, monospace" font-size="9" fill="#c62828">Lock.Primary</text>
+  <text x="800" y="334" font-family="Consolas, monospace" font-size="9" fill="#c62828">-&gt; status of</text>
+  <text x="800" y="350" font-family="Consolas, monospace" font-size="9" fill="#c62828">primaryKey</text>
+  <text x="800" y="366" font-family="Consolas, monospace" font-size="9" fill="#c62828">-&gt; Commit or</text>
+  <text x="800" y="382" font-family="Consolas, monospace" font-size="9" fill="#c62828">Rollback secondary</text>
+
+  <g transform="translate(700, 135)">
+    <rect width="360" height="180" fill="#ffffff" stroke="#607d8b" stroke-width="1.2" rx="5"/>
+    <text x="180" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Atomicity / consistency</text>
+    <text x="20" y="54" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">A. Prewrite: all Locks name primaryKey</text>
+    <text x="20" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">B. Commit primaryKey =&gt; Write@commitTS</text>
+    <text x="20" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">   = only commit decision (atomic)</text>
+    <text x="20" y="120" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">C. Secondaries must match that decision</text>
+    <text x="20" y="142" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">D. Resolve on Lock hit keeps SI consistent</text>
+    <text x="20" y="164" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">   not every query - only leftover Locks</text>
+  </g>
+
+  <g transform="translate(40, 540)">
+    <rect width="1020" height="120" fill="#eceff1" stroke="#546e7a" stroke-width="1.2" rx="5"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Orthogonal: Raft inside each Region</text>
+    <text x="20" y="52" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">R1 and R2 each have their own Raft group. primaryKey vs secondary is which mutation key holds the commit bit for this txn.</text>
+    <text x="20" y="74" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">SQL PRIMARY KEY (orders.id) only decides record key encoding (t100_r1); txn primaryKey is chosen among mutated keys.</text>
+    <text x="20" y="100" font-family="Consolas, monospace" font-size="10" fill="#455a64">UPDATE ... WHERE id IN (1,2) =&gt; mutations in R1 and R2; primaryKey := one of them (e.g. t100_r1)</text>
+  </g>
+
+  <g transform="translate(40, 680)">
+    <rect width="1020" height="110" fill="#ffffff" stroke="#1565c0" stroke-width="1.2" rx="5"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">MVCC read rule</text>
+    <text x="20" y="54" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">1. Conflicting Lock: resolve via Lock.Primary (status of primaryKey), then retry.</text>
+    <text x="20" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#37474f">2. Else newest Write with commitTS &lt;= readTS; load Default at that startTS.</text>
+    <text x="20" y="98" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Atomicity: committed iff primaryKey has Write. Consistency: all keys resolve to that same commitTS or remain invisible to older snapshots.</text>
+  </g>
+</svg>
