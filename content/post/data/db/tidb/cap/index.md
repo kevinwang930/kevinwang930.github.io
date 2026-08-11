@@ -16,7 +16,7 @@ keywords:
 - etcd
 #thumbnailImage: //example.com/image.jpg
 ---
-The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** implements CAP’s **CP** choice via majority quorum. This post introduces that theory (C, A, P, partition trade-off, Raft as CP), then details TiDB **Placement Driver (PD)’s** embedded-etcd Raft. TiKV Region Multi-Raft is in [TiKV](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
+The **CAP theorem** states what a replicated store can guarantee when the network splits. **Raft** implements CAP’s **CP** choice via majority quorum. This post introduces that theory (C, A, P, partition trade-off, Raft as CP), the Raft **log and term**, then details TiDB **Placement Driver (PD)’s** embedded-etcd Raft. TiKV Region Multi-Raft is in [TiKV](../tikv/); PD TSO / locate / schedule surfaces are in [TiDB architecture](../architecture/).
 <!--more-->
 
 
@@ -97,19 +97,97 @@ A Raft group of `N` voters has quorum size `majority(N) = ⌊N/2⌋ + 1`. For `N
 | Log up-to-date check | Prefers peers with longer committed history |
 | Randomized timeouts | Breaks split votes (two candidates, no majority) |
 
-**Log.** Each entry is `(term, index, command)`. Safety is committing only prefixes a majority has stored.
+Pipeline: **propose** → **persist + replicate** → **commit** (majority) → **apply** (state machine). The majority wait on commit is CAP’s **C** cost on the write path; the minority’s inability to elect is CAP’s sacrificed **A**. Log layout, **`term` / `index`**, and conflict resolution are §1.4.
 
-![Raft log: commitIndex and apply](images/raft-log.svg)
+Raft is not CAP itself; it is a **CP implementation** of consensus for one replicated log. In a TiDB cluster that pattern appears twice with different libraries and objects: **PD** (§2, etcd Raft for control-plane meta) and **TiKV** Regions ([TiKV post](../tikv/), `raft-rs` for row data).
+
+### 1.4 Raft log structure and term
+
+The replicated log is an ordered sequence of **entries**. Each entry is one unit of consensus: once a prefix is stored on a majority, that prefix is safe to commit and apply.
+
+#### Entry fields
+
+In the Raft paper and in libraries (etcd Raft, `raft-rs`), an entry looks like:
+
+```protobuf
+message Entry {
+  EntryType entry_type = 1;  // normal command vs config change
+  uint64 term = 2;           // election term when this entry was created
+  uint64 index = 3;          // position in the log (monotone per peer’s log)
+  bytes data = 4;            // opaque command bytes for the state machine
+  bytes context = 6;         // optional app context (not part of safety)
+}
+```
+
+| Field | Function |
+|-------|----------|
+| **`index`** | The entry’s **position** in the log (`1…`). Leaders assign the next index when proposing. Followers must match `(index, term)` of the previous entry before appending (`prevLogIndex` / `prevLogTerm` on AppendEntries). Commit and apply advance by index (`commitIndex`, `lastApplied`). |
+| **`term`** | The **election term in which this entry was created** (the leader’s `currentTerm` at propose time). Fixed for the life of that log slot. Used for safety: if two logs disagree at the same index, the entry with the higher term (or the longer suffix after the common prefix) wins during election / conflict resolution. Distinct from **`currentTerm`** on the peer (who is campaigning or leading *now*). |
+| **`data`** | Opaque **command** bytes. Raft does not interpret them; after commit, the state machine applies `data` (in PD/etcd: meta KV ops; in TiKV: `RaftCmdRequest`). Empty `data` can still appear (no-op / heartbeat-driven commit advancement). |
+| **`entry_type`** | Discriminates a normal client command from a **membership / config change** entry (joint consensus). Config entries still carry `term` and `index` like normal ones. |
+| **`context`** | Optional side channel for the application (tracing, proposal id). Not required for Raft safety. |
+
+A compact view of one log is a sequence of `(term, index, data)` cells:
+
+```text
+index:  1        2        3        4
+term:   1        1        2        2
+data:   cmd_a    cmd_b    cmd_c    cmd_d
+                 ^
+            commitIndex = 2  (majority has stored through index 2)
+```
 
 | Pointer | Meaning |
 |---------|---------|
-| `commitIndex` | Highest index stored on a majority |
-| `lastApplied` | Applied to the local state machine (`≤ commitIndex`) |
-| Match index | Per-follower agreement with the leader |
+| `commitIndex` | Highest index stored on a **majority** — safe to apply |
+| `lastApplied` | Highest index applied to the local state machine (`≤ commitIndex`) |
+| Match index | Per-follower: highest index the leader knows that follower has |
 
-Pipeline: **propose** → **persist + replicate** → **commit** (majority) → **apply** (state machine). The majority wait on commit is CAP’s **C** cost on the write path; the minority’s inability to elect is CAP’s sacrificed **A**.
+![Raft log: commitIndex and apply](images/raft-log.svg)
 
-Raft is not CAP itself; it is a **CP implementation** of consensus for one replicated log. In a TiDB cluster that pattern appears twice with different libraries and objects: **PD** (§2, etcd Raft for control-plane meta) and **TiKV** Regions ([TiKV post](../tikv/), `raft-rs` for row data).
+#### How `term` is generated
+
+Each peer stores a durable integer **`currentTerm`** (part of HardState, persisted with the log). It is **not** a wall-clock time and **not** assigned by PD or a central service. Peers start at term `0` (or `1` depending on bootstrap); from then on the value only **increases by local rules** when the peer learns that a new election era has begun. New log entries copy the leader’s `currentTerm` into **`Entry.term`** at propose time—so entry terms are generated indirectly from that counter.
+
+#### When `currentTerm` increases
+
+| Situation | What happens |
+|-----------|----------------|
+| **Start election** (`MsgHup` / election timeout) | Follower or Candidate sets `currentTerm := currentTerm + 1`, votes for self, sends `RequestVote` (or PreVote first) **for that new term**. This is the primary way terms advance. |
+| **Hear a higher term** | Any RPC (`AppendEntries`, `RequestVote`, heartbeat, …) with `Message.term > currentTerm` → peer adopts that term (`become_follower`), clears its vote for the old term, and steps down if it was leader/candidate. |
+| **Vote / PreVote response with a higher term** | Same adoption: the reply proves another peer already moved ahead. |
+| **Split vote → retry** | No majority; candidate times out again → increments term **again** and starts a new election round. |
+
+Terms do **not** increase on every heartbeat, every client write, or every tick. A stable leader can stay in the **same** term for a long time: many log indexes, one `Entry.term` value. The counter jumps only when leadership is contested or a peer observes that the cluster has moved to a newer election era.
+
+```text
+t=0  bootstrap: currentTerm = 0 (or 1)
+     …
+t=1  first election timeout → Candidate: currentTerm = 1, win → Leader term 1
+     (writes: Entry.term = 1 for indexes 1, 2, …)
+t=2  leader silent / partition → some follower: currentTerm = 2, campaign
+     if that candidate wins → Leader term 2 (new Entry.term = 2)
+     if old leader later hears term 2 → steps down, adopts currentTerm = 2
+```
+
+PreVote (used by etcd/PD and TiKV) adds a dry-run vote **without** bumping `currentTerm` until a pre-vote majority succeeds; the actual term increment still happens when the real campaign starts. The safety property is unchanged: **at most one leader per term**, because each peer votes at most once per term number.
+
+#### Same `index`, different `term`
+
+`index` alone is not enough: after a leader change, a new leader may overwrite **uncommitted** slots at the same indexes with entries from a **newer term**. Comparing `(index, term)` decides whether two peers’ logs are consistent and which candidate is more up-to-date for `RequestVote`.
+
+**Example.** Voters {A, B, C}, RF=3. Leader **A** in **term 2** appends a client write at **index 5** but crashes before a majority persists it. Only A has the entry locally; B and C still end at index 4. Later **B** wins **term 3** and proposes a different client write, also at **index 5**:
+
+```text
+Peer A (stale, was leader in term 2)     Peer B (new leader in term 3)
+index:  …  4        5                     …  4        5
+term:   …  2        2                     …  2        3
+data:   …  cmd_x    cmd_OLD               …  cmd_x    cmd_NEW
+```
+
+Both logs claim an entry at **index 5**, but the **terms differ** (2 vs 3), so the commands are not the same consensus decision. When B replicates to C (and eventually to a recovered A), AppendEntries requires the follower’s entry at index 4 to match `(index=4, term=2)`. For index 5, B sends `(term=3, data=cmd_NEW)`. A’s old `(index=5, term=2)` **conflicts**: Raft deletes the divergent suffix and appends B’s entry. Only after a **majority** stores `(5, term=3)` does `commitIndex` reach 5—so `cmd_NEW` can apply and `cmd_OLD` never becomes committed history. If Raft looked only at index 5, it could not tell `cmd_OLD` from `cmd_NEW`; the **term** marks which leader era created that slot.
+
+Committing only majority-matched prefixes of this log is how Raft keeps CAP **C**.
 
 ---
 
