@@ -273,9 +273,7 @@ Each Region **Peer** owns one raft-rs **`RawNode`** (`Peer.raft_group: RawNode<P
 
 ```plantuml
 @startuml
-skinparam classAttributeIconSize 0
-hide empty methods
-hide circle
+
 
 struct Peer {
   region_id : u64
@@ -347,31 +345,6 @@ Ready .. ApplyFsm : committed_entries
 @enduml
 ```
 
-```plantuml
-@startuml
-left to right direction
-skinparam shadowing false
-
-rectangle "propose / step / tick" as in
-rectangle "Raft\n(role, log, msgs)" as raft
-rectangle "Ready" as ready
-rectangle "raftdb\nHardState + Entry" as raftdb
-rectangle "MsgAppend &\nacks" as net
-rectangle "committed_entries" as ce
-rectangle "ApplyFsm\nRaftCmdRequest" as apply
-rectangle "kvdb\nPut / Delete CFs" as kvdb
-
-in --> raft
-raft --> ready
-ready --> raftdb
-ready --> net
-net --> raft : follower step
-ready --> ce
-ce --> apply
-apply --> kvdb
-
-@enduml
-```
 
 #### Three Raft inputs: `tick`, `step`, `propose`
 
