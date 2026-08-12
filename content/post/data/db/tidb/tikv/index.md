@@ -21,7 +21,7 @@ keywords:
 
 ## 1. Overview
 
-TiKV is a distributed transactional key-value store. Externally it presents **one globally sorted keyspace**. Internally that map is cut into **Regions**—half-open key ranges `[startKey, endKey)`—managed by **PD** and served by **TiKV store** processes. Each Region is replicated as an independent **Raft** group (default **three peers** on three different stores). Clients (typically TiDB via client-go) send Get / Prewrite / Commit / Coprocessor RPCs to the Region’s **leader**; followers replicate Raft logs. Durable user state is **MVCC** in RocksDB (`lock` / `write` / `default`).
+TiKV is a distributed transactional key-value store. Externally TiDB presents **one globally sorted keyspace**. Internally that map is cut into **Regions**—half-open key ranges `[startKey, endKey)`—managed by **PD** and served by **TiKV store** processes. Each Region is replicated as an independent **Raft** group (default **three peers** on three different stores). Clients (typically TiDB via client-go) send Get / Prewrite / Commit / Coprocessor RPCs to the Region’s **leader**; followers replicate Raft logs. Durable user state is **MVCC** in RocksDB (`lock` / `write` / `default`).
 
 **Common production layouts.** A starter deployment often runs **three TiKV stores** so each Region’s default RF=3 peers can sit on different machines. Scaling for capacity or QPS adds more TiKV stores: PD spreads **more Regions** across them; it does not add extra copies of every Region unless `max-replicas` changes. On disk, a Region (and thus each peer’s data for that Region) is sized around **`region-split-size = 256 MiB`** by default (96 MiB on older releases) and splits near **`region-max-size ≈ 384 MiB`**. A production **TiKV store** data disk is commonly kept within about **1.5 TB (regular SSD) to 2–4 TB (PCIe/NVMe)**, with usage under ~80%, so peer counts stay manageable as capacity grows. If one store or AZ fails, Regions that still have a **majority (2/3)** can elect and commit; the minority side cannot.
 
@@ -267,13 +267,18 @@ Peers share one process (`TikvServer`: gRPC, `MultiRaftServer`, `Engines`) so Ti
 
 ### 2.1 Peer Raft protocol (RawNode → kvdb)
 
-Each Region **Peer** owns one raft-rs **`RawNode`** (`Peer.raft_group: RawNode<PeerStorage>`). This subsection is the full protocol path on one peer: inputs into the node, **Ready** handling, **raftdb** durability and replication, then **ApplyFsm** writing user state into **kvdb**. Election (who is leader) is §2.2; how applied bytes become MVCC / 2PC is §3.
+Each Region **Peer** owns one raft-rs **`RawNode`** (`Peer.raft_group: RawNode<PeerStorage>`). This subsection is the full protocol path on one peer: inputs into the node (including election via `tick` / `MsgHup`), **Ready** handling, **raftdb** durability and replication, then **ApplyFsm** writing user state into **kvdb**. **`Message`** layout is §2.2; **`RaftLog` / `Entry` / `Unstable`** are §2.3; MVCC / 2PC are §3.
 
 **`RawNode.raft`: the consensus engine.** `RawNode` is a thin facade around **`raft: Raft`**. `Raft` holds peer `id`, `term` / `vote`, `StateRole`, timers, outbound `msgs`, follower progress, and `RaftLog` (committed index + `PeerStorage`). `tick` / `step` / `propose` mostly forward into that field; `RawNode` then diffs SoftState / HardState to emit a **`Ready`** for the store.
 
 ```plantuml
 @startuml
 
+
+struct PeerFsm {
+  peer : Peer
+  has_ready : bool
+}
 
 struct Peer {
   region_id : u64
@@ -285,6 +290,9 @@ struct RawNode {
   raft : Raft
   prev_ss : SoftState
   prev_hs : HardState
+  --
+  has_ready() : bool
+  ready() : Ready
 }
 
 struct Raft {
@@ -308,8 +316,16 @@ struct HardState {
 }
 
 struct RaftLog {
+  store : PeerStorage
+  unstable : Unstable
   committed : u64
-  storage : PeerStorage
+  applied : u64
+}
+
+struct Unstable {
+  entries : Entry list
+  offset : u64
+  snapshot : Snapshot optional
 }
 
 struct PeerStorage {
@@ -318,47 +334,56 @@ struct PeerStorage {
 }
 
 struct Ready {
+  number : u64
   ss : SoftState optional
   hs : HardState optional
   entries : Entry list
   messages : Message list
   committed_entries : Entry list
+  must_sync : bool
 }
 
 struct ApplyFsm {
   delegate : ApplyDelegate
 }
 
+PeerFsm *-- Peer
 Peer *-- RawNode : raft_group
 RawNode *-- Raft
 RawNode o-- SoftState : prev_ss
 RawNode o-- HardState : prev_hs
+RawNode .. Ready : ready()
+PeerFsm .. RawNode : has_ready flag then has_ready()
 Raft *-- RaftLog
-RaftLog o-- PeerStorage
+RaftLog *-- Unstable : unstable
+RaftLog o-- PeerStorage : store
 PeerStorage o-- Engines : raft + kv
 Peer .. ApplyFsm : Msg::Apply same region_id
 Ready o-- SoftState : ss
 Ready o-- HardState : hs
+Ready .. Unstable : Ready.entries from unstable
 Ready .. PeerStorage : persist hs + entries
 Ready .. ApplyFsm : committed_entries
 
 @enduml
 ```
 
+`PeerFsm.has_ready` is TiKV’s poll batching flag (set after tick / step / propose). `RawNode::has_ready()` is raft-rs’s real check against `prev_ss` / `prev_hs`, `unstable`, and `msgs`; `ready()` then materializes the **`Ready`** value the store must persist and send. `RaftLog.store` vs `unstable` is detailed in §2.3.
+
 
 #### Three Raft inputs: `tick`, `step`, `propose`
 
 Everything that moves a peer’s consensus state enters `RawNode` through one of three calls. All three eventually drive **`Raft::step`** (tick synthesizes local messages; propose wraps a `MsgPropose`). TiKV’s Peer poller invokes them; afterward the same **Ready** path runs.
 
-| Call | Who invokes it (TiKV) | Function |
-|------|------------------------|----------|
-| **`tick`** | Peer base-tick timer (`on_raft_base_tick` → `raft_group.tick`) | Advance Raft’s logical clock: election timeout or heartbeat |
-| **`step`** | Peer Raft RPC handler (`Peer::step`) | Apply one inbound `Message` (append, vote, heartbeat, …) |
-| **`propose`** | Leader write path (`Peer::propose` → `raft_group.propose`) | Append opaque client bytes as a new log `Entry` |
+| Call | Who invokes it (TiKV) | Role |
+|------|------------------------|------|
+| **`tick`** | Peer base-tick (`on_raft_base_tick` → `raft_group.tick`) | Advance the logical clock: election timeout or leader heartbeat |
+| **`step`** | Peer Raft RPC (`Peer::step`) and local msgs from tick/propose | Apply one `Message`; update term, role, log, outbound msgs |
+| **`propose`** | Leader write path (`Peer::propose` → `raft_group.propose`) | Append opaque client bytes as a new log `Entry` (Leader only) |
 
 ##### `tick` — timers
 
-**Function.** Raft has no wall-clock inside the library; the store must call `tick` periodically. On a **Follower / Candidate**, enough ticks without a valid leader message start an election (`MsgHup`). On a **Leader**, ticks send heartbeats (`MsgBeat`) and optionally check quorum.
+`tick` advances Raft’s **logical clock** by one unit. The library does not read wall time; TiKV’s peer base-tick must call `RawNode::tick` on a fixed interval. What a tick does depends on `StateRole`: as **Follower**, **PreCandidate**, or **Candidate**, successive ticks accumulate `election_elapsed` until the randomized election timeout fires, at which point the peer injects a local `MsgHup` and campaigns; as **Leader**, ticks accumulate `heartbeat_elapsed` (and optionally run a quorum check) and inject `MsgBeat` so followers keep resetting their election timers. A tick therefore either starts or sustains leadership—it never itself appends client log entries.
 
 **Implementation.** `RawNode::tick` forwards to `Raft::tick`, which branches on role:
 
@@ -409,7 +434,7 @@ TiKV schedules a per-peer Raft tick; when it fires, `has_ready` may become true 
 
 ##### `step` — network (and local) messages
 
-**Function.** `step` is the general state-machine transition: given one `Message`, update term/role/log and queue outbound replies. Followers use it for `MsgAppend` / `MsgHeartbeat` / votes; leaders use it for append responses and for local messages produced by tick (`MsgBeat`, `MsgHup`).
+`step` is the **single transition function** of the consensus state machine: it consumes one `Message` and may update `term`, `vote`, `StateRole`, the Raft log, follower progress, and the outbound `msgs` queue. Network RPCs from other peers (`MsgAppend`, `MsgAppendResponse`, `MsgHeartbeat`, `MsgRequestVote`, …) enter through `RawNode::step` → `Raft::step`. Local control messages synthesized by `tick` or `propose` (`MsgHup`, `MsgBeat`, `MsgPropose`) call `Raft::step` directly. Every meaningful role change and almost every log mutation is the result of some `step`; Ready only reports what `step` (or a preceding tick/propose that stepped) already changed.
 
 **Implementation.** `RawNode::step` rejects unexpected local message types from the network, then calls `Raft::step`:
 
@@ -427,16 +452,113 @@ pub fn step(&mut self, m: Message) -> Result<()> {
 }
 ```
 
-Inside `Raft::step`:
+`Raft::step` has two phases: **term gate**, then **message / role dispatch**.
 
-1. **Term handling** — if `m.term > self.term`, become follower (except pre-vote quirks); if `m.term < self.term`, reject or reply so the sender advances.
-2. **Role dispatch** — `step_leader` / `step_candidate` / `step_follower` on `m.msg_type` (e.g. follower on `MsgAppend` appends to `RaftLog` and resets `election_elapsed`; leader on `MsgAppendResponse` updates progress and may advance `committed`).
+**1. Term gate** — compare `m.term` to `self.term` before interpreting the payload:
 
-Local messages that tick injects are stepped **directly** on `Raft` (not via `RawNode::step`), so `MsgHup` / `MsgBeat` are not blocked as `StepLocalMsg`.
+```rust
+pub fn step(&mut self, m: Message) -> Result<()> {
+    if m.term == 0 {
+        // local message (MsgHup / MsgBeat / MsgPropose, …)
+    } else if m.term > self.term {
+        // … PreVote quirks: may ignore vote while lease valid; may not bump term …
+        if m.get_msg_type() == MessageType::MsgAppend
+            || m.get_msg_type() == MessageType::MsgHeartbeat
+            || m.get_msg_type() == MessageType::MsgSnapshot
+        {
+            self.become_follower(m.term, m.from);
+        } else if /* not a PreVote special case */ {
+            self.become_follower(m.term, INVALID_ID);
+        }
+    } else if m.term < self.term {
+        // stale leader/candidate: often reply MsgAppendResponse so they learn
+        // the newer term, then return without applying the old message
+        // …
+        return Ok(());
+    }
+    // … continue below …
+```
+
+**2. Dispatch** — `MsgHup` / votes are handled here; everything else goes to the role-specific stepper:
+
+```rust
+    match m.get_msg_type() {
+        MessageType::MsgHup => self.hup(false),  // → become_candidate / campaign
+        MessageType::MsgRequestVote | MessageType::MsgRequestPreVote => {
+            // grant or reject; maybe set self.vote = m.from
+            // …
+        }
+        _ => match self.state {
+            StateRole::PreCandidate | StateRole::Candidate => self.step_candidate(m)?,
+            StateRole::Follower => self.step_follower(m)?,
+            StateRole::Leader => self.step_leader(m)?,
+        },
+    }
+    Ok(())
+}
+```
+
+**`step_leader`** (selected arms) — heartbeats, quorum check, client proposes:
+
+```rust
+fn step_leader(&mut self, mut m: Message) -> Result<()> {
+    match m.get_msg_type() {
+        MessageType::MsgBeat => {
+            self.bcast_heartbeat();
+            return Ok(());
+        }
+        MessageType::MsgCheckQuorum => {
+            if !self.check_quorum_active() {
+                let term = self.term;
+                self.become_follower(term, INVALID_ID);  // Leader → Follower
+            }
+            return Ok(());
+        }
+        MessageType::MsgPropose => {
+            // … reject if not in config / transfer in progress …
+            if !self.append_entry(m.mut_entries()) {
+                return Err(Error::ProposalDropped);
+            }
+            self.bcast_append();   // queue MsgAppend to followers
+            return Ok(());
+        }
+        // MsgAppendResponse → update progress, maybe_commit, …
+        _ => { /* … */ }
+    }
+}
+```
+
+**`step_follower`** (selected arms) — reset election timer; append or forward proposes:
+
+```rust
+fn step_follower(&mut self, mut m: Message) -> Result<()> {
+    match m.get_msg_type() {
+        MessageType::MsgPropose => {
+            // forward to leader_id (or drop) — follower does not append as leader
+            m.to = self.leader_id;
+            self.r.send(m, &mut self.msgs);
+        }
+        MessageType::MsgAppend => {
+            self.election_elapsed = 0;
+            self.leader_id = m.from;
+            self.handle_append_entries(&m);  // match log, append, reply
+        }
+        MessageType::MsgHeartbeat => {
+            self.election_elapsed = 0;
+            self.leader_id = m.from;
+            self.handle_heartbeat(m);
+        }
+        // …
+        _ => {}
+    }
+}
+```
+
+Local messages that **tick** injects call **`Raft::step` directly** (not `RawNode::step`), so `MsgHup` / `MsgBeat` are not rejected as `StepLocalMsg`.
 
 ##### `propose` — client log entries
 
-**Function.** Only the **leader** should accept client writes. `propose` asks Raft to append opaque bytes (`RaftCmdRequest`) as a new log entry and replicate them. Followers that receive `MsgPropose` forward or drop; they do not append as leader.
+`propose` is how a **Leader** turns a client write into a Raft log entry. TiKV passes opaque bytes—typically a serialized `RaftCmdRequest`—plus an optional context; `RawNode::propose` wraps them as a local `MsgPropose` and `Raft::step`s that message. On the leader, `step_leader` assigns `term`/`index`, appends to `RaftLog`, and queues `MsgAppend` for followers. On a non-leader, the same `MsgPropose` is forwarded or dropped (`NotLeader` / `ProposalDropped`); followers never treat propose as authority to grow the log themselves. Propose does not change `StateRole`: it only extends the log when the peer already is Leader, then relies on the shared Ready path for raftdb persistence, replication, and later apply.
 
 **Implementation.** `RawNode::propose` builds a local `MsgPropose` and steps it; there is no separate propose engine:
 
@@ -453,11 +575,41 @@ pub fn propose(&mut self, context: impl Into<Bytes>, data: impl Into<Bytes>) -> 
     e.data = data.into();       // RaftCmdRequest bytes
     e.context = context.into();
     m.set_entries(vec![e].into());
-    self.raft.step(m)           // → step_leader MsgPropose → append + bcast MsgAppend
+    self.raft.step(m)           // → step_leader MsgPropose
 }
 ```
 
-On the leader, `step_leader` for `MsgPropose` assigns term/index, appends to `RaftLog`, and queues `MsgAppend` for followers. `Entry.data` stays opaque inside raft-rs: no CF names, no MVCC decode.
+On the leader, `step_leader` accepts `MsgPropose`, appends into `RaftLog`, then broadcasts:
+
+```rust
+// Raft::step_leader
+MessageType::MsgPropose => {
+    if m.entries.is_empty() {
+        fatal!(self.logger, "stepped empty MsgProp");
+    }
+    // drop if removed from config or leadership transfer in progress …
+    if !self.append_entry(m.mut_entries()) {
+        return Err(Error::ProposalDropped);  // e.g. uncommitted size limit
+    }
+    self.bcast_append();  // queue MsgAppend for followers
+    return Ok(());
+}
+```
+
+**Append into `RaftLog`.** `append_entry` stamps the leader’s current term and the next indexes, then pushes the slice onto **`RaftLog.unstable`** (in memory only). Persistence to **raftdb** happens later when Ready exposes those entries (§2.1 Ready; log layout §2.3):
+
+```rust
+self.raft_log.append(es);  // unstable.truncate_and_append — see §2.3
+```
+
+```text
+MsgPropose { entries: [Entry { data, context, term:0, index:0 }] }
+  → append_entry: set term/index → RaftLog.unstable
+  → bcast_append: msgs += MsgAppend(…)
+  → Ready.entries = unstable slice → PeerStorage → raftdb
+```
+
+`Entry.data` stays opaque inside raft-rs: no CF names, no MVCC decode.
 
 ```text
 tick  → (MsgHup | MsgBeat) → Raft::step → maybe Ready (votes / heartbeats)
@@ -466,73 +618,228 @@ propose → MsgPropose       → Raft::step → Ready (entries + MsgAppend)
          └──────── all three share the Ready → raftdb / apply path below
 ```
 
-#### `Message` structure (and `term`)
+#### State machine: roles, inputs, Ready
 
-Peer-to-peer Raft RPCs and many local events are one protobuf **`Message`**. Ready’s outbound `messages` and `Peer::step` inputs are this type.
+Raft has two layers that change together: **`StateRole`** (SoftState: Follower / PreCandidate / Candidate / Leader) and the store’s **Ready handling** (persist / send / apply / advance). Role changes are triggered by `tick` and `step`; `propose` does not change role—it only appends on a Leader. After any input, SoftState / HardState / log / `msgs` deltas surface as **Ready**.
 
-```protobuf
-message Message {
-  MessageType msg_type = 1;
-  uint64 to = 2;
-  uint64 from = 3;
-  uint64 term = 4;       // sender's current Raft term (see below)
-  uint64 log_term = 5;   // term of the log entry at `index` (matching)
-  uint64 index = 6;      // log index this message refers to
-  repeated Entry entries = 7;
-  uint64 commit = 8;     // leader's committed index (Append / Heartbeat)
-  bool reject = 10;
-  // … snapshot, reject_hint, context, priority, …
+**Role transitions** (`Raft.state` / SoftState `raft_state`):
+
+```plantuml
+@startuml
+hide empty description
+skinparam state {
+  BackgroundColor<<leader>> #E8F5E9
+  BackgroundColor<<cand>> #FFF8E1
+  BackgroundColor<<fol>> #E3F2FD
 }
 
-message Entry {
-  EntryType entry_type = 1;
-  uint64 term = 2;       // term when this log entry was created
-  uint64 index = 3;
-  bytes data = 4;        // opaque (RaftCmdRequest in TiKV)
-}
+state "Follower" as F <<fol>>
+state "PreCandidate\n(pre-vote on)" as P <<cand>>
+state "Candidate" as C <<cand>>
+state "Leader" as L <<leader>>
+
+[*] --> F : bootstrap / restart\n(load HardState)
+
+F --> P : tick election timeout\n(pre_vote) / MsgHup dry-run
+F --> C : tick election timeout\n(no pre_vote) / MsgHup\n(term++)
+P --> C : pre-vote majority\nthen real campaign (term++)
+P --> F : pre-vote rejected /\nhear valid leader (higher or current term)
+
+C --> L : majority MsgRequestVoteResponse\n(granted) → become_leader
+C --> C : election timeout again\n(term++; new MsgRequestVote)
+C --> F : step: higher Message.term /\nAppend or Heartbeat from leader /\nlose vote
+
+L --> F : step: Message.term > currentTerm\n(become_follower) /\ntick: MsgCheckQuorum fails
+
+F --> F : step MsgAppend / MsgHeartbeat\n(same or lower ok path;\nreset election_elapsed)
+L --> L : tick MsgBeat (heartbeat) /\nstep MsgAppendResponse /\npropose MsgPropose\n(role unchanged)
+
+@enduml
 ```
 
-| Field | Role |
-|-------|------|
-| `msg_type` | What kind of RPC / local event (`MsgAppend`, `MsgRequestVote`, `MsgHeartbeat`, …) |
-| `from` / `to` | Peer ids in the Region’s Raft group |
-| **`term`** | **The sender’s current election term** when the message is sent (or `0` for some local messages) |
-| `log_term` + `index` | Log matching: “the entry at `index` has term `log_term`” (Append / vote / reject hint) |
-| `entries` | New log entries (Append / Propose) |
-| `commit` | Leader’s commit index so followers can advance |
+| From → To | Trigger | What runs |
+|-----------|---------|-----------|
+| Follower → Candidate (or PreCandidate) | **`tick`** election timeout → `MsgHup` | `become_candidate` / `become_pre_candidate`; broadcast votes |
+| Candidate → Leader | **`step`** majority vote grants | `become_leader`; SoftState leader_id = self |
+| Any → Follower | **`step`** higher `Message.term`, or Append/Heartbeat from a valid leader | `become_follower`; clear leadership |
+| Leader → Follower | Higher term, or **`tick`** quorum check fail | Step down |
+| Leader → Leader | **`propose`**, **`tick`** heartbeat, append responses | Log / msgs change; **role stays Leader** |
 
-**`Message.term` vs other “term” fields.** Raft’s logical clock is a monotonically increasing **term** stored in HardState and in `Raft.term`. Do not confuse:
+**Ready cycle** (store side; same for every input that dirties the node):
 
-| Name | Meaning |
-|------|---------|
-| **`Message.term`** | Current term of the **sender’s Raft instance** (who claims leadership / candidacy now) |
-| **`Entry.term`** | Term in which **that log entry** was proposed (fixed once appended) |
-| **`Message.log_term`** | Term of the log entry at **`Message.index`** (prev-log matching on Append; last-log info on Vote) |
-| **`HardState.term`** | This peer’s persisted current term |
+```plantuml
+@startuml
+hide empty description
 
-When raft-rs **sends** a network message, it normally stamps `m.term = self.term` (except `MsgPropose` / `MsgReadIndex`, which stay local-style with term `0` until forwarded). Receivers use **`Message.term` first** in `Raft::step`:
+state "Idle\n(no pending Ready)" as Idle
+state "Input\ntick / step / propose" as In
+state "Raft updated\n(role, term, log, msgs)" as Upd
+state "has_ready?" as HR <<choice>>
+state "Take Ready" as Take
+state "Persist\nHardState + entries\n→ raftdb" as Pers
+state "Send messages\n(votes, Append, …)" as Send
+state "Schedule apply\ncommitted_entries\n→ ApplyFsm → kvdb" as App
+state "advance / light apply" as Adv
+
+[*] --> Idle
+Idle --> In : Peer poller / RPC / write path
+In --> Upd : Raft::tick or Raft::step
+Upd --> HR
+HR --> Idle : false
+HR --> Take : true
+Take --> Pers
+Take --> Send
+Take --> App
+Pers --> Adv
+Send --> Adv
+App --> Adv
+Adv --> Idle : ready handled;\nprev_ss / prev_hs updated
+
+note right of In
+  propose only accepted
+  when state == Leader
+  else NotLeader / drop
+end note
+
+note right of Take
+  Ready may carry:
+  ss SoftState (role change)
+  hs HardState (term/vote/commit)
+  entries, messages,
+  committed_entries
+end note
+@enduml
+```
+
+```text
+                    ┌─────────────────────────────────────────┐
+  tick / step /     │  StateRole: Follower ⇄ Candidate ⇄ Leader │
+  propose ─────────►│       SoftState changes when role moves   │
+                    └───────────────┬─────────────────────────┘
+                                    │ has_ready()
+                                    ▼
+                         Ready { ss?, hs?, entries?, messages?,
+                                 committed_entries? }
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+         raftdb persist        send Messages         ApplyFsm → kvdb
+              └─────────────────────┴─────────────────────┘
+                                    ▼
+                              advance → Idle
+```
+
+So: **`tick` / `step` drive role transfers** (including election); **`propose` drives log growth on the Leader**; **Ready** is how every transfer and log update is observed and made durable by TiKV. `Message` fields are §2.2; log layout is §2.3.
+
+#### Ready: when it fires, and how unstable becomes durable
+
+**Propose does not write raftdb.** After `MsgPropose`, the new `Entry` lives only in **`RaftLog.unstable`**, and `bcast_append` only appends **`MsgAppend`** into **`Raft.msgs`**—both in memory. SoftState / HardState may also differ from `RawNode`’s remembered `prev_ss` / `prev_hs`. Nothing is durable until the Peer drains a **Ready**.
+
+**When Ready is triggered.** TiKV does not call `RawNode::has_ready` on every message inline. The peer FSM sets a local flag after inputs that may dirty Raft; at the **end of the poll**, it drains Ready if that flag is set.
+
+After **tick** / **step** / **propose**, mark the peer dirty:
 
 ```rust
-// Raft::step — term gate before role-specific handling
-if m.term > self.term {
-    // higher term wins: step down (become_follower), then process
-    if m.get_msg_type() == MsgAppend || MsgHeartbeat || MsgSnapshot {
-        self.become_follower(m.term, m.from);  // recognize sender as leader
-    } else {
-        self.become_follower(m.term, INVALID_ID);
-    }
-} else if m.term < self.term {
-    // stale leader / candidate: ignore or reply with newer term
-    // (e.g. reject Append/Heartbeat so they learn the higher term)
+// tick (on_raft_base_tick)
+if self.fsm.peer.raft_group.tick() {
+    self.fsm.has_ready = true;
 }
-// then step_leader / step_candidate / step_follower(m)
+
+// step (inbound Raft Message for this region)
+self.fsm.peer.step(self.ctx, msg.take_message())?;
+// …
+self.fsm.has_ready = true;
+
+// propose (RaftCmdRequest on the leader)
+if self.fsm.peer.propose(self.ctx, cb, msg, resp, diskfullopt) {
+    self.fsm.has_ready = true;
+}
 ```
 
-So **`Message.term` enforces a single timeline**: a leader from an old term cannot overwrite a peer that has already moved on; a candidate with a higher term forces everyone else to follow. **`Entry.term` / `log_term`** enforce **log consistency** (same index must carry the same entry term), which is separate from “who is the current leader.”
+End of the peer poll cycle — only then call into raft-rs:
 
-#### Ready: what the store must do
+```rust
+// PeerFsmDelegate::collect_ready — after handle_msgs in this poll
+pub fn collect_ready(&mut self) -> bool {
+    let has_ready = self.fsm.has_ready;
+    self.fsm.has_ready = false;
+    if !has_ready || self.fsm.stopped {
+        return false;
+    }
+    let res = self.fsm.peer.handle_raft_ready_append(self.ctx);
+    // …
+}
 
-After propose / step / tick, if `has_ready()`, the Peer takes a **Ready** and must handle it before further mutating the node:
+// Peer::handle_raft_ready_append
+if !self.raft_group.has_ready() {
+    return None;  // flag was optimistic; nothing to drain
+}
+let mut ready = self.raft_group.ready();
+```
+
+`RawNode::has_ready()` is the precise check: true when any in-memory delta exists:
+
+```rust
+pub fn has_ready(&self) -> bool {
+    let raft = &self.raft;
+    if !raft.msgs.is_empty() { return true; }                    // outbound Messages
+    if raft.soft_state() != self.prev_ss { return true; }        // role / leader_id
+    if raft.hard_state() != self.prev_hs { return true; }        // term / vote / commit
+    if !raft.raft_log.unstable_entries().is_empty() { return true; } // unstable log
+    // … snapshot or newly commit-able entries since commit_since_index …
+    false
+}
+```
+
+```text
+tick / step / propose
+  → PeerFsm.has_ready = true          (batching flag)
+  → (more msgs in same poll…)
+  → collect_ready()
+       → handle_raft_ready_append()
+            → RawNode::has_ready()?   (real check)
+            → RawNode::ready()
+```
+
+So a successful **propose** sets the FSM flag because **`unstable` is non-empty** and **`msgs` holds `MsgAppend`**; `has_ready()` confirms that before `ready()` is taken.
+
+**What `ready()` packages.** `RawNode::ready()` snapshots those deltas into a `Ready` the store must handle before further `step` / `propose`:
+
+```rust
+pub fn ready(&mut self) -> Ready {
+    // …
+    if ss != self.prev_ss { rd.ss = Some(ss); }
+    if hs != self.prev_hs { rd.hs = Some(hs); }
+    rd.entries = raft.raft_log.unstable_entries().to_vec(); // copy from Unstable
+    // Leader: messages may be sent before/while persisting (concurrent replication)
+    // Follower: messages that must wait for persist go on the persisted path
+    rd.light = self.gen_light_ready(); // messages + committed_entries
+    rd
+}
+```
+
+| Ready field | Comes from (in memory) | Peer must |
+|-------------|------------------------|-----------|
+| `entries` | `RaftLog.unstable.entries` | Persist to **raftdb** (`PeerStorage` / write worker) |
+| `hs` | HardState delta vs `prev_hs` | Persist to **raftdb** |
+| `ss` | SoftState delta vs `prev_ss` | Update lease / role bookkeeping (not raftdb log) |
+| `messages` | `Raft.msgs` (e.g. `MsgAppend`) | Send to other TiKV peers |
+| `committed_entries` | committed but not yet applied slice | Schedule **ApplyFsm** → kvdb |
+
+```text
+propose / step / tick
+  → only memory: Unstable + msgs (+ maybe term/role)
+  → has_ready() == true
+  → ready()
+       Ready.entries  ← unstable_entries()
+       Ready.messages ← raft.msgs
+       Ready.hs / ss  ← HardState / SoftState deltas
+  → Peer:
+       persist entries + hs → raftdb
+       send messages → network
+       committed_entries → ApplyFsm
+  → advance / on_persist_*  (stable unstable; update prev_ss / prev_hs)
+```
 
 ```rust
 if !self.raft_group.has_ready() { return None; }
@@ -549,16 +856,9 @@ if !ready.committed_entries().is_empty() {
 self.mut_store().handle_raft_ready(&mut ready, destroy_regions)?;
 ```
 
-| Ready field | Meaning | Peer action |
-|-------------|---------|-------------|
-| `entries` | New log to append | Persist to **raftdb** |
-| `hs` | HardState (`term`, `vote`, `commit`) | Persist to **raftdb** |
-| `messages` | Outbound Raft RPC | Send to other TiKV peers |
-| `committed_entries` | Majority-committed log | Schedule **ApplyFsm** |
+#### Persist: unstable entries and HardState → raftdb
 
-#### Persist: log and HardState → raftdb
-
-`PeerStorage` folds Ready into a write task; the async write worker appends to the shared **raft** engine:
+`PeerStorage` folds Ready’s **`entries`** (the unstable snapshot) and optional HardState into a write task; the async write worker appends to the shared **raft** engine:
 
 ```rust
 // PeerStorage::handle_raft_ready
@@ -573,11 +873,11 @@ if prev_raft_state != *self.raft_state() || !ready.snapshot().is_empty() {
 }
 ```
 
-Until this (and follower acks for a majority) succeeds, the entry is not **committed**. User **kvdb** is still unchanged.
+After the write succeeds, TiKV notifies raft-rs (`on_persist_entries` / `advance`) so **`unstable` can drop the persisted prefix** and `persisted` / match indexes advance. Until that persist (and follower majority acks) completes, the entry is not **committed**. User **kvdb** is still unchanged.
 
 #### Replicate then commit
 
-Ready `messages` carry **`MsgAppend`** (and heartbeats / votes). Followers `step`, run the same Ready persist path on their raftdb, and respond. When a majority has the entry, `RaftLog.committed` advances; a later Ready exposes those entries as `committed_entries`.
+Ready **`messages`** are the network side of the same propose: typically **`MsgAppend`** carrying the new entries (plus heartbeats / votes from other paths). Followers `step` those messages, append into *their* unstable, run the same Ready persist path on their raftdb, and respond. When a majority has the entry durable, `RaftLog.committed` advances; a later Ready exposes it in `committed_entries`.
 
 #### Apply: committed `Entry.data` → kvdb
 
@@ -630,55 +930,241 @@ propose / step
 
 Followers never accept the client write (`NotLeader`); they still apply the same committed entries so their kvdb matches the leader’s applied log.
 
-### 2.2 Peer election
+### 2.2 Message structure (and `term`)
 
-Who becomes **Leader** is decided inside the Ready loop above. Silence is the signal: if a follower’s **election timeout** fires without a valid leader message, raft-rs campaigns.
+Peer-to-peer Raft RPCs and many local events are one protobuf **`Message`**. Ready’s outbound `messages` and `Peer::step` inputs are this type. Log **`Entry`** bodies that ride inside `Message.entries` (or sit in `RaftLog`) are §2.3.
 
-| State | Behavior |
-|-------|----------|
-| **Follower** | Accepts heartbeats / appends; resets election timer |
-| **Candidate** | Increments term, votes for self, asks peers for votes |
-| **Leader** | Sends heartbeats; only this peer accepts client writes for the Region |
-
-| Message | Purpose |
-|---------|---------|
-| `MsgRequestVote` / `MsgRequestVoteResponse` | Election |
-| `MsgRequestPreVote` / `MsgRequestPreVoteResponse` | Optional pre-vote before bumping term |
-| `MsgHeartbeat` / `MsgHeartbeatResponse` | Leader liveness; followers reset the election timer |
-
-```rust
-election_elapsed += 1;
-if !pass_election_timeout() || !promotable {
-    return false;
-}
-election_elapsed = 0;
-step(Message { msg_type: MsgHup, .. });
-```
-
-`MsgHup` drives `campaign` → `become_candidate` (term + 1, vote for self) and broadcast of `MsgRequestVote` with last log index/term so voters can reject a stale candidate:
-
-```rust
-fn become_candidate(&mut self) {
-    let term = self.term + 1;
-    self.reset(term);
-    self.vote = self.id;
-    self.state = StateRole::Candidate;
+```protobuf
+message Message {
+  MessageType msg_type = 1;
+  uint64 to = 2;
+  uint64 from = 3;
+  uint64 term = 4;       // sender's current Raft term (see below)
+  uint64 log_term = 5;   // term of the log entry at `index` (matching)
+  uint64 index = 6;      // log index this message refers to
+  repeated Entry entries = 7;
+  uint64 commit = 8;     // leader's committed index (Append / Heartbeat)
+  bool reject = 10;
+  // … snapshot, reject_hint, context, priority, …
 }
 ```
 
-A peer grants **at most one vote per term**, and only if the candidate’s log is at least as up-to-date. Majority votes (2 of 3 at RF=3) ⇒ Leader. The new `HardState` (term/vote) is what Ready persists to **raftdb**—not to kvdb. TiKV then reacts to the SoftState change (lease, in-memory locks, …). Non-leaders reject client writes with **`NotLeader`**.
+| Field | Role |
+|-------|------|
+| `msg_type` | What kind of RPC / local event (`MsgAppend`, `MsgRequestVote`, `MsgHeartbeat`, …) |
+| `from` / `to` | Peer ids in the Region’s Raft group |
+| **`term`** | **The sender’s current election term** when the message is sent (or `0` for some local messages) |
+| `log_term` + `index` | Log matching: “the entry at `index` has term `log_term`” (Append / vote / reject hint) |
+| `entries` | New log entries (Append / Propose) |
+| `commit` | Leader’s commit index so followers can advance |
 
-![Raft leader election](images/raft-leader-election.svg)
+**`Message.term` vs other “term” fields.** Raft’s logical clock is a monotonically increasing **term** stored in HardState and in `Raft.term`. Do not confuse:
+
+| Name | Meaning |
+|------|---------|
+| **`Message.term`** | Current term of the **sender’s Raft instance** (who claims leadership / candidacy now) |
+| **`Entry.term`** | Term in which **that log entry** was proposed (fixed once appended) — §2.3 |
+| **`Message.log_term`** | Term of the log entry at **`Message.index`** (prev-log matching on Append; last-log info on Vote) |
+| **`HardState.term`** | This peer’s persisted current term |
+
+When raft-rs **sends** a network message, it normally stamps `m.term = self.term` (except `MsgPropose` / `MsgReadIndex`, which stay local-style with term `0` until forwarded). Receivers use **`Message.term` first** in `Raft::step`:
+
+```rust
+// Raft::step — term gate before role-specific handling
+if m.term > self.term {
+    // higher term wins: step down (become_follower), then process
+    if m.get_msg_type() == MsgAppend || MsgHeartbeat || MsgSnapshot {
+        self.become_follower(m.term, m.from);  // recognize sender as leader
+    } else {
+        self.become_follower(m.term, INVALID_ID);
+    }
+} else if m.term < self.term {
+    // stale leader / candidate: ignore or reply with newer term
+    // (e.g. reject Append/Heartbeat so they learn the higher term)
+}
+// then step_leader / step_candidate / step_follower(m)
+```
+
+So **`Message.term` enforces a single timeline**: a leader from an old term cannot overwrite a peer that has already moved on; a candidate with a higher term forces everyone else to follow. **`Entry.term` / `log_term`** enforce **log consistency** (same index must carry the same entry term), which is separate from “who is the current leader.”
+
+### 2.3 Raft log (`RaftLog`, `Unstable`, `Entry`)
+
+The replicated log is **`Raft.raft_log: RaftLog`**. It is an ordered sequence of **`Entry`** values. Commit advances a contiguous prefix (`committed`); apply consumes that prefix into the state machine (`applied`).
+
+![Raft log: commitIndex and apply](images/raft-log.svg)
+
+| Piece | Role |
+|-------|------|
+| **`store`** (`PeerStorage`) | Entries (and HardState) already written to **raftdb** |
+| **`unstable`** | Entries (and optional snapshot) not yet persisted; filled by `append_entry` / follower append |
+| **`committed`** | Highest index known majority-replicated (`commitIndex`) |
+| **`applied`** | Highest index handed to ApplyFsm (`lastApplied` ≤ `committed`) |
 
 ```text
-no heartbeat within election timeout
-  → Follower: MsgHup → Candidate (term++)
-  → MsgRequestVote to other peers
-  → majority MsgRequestVoteResponse(granted)
-  → Leader; Ready persists HardState to raftdb; heartbeats begin
+index:  1        2        3        4
+term:   1        1        2        2
+        [==== committed ====]
+                 ^
+            applied may lag committed until ApplyFsm catches up
 ```
 
-On restart, the peer reloads HardState from raftdb so it resumes the same term/vote and does not double-vote.
+#### Entry fields
+
+```protobuf
+enum EntryType {
+  EntryNormal = 0;
+  EntryConfChange = 1;
+  EntryConfChangeV2 = 2;
+}
+
+message Entry {
+  EntryType entry_type = 1;
+  uint64 term = 2;           // leader currentTerm when created
+  uint64 index = 3;          // position in the log
+  bytes data = 4;            // type-dependent payload
+  bytes context = 6;         // optional proposal context
+}
+```
+
+| Field | Function |
+|-------|----------|
+| **`index`** | Contiguous position; leaders assign `last_index + 1` on propose |
+| **`term`** | Election term that created this slot; fixed for that entry |
+| **`data`** | Payload interpreted by **`entry_type`** (below) |
+| **`entry_type`** | Which of the three log kinds this slot is |
+| **`context`** | Opaque side channel (TiKV proposal callback id, etc.) |
+
+#### Entry types (all kinds, with examples)
+
+raft-rs defines exactly three `EntryType` values. TiKV uses all of them.
+
+**1. `EntryNormal` — user / admin Raft commands (or empty noop).**  
+`data` is usually a serialized **`RaftCmdRequest`**. Apply decodes Puts/Deletes onto MVCC CFs (§3). An **empty** `EntryNormal` (no `data`) is the leader’s first noop after `become_leader`, used to commit prior-term entries.
+
+```text
+# Prewrite lock (typical TiKV write)
+Entry {
+  entry_type: EntryNormal,
+  term:  3,
+  index: 42,
+  data:  RaftCmdRequest {
+    header: { region_id, peer, region_epoch, … },
+    requests: [
+      Put { cf: "lock", key: <user key>, value: <Lock { startTS, primary, … }> }
+      // optional: Put { cf: "default", … }
+    ]
+  }
+}
+
+# Commit (clear lock + write record)
+Entry {
+  entry_type: EntryNormal,
+  term:  3,
+  index: 43,
+  data:  RaftCmdRequest {
+    requests: [
+      Put    { cf: "write", key: <user key>@commitTS, value: <Write { startTS, … }> },
+      Delete { cf: "lock",  key: <user key> }
+    ]
+  }
+}
+
+# Leader noop after election (commit barrier for prior term)
+Entry {
+  entry_type: EntryNormal,
+  term:  4,          // new leader’s term
+  index: 44,
+  data:  <empty>
+}
+```
+
+**2. `EntryConfChange` — single membership change (v1).**  
+`data` is a **`ConfChange`**: add / remove voter or add learner, one peer at a time. TiKV still accepts this type on apply; new proposals prefer V2.
+
+```text
+Entry {
+  entry_type: EntryConfChange,
+  term:  5,
+  index: 50,
+  data:  ConfChange {
+    change_type: AddNode,      // or RemoveNode / AddLearnerNode
+    node_id: 1003,
+    context: <optional app bytes>
+  }
+}
+```
+
+**3. `EntryConfChangeV2` — joint consensus / multi-change (v2).**  
+`data` is a **`ConfChangeV2`**: one or more `ConfChangeSingle` ops, optional transition mode. An **empty** `ConfChangeV2` (nil data) is used to **leave a joint configuration** automatically when `auto_leave` is set.
+
+```text
+# Add a learner and remove a voter in one joint change
+Entry {
+  entry_type: EntryConfChangeV2,
+  term:  6,
+  index: 60,
+  data:  ConfChangeV2 {
+    transition: Auto,          // or Implicit / Explicit
+    changes: [
+      { change_type: AddLearnerNode, node_id: 1004 },
+      { change_type: RemoveNode,     node_id: 1002 }
+    ],
+    context: <optional>
+  }
+}
+
+# Empty ConfChangeV2 — leave joint config (auto_leave path)
+Entry {
+  entry_type: EntryConfChangeV2,
+  term:  6,
+  index: 61,
+  data:  <empty ConfChangeV2>
+}
+```
+
+| `EntryType` | `data` payload | Typical TiKV use |
+|-------------|----------------|------------------|
+| **`EntryNormal`** | `RaftCmdRequest` or empty | Prewrite / Commit / admin cmds; leader noop |
+| **`EntryConfChange`** | `ConfChange` | Legacy single add/remove peer |
+| **`EntryConfChangeV2`** | `ConfChangeV2` (maybe empty) | Region conf change / leave joint |
+
+Apply dispatches on type: `EntryNormal` → CF mutations; conf-change types → update Region membership, then `RawNode::apply_conf_change`.
+
+#### `Unstable` and append
+
+After `MsgPropose`, `append_entry` only mutates memory:
+
+```rust
+// Raft::append_entry — leader only
+pub fn append_entry(&mut self, es: &mut [Entry]) -> bool {
+    let li = self.raft_log.last_index();
+    for (i, e) in es.iter_mut().enumerate() {
+        e.term = self.term;
+        e.index = li + 1 + i as u64;
+    }
+    self.raft_log.append(es);  // → unstable.truncate_and_append
+    true
+}
+
+// RaftLog::append
+pub fn append(&mut self, ents: &[Entry]) -> u64 {
+    self.unstable.truncate_and_append(ents);
+    self.last_index()
+}
+```
+
+`Unstable.offset` is the Raft index of `entries[0]`; `entries[i]` has index `offset + i`. Ready copies `unstable_entries()` into `Ready.entries` for the Peer to flush to raftdb (§2.1); after persist / `advance`, that unstable prefix is dropped so the next propose appends into a fresh buffer.
+
+```text
+MsgPropose
+  → append_entry → RaftLog.unstable   (memory)
+  → bcast_append → Raft.msgs          (memory)
+  → Ready.entries / messages
+  → raftdb persist + network MsgAppend
+  → majority → committed ↑ → ApplyFsm
+```
+
+Propose wiring (`RawNode::propose` → `step_leader`) remains in §2.1; this section is the log’s shape, entry kinds, and where bytes sit before Ready.
 
 ---
 
@@ -800,7 +1286,7 @@ entry.set_data(req.write_to_bytes()?.into());
 | `commitIndex` | Highest Raft index majority-replicated (raftdb / HardState) |
 | `lastApplied` | Highest index applied into MVCC / kvdb (`≤ commitIndex`) |
 
-![Raft log commit then apply](images/raft-log.svg)
+Log layout and all `EntryType` examples are in §2.3.
 
 ### 3.4 2PC: Prewrite and Commit
 
