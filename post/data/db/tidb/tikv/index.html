@@ -163,9 +163,7 @@ PeerFsm .. ApplyFsm : same region_id
 </span></span><span style=display:flex><span>  → RawNode.step → Ready → raftdb / outbound Messages
 </span></span><span style=display:flex><span>  → committed entries → ApplyFsm → kvdb
 </span></span></code></pre></div><p>Many Region peers share one <code>Engines</code> pair; each peer has its own <code>RawNode</code> and apply delegate. Peer Raft is §2; write preparation, MVCC, and 2PC are §3.</p><h2 id=2-multi-raft>2. Multi-Raft</h2><p><strong>Multi-Raft</strong> means TiKV runs <strong>many Raft groups</strong>, not one: <strong>PD</strong> splits the keyspace into Regions; <strong>each Region is one Raft group</strong> (default three peers on three stores). A <strong>TiKV store</strong> hosts <strong>many peers</strong>—one local replica for each Region PD placed on that machine. The same store can be leader for some Regions and follower for others; leadership is per Region.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-multi-raft-peers.svg alt="Multi-Raft: PD ranges, many Region peers per TiKV store"></p><p>Peers share one process (<code>TikvServer</code>: gRPC, <code>MultiRaftServer</code>, <code>Engines</code>) so TiKV need not open a RocksDB per Region. Consensus stays independent: R1’s election and log progress do not block R2. <code>RaftRouter</code> routes work by <code>region_id</code> to each <code>PeerFsm</code>. Clients send KV RPCs only to that Region’s <strong>leader</strong>.</p><h3 id=21-peer-raft-protocol-rawnode--kvdb>2.1 Peer Raft protocol (RawNode → kvdb)</h3><p>Each Region <strong>Peer</strong> owns one raft-rs <strong><code>RawNode</code></strong> (<code>Peer.raft_group: RawNode&lt;PeerStorage></code>). This subsection is the full protocol path on one peer: inputs into the node, <strong>Ready</strong> handling, <strong>raftdb</strong> durability and replication, then <strong>ApplyFsm</strong> writing user state into <strong>kvdb</strong>. Election (who is leader) is §2.2; how applied bytes become MVCC / 2PC is §3.</p><p><strong><code>RawNode.raft</code>: the consensus engine.</strong> <code>RawNode</code> is a thin facade around <strong><code>raft: Raft</code></strong>. <code>Raft</code> holds peer <code>id</code>, <code>term</code> / <code>vote</code>, <code>StateRole</code>, timers, outbound <code>msgs</code>, follower progress, and <code>RaftLog</code> (committed index + <code>PeerStorage</code>). <code>tick</code> / <code>step</code> / <code>propose</code> mostly forward into that field; <code>RawNode</code> then diffs SoftState / HardState to emit a <strong><code>Ready</code></strong> for the store.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-skinparam classAttributeIconSize 0
-hide empty methods
-hide circle
+
 
 struct Peer {
   region_id : u64
@@ -233,29 +231,6 @@ Ready o-- SoftState : ss
 Ready o-- HardState : hs
 Ready .. PeerStorage : persist hs + entries
 Ready .. ApplyFsm : committed_entries
-
-@enduml
-</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-left to right direction
-skinparam shadowing false
-
-rectangle &#34;propose / step / tick&#34; as in
-rectangle &#34;Raft\n(role, log, msgs)&#34; as raft
-rectangle &#34;Ready&#34; as ready
-rectangle &#34;raftdb\nHardState + Entry&#34; as raftdb
-rectangle &#34;MsgAppend &amp;\nacks&#34; as net
-rectangle &#34;committed_entries&#34; as ce
-rectangle &#34;ApplyFsm\nRaftCmdRequest&#34; as apply
-rectangle &#34;kvdb\nPut / Delete CFs&#34; as kvdb
-
-in --&gt; raft
-raft --&gt; ready
-ready --&gt; raftdb
-ready --&gt; net
-net --&gt; raft : follower step
-ready --&gt; ce
-ce --&gt; apply
-apply --&gt; kvdb
 
 @enduml
 </code></pre><h4 id=three-raft-inputs-tick-step-propose>Three Raft inputs: <code>tick</code>, <code>step</code>, <code>propose</code></h4><p>Everything that moves a peer’s consensus state enters <code>RawNode</code> through one of three calls. All three eventually drive <strong><code>Raft::step</code></strong> (tick synthesizes local messages; propose wraps a <code>MsgPropose</code>). TiKV’s Peer poller invokes them; afterward the same <strong>Ready</strong> path runs.</p><table><thead><tr><th>Call</th><th>Who invokes it (TiKV)</th><th>Function</th></tr></thead><tbody><tr><td><strong><code>tick</code></strong></td><td>Peer base-tick timer (<code>on_raft_base_tick</code> → <code>raft_group.tick</code>)</td><td>Advance Raft’s logical clock: election timeout or heartbeat</td></tr><tr><td><strong><code>step</code></strong></td><td>Peer Raft RPC handler (<code>Peer::step</code>)</td><td>Apply one inbound <code>Message</code> (append, vote, heartbeat, …)</td></tr><tr><td><strong><code>propose</code></strong></td><td>Leader write path (<code>Peer::propose</code> → <code>raft_group.propose</code>)</td><td>Append opaque client bytes as a new log <code>Entry</code></td></tr></tbody></table><h5 id=tick--timers><code>tick</code> — timers</h5><p><strong>Function.</strong> Raft has no wall-clock inside the library; the store must call <code>tick</code> periodically. On a <strong>Follower / Candidate</strong>, enough ticks without a valid leader message start an election (<code>MsgHup</code>). On a <strong>Leader</strong>, ticks send heartbeats (<code>MsgBeat</code>) and optionally check quorum.</p><p><strong>Implementation.</strong> <code>RawNode::tick</code> forwards to <code>Raft::tick</code>, which branches on role:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// RawNode
