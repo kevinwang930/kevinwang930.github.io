@@ -1,5 +1,5 @@
 ---
-title: "TiKV : Multi-Raft Regions, peer Raft, and writes (MVCC / 2PC)"
+title: "TiKV: Multi-Raft storage — peer consensus, transaction, and MVCC"
 date: 2026-08-08T16:00:00+02:00
 categories:
 - data
@@ -12,16 +12,17 @@ tags:
 keywords:
 - tikv
 - raft-rs
+- multi-raft
 #thumbnailImage: //example.com/image.jpg
 ---
-**TiKV** is the distributed row store: one sorted keyspace, many **Regions** (each a Raft group), **MVCC** in RocksDB, and Raft-backed apply for every durable write.
+**TiKV** is TiDB’s row store built on **Multi-Raft**: every Region is a Raft group, every durable write is a Raft log entry, and RocksDB holds the Raft log (**raftdb**) plus applied MVCC (**kvdb**).
 <!--more-->
 
 ---
 
 ## 1. Overview
 
-TiKV is a distributed transactional key-value store. Externally TiDB presents **one globally sorted keyspace**. Internally that map is cut into **Regions**—half-open key ranges `[startKey, endKey)`—managed by **PD** and served by **TiKV store** processes. Each Region is replicated as an independent **Raft** group (default **three peers** on three different stores). Clients (typically TiDB via client-go) send Get / Prewrite / Commit / Coprocessor RPCs to the Region’s **leader**; followers replicate Raft logs. Durable user state is **MVCC** in RocksDB (`lock` / `write` / `default`).
+TiKV is a distributed transactional key-value store whose **replication and commit path are Raft**. Externally TiDB presents **one globally sorted keyspace**. Internally that map is cut into **Regions**—half-open ranges `[startKey, endKey)`—managed by **PD**. Each Region is an independent **Raft** group (default **three peers** on three TiKV stores); the store process runs many such peers at once (**Multi-Raft**). Clients (typically TiDB via client-go) send Get / Prewrite / Commit / Coprocessor RPCs only to that Region’s **leader**. The leader **`propose`s** a log entry; followers replicate it; after a majority commit, **apply** turns `Entry.data` into **MVCC** in RocksDB (`lock` / `write` / `default`). Consensus state (HardState + log) lives in a separate RocksDB instance (**raftdb**); user state after apply lives in **kvdb**.
 
 **Common production layouts.** A starter deployment often runs **three TiKV stores** so each Region’s default RF=3 peers can sit on different machines. Scaling for capacity or QPS adds more TiKV stores: PD spreads **more Regions** across them; it does not add extra copies of every Region unless `max-replicas` changes. On disk, a Region (and thus each peer’s data for that Region) is sized around **`region-split-size = 256 MiB`** by default (96 MiB on older releases) and splits near **`region-max-size ≈ 384 MiB`**. A production **TiKV store** data disk is commonly kept within about **1.5 TB (regular SSD) to 2–4 TB (PCIe/NVMe)**, with usage under ~80%, so peer counts stay manageable as capacity grows. If one store or AZ fails, Regions that still have a **majority (2/3)** can elect and commit; the minority side cannot.
 
