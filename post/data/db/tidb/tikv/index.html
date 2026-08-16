@@ -162,7 +162,7 @@ PeerFsm .. ApplyFsm : same region_id
 </span></span><span style=display:flex><span>  → RaftRouter → PeerFsm
 </span></span><span style=display:flex><span>  → RawNode.step → Ready → raftdb / outbound Messages
 </span></span><span style=display:flex><span>  → committed entries → ApplyFsm → kvdb
-</span></span></code></pre></div><p>Many Region peers share one <code>Engines</code> pair; each peer has its own <code>RawNode</code> and apply delegate. Peer Raft is §2; write preparation, MVCC, and 2PC are §3.</p><h2 id=2-multi-raft>2. Multi-Raft</h2><p><strong>Multi-Raft</strong> means TiKV runs <strong>many Raft groups</strong>, not one: <strong>PD</strong> splits the keyspace into Regions; <strong>each Region is one Raft group</strong> (default three peers on three stores). A <strong>TiKV store</strong> hosts <strong>many peers</strong>—one local replica for each Region PD placed on that machine. The same store can be leader for some Regions and follower for others; leadership is per Region.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-multi-raft-peers.svg alt="Multi-Raft: PD ranges, many Region peers per TiKV store"></p><p>Peers share one process (<code>TikvServer</code>: gRPC, <code>MultiRaftServer</code>, <code>Engines</code>) so TiKV need not open a RocksDB per Region. Consensus stays independent: R1’s election and log progress do not block R2. <code>RaftRouter</code> routes work by <code>region_id</code> to each <code>PeerFsm</code>. Clients send KV RPCs only to that Region’s <strong>leader</strong>.</p><h3 id=21-peer-raft-protocol-rawnode--kvdb>2.1 Peer Raft protocol (RawNode → kvdb)</h3><p>Each Region <strong>Peer</strong> owns one raft-rs <strong><code>RawNode</code></strong> (<code>Peer.raft_group: RawNode&lt;PeerStorage></code>). This subsection is the full protocol path on one peer: inputs into the node (including election via <code>tick</code> / <code>MsgHup</code>), <strong>Ready</strong> handling, <strong>raftdb</strong> durability and replication, then <strong>ApplyFsm</strong> writing user state into <strong>kvdb</strong>. <strong><code>Message</code></strong> layout is §2.2; <strong><code>RaftLog</code> / <code>Entry</code> / <code>Unstable</code></strong> are §2.3; MVCC / 2PC are §3.</p><p><strong><code>RawNode.raft</code>: the consensus engine.</strong> <code>RawNode</code> is a thin facade around <strong><code>raft: Raft</code></strong>. <code>Raft</code> holds peer <code>id</code>, <code>term</code> / <code>vote</code>, <code>StateRole</code>, timers, outbound <code>msgs</code>, follower progress, and <code>RaftLog</code> (committed index + <code>PeerStorage</code>). <code>tick</code> / <code>step</code> / <code>propose</code> mostly forward into that field; <code>RawNode</code> then diffs SoftState / HardState to emit a <strong><code>Ready</code></strong> for the store.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Many Region peers share one <code>Engines</code> pair; each peer has its own <code>RawNode</code> and apply delegate. Peer Raft (tick / step / Ready / role) is §3; client writes (propose → log → engines, then MVCC / 2PC) are §4.</p><h2 id=2-multi-raft>2. Multi-Raft</h2><p>TiKV runs <strong>many Raft groups</strong>, not one: <strong>PD</strong> splits the keyspace into Regions; <strong>each Region is one Raft group</strong> (default three peers on three stores). A <strong>TiKV store</strong> hosts <strong>many peers</strong>—one local replica for each Region PD placed on that machine. The same store can be leader for some Regions and follower for others; leadership is per Region.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-multi-raft-peers.svg alt="Multi-Raft: PD ranges, many Region peers per TiKV store"></p><p>Peers share one process (<code>TikvServer</code>: gRPC, <code>MultiRaftServer</code>, <code>Engines</code>) so TiKV need not open a RocksDB per Region. Consensus stays independent: R1’s election and log progress do not block R2. <code>RaftRouter</code> routes work by <code>region_id</code> to each <code>PeerFsm</code>. Clients send KV RPCs only to that Region’s <strong>leader</strong>.</p><h2 id=3-peer-raft-protocol>3. Peer Raft protocol</h2><p>Each Region <strong>Peer</strong> owns one raft-rs <strong><code>RawNode</code></strong>—the consensus engine for that key range on this store. The protocol is one loop with three kinds of drive:</p><p>A <strong>timer tick</strong> fires on a fixed interval. Each tick advances Raft’s logical clock. On a Follower or Candidate, enough ticks without hearing the leader start an election (<code>MsgHup</code>); on a Leader, ticks send heartbeats (<code>MsgBeat</code>) so followers keep resetting their election timers. That tick → maybe Ready → idle path repeats for the life of the peer.</p><p><strong>Raft RPCs</strong> between stores are request/response on the same machine: inbound <code>Message</code>s (<code>MsgAppend</code>, <code>MsgRequestVote</code>, <code>MsgHeartbeat</code>, and their responses) are <code>step</code>ped into <code>RawNode</code>; outbound replies and fan-out sit in <code>msgs</code> until Ready sends them. A follower that accepts an Append persists and answers <code>MsgAppendResponse</code>; a candidate that gathers vote responses may win; a leader that sees AppendResponses may advance <code>committed</code>. Client writes use the same Ready path; how <code>propose</code> grows the log and what apply means for MVCC / 2PC is §4.</p><p><strong>State transfer</strong> (role transfer) is SoftState <strong><code>StateRole</code></strong> on that same loop—Follower, PreCandidate / Candidate, Leader—the Raft state machine, not a separate controller. Election timeout and majority votes move Follower → Candidate → Leader; a higher-term message or failed quorum check moves Leader (or Candidate) back to Follower. After any input, TiKV drains <strong>Ready</strong>: persist HardState and log entries to <strong>raftdb</strong>, send Messages, and hand committed entries to <strong>ApplyFsm</strong> for <strong>kvdb</strong>.</p><h3 id=31-peer-and-rawnode>3.1 Peer and RawNode</h3><p><strong><code>RawNode.raft</code>: the consensus engine.</strong> <code>RawNode</code> is a thin facade around <strong><code>raft: Raft</code></strong>. <code>Raft</code> holds peer <code>id</code>, <code>term</code> / <code>vote</code>, <code>StateRole</code>, timers, outbound <code>msgs</code>, follower progress, and <code>RaftLog</code> (committed index + <code>PeerStorage</code>). <code>tick</code> / <code>step</code> mostly forward into that field (<code>propose</code> on the write path is §4); <code>RawNode</code> then diffs SoftState / HardState to emit a <strong><code>Ready</code></strong> for the store.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 
 struct PeerFsm {
@@ -256,7 +256,60 @@ Ready .. PeerStorage : persist hs + entries
 Ready .. ApplyFsm : committed_entries
 
 @enduml
-</code></pre><p><code>PeerFsm.has_ready</code> is TiKV’s poll batching flag (set after tick / step / propose). <code>RawNode::has_ready()</code> is raft-rs’s real check against <code>prev_ss</code> / <code>prev_hs</code>, <code>unstable</code>, and <code>msgs</code>; <code>ready()</code> then materializes the <strong><code>Ready</code></strong> value the store must persist and send. <code>RaftLog.store</code> vs <code>unstable</code> is detailed in §2.3.</p><h4 id=three-raft-inputs-tick-step-propose>Three Raft inputs: <code>tick</code>, <code>step</code>, <code>propose</code></h4><p>Everything that moves a peer’s consensus state enters <code>RawNode</code> through one of three calls. All three eventually drive <strong><code>Raft::step</code></strong> (tick synthesizes local messages; propose wraps a <code>MsgPropose</code>). TiKV’s Peer poller invokes them; afterward the same <strong>Ready</strong> path runs.</p><table><thead><tr><th>Call</th><th>Who invokes it (TiKV)</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>tick</code></strong></td><td>Peer base-tick (<code>on_raft_base_tick</code> → <code>raft_group.tick</code>)</td><td>Advance the logical clock: election timeout or leader heartbeat</td></tr><tr><td><strong><code>step</code></strong></td><td>Peer Raft RPC (<code>Peer::step</code>) and local msgs from tick/propose</td><td>Apply one <code>Message</code>; update term, role, log, outbound msgs</td></tr><tr><td><strong><code>propose</code></strong></td><td>Leader write path (<code>Peer::propose</code> → <code>raft_group.propose</code>)</td><td>Append opaque client bytes as a new log <code>Entry</code> (Leader only)</td></tr></tbody></table><h5 id=tick--timers><code>tick</code> — timers</h5><p><code>tick</code> advances Raft’s <strong>logical clock</strong> by one unit. The library does not read wall time; TiKV’s peer base-tick must call <code>RawNode::tick</code> on a fixed interval. What a tick does depends on <code>StateRole</code>: as <strong>Follower</strong>, <strong>PreCandidate</strong>, or <strong>Candidate</strong>, successive ticks accumulate <code>election_elapsed</code> until the randomized election timeout fires, at which point the peer injects a local <code>MsgHup</code> and campaigns; as <strong>Leader</strong>, ticks accumulate <code>heartbeat_elapsed</code> (and optionally run a quorum check) and inject <code>MsgBeat</code> so followers keep resetting their election timers. A tick therefore either starts or sustains leadership—it never itself appends client log entries.</p><p><strong>Implementation.</strong> <code>RawNode::tick</code> forwards to <code>Raft::tick</code>, which branches on role:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// RawNode
+</code></pre><p><code>PeerFsm.has_ready</code> is TiKV’s poll batching flag (set after tick / step, and after propose on the write path). <code>RawNode::has_ready()</code> is raft-rs’s real check against <code>prev_ss</code> / <code>prev_hs</code>, <code>unstable</code>, and <code>msgs</code>; <code>ready()</code> then materializes the <strong><code>Ready</code></strong> value the store must persist and send. Ready drain is below (§3.2.3); client <code>propose</code> that fills the log is §4.</p><h3 id=32-raft-cycles-and-role-transfer>3.2 Raft cycles and role transfer</h3><p>Peer Raft is the repeated <strong>cycle</strong> (<code>tick</code> / <code>step</code> → Ready) plus <strong>role transfer</strong> on SoftState <code>StateRole</code> (Follower ⇄ Candidate ⇄ Leader). Inputs drive both: a cycle may send votes or heartbeats without changing role, or it may call <code>become_*</code> / <code>hup</code> / <code>poll</code> and transfer role; afterward the same Ready drain runs. Client log appends (<code>propose</code>) use that same Ready path and are §4.</p><p>Everything that moves consensus state enters <code>RawNode</code> through <strong><code>tick</code></strong> or <strong><code>step</code></strong> (tick synthesizes local messages). TiKV’s Peer poller invokes them; afterward Ready—persist, send, apply, advance—then idle until the next input.</p><table><thead><tr><th>Call</th><th>Who invokes it (TiKV)</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>tick</code></strong></td><td>Peer base-tick (<code>on_raft_base_tick</code> → <code>raft_group.tick</code>)</td><td>Advance the logical clock: election timeout or leader heartbeat</td></tr><tr><td><strong><code>step</code></strong></td><td>Peer Raft RPC (<code>Peer::step</code>) and local msgs from tick</td><td>Apply one <code>Message</code>; update term, role, log, outbound msgs</td></tr></tbody></table><p><strong>One cycle on the store side</strong> (same drain after any dirtying input):</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+hide empty description
+
+state &#34;Idle\n(no pending Ready)&#34; as Idle
+state &#34;Input\ntick / step&#34; as In
+state &#34;Raft updated\n(role, term, log, msgs)&#34; as Upd
+state &#34;has_ready?&#34; as HR &lt;&lt;choice&gt;&gt;
+state &#34;Take Ready&#34; as Take
+state &#34;Persist\nHardState + entries\n→ raftdb&#34; as Pers
+state &#34;Send messages\n(votes, Append, …)&#34; as Send
+state &#34;Schedule apply\ncommitted_entries\n→ ApplyFsm → kvdb&#34; as App
+state &#34;advance / light apply&#34; as Adv
+
+[*] --&gt; Idle
+Idle --&gt; In : Peer poller / RPC
+In --&gt; Upd : Raft::tick or Raft::step
+Upd --&gt; HR
+HR --&gt; Idle : false
+HR --&gt; Take : true
+Take --&gt; Pers
+Take --&gt; Send
+Take --&gt; App
+Pers --&gt; Adv
+Send --&gt; Adv
+App --&gt; Adv
+Adv --&gt; Idle : ready handled;\nprev_ss / prev_hs updated
+
+note right of Take
+  Ready may carry:
+  ss SoftState (role change)
+  hs HardState (term/vote/commit)
+  entries, messages,
+  committed_entries
+end note
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>  tick / step
+</span></span><span style=display:flex><span>           │
+</span></span><span style=display:flex><span>           ▼
+</span></span><span style=display:flex><span>    Raft in-memory update
+</span></span><span style=display:flex><span>    (term, log, msgs; maybe StateRole)
+</span></span><span style=display:flex><span>           │
+</span></span><span style=display:flex><span>           ▼ has_ready()
+</span></span><span style=display:flex><span>    Ready { ss?, hs?, entries?, messages?, committed_entries? }
+</span></span><span style=display:flex><span>           │
+</span></span><span style=display:flex><span>     ┌─────┼─────┐
+</span></span><span style=display:flex><span>     ▼     ▼     ▼
+</span></span><span style=display:flex><span>  raftdb  send  ApplyFsm → kvdb
+</span></span><span style=display:flex><span>     └─────┴─────┘
+</span></span><span style=display:flex><span>           ▼
+</span></span><span style=display:flex><span>      advance → Idle  (next cycle)
+</span></span></code></pre></div><p>Each cycle is <strong>input → maybe Ready drain</strong>. Role transfers happen inside some cycles. Growing the log with client bytes is <strong><code>propose</code></strong> on a Leader (§4).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>tick  → (MsgHup | MsgBeat) → Raft::step → maybe Ready (votes / heartbeats)
+</span></span><span style=display:flex><span>step  → Message from peer  → Raft::step → maybe Ready (log / HardState / msgs)
+</span></span><span style=display:flex><span>         └──────── both share the Ready → raftdb / apply path
+</span></span></code></pre></div><h4 id=321-tick--timers>3.2.1 <code>tick</code> — timers</h4><p><code>tick</code> advances Raft’s <strong>logical clock</strong> by one unit. The library does not read wall time; TiKV’s peer base-tick must call <code>RawNode::tick</code> on a fixed interval. What a tick does depends on <code>StateRole</code>: as <strong>Follower</strong>, <strong>PreCandidate</strong>, or <strong>Candidate</strong>, successive ticks accumulate <code>election_elapsed</code> until the randomized election timeout fires, at which point the peer injects a local <code>MsgHup</code> and campaigns; as <strong>Leader</strong>, ticks accumulate <code>heartbeat_elapsed</code> (and optionally run a quorum check) and inject <code>MsgBeat</code> so followers keep resetting their election timers. A tick therefore either starts or sustains leadership—it never itself appends client log entries.</p><p><strong>Implementation.</strong> <code>RawNode::tick</code> forwards to <code>Raft::tick</code>, which branches on role:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// RawNode
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>tick</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) -&gt; <span style=color:#66d9ef>bool</span> {
 </span></span><span style=display:flex><span>    self.raft.tick()
 </span></span><span style=display:flex><span>}
@@ -293,7 +346,7 @@ Ready .. ApplyFsm : committed_entries
 </span></span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#75715e>// …
 </span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>TiKV schedules a per-peer Raft tick; when it fires, <code>has_ready</code> may become true so heartbeats or vote messages leave via Ready.</p><h5 id=step--network-and-local-messages><code>step</code> — network (and local) messages</h5><p><code>step</code> is the <strong>single transition function</strong> of the consensus state machine: it consumes one <code>Message</code> and may update <code>term</code>, <code>vote</code>, <code>StateRole</code>, the Raft log, follower progress, and the outbound <code>msgs</code> queue. Network RPCs from other peers (<code>MsgAppend</code>, <code>MsgAppendResponse</code>, <code>MsgHeartbeat</code>, <code>MsgRequestVote</code>, …) enter through <code>RawNode::step</code> → <code>Raft::step</code>. Local control messages synthesized by <code>tick</code> or <code>propose</code> (<code>MsgHup</code>, <code>MsgBeat</code>, <code>MsgPropose</code>) call <code>Raft::step</code> directly. Every meaningful role change and almost every log mutation is the result of some <code>step</code>; Ready only reports what <code>step</code> (or a preceding tick/propose that stepped) already changed.</p><p><strong>Implementation.</strong> <code>RawNode::step</code> rejects unexpected local message types from the network, then calls <code>Raft::step</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer — after gRPC delivers a Raft Message for this region_id
+</span></span></code></pre></div><p>TiKV schedules a per-peer Raft tick; when it fires, <code>has_ready</code> may become true so heartbeats or vote messages leave via Ready.</p><h4 id=322-step--network-and-local-messages>3.2.2 <code>step</code> — network (and local) messages</h4><p><code>step</code> is the <strong>single transition function</strong> of the consensus state machine: it consumes one <code>Message</code> and may update <code>term</code>, <code>vote</code>, <code>StateRole</code>, the Raft log, follower progress, and the outbound <code>msgs</code> queue. Network RPCs from other peers (<code>MsgAppend</code>, <code>MsgAppendResponse</code>, <code>MsgHeartbeat</code>, <code>MsgRequestVote</code>, …) enter through <code>RawNode::step</code> → <code>Raft::step</code>. Local control messages synthesized by <code>tick</code> (<code>MsgHup</code>, <code>MsgBeat</code>; <code>MsgPropose</code> in §4) call <code>Raft::step</code> directly. Every meaningful role change and almost every log mutation is the result of some <code>step</code>; Ready only reports what <code>step</code> (or a preceding tick that stepped) already changed.</p><p><strong>Implementation.</strong> <code>RawNode::step</code> rejects unexpected local message types from the network, then calls <code>Raft::step</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer — after gRPC delivers a Raft Message for this region_id
 </span></span></span><span style=display:flex><span>self.raft_group.step(m)<span style=color:#f92672>?</span>;
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#75715e>// RawNode::step
@@ -304,7 +357,7 @@ Ready .. ApplyFsm : committed_entries
 </span></span><span style=display:flex><span>    <span style=color:#75715e>// …
 </span></span></span><span style=display:flex><span>    self.raft.step(m)
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>Raft::step</code> has two phases: <strong>term gate</strong>, then <strong>message / role dispatch</strong>.</p><p><strong>1. Term gate</strong> — compare <code>m.term</code> to <code>self.term</code> before interpreting the payload:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
+</span></span></code></pre></div><p><code>Raft::step</code> has two phases: <strong>term gate</strong>, then <strong>message / role dispatch</strong>. SoftState moves only inside <code>become_*</code>; Ready later surfaces <code>ss</code> if it differs from <code>prev_ss</code>. Local messages that <strong>tick</strong> injects call <strong><code>Raft::step</code> directly</strong> (not <code>RawNode::step</code>), so <code>MsgHup</code> / <code>MsgBeat</code> are not rejected as <code>StepLocalMsg</code>.</p><p><strong>1. Term gate</strong> — compare <code>m.term</code> to <code>self.term</code> before interpreting the payload:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> m.term <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span> {
 </span></span><span style=display:flex><span>        <span style=color:#75715e>// local message (MsgHup / MsgBeat / MsgPropose, …)
 </span></span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> m.term <span style=color:#f92672>&gt;</span> self.term {
@@ -320,15 +373,14 @@ Ready .. ApplyFsm : committed_entries
 </span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> m.term <span style=color:#f92672>&lt;</span> self.term {
 </span></span><span style=display:flex><span>        <span style=color:#75715e>// stale leader/candidate: often reply MsgAppendResponse so they learn
 </span></span></span><span style=display:flex><span>        <span style=color:#75715e>// the newer term, then return without applying the old message
-</span></span></span><span style=display:flex><span>        <span style=color:#75715e>// …
 </span></span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Ok(());
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// … continue below …
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … continue to dispatch …
 </span></span></span></code></pre></div><p><strong>2. Dispatch</strong> — <code>MsgHup</code> / votes are handled here; everything else goes to the role-specific stepper:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span>    <span style=color:#66d9ef>match</span> m.get_msg_type() {
-</span></span><span style=display:flex><span>        MessageType::MsgHup <span style=color:#f92672>=&gt;</span> self.hup(<span style=color:#66d9ef>false</span>),  <span style=color:#75715e>// → become_candidate / campaign
+</span></span><span style=display:flex><span>        MessageType::MsgHup <span style=color:#f92672>=&gt;</span> self.hup(<span style=color:#66d9ef>false</span>),  <span style=color:#75715e>// → campaign → PreCandidate or Candidate
 </span></span></span><span style=display:flex><span>        MessageType::MsgRequestVote <span style=color:#f92672>|</span> MessageType::MsgRequestPreVote <span style=color:#f92672>=&gt;</span> {
 </span></span><span style=display:flex><span>            <span style=color:#75715e>// grant or reject; maybe set self.vote = m.from
-</span></span></span><span style=display:flex><span>            <span style=color:#75715e>// …
+</span></span></span><span style=display:flex><span>            <span style=color:#75715e>// (does not change StateRole by itself)
 </span></span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        _ <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>match</span> self.state {
 </span></span><span style=display:flex><span>            StateRole::PreCandidate <span style=color:#f92672>|</span> StateRole::Candidate <span style=color:#f92672>=&gt;</span> self.step_candidate(m)<span style=color:#f92672>?</span>,
@@ -338,174 +390,221 @@ Ready .. ApplyFsm : committed_entries
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    Ok(())
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><strong><code>step_leader</code></strong> (selected arms) — heartbeats, quorum check, client proposes:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step_leader</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
+</span></span></code></pre></div><p><strong>3. Role steppers and final handlers</strong> — <code>MsgHup</code> (from tick, or follower <code>MsgTimeoutNow</code>) starts a campaign; vote responses and Append/Heartbeat drive the rest:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>hup</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, transfer_leader: <span style=color:#66d9ef>bool</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> self.state <span style=color:#f92672>==</span> StateRole::Leader { <span style=color:#66d9ef>return</span>; }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … refuse if unapplied conf changes …
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> transfer_leader {
+</span></span><span style=display:flex><span>        self.campaign(<span style=color:#66d9ef>CAMPAIGN_TRANSFER</span>);       <span style=color:#75715e>// → Candidate, no PreVote
+</span></span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> self.pre_vote {
+</span></span><span style=display:flex><span>        self.campaign(<span style=color:#66d9ef>CAMPAIGN_PRE_ELECTION</span>);   <span style=color:#75715e>// → PreCandidate
+</span></span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        self.campaign(<span style=color:#66d9ef>CAMPAIGN_ELECTION</span>);       <span style=color:#75715e>// → Candidate (term++)
+</span></span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>campaign</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, campaign_type: <span style=color:#66d9ef>&amp;</span>&#39;static [<span style=color:#66d9ef>u8</span>]) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> (vote_msg, term) <span style=color:#f92672>=</span> <span style=color:#66d9ef>if</span> campaign_type <span style=color:#f92672>==</span> <span style=color:#66d9ef>CAMPAIGN_PRE_ELECTION</span> {
+</span></span><span style=display:flex><span>        self.become_pre_candidate(); <span style=color:#75715e>// state = PreCandidate; term unchanged
+</span></span></span><span style=display:flex><span>        (MessageType::MsgRequestPreVote, self.term <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span>)
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        self.become_candidate();     <span style=color:#75715e>// term++; vote = self; state = Candidate
+</span></span></span><span style=display:flex><span>        (MessageType::MsgRequestVote, self.term)
+</span></span><span style=display:flex><span>    };
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> VoteResult::Won <span style=color:#f92672>==</span> self.poll(self.id, vote_msg, <span style=color:#66d9ef>true</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>; <span style=color:#75715e>// single-node
+</span></span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … send vote_msg to other voters …
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>become_follower</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, term: <span style=color:#66d9ef>u64</span>, leader_id: <span style=color:#66d9ef>u64</span>) {
+</span></span><span style=display:flex><span>    self.reset(term);
+</span></span><span style=display:flex><span>    self.leader_id <span style=color:#f92672>=</span> leader_id;
+</span></span><span style=display:flex><span>    self.state <span style=color:#f92672>=</span> StateRole::Follower;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>become_pre_candidate</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) {
+</span></span><span style=display:flex><span>    self.state <span style=color:#f92672>=</span> StateRole::PreCandidate;
+</span></span><span style=display:flex><span>    self.prs.reset_votes();
+</span></span><span style=display:flex><span>    self.leader_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>INVALID_ID</span>; <span style=color:#75715e>// term / vote unchanged
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>become_candidate</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> term <span style=color:#f92672>=</span> self.term <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>    self.reset(term);
+</span></span><span style=display:flex><span>    self.vote <span style=color:#f92672>=</span> self.id;
+</span></span><span style=display:flex><span>    self.state <span style=color:#f92672>=</span> StateRole::Candidate;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>become_leader</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> term <span style=color:#f92672>=</span> self.term;
+</span></span><span style=display:flex><span>    self.reset(term);
+</span></span><span style=display:flex><span>    self.leader_id <span style=color:#f92672>=</span> self.id;
+</span></span><span style=display:flex><span>    self.state <span style=color:#f92672>=</span> StateRole::Leader;
+</span></span><span style=display:flex><span>    self.append_entry(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> [Entry::default()]); <span style=color:#75715e>// empty noop
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step_leader</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> m.get_msg_type() {
-</span></span><span style=display:flex><span>        MessageType::MsgBeat <span style=color:#f92672>=&gt;</span> {
-</span></span><span style=display:flex><span>            self.bcast_heartbeat();
-</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> Ok(());
-</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgBeat <span style=color:#f92672>=&gt;</span> { self.bcast_heartbeat(); <span style=color:#66d9ef>return</span> Ok(()); }
 </span></span><span style=display:flex><span>        MessageType::MsgCheckQuorum <span style=color:#f92672>=&gt;</span> {
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>self.check_quorum_active() {
-</span></span><span style=display:flex><span>                <span style=color:#66d9ef>let</span> term <span style=color:#f92672>=</span> self.term;
-</span></span><span style=display:flex><span>                self.become_follower(term, <span style=color:#66d9ef>INVALID_ID</span>);  <span style=color:#75715e>// Leader → Follower
+</span></span><span style=display:flex><span>                self.become_follower(self.term, <span style=color:#66d9ef>INVALID_ID</span>); <span style=color:#75715e>// Leader → Follower
 </span></span></span><span style=display:flex><span>            }
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> Ok(());
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        MessageType::MsgPropose <span style=color:#f92672>=&gt;</span> {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// … reject if not in config / transfer in progress …
-</span></span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>self.append_entry(m.mut_entries()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>self.append_entry(m.mut_entries()) {
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> Err(Error::ProposalDropped);
 </span></span><span style=display:flex><span>            }
-</span></span><span style=display:flex><span>            self.bcast_append();   <span style=color:#75715e>// queue MsgAppend to followers
+</span></span><span style=display:flex><span>            self.bcast_append(); <span style=color:#75715e>// role unchanged
 </span></span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> Ok(());
 </span></span><span style=display:flex><span>        }
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// MsgAppendResponse → update progress, maybe_commit, …
-</span></span></span><span style=display:flex><span>        _ <span style=color:#f92672>=&gt;</span> { <span style=color:#75715e>/* … */</span> }
+</span></span><span style=display:flex><span>        MessageType::MsgAppendResponse <span style=color:#f92672>=&gt;</span> self.handle_append_response(<span style=color:#f92672>&amp;</span>m),
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// MsgHeartbeatResponse / MsgTransferLeader / … → handle_*
+</span></span></span><span style=display:flex><span>        _ <span style=color:#f92672>=&gt;</span> {}
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Ok(())
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><strong><code>step_follower</code></strong> (selected arms) — reset election timer; append or forward proposes:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step_follower</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>append_entry</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, es: <span style=color:#66d9ef>&amp;</span><span style=color:#a6e22e>mut</span> [Entry]) -&gt; <span style=color:#66d9ef>bool</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>self.maybe_increase_uncommitted_size(es) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> li <span style=color:#f92672>=</span> self.raft_log.last_index();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (i, e) <span style=color:#66d9ef>in</span> es.iter_mut().enumerate() {
+</span></span><span style=display:flex><span>        e.term <span style=color:#f92672>=</span> self.term;
+</span></span><span style=display:flex><span>        e.index <span style=color:#f92672>=</span> li <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span> <span style=color:#f92672>+</span> i <span style=color:#66d9ef>as</span> <span style=color:#66d9ef>u64</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    self.raft_log.append(es); <span style=color:#75715e>// → RaftLog.unstable
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>true</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>bcast_append</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> self_id <span style=color:#f92672>=</span> self.id;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> core <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.r;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> msgs <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs;
+</span></span><span style=display:flex><span>    self.prs.iter_mut()
+</span></span><span style=display:flex><span>        .filter(<span style=color:#f92672>|&amp;</span>(id, _)<span style=color:#f92672>|</span> <span style=color:#f92672>*</span>id <span style=color:#f92672>!=</span> self_id)
+</span></span><span style=display:flex><span>        .for_each(<span style=color:#f92672>|</span>(id, pr)<span style=color:#f92672>|</span> core.send_append(<span style=color:#f92672>*</span>id, pr, msgs));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>handle_append_response</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, m: <span style=color:#66d9ef>&amp;</span><span style=color:#a6e22e>Message</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … reject → maybe_decr_to + send_append; accept → maybe_update …
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> self.maybe_commit() <span style=color:#f92672>&amp;&amp;</span> self.should_bcast_commit() {
+</span></span><span style=display:flex><span>        self.bcast_append();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    self.send_append_aggressively(m.from);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step_candidate</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> m.get_msg_type() {
+</span></span><span style=display:flex><span>        MessageType::MsgAppend <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.become_follower(m.term, m.from);
+</span></span><span style=display:flex><span>            self.handle_append_entries(<span style=color:#f92672>&amp;</span>m);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgHeartbeat <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.become_follower(m.term, m.from);
+</span></span><span style=display:flex><span>            self.handle_heartbeat(m);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgSnapshot <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.become_follower(m.term, m.from);
+</span></span><span style=display:flex><span>            self.handle_snapshot(m);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgRequestPreVoteResponse <span style=color:#f92672>|</span> MessageType::MsgRequestVoteResponse <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.poll(m.from, m.get_msg_type(), <span style=color:#f92672>!</span>m.reject);
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Won → campaign again or become_leader; Lost → become_follower
+</span></span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgPropose <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>return</span> Err(Error::ProposalDropped),
+</span></span><span style=display:flex><span>        _ <span style=color:#f92672>=&gt;</span> {}
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Ok(())
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>poll</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, from: <span style=color:#66d9ef>u64</span>, t: <span style=color:#a6e22e>MessageType</span>, vote: <span style=color:#66d9ef>bool</span>) -&gt; <span style=color:#a6e22e>VoteResult</span> {
+</span></span><span style=display:flex><span>    self.prs.record_vote(from, vote);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> self.prs.tally_votes().<span style=color:#ae81ff>2</span> {
+</span></span><span style=display:flex><span>        VoteResult::Won <span style=color:#66d9ef>if</span> self.state <span style=color:#f92672>==</span> StateRole::PreCandidate <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.campaign(<span style=color:#66d9ef>CAMPAIGN_ELECTION</span>);   <span style=color:#75715e>// → Candidate
+</span></span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        VoteResult::Won <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.become_leader();                 <span style=color:#75715e>// → Leader
+</span></span></span><span style=display:flex><span>            self.bcast_append();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        VoteResult::Lost <span style=color:#f92672>=&gt;</span> self.become_follower(self.term, <span style=color:#66d9ef>INVALID_ID</span>),
+</span></span><span style=display:flex><span>        VoteResult::Pending <span style=color:#f92672>=&gt;</span> {}
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// …
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>step_follower</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> m.get_msg_type() {
 </span></span><span style=display:flex><span>        MessageType::MsgPropose <span style=color:#f92672>=&gt;</span> {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// forward to leader_id (or drop) — follower does not append as leader
-</span></span></span><span style=display:flex><span>            m.to <span style=color:#f92672>=</span> self.leader_id;
-</span></span><span style=display:flex><span>            self.r.send(m, <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs);
-</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>            m.to <span style=color:#f92672>=</span> self.leader_id;
+</span></span><span style=display:flex><span>            self.r.send(m, <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs);  <span style=color:#75715e>// forward; role unchanged
+</span></span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        MessageType::MsgAppend <span style=color:#f92672>=&gt;</span> {
 </span></span><span style=display:flex><span>            self.election_elapsed <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
 </span></span><span style=display:flex><span>            self.leader_id <span style=color:#f92672>=</span> m.from;
-</span></span><span style=display:flex><span>            self.handle_append_entries(<span style=color:#f92672>&amp;</span>m);  <span style=color:#75715e>// match log, append, reply
-</span></span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>            self.handle_append_entries(<span style=color:#f92672>&amp;</span>m);
+</span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        MessageType::MsgHeartbeat <span style=color:#f92672>=&gt;</span> {
 </span></span><span style=display:flex><span>            self.election_elapsed <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
 </span></span><span style=display:flex><span>            self.leader_id <span style=color:#f92672>=</span> m.from;
 </span></span><span style=display:flex><span>            self.handle_heartbeat(m);
 </span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgSnapshot <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.election_elapsed <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>            self.leader_id <span style=color:#f92672>=</span> m.from;
+</span></span><span style=display:flex><span>            self.handle_snapshot(m);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        MessageType::MsgTimeoutNow <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>            self.hup(<span style=color:#66d9ef>true</span>);  <span style=color:#75715e>// transfer: → Candidate (skip PreVote)
+</span></span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        <span style=color:#75715e>// …
 </span></span></span><span style=display:flex><span>        _ <span style=color:#f92672>=&gt;</span> {}
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Ok(())
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Local messages that <strong>tick</strong> injects call <strong><code>Raft::step</code> directly</strong> (not <code>RawNode::step</code>), so <code>MsgHup</code> / <code>MsgBeat</code> are not rejected as <code>StepLocalMsg</code>.</p><h5 id=propose--client-log-entries><code>propose</code> — client log entries</h5><p><code>propose</code> is how a <strong>Leader</strong> turns a client write into a Raft log entry. TiKV passes opaque bytes—typically a serialized <code>RaftCmdRequest</code>—plus an optional context; <code>RawNode::propose</code> wraps them as a local <code>MsgPropose</code> and <code>Raft::step</code>s that message. On the leader, <code>step_leader</code> assigns <code>term</code>/<code>index</code>, appends to <code>RaftLog</code>, and queues <code>MsgAppend</code> for followers. On a non-leader, the same <code>MsgPropose</code> is forwarded or dropped (<code>NotLeader</code> / <code>ProposalDropped</code>); followers never treat propose as authority to grow the log themselves. Propose does not change <code>StateRole</code>: it only extends the log when the peer already is Leader, then relies on the shared Ready path for raftdb persistence, replication, and later apply.</p><p><strong>Implementation.</strong> <code>RawNode::propose</code> builds a local <code>MsgPropose</code> and steps it; there is no separate propose engine:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer::propose_normal — after req.write_to_bytes()
-</span></span></span><span style=display:flex><span>self.raft_group.propose(ctx.to_vec(), data)<span style=color:#f92672>?</span>;
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// RawNode::propose
-</span></span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>propose</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, context: <span style=color:#a6e22e>impl</span> Into<span style=color:#f92672>&lt;</span>Bytes<span style=color:#f92672>&gt;</span>, data: <span style=color:#a6e22e>impl</span> Into<span style=color:#f92672>&lt;</span>Bytes<span style=color:#f92672>&gt;</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> m <span style=color:#f92672>=</span> Message::default();
-</span></span><span style=display:flex><span>    m.set_msg_type(MessageType::MsgPropose);
-</span></span><span style=display:flex><span>    m.from <span style=color:#f92672>=</span> self.raft.id;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> e <span style=color:#f92672>=</span> Entry::default();
-</span></span><span style=display:flex><span>    e.data <span style=color:#f92672>=</span> data.into();       <span style=color:#75715e>// RaftCmdRequest bytes
-</span></span></span><span style=display:flex><span>    e.context <span style=color:#f92672>=</span> context.into();
-</span></span><span style=display:flex><span>    m.set_entries(<span style=color:#a6e22e>vec!</span>[e].into());
-</span></span><span style=display:flex><span>    self.raft.step(m)           <span style=color:#75715e>// → step_leader MsgPropose
-</span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>On the leader, <code>step_leader</code> accepts <code>MsgPropose</code>, appends into <code>RaftLog</code>, then broadcasts:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Raft::step_leader
-</span></span></span><span style=display:flex><span>MessageType::MsgPropose <span style=color:#f92672>=&gt;</span> {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> m.entries.is_empty() {
-</span></span><span style=display:flex><span>        <span style=color:#a6e22e>fatal!</span>(self.logger, <span style=color:#e6db74>&#34;stepped empty MsgProp&#34;</span>);
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// drop if removed from config or leadership transfer in progress …
-</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>self.append_entry(m.mut_entries()) {
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Err(Error::ProposalDropped);  <span style=color:#75715e>// e.g. uncommitted size limit
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>handle_append_entries</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, m: <span style=color:#66d9ef>&amp;</span><span style=color:#a6e22e>Message</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … reject if m.index &lt; committed; else maybe_append …
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> to_send <span style=color:#f92672>=</span> Message::default();
+</span></span><span style=display:flex><span>    to_send.set_msg_type(MessageType::MsgAppendResponse);
+</span></span><span style=display:flex><span>    to_send.to <span style=color:#f92672>=</span> m.from;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> <span style=color:#66d9ef>let</span> Some((_, last_idx)) <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        self.raft_log.maybe_append(m.index, m.log_term, m.commit, <span style=color:#f92672>&amp;</span>m.entries)
+</span></span><span style=display:flex><span>    {
+</span></span><span style=display:flex><span>        to_send.set_index(last_idx);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        to_send.reject <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// … reject_hint / log_term from find_conflict_by_term …
 </span></span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    self.bcast_append();  <span style=color:#75715e>// queue MsgAppend for followers
-</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Ok(());
+</span></span><span style=display:flex><span>    to_send.set_commit(self.raft_log.committed);
+</span></span><span style=display:flex><span>    self.r.send(to_send, <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><strong>Append into <code>RaftLog</code>.</strong> <code>append_entry</code> stamps the leader’s current term and the next indexes, then pushes the slice onto <strong><code>RaftLog.unstable</code></strong> (in memory only). Persistence to <strong>raftdb</strong> happens later when Ready exposes those entries (§2.1 Ready; log layout §2.3):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span>self.raft_log.append(es);  <span style=color:#75715e>// unstable.truncate_and_append — see §2.3
-</span></span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MsgPropose { entries: [Entry { data, context, term:0, index:0 }] }
-</span></span><span style=display:flex><span>  → append_entry: set term/index → RaftLog.unstable
-</span></span><span style=display:flex><span>  → bcast_append: msgs += MsgAppend(…)
-</span></span><span style=display:flex><span>  → Ready.entries = unstable slice → PeerStorage → raftdb
-</span></span></code></pre></div><p><code>Entry.data</code> stays opaque inside raft-rs: no CF names, no MVCC decode.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>tick  → (MsgHup | MsgBeat) → Raft::step → maybe Ready (votes / heartbeats)
-</span></span><span style=display:flex><span>step  → Message from peer  → Raft::step → maybe Ready (log / HardState / msgs)
-</span></span><span style=display:flex><span>propose → MsgPropose       → Raft::step → Ready (entries + MsgAppend)
-</span></span><span style=display:flex><span>         └──────── all three share the Ready → raftdb / apply path below
-</span></span></code></pre></div><h4 id=state-machine-roles-inputs-ready>State machine: roles, inputs, Ready</h4><p>Raft has two layers that change together: <strong><code>StateRole</code></strong> (SoftState: Follower / PreCandidate / Candidate / Leader) and the store’s <strong>Ready handling</strong> (persist / send / apply / advance). Role changes are triggered by <code>tick</code> and <code>step</code>; <code>propose</code> does not change role—it only appends on a Leader. After any input, SoftState / HardState / log / <code>msgs</code> deltas surface as <strong>Ready</strong>.</p><p><strong>Role transitions</strong> (<code>Raft.state</code> / SoftState <code>raft_state</code>):</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-hide empty description
-skinparam state {
-  BackgroundColor&lt;&lt;leader&gt;&gt; #E8F5E9
-  BackgroundColor&lt;&lt;cand&gt;&gt; #FFF8E1
-  BackgroundColor&lt;&lt;fol&gt;&gt; #E3F2FD
-}
-
-state &#34;Follower&#34; as F &lt;&lt;fol&gt;&gt;
-state &#34;PreCandidate\n(pre-vote on)&#34; as P &lt;&lt;cand&gt;&gt;
-state &#34;Candidate&#34; as C &lt;&lt;cand&gt;&gt;
-state &#34;Leader&#34; as L &lt;&lt;leader&gt;&gt;
-
-[*] --&gt; F : bootstrap / restart\n(load HardState)
-
-F --&gt; P : tick election timeout\n(pre_vote) / MsgHup dry-run
-F --&gt; C : tick election timeout\n(no pre_vote) / MsgHup\n(term++)
-P --&gt; C : pre-vote majority\nthen real campaign (term++)
-P --&gt; F : pre-vote rejected /\nhear valid leader (higher or current term)
-
-C --&gt; L : majority MsgRequestVoteResponse\n(granted) → become_leader
-C --&gt; C : election timeout again\n(term++; new MsgRequestVote)
-C --&gt; F : step: higher Message.term /\nAppend or Heartbeat from leader /\nlose vote
-
-L --&gt; F : step: Message.term &gt; currentTerm\n(become_follower) /\ntick: MsgCheckQuorum fails
-
-F --&gt; F : step MsgAppend / MsgHeartbeat\n(same or lower ok path;\nreset election_elapsed)
-L --&gt; L : tick MsgBeat (heartbeat) /\nstep MsgAppendResponse /\npropose MsgPropose\n(role unchanged)
-
-@enduml
-</code></pre><table><thead><tr><th>From → To</th><th>Trigger</th><th>What runs</th></tr></thead><tbody><tr><td>Follower → Candidate (or PreCandidate)</td><td><strong><code>tick</code></strong> election timeout → <code>MsgHup</code></td><td><code>become_candidate</code> / <code>become_pre_candidate</code>; broadcast votes</td></tr><tr><td>Candidate → Leader</td><td><strong><code>step</code></strong> majority vote grants</td><td><code>become_leader</code>; SoftState leader_id = self</td></tr><tr><td>Any → Follower</td><td><strong><code>step</code></strong> higher <code>Message.term</code>, or Append/Heartbeat from a valid leader</td><td><code>become_follower</code>; clear leadership</td></tr><tr><td>Leader → Follower</td><td>Higher term, or <strong><code>tick</code></strong> quorum check fail</td><td>Step down</td></tr><tr><td>Leader → Leader</td><td><strong><code>propose</code></strong>, <strong><code>tick</code></strong> heartbeat, append responses</td><td>Log / msgs change; <strong>role stays Leader</strong></td></tr></tbody></table><p><strong>Ready cycle</strong> (store side; same for every input that dirties the node):</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-hide empty description
-
-state &#34;Idle\n(no pending Ready)&#34; as Idle
-state &#34;Input\ntick / step / propose&#34; as In
-state &#34;Raft updated\n(role, term, log, msgs)&#34; as Upd
-state &#34;has_ready?&#34; as HR &lt;&lt;choice&gt;&gt;
-state &#34;Take Ready&#34; as Take
-state &#34;Persist\nHardState + entries\n→ raftdb&#34; as Pers
-state &#34;Send messages\n(votes, Append, …)&#34; as Send
-state &#34;Schedule apply\ncommitted_entries\n→ ApplyFsm → kvdb&#34; as App
-state &#34;advance / light apply&#34; as Adv
-
-[*] --&gt; Idle
-Idle --&gt; In : Peer poller / RPC / write path
-In --&gt; Upd : Raft::tick or Raft::step
-Upd --&gt; HR
-HR --&gt; Idle : false
-HR --&gt; Take : true
-Take --&gt; Pers
-Take --&gt; Send
-Take --&gt; App
-Pers --&gt; Adv
-Send --&gt; Adv
-App --&gt; Adv
-Adv --&gt; Idle : ready handled;\nprev_ss / prev_hs updated
-
-note right of In
-  propose only accepted
-  when state == Leader
-  else NotLeader / drop
-end note
-
-note right of Take
-  Ready may carry:
-  ss SoftState (role change)
-  hs HardState (term/vote/commit)
-  entries, messages,
-  committed_entries
-end note
-@enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>                    ┌─────────────────────────────────────────┐
-</span></span><span style=display:flex><span>  tick / step /     │  StateRole: Follower ⇄ Candidate ⇄ Leader │
-</span></span><span style=display:flex><span>  propose ─────────►│       SoftState changes when role moves   │
-</span></span><span style=display:flex><span>                    └───────────────┬─────────────────────────┘
-</span></span><span style=display:flex><span>                                    │ has_ready()
-</span></span><span style=display:flex><span>                                    ▼
-</span></span><span style=display:flex><span>                         Ready { ss?, hs?, entries?, messages?,
-</span></span><span style=display:flex><span>                                 committed_entries? }
-</span></span><span style=display:flex><span>                                    │
-</span></span><span style=display:flex><span>              ┌─────────────────────┼─────────────────────┐
-</span></span><span style=display:flex><span>              ▼                     ▼                     ▼
-</span></span><span style=display:flex><span>         raftdb persist        send Messages         ApplyFsm → kvdb
-</span></span><span style=display:flex><span>              └─────────────────────┴─────────────────────┘
-</span></span><span style=display:flex><span>                                    ▼
-</span></span><span style=display:flex><span>                              advance → Idle
-</span></span></code></pre></div><p>So: <strong><code>tick</code> / <code>step</code> drive role transfers</strong> (including election); <strong><code>propose</code> drives log growth on the Leader</strong>; <strong>Ready</strong> is how every transfer and log update is observed and made durable by TiKV. <code>Message</code> fields are §2.2; log layout is §2.3.</p><h4 id=ready-when-it-fires-and-how-unstable-becomes-durable>Ready: when it fires, and how unstable becomes durable</h4><p><strong>Propose does not write raftdb.</strong> After <code>MsgPropose</code>, the new <code>Entry</code> lives only in <strong><code>RaftLog.unstable</code></strong>, and <code>bcast_append</code> only appends <strong><code>MsgAppend</code></strong> into <strong><code>Raft.msgs</code></strong>—both in memory. SoftState / HardState may also differ from <code>RawNode</code>’s remembered <code>prev_ss</code> / <code>prev_hs</code>. Nothing is durable until the Peer drains a <strong>Ready</strong>.</p><p><strong>When Ready is triggered.</strong> TiKV does not call <code>RawNode::has_ready</code> on every message inline. The peer FSM sets a local flag after inputs that may dirty Raft; at the <strong>end of the poll</strong>, it drains Ready if that flag is set.</p><p>After <strong>tick</strong> / <strong>step</strong> / <strong>propose</strong>, mark the peer dirty:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// tick (on_raft_base_tick)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>handle_heartbeat</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) {
+</span></span><span style=display:flex><span>    self.raft_log.commit_to(m.commit);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> to_send <span style=color:#f92672>=</span> Message::default();
+</span></span><span style=display:flex><span>    to_send.set_msg_type(MessageType::MsgHeartbeatResponse);
+</span></span><span style=display:flex><span>    to_send.to <span style=color:#f92672>=</span> m.from;
+</span></span><span style=display:flex><span>    to_send.context <span style=color:#f92672>=</span> m.take_context();
+</span></span><span style=display:flex><span>    to_send.commit <span style=color:#f92672>=</span> self.raft_log.committed;
+</span></span><span style=display:flex><span>    self.r.send(to_send, <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>handle_snapshot</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, <span style=color:#66d9ef>mut</span> m: <span style=color:#a6e22e>Message</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> to_send <span style=color:#f92672>=</span> Message::default();
+</span></span><span style=display:flex><span>    to_send.set_msg_type(MessageType::MsgAppendResponse);
+</span></span><span style=display:flex><span>    to_send.to <span style=color:#f92672>=</span> m.from;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> self.restore(m.take_snapshot()) {
+</span></span><span style=display:flex><span>        to_send.index <span style=color:#f92672>=</span> self.raft_log.last_index();
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        to_send.index <span style=color:#f92672>=</span> self.raft_log.committed;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    self.r.send(to_send, <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self.msgs);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=323-ready-when-it-fires-and-how-unstable-becomes-durable>3.2.3 Ready: when it fires, and how unstable becomes durable</h4><p><strong>In-memory deltas are not durable.</strong> After <code>tick</code> / <code>step</code> / <code>propose</code>, new log entries may sit only in <strong><code>RaftLog.unstable</code></strong>, outbound RPCs in <strong><code>Raft.msgs</code></strong>, and SoftState / HardState may differ from <code>RawNode</code>’s <code>prev_ss</code> / <code>prev_hs</code>. Nothing is durable until the Peer drains a <strong>Ready</strong>.</p><p><strong>When Ready is triggered.</strong> TiKV does not call <code>RawNode::has_ready</code> on every message inline. The peer FSM sets a local flag after inputs that may dirty Raft; at the <strong>end of the poll</strong>, it drains Ready if that flag is set.</p><p>After <strong>tick</strong> / <strong>step</strong> / <strong>propose</strong>, mark the peer dirty:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// tick (on_raft_base_tick)
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> self.fsm.peer.raft_group.tick() {
 </span></span><span style=display:flex><span>    self.fsm.has_ready <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
 </span></span><span style=display:flex><span>}
@@ -551,7 +650,7 @@ end note
 </span></span><span style=display:flex><span>       → handle_raft_ready_append()
 </span></span><span style=display:flex><span>            → RawNode::has_ready()?   (real check)
 </span></span><span style=display:flex><span>            → RawNode::ready()
-</span></span></code></pre></div><p>So a successful <strong>propose</strong> sets the FSM flag because <strong><code>unstable</code> is non-empty</strong> and <strong><code>msgs</code> holds <code>MsgAppend</code></strong>; <code>has_ready()</code> confirms that before <code>ready()</code> is taken.</p><p><strong>What <code>ready()</code> packages.</strong> <code>RawNode::ready()</code> snapshots those deltas into a <code>Ready</code> the store must handle before further <code>step</code> / <code>propose</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>ready</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) -&gt; <span style=color:#a6e22e>Ready</span> {
+</span></span></code></pre></div><p>A successful <strong>propose</strong> (§4) sets the FSM flag because <strong><code>unstable</code> is non-empty</strong> and <strong><code>msgs</code> holds <code>MsgAppend</code></strong>; elections and Append paths set it for the same reason when <code>msgs</code> / HardState / SoftState change. <code>has_ready()</code> confirms before <code>ready()</code> is taken.</p><p><strong>What <code>ready()</code> packages.</strong> <code>RawNode::ready()</code> snapshots those deltas into a <code>Ready</code> the store must handle before further <code>step</code> / <code>propose</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>ready</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self) -&gt; <span style=color:#a6e22e>Ready</span> {
 </span></span><span style=display:flex><span>    <span style=color:#75715e>// …
 </span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> ss <span style=color:#f92672>!=</span> self.prev_ss { rd.ss <span style=color:#f92672>=</span> Some(ss); }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> hs <span style=color:#f92672>!=</span> self.prev_hs { rd.hs <span style=color:#f92672>=</span> Some(hs); }
@@ -585,7 +684,7 @@ end note
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span><span style=color:#75715e>// PeerStorage::handle_raft_ready → WriteTask → raftdb
 </span></span></span><span style=display:flex><span>self.mut_store().handle_raft_ready(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> ready, destroy_regions)<span style=color:#f92672>?</span>;
-</span></span></code></pre></div><h4 id=persist-unstable-entries-and-hardstate--raftdb>Persist: unstable entries and HardState → raftdb</h4><p><code>PeerStorage</code> folds Ready’s <strong><code>entries</code></strong> (the unstable snapshot) and optional HardState into a write task; the async write worker appends to the shared <strong>raft</strong> engine:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// PeerStorage::handle_raft_ready
+</span></span></code></pre></div><h4 id=324-persist-unstable-entries-and-hardstate--raftdb>3.2.4 Persist: unstable entries and HardState → raftdb</h4><p><code>PeerStorage</code> folds Ready’s <strong><code>entries</code></strong> (the unstable snapshot) and optional HardState into a write task; the async write worker appends to the shared <strong>raft</strong> engine:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// PeerStorage::handle_raft_ready
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> <span style=color:#f92672>!</span>ready.entries().is_empty() {
 </span></span><span style=display:flex><span>    self.append(ready.take_entries(), <span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> write_task);  <span style=color:#75715e>// EntryStorage cache + task
 </span></span></span><span style=display:flex><span>}
@@ -595,63 +694,84 @@ end note
 </span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> prev_raft_state <span style=color:#f92672>!=</span> <span style=color:#f92672>*</span>self.raft_state() <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>ready.snapshot().is_empty() {
 </span></span><span style=display:flex><span>    write_task.raft_state <span style=color:#f92672>=</span> Some(self.raft_state().clone());
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>After the write succeeds, TiKV notifies raft-rs (<code>on_persist_entries</code> / <code>advance</code>) so <strong><code>unstable</code> can drop the persisted prefix</strong> and <code>persisted</code> / match indexes advance. Until that persist (and follower majority acks) completes, the entry is not <strong>committed</strong>. User <strong>kvdb</strong> is still unchanged.</p><h4 id=replicate-then-commit>Replicate then commit</h4><p>Ready <strong><code>messages</code></strong> are the network side of the same propose: typically <strong><code>MsgAppend</code></strong> carrying the new entries (plus heartbeats / votes from other paths). Followers <code>step</code> those messages, append into <em>their</em> unstable, run the same Ready persist path on their raftdb, and respond. When a majority has the entry durable, <code>RaftLog.committed</code> advances; a later Ready exposes it in <code>committed_entries</code>.</p><h4 id=apply-committed-entrydata--kvdb>Apply: committed <code>Entry.data</code> → kvdb</h4><p>The Peer schedules an apply task on the same <code>region_id</code>. <strong>ApplyDelegate</strong> parses bytes as <code>RaftCmdRequest</code> and writes the KV engine batch:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer — notify ApplyFsm
-</span></span></span><span style=display:flex><span>ctx.apply_router.schedule_task(
-</span></span><span style=display:flex><span>    self.region_id,
-</span></span><span style=display:flex><span>    ApplyTask::apply(Apply::new(<span style=color:#75715e>/* … committed_entries … */</span>)),
-</span></span><span style=display:flex><span>);
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// ApplyDelegate — per committed Entry
-</span></span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> data <span style=color:#f92672>=</span> entry.get_data();
-</span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> cmd <span style=color:#f92672>=</span> util::parse_raft_cmd_request(data, index, term, <span style=color:#f92672>&amp;</span>self.tag);
-</span></span><span style=display:flex><span><span style=color:#75715e>// …
-</span></span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> req <span style=color:#66d9ef>in</span> requests {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> req.get_cmd_type() {
-</span></span><span style=display:flex><span>        CmdType::Put <span style=color:#f92672>=&gt;</span> self.handle_put(ctx, req),      <span style=color:#75715e>// kv_wb.put_cf(…)
-</span></span></span><span style=display:flex><span>        CmdType::Delete <span style=color:#f92672>=&gt;</span> self.handle_delete(ctx, req),
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// …
-</span></span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span><span style=color:#75715e>// ApplyContext::commit → kv_wb.write → Engines.kv
-</span></span></span></code></pre></div><p><code>handle_put</code> checks the key is in the Region, prefixes the data key, and puts into the requested CF (<code>lock</code> / <code>write</code> / <code>default</code>). Flushing the write batch is when <strong>user</strong> state becomes durable on this store. The leader’s client RPC completes only after this apply path (proposal callback), not after propose alone.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>propose / step
-</span></span><span style=display:flex><span>  → Raft updates role, RaftLog, msgs
-</span></span><span style=display:flex><span>  → Ready
-</span></span><span style=display:flex><span>       ├─ entries + HardState → PeerStorage → raftdb
-</span></span><span style=display:flex><span>       ├─ messages → other peers (followers: step → their raftdb)
-</span></span><span style=display:flex><span>       └─ committed_entries → ApplyFsm
-</span></span><span style=display:flex><span>            → parse RaftCmdRequest
-</span></span><span style=display:flex><span>            → Put/Delete on kvdb CFs
-</span></span><span style=display:flex><span>  → (leader) RPC callback
-</span></span></code></pre></div><p><strong>Where bytes land.</strong></p><table><thead><tr><th>Bytes</th><th>Engine / path</th></tr></thead><tbody><tr><td>HardState + log <code>Entry</code></td><td><strong>raftdb</strong> (<code>Engines.raft</code>)</td></tr><tr><td>Outbound <code>Message</code></td><td>Network only</td></tr><tr><td>Applied <code>Put</code> / <code>Delete</code></td><td><strong>kvdb</strong> (<code>Engines.kv</code>, MVCC CFs)</td></tr></tbody></table><p>Followers never accept the client write (<code>NotLeader</code>); they still apply the same committed entries so their kvdb matches the leader’s applied log.</p><h3 id=22-message-structure-and-term>2.2 Message structure (and <code>term</code>)</h3><p>Peer-to-peer Raft RPCs and many local events are one protobuf <strong><code>Message</code></strong>. Ready’s outbound <code>messages</code> and <code>Peer::step</code> inputs are this type. Log <strong><code>Entry</code></strong> bodies that ride inside <code>Message.entries</code> (or sit in <code>RaftLog</code>) are §2.3.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-protobuf data-lang=protobuf><span style=display:flex><span><span style=color:#66d9ef>message</span> <span style=color:#a6e22e>Message</span> {
-</span></span><span style=display:flex><span>  MessageType msg_type <span style=color:#f92672>=</span> <span style=color:#ae81ff>1</span>;
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> <span style=color:#66d9ef>to</span> <span style=color:#f92672>=</span> <span style=color:#ae81ff>2</span>;
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> from <span style=color:#f92672>=</span> <span style=color:#ae81ff>3</span>;
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> term <span style=color:#f92672>=</span> <span style=color:#ae81ff>4</span>;       <span style=color:#75715e>// sender&#39;s current Raft term (see below)
-</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> log_term <span style=color:#f92672>=</span> <span style=color:#ae81ff>5</span>;   <span style=color:#75715e>// term of the log entry at `index` (matching)
-</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> index <span style=color:#f92672>=</span> <span style=color:#ae81ff>6</span>;      <span style=color:#75715e>// log index this message refers to
-</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>repeated</span> Entry entries <span style=color:#f92672>=</span> <span style=color:#ae81ff>7</span>;
-</span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64</span> commit <span style=color:#f92672>=</span> <span style=color:#ae81ff>8</span>;     <span style=color:#75715e>// leader&#39;s committed index (Append / Heartbeat)
-</span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> reject <span style=color:#f92672>=</span> <span style=color:#ae81ff>10</span>;
-</span></span><span style=display:flex><span>  <span style=color:#75715e>// … snapshot, reject_hint, context, priority, …
-</span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><table><thead><tr><th>Field</th><th>Role</th></tr></thead><tbody><tr><td><code>msg_type</code></td><td>What kind of RPC / local event (<code>MsgAppend</code>, <code>MsgRequestVote</code>, <code>MsgHeartbeat</code>, …)</td></tr><tr><td><code>from</code> / <code>to</code></td><td>Peer ids in the Region’s Raft group</td></tr><tr><td><strong><code>term</code></strong></td><td><strong>The sender’s current election term</strong> when the message is sent (or <code>0</code> for some local messages)</td></tr><tr><td><code>log_term</code> + <code>index</code></td><td>Log matching: “the entry at <code>index</code> has term <code>log_term</code>” (Append / vote / reject hint)</td></tr><tr><td><code>entries</code></td><td>New log entries (Append / Propose)</td></tr><tr><td><code>commit</code></td><td>Leader’s commit index so followers can advance</td></tr></tbody></table><p><strong><code>Message.term</code> vs other “term” fields.</strong> Raft’s logical clock is a monotonically increasing <strong>term</strong> stored in HardState and in <code>Raft.term</code>. Do not confuse:</p><table><thead><tr><th>Name</th><th>Meaning</th></tr></thead><tbody><tr><td><strong><code>Message.term</code></strong></td><td>Current term of the <strong>sender’s Raft instance</strong> (who claims leadership / candidacy now)</td></tr><tr><td><strong><code>Entry.term</code></strong></td><td>Term in which <strong>that log entry</strong> was proposed (fixed once appended) — §2.3</td></tr><tr><td><strong><code>Message.log_term</code></strong></td><td>Term of the log entry at <strong><code>Message.index</code></strong> (prev-log matching on Append; last-log info on Vote)</td></tr><tr><td><strong><code>HardState.term</code></strong></td><td>This peer’s persisted current term</td></tr></tbody></table><p>When raft-rs <strong>sends</strong> a network message, it normally stamps <code>m.term = self.term</code> (except <code>MsgPropose</code> / <code>MsgReadIndex</code>, which stay local-style with term <code>0</code> until forwarded). Receivers use <strong><code>Message.term</code> first</strong> in <code>Raft::step</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Raft::step — term gate before role-specific handling
-</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> m.term <span style=color:#f92672>&gt;</span> self.term {
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// higher term wins: step down (become_follower), then process
-</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> m.get_msg_type() <span style=color:#f92672>==</span> MsgAppend <span style=color:#f92672>||</span> MsgHeartbeat <span style=color:#f92672>||</span> MsgSnapshot {
-</span></span><span style=display:flex><span>        self.become_follower(m.term, m.from);  <span style=color:#75715e>// recognize sender as leader
-</span></span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
-</span></span><span style=display:flex><span>        self.become_follower(m.term, <span style=color:#66d9ef>INVALID_ID</span>);
+</span></span></code></pre></div><p>After the write succeeds, TiKV notifies raft-rs (<code>on_persist_entries</code> / <code>advance</code>) so <strong><code>unstable</code> can drop the persisted prefix</strong> and <code>persisted</code> / match indexes advance. Until that persist (and follower majority acks) completes, the entry is not <strong>committed</strong>. User <strong>kvdb</strong> is still unchanged.</p><h4 id=325-replicate-then-commit>3.2.5 Replicate then commit</h4><p>Ready <strong><code>messages</code></strong> are the network side of the cycle: typically <strong><code>MsgAppend</code></strong> carrying new entries (from propose or follower catch-up), plus heartbeats / votes from other paths. Followers <code>step</code> those messages, append into <em>their</em> unstable, run the same Ready persist path on their raftdb, and respond. When a majority has the entry durable, <code>RaftLog.committed</code> advances; a later Ready exposes it in <code>committed_entries</code> for apply (§4.1.6).</p><h4 id=326-role-transfer-state-machine>3.2.6 Role transfer (state machine)</h4><p>SoftState <strong><code>StateRole</code></strong> (Follower / PreCandidate / Candidate / Leader) is the peer’s leadership state machine. <strong>Role transfer</strong> is moving along that machine when a cycle calls <code>become_*</code> / <code>hup</code> / <code>poll</code>. After an input, SoftState / HardState / log / <code>msgs</code> deltas still surface as <strong>Ready</strong> on the same drain path. Appending client entries (<code>propose</code>) does not transfer role (§4).</p><p><strong>Transitions</strong> (<code>Raft.state</code> / SoftState <code>raft_state</code>):</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+hide empty description
+skinparam state {
+  BackgroundColor&lt;&lt;leader&gt;&gt; #E8F5E9
+  BackgroundColor&lt;&lt;cand&gt;&gt; #FFF8E1
+  BackgroundColor&lt;&lt;fol&gt;&gt; #E3F2FD
+}
+
+state &#34;Follower&#34; as F &lt;&lt;fol&gt;&gt;
+state &#34;PreCandidate\n(pre-vote on)&#34; as P &lt;&lt;cand&gt;&gt;
+state &#34;Candidate&#34; as C &lt;&lt;cand&gt;&gt;
+state &#34;Leader&#34; as L &lt;&lt;leader&gt;&gt;
+
+[*] --&gt; F : bootstrap / restart\n(load HardState)
+
+F --&gt; P : tick election timeout\n(pre_vote) / MsgHup dry-run
+F --&gt; C : tick election timeout\n(no pre_vote) / MsgHup\n(term++)
+P --&gt; C : pre-vote majority\nthen real campaign (term++)
+P --&gt; F : pre-vote rejected /\nhear valid leader (higher or current term)
+
+C --&gt; L : majority MsgRequestVoteResponse\n(granted) → become_leader
+C --&gt; C : election timeout again\n(term++; new MsgRequestVote)
+C --&gt; F : step: higher Message.term /\nAppend or Heartbeat from leader /\nlose vote
+
+L --&gt; F : step: Message.term &gt; currentTerm\n(become_follower) /\ntick: MsgCheckQuorum fails
+
+F --&gt; F : step MsgAppend / MsgHeartbeat\n(same or lower ok path;\nreset election_elapsed)
+L --&gt; L : tick MsgBeat (heartbeat) /\nstep MsgAppendResponse\n(role unchanged; propose in §4)
+
+@enduml
+</code></pre><p>Those transitions are the <code>become_*</code> / <code>hup</code> / <code>poll</code> / <code>step_*</code> paths under <strong><code>step</code></strong>; the diagram is the SoftState view of the same calls.</p><h3 id=33-example-follower--leader-steps-ready-raft-log>3.3 Example: Follower → Leader (steps, Ready, Raft log)</h3><p>Three peers (<strong>1</strong>, <strong>2</strong>, <strong>3</strong>; majority = 2). Track <strong>peer 1</strong>. PreVote off. Peer Raft only (empty leader noops). Figures split <strong>store / raftdb</strong> (<code>RaftLocalState</code> + <code>Entry[]</code>) vs <strong>in memory</strong> (SoftState, HardState, <code>unstable</code>, <code>msgs</code>).</p><p><strong>Initial</strong> — peer 1 Follower, peer 2 Leader.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-0-initial.svg alt=Initial></p><p><strong>Step 1 — <code>tick</code> election timeout</strong> → Candidate; votes queued in <code>msgs</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-1-tick-candidate.svg alt="Step 1"></p><p><strong>Step 2 — Ready</strong> — persist HardState; send <code>MsgRequestVote</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-2-ready-votes.svg alt="Step 2"></p><p><strong>Step 3 — <code>step</code> vote grants</strong> → Leader; noop in <code>unstable</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-3-votes-leader.svg alt="Step 3"></p><p><strong>Step 4 — Ready</strong> — persist Entry 4; send <code>MsgAppend</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-4-ready-append.svg alt="Step 4"></p><p><strong>Step 5 — followers <code>step</code> Append</strong> — persist; <code>MsgAppendResponse</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-5-follower-append.svg alt="Step 5"></p><p><strong>Step 6 — <code>step</code> AppendResponse</strong> — peer 1 <code>hard_state.commit</code> = 4 (followers still 3).</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-6-commit-apply.svg alt="Step 6"></p><p><strong>Step 7 — Heartbeat</strong> — peer 1 sends <code>MsgHeartbeat</code> with <code>commit=4</code>; peers 2 / 3 <code>commit_to(4)</code> and persist <code>hard_state.commit</code>.</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-election-ex-7-heartbeat-commit.svg alt="Step 7"></p><h2 id=4-client-writes-raft-path>4. Client writes (Raft path)</h2><p>A client write first <strong>changes the Raft log</strong> on the Region leader (<code>propose</code> → <code>Entry</code> in <code>unstable</code>). Ready (§3) persists and replicates that log to <strong>raftdb</strong>; <strong>apply</strong> (§4.1.6) turns committed <code>Entry.data</code> into <strong>kvdb</strong>. Applied bytes are MVCC CF mutations; multi-key transactions use Percolator 2PC over that path.</p><h3 id=41-client-write--raft-log--raftdb--kvdb>4.1 Client write → Raft log → raftdb / kvdb</h3><p>A client write on the Region <strong>leader</strong> becomes opaque bytes in a Raft <strong><code>Entry</code></strong>, then—via the Ready cycle in §3—lands in <strong>raftdb</strong> (log + HardState) and finally <strong>kvdb</strong> (MVCC Puts/Deletes). Followers never accept the client RPC (<code>NotLeader</code>); they still append and apply the same log.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>gRPC (Prewrite / Commit / Rollback / …)
+</span></span><span style=display:flex><span>  → Storage + TxnScheduler   (latches; conflict / lock checks; build Modify batch)
+</span></span><span style=display:flex><span>  → RaftKv → RaftRouter → Peer
+</span></span><span style=display:flex><span>  → propose → RaftLog.unstable (+ MsgAppend in msgs)
+</span></span><span style=display:flex><span>  → Ready (§3.2.3): persist Entry → raftdb
+</span></span><span style=display:flex><span>  → replicate / majority → committed
+</span></span><span style=display:flex><span>  → ApplyFsm (§4.1.6): Entry.data → kvdb
+</span></span><span style=display:flex><span>  → RPC callback
+</span></span></code></pre></div><table><thead><tr><th>Layer</th><th>Role on the write path</th></tr></thead><tbody><tr><td><strong>TxnScheduler</strong></td><td>Per-key latches; run Prewrite/Commit/…; produce <code>Modify</code>s</td></tr><tr><td><strong>RaftKv</strong> / <strong>Peer</strong></td><td>Serialize <code>RaftCmdRequest</code>, <code>propose</code> into the Raft log</td></tr><tr><td><strong>Ready / PeerStorage</strong></td><td>Persist <code>Entry</code> + HardState to <strong>raftdb</strong> (§3.2.3–§3.2.4)</td></tr><tr><td><strong>ApplyDelegate</strong></td><td>Decode committed <code>Entry.data</code> into CF mutations on <strong>kvdb</strong> (§4.1.6)</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Modify::Put → one RaftCmdRequest Request (CF + key + value)
+</span></span></span><span style=display:flex><span>Modify::Put(cf, k, v) <span style=color:#f92672>=&gt;</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> put <span style=color:#f92672>=</span> PutRequest::default();
+</span></span><span style=display:flex><span>    put.set_key(k.into_encoded());
+</span></span><span style=display:flex><span>    put.set_value(v);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> cf <span style=color:#f92672>!=</span> <span style=color:#66d9ef>CF_DEFAULT</span> {
+</span></span><span style=display:flex><span>        put.set_cf(cf.to_string());
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> m.term <span style=color:#f92672>&lt;</span> self.term {
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// stale leader / candidate: ignore or reply with newer term
-</span></span></span><span style=display:flex><span>    <span style=color:#75715e>// (e.g. reject Append/Heartbeat so they learn the higher term)
+</span></span><span style=display:flex><span>    req.set_cmd_type(CmdType::Put);
+</span></span><span style=display:flex><span>    req.set_put(put);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>let</span> reqs: Vec<span style=color:#f92672>&lt;</span>Request<span style=color:#f92672>&gt;</span> <span style=color:#f92672>=</span> batch.modifies.into_iter().map(Into::into).collect();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> cmd <span style=color:#f92672>=</span> RaftCmdRequest::default();
+</span></span><span style=display:flex><span>cmd.set_header(header);       <span style=color:#75715e>// region_id, epoch, peer, …
+</span></span></span><span style=display:flex><span>cmd.set_requests(reqs.into());
+</span></span><span style=display:flex><span><span style=color:#75715e>// → peer.propose(cmd.write_to_bytes())
+</span></span></span></code></pre></div><h4 id=411-propose--append-into-the-raft-log>4.1.1 <code>propose</code> — append into the Raft log</h4><p><code>propose</code> is how a <strong>Leader</strong> turns a client write into a Raft log entry. TiKV passes opaque bytes—typically a serialized <code>RaftCmdRequest</code>—plus an optional context; <code>RawNode::propose</code> wraps them as a local <code>MsgPropose</code> and <code>Raft::step</code>s that message. On the leader, <code>step_leader</code> assigns <code>term</code>/<code>index</code>, appends to <code>RaftLog</code>, and queues <code>MsgAppend</code> for followers. On a non-leader, the same <code>MsgPropose</code> is forwarded or dropped (<code>NotLeader</code> / <code>ProposalDropped</code>); followers never treat propose as authority to grow the log themselves. Propose does not change <code>StateRole</code>: it only extends the log when the peer already is Leader, then relies on the Ready drain (§3.2.3–§3.2.5) for raftdb persistence and replication, then apply (§4.1.6).</p><p><strong>Implementation.</strong> <code>RawNode::propose</code> builds a local <code>MsgPropose</code> and steps it; there is no separate propose engine:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer::propose_normal — after req.write_to_bytes()
+</span></span></span><span style=display:flex><span>self.raft_group.propose(ctx.to_vec(), data)<span style=color:#f92672>?</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// RawNode::propose
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>propose</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, context: <span style=color:#a6e22e>impl</span> Into<span style=color:#f92672>&lt;</span>Bytes<span style=color:#f92672>&gt;</span>, data: <span style=color:#a6e22e>impl</span> Into<span style=color:#f92672>&lt;</span>Bytes<span style=color:#f92672>&gt;</span>) -&gt; Result<span style=color:#f92672>&lt;</span>()<span style=color:#f92672>&gt;</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> m <span style=color:#f92672>=</span> Message::default();
+</span></span><span style=display:flex><span>    m.set_msg_type(MessageType::MsgPropose);
+</span></span><span style=display:flex><span>    m.from <span style=color:#f92672>=</span> self.raft.id;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> e <span style=color:#f92672>=</span> Entry::default();
+</span></span><span style=display:flex><span>    e.data <span style=color:#f92672>=</span> data.into();       <span style=color:#75715e>// RaftCmdRequest bytes
+</span></span></span><span style=display:flex><span>    e.context <span style=color:#f92672>=</span> context.into();
+</span></span><span style=display:flex><span>    m.set_entries(<span style=color:#a6e22e>vec!</span>[e].into());
+</span></span><span style=display:flex><span>    self.raft.step(m)           <span style=color:#75715e>// → step_leader MsgPropose
 </span></span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span><span style=color:#75715e>// then step_leader / step_candidate / step_follower(m)
-</span></span></span></code></pre></div><p>So <strong><code>Message.term</code> enforces a single timeline</strong>: a leader from an old term cannot overwrite a peer that has already moved on; a candidate with a higher term forces everyone else to follow. <strong><code>Entry.term</code> / <code>log_term</code></strong> enforce <strong>log consistency</strong> (same index must carry the same entry term), which is separate from “who is the current leader.”</p><h3 id=23-raft-log-raftlog-unstable-entry>2.3 Raft log (<code>RaftLog</code>, <code>Unstable</code>, <code>Entry</code>)</h3><p>The replicated log is <strong><code>Raft.raft_log: RaftLog</code></strong>. It is an ordered sequence of <strong><code>Entry</code></strong> values. Commit advances a contiguous prefix (<code>committed</code>); apply consumes that prefix into the state machine (<code>applied</code>).</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-log.svg alt="Raft log: commitIndex and apply"></p><table><thead><tr><th>Piece</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>store</code></strong> (<code>PeerStorage</code>)</td><td>Entries (and HardState) already written to <strong>raftdb</strong></td></tr><tr><td><strong><code>unstable</code></strong></td><td>Entries (and optional snapshot) not yet persisted; filled by <code>append_entry</code> / follower append</td></tr><tr><td><strong><code>committed</code></strong></td><td>Highest index known majority-replicated (<code>commitIndex</code>)</td></tr><tr><td><strong><code>applied</code></strong></td><td>Highest index handed to ApplyFsm (<code>lastApplied</code> ≤ <code>committed</code>)</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>index:  1        2        3        4
+</span></span></code></pre></div><p>On the leader, <code>step_leader</code> accepts <code>MsgPropose</code>, then <strong><code>append_entry</code> → <code>bcast_append</code></strong> (snippets under <strong><code>step</code></strong> above). Persistence to <strong>raftdb</strong> is not inside <code>step</code>: Ready (§3.2.3) later exposes <code>RaftLog.unstable</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MsgPropose { entries: [Entry { data, context, term:0, index:0 }] }
+</span></span><span style=display:flex><span>  → append_entry: set term/index → RaftLog.unstable
+</span></span><span style=display:flex><span>  → bcast_append: msgs += MsgAppend(…)
+</span></span><span style=display:flex><span>  → Ready (§3.2.3): entries → raftdb; messages → followers; committed_entries → apply (§4.1.6)
+</span></span></code></pre></div><p><code>Entry.data</code> stays opaque inside raft-rs: no CF names, no MVCC decode.</p><h4 id=412-raft-log-shape-raftlog-unstable-entry>4.1.2 Raft log shape (<code>RaftLog</code>, <code>Unstable</code>, <code>Entry</code>)</h4><p>On the write path, every durable mutation is one <strong><code>Entry</code></strong> in <strong><code>Raft.raft_log: RaftLog</code></strong>. Commit advances a contiguous prefix (<code>committed</code>); apply consumes that prefix into the state machine (<code>applied</code>).</p><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/raft-log.svg alt="Raft log: commitIndex and apply"></p><table><thead><tr><th>Piece</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>store</code></strong> (<code>PeerStorage</code>)</td><td>Entries (and HardState) already written to <strong>raftdb</strong></td></tr><tr><td><strong><code>unstable</code></strong></td><td>Entries (and optional snapshot) not yet persisted; filled by <code>append_entry</code> / follower append</td></tr><tr><td><strong><code>committed</code></strong></td><td>Highest index known majority-replicated (<code>commitIndex</code>)</td></tr><tr><td><strong><code>applied</code></strong></td><td>Highest index handed to ApplyFsm (<code>lastApplied</code> ≤ <code>committed</code>)</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>index:  1        2        3        4
 </span></span><span style=display:flex><span>term:   1        1        2        2
 </span></span><span style=display:flex><span>        [==== committed ====]
 </span></span><span style=display:flex><span>                 ^
 </span></span><span style=display:flex><span>            applied may lag committed until ApplyFsm catches up
-</span></span></code></pre></div><h4 id=entry-fields>Entry fields</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-protobuf data-lang=protobuf><span style=display:flex><span><span style=color:#66d9ef>enum</span> EntryType {
+</span></span></code></pre></div><h4 id=413-entry-fields>4.1.3 Entry fields</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-protobuf data-lang=protobuf><span style=display:flex><span><span style=color:#66d9ef>enum</span> EntryType {
 </span></span><span style=display:flex><span>  EntryNormal <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
 </span></span><span style=display:flex><span>  EntryConfChange <span style=color:#f92672>=</span> <span style=color:#ae81ff>1</span>;
 </span></span><span style=display:flex><span>  EntryConfChangeV2 <span style=color:#f92672>=</span> <span style=color:#ae81ff>2</span>;
@@ -664,7 +784,7 @@ end note
 </span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>bytes</span> data <span style=color:#f92672>=</span> <span style=color:#ae81ff>4</span>;            <span style=color:#75715e>// type-dependent payload
 </span></span></span><span style=display:flex><span>  <span style=color:#66d9ef>bytes</span> context <span style=color:#f92672>=</span> <span style=color:#ae81ff>6</span>;         <span style=color:#75715e>// optional proposal context
 </span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><table><thead><tr><th>Field</th><th>Function</th></tr></thead><tbody><tr><td><strong><code>index</code></strong></td><td>Contiguous position; leaders assign <code>last_index + 1</code> on propose</td></tr><tr><td><strong><code>term</code></strong></td><td>Election term that created this slot; fixed for that entry</td></tr><tr><td><strong><code>data</code></strong></td><td>Payload interpreted by <strong><code>entry_type</code></strong> (below)</td></tr><tr><td><strong><code>entry_type</code></strong></td><td>Which of the three log kinds this slot is</td></tr><tr><td><strong><code>context</code></strong></td><td>Opaque side channel (TiKV proposal callback id, etc.)</td></tr></tbody></table><h4 id=entry-types-all-kinds-with-examples>Entry types (all kinds, with examples)</h4><p>raft-rs defines exactly three <code>EntryType</code> values. TiKV uses all of them.</p><p><strong>1. <code>EntryNormal</code> — user / admin Raft commands (or empty noop).</strong><br><code>data</code> is usually a serialized <strong><code>RaftCmdRequest</code></strong>. Apply decodes Puts/Deletes onto MVCC CFs (§3). An <strong>empty</strong> <code>EntryNormal</code> (no <code>data</code>) is the leader’s first noop after <code>become_leader</code>, used to commit prior-term entries.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span># Prewrite lock (typical TiKV write)
+</span></span></code></pre></div><table><thead><tr><th>Field</th><th>Function</th></tr></thead><tbody><tr><td><strong><code>index</code></strong></td><td>Contiguous position; leaders assign <code>last_index + 1</code> on propose</td></tr><tr><td><strong><code>term</code></strong></td><td>Election term that created this slot; fixed for that entry</td></tr><tr><td><strong><code>data</code></strong></td><td>Payload interpreted by <strong><code>entry_type</code></strong> (below)</td></tr><tr><td><strong><code>entry_type</code></strong></td><td>Which of the three log kinds this slot is</td></tr><tr><td><strong><code>context</code></strong></td><td>Opaque side channel (TiKV proposal callback id, etc.)</td></tr></tbody></table><h4 id=414-entry-types-all-kinds-with-examples>4.1.4 Entry types (all kinds, with examples)</h4><p>raft-rs defines exactly three <code>EntryType</code> values. TiKV uses all of them.</p><p><strong>1. <code>EntryNormal</code> — user / admin Raft commands (or empty noop).</strong><br><code>data</code> is usually a serialized <strong><code>RaftCmdRequest</code></strong>. Apply decodes Puts/Deletes onto MVCC CFs (§4.2). An <strong>empty</strong> <code>EntryNormal</code> (no <code>data</code>) is the leader’s first noop after <code>become_leader</code>, used to commit prior-term entries.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span># Prewrite lock (typical TiKV write)
 </span></span><span style=display:flex><span>Entry {
 </span></span><span style=display:flex><span>  entry_type: EntryNormal,
 </span></span><span style=display:flex><span>  term:  3,
@@ -730,7 +850,7 @@ end note
 </span></span><span style=display:flex><span>  index: 61,
 </span></span><span style=display:flex><span>  data:  &lt;empty ConfChangeV2&gt;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><table><thead><tr><th><code>EntryType</code></th><th><code>data</code> payload</th><th>Typical TiKV use</th></tr></thead><tbody><tr><td><strong><code>EntryNormal</code></strong></td><td><code>RaftCmdRequest</code> or empty</td><td>Prewrite / Commit / admin cmds; leader noop</td></tr><tr><td><strong><code>EntryConfChange</code></strong></td><td><code>ConfChange</code></td><td>Legacy single add/remove peer</td></tr><tr><td><strong><code>EntryConfChangeV2</code></strong></td><td><code>ConfChangeV2</code> (maybe empty)</td><td>Region conf change / leave joint</td></tr></tbody></table><p>Apply dispatches on type: <code>EntryNormal</code> → CF mutations; conf-change types → update Region membership, then <code>RawNode::apply_conf_change</code>.</p><h4 id=unstable-and-append><code>Unstable</code> and append</h4><p>After <code>MsgPropose</code>, <code>append_entry</code> only mutates memory:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Raft::append_entry — leader only
+</span></span></code></pre></div><table><thead><tr><th><code>EntryType</code></th><th><code>data</code> payload</th><th>Typical TiKV use</th></tr></thead><tbody><tr><td><strong><code>EntryNormal</code></strong></td><td><code>RaftCmdRequest</code> or empty</td><td>Prewrite / Commit / admin cmds; leader noop</td></tr><tr><td><strong><code>EntryConfChange</code></strong></td><td><code>ConfChange</code></td><td>Legacy single add/remove peer</td></tr><tr><td><strong><code>EntryConfChangeV2</code></strong></td><td><code>ConfChangeV2</code> (maybe empty)</td><td>Region conf change / leave joint</td></tr></tbody></table><p>Apply dispatches on type: <code>EntryNormal</code> → CF mutations; conf-change types → update Region membership, then <code>RawNode::apply_conf_change</code>.</p><h4 id=415-unstable-and-append>4.1.5 <code>Unstable</code> and append</h4><p>After <code>MsgPropose</code>, <code>append_entry</code> only mutates memory:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Raft::append_entry — leader only
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>pub</span> <span style=color:#66d9ef>fn</span> <span style=color:#a6e22e>append_entry</span>(<span style=color:#f92672>&amp;</span><span style=color:#66d9ef>mut</span> self, es: <span style=color:#66d9ef>&amp;</span><span style=color:#a6e22e>mut</span> [Entry]) -&gt; <span style=color:#66d9ef>bool</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> li <span style=color:#f92672>=</span> self.raft_log.last_index();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (i, e) <span style=color:#66d9ef>in</span> es.iter_mut().enumerate() {
@@ -746,40 +866,38 @@ end note
 </span></span><span style=display:flex><span>    self.unstable.truncate_and_append(ents);
 </span></span><span style=display:flex><span>    self.last_index()
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>Unstable.offset</code> is the Raft index of <code>entries[0]</code>; <code>entries[i]</code> has index <code>offset + i</code>. Ready copies <code>unstable_entries()</code> into <code>Ready.entries</code> for the Peer to flush to raftdb (§2.1); after persist / <code>advance</code>, that unstable prefix is dropped so the next propose appends into a fresh buffer.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MsgPropose
+</span></span></code></pre></div><p><code>Unstable.offset</code> is the Raft index of <code>entries[0]</code>; <code>entries[i]</code> has index <code>offset + i</code>. Ready copies <code>unstable_entries()</code> into <code>Ready.entries</code> for the Peer to flush to raftdb (§3.2.3); after persist / <code>advance</code>, that unstable prefix is dropped so the next propose appends into a fresh buffer.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MsgPropose
 </span></span><span style=display:flex><span>  → append_entry → RaftLog.unstable   (memory)
 </span></span><span style=display:flex><span>  → bcast_append → Raft.msgs          (memory)
 </span></span><span style=display:flex><span>  → Ready.entries / messages
 </span></span><span style=display:flex><span>  → raftdb persist + network MsgAppend
 </span></span><span style=display:flex><span>  → majority → committed ↑ → ApplyFsm
-</span></span></code></pre></div><p>Propose wiring (<code>RawNode::propose</code> → <code>step_leader</code>) remains in §2.1; this section is the log’s shape, entry kinds, and where bytes sit before Ready.</p><hr><h2 id=3-writes-mvcc-and-2pc>3. Writes: MVCC and 2PC</h2><p>§2 makes an opaque <code>Entry.data</code> durable and applied. This section is what those bytes <strong>mean</strong> on TiKV’s write path: how a client mutation is prepared, how <strong>MVCC</strong> is laid out in kvdb, and how <strong>Percolator 2PC</strong> (Prewrite / Commit) uses that layout. The coordinator is the client (TiDB / client-go); each TiKV Region leader only runs local latch + propose + apply.</p><h3 id=31-write-path-implementation>3.1 Write path implementation</h3><p>A durable user write always ends as one or more CF Puts/Deletes applied through Raft on the Region <strong>leader</strong>. Layers above the peer:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>gRPC (Prewrite / Commit / Rollback / …)
-</span></span><span style=display:flex><span>  → Storage + TxnScheduler   (latches; conflict / lock checks; build Modify batch)
-</span></span><span style=display:flex><span>  → RaftKv                   (engine facade)
-</span></span><span style=display:flex><span>  → RaftRouter → Peer        (serialize RaftCmdRequest → propose)   [§2.1]
-</span></span><span style=display:flex><span>  → Ready → raftdb + replicate → commit
-</span></span><span style=display:flex><span>  → ApplyFsm                 (decode Entry.data → kv_wb Put/Delete)
-</span></span><span style=display:flex><span>  → Engines.kv (MVCC CFs)
-</span></span><span style=display:flex><span>  → RPC callback
-</span></span></code></pre></div><table><thead><tr><th>Layer</th><th>Role on the write path</th></tr></thead><tbody><tr><td><strong>TxnScheduler</strong></td><td>Per-key latches; run the command (Prewrite/Commit/…) against a snapshot; produce <code>Modify</code>s</td></tr><tr><td><strong>RaftKv</strong></td><td>Turn the batch into a proposal on the right <code>region_id</code>, or serve local reads</td></tr><tr><td><strong>Peer / RawNode</strong></td><td>Consensus durability for the serialized <code>RaftCmdRequest</code> (§2.1)</td></tr><tr><td><strong>ApplyDelegate</strong></td><td>Decode applied entries into CF mutations on <strong>kvdb</strong></td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Modify::Put → one RaftCmdRequest Request (CF + key + value)
-</span></span></span><span style=display:flex><span>Modify::Put(cf, k, v) <span style=color:#f92672>=&gt;</span> {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> put <span style=color:#f92672>=</span> PutRequest::default();
-</span></span><span style=display:flex><span>    put.set_key(k.into_encoded());
-</span></span><span style=display:flex><span>    put.set_value(v);
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> cf <span style=color:#f92672>!=</span> <span style=color:#66d9ef>CF_DEFAULT</span> {
-</span></span><span style=display:flex><span>        put.set_cf(cf.to_string());
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    req.set_cmd_type(CmdType::Put);
-</span></span><span style=display:flex><span>    req.set_put(put);
+</span></span></code></pre></div><p>Propose wiring is §4.1.1; Ready persist/replicate is §3.2.3–§3.2.5; apply is §4.1.6.</p><hr><h4 id=416-apply-committed-entrydata--kvdb>4.1.6 Apply: committed <code>Entry.data</code> → kvdb</h4><p>The Peer schedules an apply task on the same <code>region_id</code>. <strong>ApplyDelegate</strong> parses bytes as <code>RaftCmdRequest</code> and writes the KV engine batch:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// Peer — notify ApplyFsm
+</span></span></span><span style=display:flex><span>ctx.apply_router.schedule_task(
+</span></span><span style=display:flex><span>    self.region_id,
+</span></span><span style=display:flex><span>    ApplyTask::apply(Apply::new(<span style=color:#75715e>/* … committed_entries … */</span>)),
+</span></span><span style=display:flex><span>);
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#75715e>// ApplyDelegate — per committed Entry
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> data <span style=color:#f92672>=</span> entry.get_data();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> cmd <span style=color:#f92672>=</span> util::parse_raft_cmd_request(data, index, term, <span style=color:#f92672>&amp;</span>self.tag);
+</span></span><span style=display:flex><span><span style=color:#75715e>// …
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> req <span style=color:#66d9ef>in</span> requests {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>match</span> req.get_cmd_type() {
+</span></span><span style=display:flex><span>        CmdType::Put <span style=color:#f92672>=&gt;</span> self.handle_put(ctx, req),      <span style=color:#75715e>// kv_wb.put_cf(…)
+</span></span></span><span style=display:flex><span>        CmdType::Delete <span style=color:#f92672>=&gt;</span> self.handle_delete(ctx, req),
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// …
+</span></span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>let</span> reqs: Vec<span style=color:#f92672>&lt;</span>Request<span style=color:#f92672>&gt;</span> <span style=color:#f92672>=</span> batch.modifies.into_iter().map(Into::into).collect();
-</span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> cmd <span style=color:#f92672>=</span> RaftCmdRequest::default();
-</span></span><span style=display:flex><span>cmd.set_header(header);       <span style=color:#75715e>// region_id, epoch, peer, …
-</span></span></span><span style=display:flex><span>cmd.set_requests(reqs.into());
-</span></span><span style=display:flex><span><span style=color:#75715e>// → peer.propose(cmd.write_to_bytes())
-</span></span></span></code></pre></div><p>After majority commit, apply is ordinary CF I/O—not a second transaction protocol inside raftstore:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-rust data-lang=rust><span style=display:flex><span><span style=color:#66d9ef>let</span> cmd <span style=color:#f92672>=</span> parse_raft_cmd_request(entry.get_data());
-</span></span><span style=display:flex><span>process_raft_cmd(apply_ctx, index, term, cmd);
-</span></span><span style=display:flex><span><span style=color:#75715e>// CmdType::Put → handle_put → kv_wb.put_cf(cf, key, value)
-</span></span></span></code></pre></div><p>Reads (Get / Coprocessor) use the same MVCC in <strong>kvdb</strong>; they do not propose unless the read protocol requires it (e.g. read index). Coprocessor does not bypass Raft for writes.</p><h3 id=32-mvcc-column-families>3.2 MVCC column families</h3><p>User state is multi-versioned in <strong>kvdb</strong>. Intents and commits share that engine:</p><table><thead><tr><th>CF</th><th>Contents</th></tr></thead><tbody><tr><td><code>lock</code></td><td>Prewrite / pessimistic <strong>intent</strong> (who holds the key, <code>startTS</code>, primary, …)</td></tr><tr><td><code>write</code></td><td><strong>Commit</strong> records at <code>commitTS</code> (and short values inline)</td></tr><tr><td><code>default</code></td><td>Large values keyed by <code>startTS</code> when not inlined in <code>write</code></td></tr></tbody></table><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-distributed-mvcc-txn.svg alt="MVCC Lock / Write / Default"></p><p><strong>Read rule (sketch).</strong> A snapshot read at <code>ts</code> looks for the latest <code>write</code> record with <code>commitTS ≤ ts</code> (and no conflicting lock that must be resolved). <strong>Write rule.</strong> A Prewrite installs a <code>lock</code> (and maybe <code>default</code>); a Commit installs <code>write</code> and deletes <code>lock</code>.</p><p>One RocksDB apply batch is atomic <strong>on one store for one Region</strong>. Keys in other Regions are other Raft groups; cross-Region atomicity is the client’s 2PC over these CFs (§3.4)—not a multi-Region transaction inside one apply.</p><h3 id=33-write-payload-raftcmdrequest-on-mvcc-cfs>3.3 Write payload: <code>RaftCmdRequest</code> on MVCC CFs</h3><p>Transactional RPCs become ordinary CF mutations <strong>before</strong> propose. Raft has no <code>Prewrite</code> message type—only <code>Entry.data = RaftCmdRequest</code> with <code>Put</code> / <code>Delete</code> on CFs.</p><p>Logical shape after a Prewrite that takes a lock:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Entry {
+</span></span><span style=display:flex><span><span style=color:#75715e>// ApplyContext::commit → kv_wb.write → Engines.kv
+</span></span></span></code></pre></div><p><code>handle_put</code> checks the key is in the Region, prefixes the data key, and puts into the requested CF (<code>lock</code> / <code>write</code> / <code>default</code>). Flushing the write batch is when <strong>user</strong> state becomes durable on this store. The leader’s client RPC completes only after this apply path (proposal callback), not after propose alone.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>propose → RaftLog / msgs
+</span></span><span style=display:flex><span>  → Ready (§3.2.3)
+</span></span><span style=display:flex><span>       ├─ entries + HardState → raftdb
+</span></span><span style=display:flex><span>       ├─ messages → followers
+</span></span><span style=display:flex><span>       └─ committed_entries → ApplyFsm
+</span></span><span style=display:flex><span>            → parse RaftCmdRequest
+</span></span><span style=display:flex><span>            → Put/Delete on kvdb CFs
+</span></span><span style=display:flex><span>  → (leader) RPC callback
+</span></span></code></pre></div><p><strong>Where bytes land.</strong></p><table><thead><tr><th>Bytes</th><th>Engine / path</th></tr></thead><tbody><tr><td>HardState + log <code>Entry</code></td><td><strong>raftdb</strong> (<code>Engines.raft</code>)</td></tr><tr><td>Outbound <code>Message</code></td><td>Network only</td></tr><tr><td>Applied <code>Put</code> / <code>Delete</code></td><td><strong>kvdb</strong> (<code>Engines.kv</code>, MVCC CFs)</td></tr></tbody></table><p>Followers never accept the client write (<code>NotLeader</code>); they still apply the same committed entries so their kvdb matches the leader’s applied log.</p><h3 id=42-mvcc-column-families>4.2 MVCC column families</h3><p>User state is multi-versioned in <strong>kvdb</strong>. Intents and commits share that engine:</p><table><thead><tr><th>CF</th><th>Contents</th></tr></thead><tbody><tr><td><code>lock</code></td><td>Prewrite / pessimistic <strong>intent</strong> (who holds the key, <code>startTS</code>, primary, …)</td></tr><tr><td><code>write</code></td><td><strong>Commit</strong> records at <code>commitTS</code> (and short values inline)</td></tr><tr><td><code>default</code></td><td>Large values keyed by <code>startTS</code> when not inlined in <code>write</code></td></tr></tbody></table><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-distributed-mvcc-txn.svg alt="MVCC Lock / Write / Default"></p><p><strong>Read rule (sketch).</strong> A snapshot read at <code>ts</code> looks for the latest <code>write</code> record with <code>commitTS ≤ ts</code> (and no conflicting lock that must be resolved). <strong>Write rule.</strong> A Prewrite installs a <code>lock</code> (and maybe <code>default</code>); a Commit installs <code>write</code> and deletes <code>lock</code>.</p><p>One RocksDB apply batch is atomic <strong>on one store for one Region</strong>. Keys in other Regions are other Raft groups; cross-Region atomicity is the client’s 2PC over these CFs (§4.3)—not a multi-Region transaction inside one apply.</p><h4 id=421-write-payload-raftcmdrequest-on-mvcc-cfs>4.2.1 Write payload: <code>RaftCmdRequest</code> on MVCC CFs</h4><p>Transactional RPCs become ordinary CF mutations <strong>before</strong> propose. Raft has no <code>Prewrite</code> message type—only <code>Entry.data = RaftCmdRequest</code> with <code>Put</code> / <code>Delete</code> on CFs.</p><p>Logical shape after a Prewrite that takes a lock:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Entry {
 </span></span><span style=display:flex><span>  term, index,
 </span></span><span style=display:flex><span>  data: RaftCmdRequest {
 </span></span><span style=display:flex><span>    header: { region_id, peer, region_epoch, … },
@@ -801,9 +919,9 @@ end note
 </span></span><span style=display:flex><span><span style=color:#66d9ef>let</span> <span style=color:#66d9ef>mut</span> req <span style=color:#f92672>=</span> RaftCmdRequest::default();
 </span></span><span style=display:flex><span>req.mut_requests().push(cmd);
 </span></span><span style=display:flex><span>entry.set_data(req.write_to_bytes()<span style=color:#f92672>?</span>.into());
-</span></span></code></pre></div><table><thead><tr><th>Pointer (peer)</th><th>Meaning</th></tr></thead><tbody><tr><td><code>commitIndex</code></td><td>Highest Raft index majority-replicated (raftdb / HardState)</td></tr><tr><td><code>lastApplied</code></td><td>Highest index applied into MVCC / kvdb (<code>≤ commitIndex</code>)</td></tr></tbody></table><p>Log layout and all <code>EntryType</code> examples are in §2.3.</p><h3 id=34-2pc-prewrite-and-commit>3.4 2PC: Prewrite and Commit</h3><p>TiKV implements <strong>Percolator-style 2PC</strong> as two (or more) Region writes. The <strong>client</strong> chooses a primary key, obtains <code>startTS</code> / <code>commitTS</code> from PD TSO, and issues RPCs to each involved Region <strong>leader</strong>. TiKV does not run a cross-Region coordinator inside <code>MultiRaftServer</code>.</p><table><thead><tr><th>Phase</th><th>Client</th><th>Typical apply on each Region leader</th></tr></thead><tbody><tr><td><strong>Prewrite</strong></td><td>Lock all keys in the txn (primary first)</td><td>Write <code>lock</code> CF (+ <code>default</code> for large values) at <code>startTS</code></td></tr><tr><td><strong>Commit</strong></td><td>Commit primary, then secondaries</td><td>Write <code>write</code> CF at <code>commitTS</code>; delete <code>lock</code></td></tr><tr><td><strong>Rollback / ResolveLock</strong></td><td>Abort or recover</td><td>Clear or finish leftover locks</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Prewrite key:  Lock[key] = { startTS, primary, … }
+</span></span></code></pre></div><table><thead><tr><th>Pointer (peer)</th><th>Meaning</th></tr></thead><tbody><tr><td><code>commitIndex</code></td><td>Highest Raft index majority-replicated (raftdb / HardState)</td></tr><tr><td><code>lastApplied</code></td><td>Highest index applied into MVCC / kvdb (<code>≤ commitIndex</code>)</td></tr></tbody></table><p>Log layout and all <code>EntryType</code> examples are in §4.1.</p><h3 id=43-2pc-prewrite-and-commit>4.3 2PC: Prewrite and Commit</h3><p>TiKV implements <strong>Percolator-style 2PC</strong> as two (or more) Region writes. The <strong>client</strong> chooses a primary key, obtains <code>startTS</code> / <code>commitTS</code> from PD TSO, and issues RPCs to each involved Region <strong>leader</strong>. TiKV does not run a cross-Region coordinator inside <code>MultiRaftServer</code>.</p><table><thead><tr><th>Phase</th><th>Client</th><th>Typical apply on each Region leader</th></tr></thead><tbody><tr><td><strong>Prewrite</strong></td><td>Lock all keys in the txn (primary first)</td><td>Write <code>lock</code> CF (+ <code>default</code> for large values) at <code>startTS</code></td></tr><tr><td><strong>Commit</strong></td><td>Commit primary, then secondaries</td><td>Write <code>write</code> CF at <code>commitTS</code>; delete <code>lock</code></td></tr><tr><td><strong>Rollback / ResolveLock</strong></td><td>Abort or recover</td><td>Clear or finish leftover locks</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Prewrite key:  Lock[key] = { startTS, primary, … }
 </span></span><span style=display:flex><span>Commit key:    Write[key]@commitTS; delete Lock[key]
-</span></span></code></pre></div><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-2pc-mvcc.svg alt="Prewrite / Commit MVCC"></p><p><strong>Single-Region txn.</strong> Prewrite then Commit are two Raft-committed applies on that Region’s leader—two entries, two MVCC updates, same propose/apply path as §3.1.</p><p><strong>Multi-Region txn.</strong> Each Region’s leader runs Prewrite/Commit independently on its key range. Whole-txn atomicity is: <strong>committed iff the primary key’s <code>write</code> record exists</strong>. Secondaries and readers that see a lock <strong>resolve</strong> by reading the primary’s MVCC state on its Region (commit, rollback, or wait). That primary-key rule—not a distributed prepare across stores inside TiKV—is the 2PC commit bit.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>client (TiDB / client-go)
+</span></span></code></pre></div><p><img src=https://kevinwang930.github.io/post/data/db/tidb/tikv/images/tikv-2pc-mvcc.svg alt="Prewrite / Commit MVCC"></p><p><strong>Single-Region txn.</strong> Prewrite then Commit are two Raft-committed applies on that Region’s leader—two entries, two MVCC updates, same propose/apply path as §4.1.</p><p><strong>Multi-Region txn.</strong> Each Region’s leader runs Prewrite/Commit independently on its key range. Whole-txn atomicity is: <strong>committed iff the primary key’s <code>write</code> record exists</strong>. Secondaries and readers that see a lock <strong>resolve</strong> by reading the primary’s MVCC state on its Region (commit, rollback, or wait). That primary-key rule—not a distributed prepare across stores inside TiKV—is the 2PC commit bit.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>client (TiDB / client-go)
 </span></span><span style=display:flex><span>  ├─ Prewrite(primary) → Region P leader → Raft → lock CF
 </span></span><span style=display:flex><span>  ├─ Prewrite(secondaries) → Region S_i leaders → Raft → lock CF
 </span></span><span style=display:flex><span>  ├─ Commit(primary) → Region P → Raft → write CF; clear lock
