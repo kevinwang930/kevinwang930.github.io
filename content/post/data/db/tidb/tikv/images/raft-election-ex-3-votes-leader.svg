@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420" role="img" aria-label="Step 3 unstable only">
+  <defs>
+    <marker id="arrDk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="arrBl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrGn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrOr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="420" fill="#f7f9fb"/>
+
+  <text x="500" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Step 3  votes -&gt; Leader</text>
+
+  <g transform="translate(40,42)">
+    <rect width="200" height="52" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="4"/>
+    <text x="100" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">peer 1 Leader</text>
+    <text x="100" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">term=6 leader_id=1</text>
+  </g>
+
+  <g transform="translate(400,42)">
+    <rect width="200" height="52" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.4" rx="4"/>
+    <text x="100" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">peer 2</text>
+    <text x="100" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">grant</text>
+  </g>
+
+  <g transform="translate(760,42)">
+    <rect width="200" height="52" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.4" rx="4"/>
+    <text x="100" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">peer 3</text>
+    <text x="100" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">grant</text>
+  </g>
+  <line x1="400" y1="68" x2="250" y2="68" stroke="#2e7d32" stroke-width="1.3" marker-end="url(#arrGn)"/>
+
+
+  <g transform="translate(40,105)">
+    <rect width="460" height="210" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="12" y="18" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">store / raftdb</text>
+
+    <text x="16" y="40" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#37474f">RaftLocalState</text>
+    <rect x="16" y="46" width="428" height="58" fill="#f5f5f5" stroke="#90a4ae" rx="3"/>
+    <rect x="24" y="54" width="412" height="22" fill="#e3f2fd" stroke="#1565c0" rx="2"/>
+    <text x="32" y="69" font-family="Consolas, monospace" font-size="10" fill="#0d47a1">hard_state { term:6, vote:1, commit:3 }</text>
+    <rect x="24" y="78" width="200" height="20" fill="#e8f5e9" stroke="#2e7d32" rx="2"/>
+    <text x="32" y="92" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">last_index: 3</text>
+
+    <text x="16" y="126" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#37474f">Entry[]</text>
+    <g transform="translate(0,132)">
+    
+    <g transform="translate(20,0)">
+      <rect width="68" height="48" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.3" rx="3"/>
+      <text x="34.0" y="15" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 1</text>
+      <text x="34.0" y="30" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term 1</text>
+      <text x="34.0" y="43" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Normal</text>
+    </g>
+    <g transform="translate(96,0)">
+      <rect width="68" height="48" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.3" rx="3"/>
+      <text x="34.0" y="15" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 2</text>
+      <text x="34.0" y="30" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term 3</text>
+      <text x="34.0" y="43" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Normal</text>
+    </g>
+    <g transform="translate(172,0)">
+      <rect width="68" height="48" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.3" rx="3"/>
+      <text x="34.0" y="15" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">idx 3</text>
+      <text x="34.0" y="30" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term 5</text>
+      <text x="34.0" y="43" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Normal</text>
+    </g>
+    </g>
+    
+  </g>
+
+  <g transform="translate(520,105)">
+    <rect width="440" height="230" fill="#fffde7" stroke="#f9a825" stroke-width="1.5" rx="5"/>
+    <text x="12" y="18" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">in memory</text>
+    <text x="16" y="44" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">SoftState  Leader  leader_id=1</text><text x="16" y="64" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">HardState  {term:6, vote:1, commit:3}</text><text x="16" y="84" font-family="Consolas, monospace" font-size="11" fill="#e65100">unstable:</text>
+  </g>
+  <g transform="translate(520,105)">
+    
+    <g transform="translate(16,100)">
+      <rect width="80" height="48" fill="#fff9c4" stroke="#f9a825" stroke-width="1.3" rx="3"/>
+      <text x="40.0" y="15" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">idx 4</text>
+      <text x="40.0" y="30" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">term 6</text>
+      <text x="40.0" y="43" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">Normal</text>
+    </g>
+    <text x="108" y="118" font-family="Consolas, monospace" font-size="9" fill="#ef6c00">EntryNormal data=&lt;empty&gt;</text>
+    <text x="108" y="134" font-family="Consolas, monospace" font-size="9" fill="#ef6c00">not in raftdb Entry[] yet</text>
+    <text x="16" y="172" font-family="Consolas, monospace" font-size="11" fill="#e65100">msgs: MsgAppend entries=[4]</text>
+  </g>
+
+</svg>
