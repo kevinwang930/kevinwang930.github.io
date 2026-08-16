@@ -1334,21 +1334,76 @@ Followers never accept the client write (`NotLeader`); they still apply the same
 
 ### 4.2 MVCC column families
 
-User state is multi-versioned in **kvdb**. Intents and commits share that engine:
+User state after apply lives in **kvdb** as three RocksDB **column families**. They share the same engine and Region key ranges, but store different roles for each logical user key: an open **intent**, a **commit history**, and optional **value blobs**.
 
-| CF | Contents |
-|----|----------|
-| `lock` | Prewrite / pessimistic **intent** (who holds the key, `startTS`, primary, …) |
-| `write` | **Commit** records at `commitTS` (and short values inline) |
-| `default` | Large values keyed by `startTS` when not inlined in `write` |
+![kvdb MVCC column families](images/tikv-mvcc-column-families.svg)
 
-![MVCC Lock / Write / Default](images/tikv-distributed-mvcc-txn.svg)
+| CF | Key layout | Value | Lifetime |
+|----|------------|-------|----------|
+| **`lock`** | Encoded user key (no timestamp suffix) | `Lock { startTS, primary, ttl, op, … }` | Exists only while the txn holds the key; Prewrite Puts it, Commit/Rollback Deletes it |
+| **`write`** | Encoded user key **`@ commitTS`** | `Write { startTS, … }` (optional short value inline) | One record per commit; snapshot reads pick the latest `commitTS ≤ read_ts` |
+| **`default`** | Encoded user key **`@ startTS`** | Raw user bytes | Written on Prewrite when the value is too large to inline in `write`; kept after Commit; `Write.startTS` points here |
 
-**Read rule (sketch).** A snapshot read at `ts` looks for the latest `write` record with `commitTS ≤ ts` (and no conflicting lock that must be resolved). **Write rule.** A Prewrite installs a `lock` (and maybe `default`); a Commit installs `write` and deletes `lock`.
+**One key, two timestamps.** `startTS` (from PD TSO at begin) versions the intent and the large-value slot. `commitTS` (from TSO at commit) versions the durable commit record. The lock row has no TS in the key because a key may hold only one open lock.
 
-One RocksDB apply batch is atomic **on one store for one Region**. Keys in other Regions are other Raft groups; cross-Region atomicity is the client’s 2PC over these CFs (§4.3)—not a multi-Region transaction inside one apply.
+```text
+user key k
 
-#### 4.2.1 Write payload: `RaftCmdRequest` on MVCC CFs
+lock CF:     k              -> Lock { startTS=100, primary=… }     # Prewrite only
+write CF:    k @ commitTS   -> Write { startTS=100, … }            # after Commit
+default CF:  k @ startTS    -> <blob>                              # if not inlined
+```
+
+**Read rule (sketch).** A snapshot read at `ts` ignores `lock` when safe (or resolves it), then finds the newest **`write`** with `commitTS ≤ ts`, and loads the value from that `Write` (inline) or from **`default`** at `Write.startTS`. **Write rule.** Prewrite Puts **`lock`** (and maybe **`default`**); Commit Puts **`write`** and Deletes **`lock`**.
+
+#### 4.2.1 Example: one key through Prewrite, Commit, and snapshot reads
+
+User key `k` already has a committed value `"v1"` from an earlier txn (`startTS=40`, `commitTS=50`). A new txn sets `k` to `"v2"` with `startTS=100`, `commitTS=120`. Value is stored in **`default`** (not inlined).
+
+**t0 — initial CF state**
+
+```text
+lock:     (empty)
+write:    k @ 50  -> Write { startTS: 40 }
+default:  k @ 40  -> "v1"
+```
+
+`Get(k, ts=60)` → newest `write` with `commitTS ≤ 60` is `k@50` → `default[k@40]` → `"v1"`.
+
+**t1 — after Prewrite apply** (Raft entry Puts `lock` + `default`)
+
+```text
+lock:     k       -> Lock { startTS: 100, primary: k, … }
+write:    k @ 50  -> Write { startTS: 40 }          # unchanged
+default:  k @ 40  -> "v1"
+          k @ 100 -> "v2"                           # new
+```
+
+`Get(k, ts=60)` still → `"v1"` (ignores the new default; no `write` at 100 yet).  
+`Get(k, ts=110)` sees **`lock[k]`** with `startTS=100 ≤ 110` → wait or resolve (txn not committed).  
+Another Prewrite on `k` conflicts on the lock.
+
+**t2 — after Commit apply** (Puts `write@120`, Deletes `lock`)
+
+```text
+lock:     (empty)
+write:    k @ 50  -> Write { startTS: 40 }
+          k @ 120 -> Write { startTS: 100 }         # new
+default:  k @ 40  -> "v1"
+          k @ 100 -> "v2"                           # kept
+```
+
+| Snapshot read | Chosen `write` | Value |
+|---------------|----------------|-------|
+| `Get(k, ts=60)` | `k@50` → startTS 40 | `"v1"` |
+| `Get(k, ts=110)` | `k@50` → startTS 40 | `"v1"` (commit 120 not visible yet) |
+| `Get(k, ts=130)` | `k@120` → startTS 100 | `"v2"` |
+
+Old versions stay until GC compaction removes them; reads do not rewrite prior `write` / `default` rows. That is multi-version retention, not an undo log replay.
+
+One RocksDB apply batch is atomic **on one store for one Region**. Keys in other Regions are other Raft groups; cross-Region atomicity is the client’s 2PC (§4.3).
+
+#### 4.2.2 Write payload: `RaftCmdRequest` on MVCC CFs
 
 Transactional RPCs become ordinary CF mutations **before** propose. Raft has no `Prewrite` message type—only `Entry.data = RaftCmdRequest` with `Put` / `Delete` on CFs.
 
@@ -1409,7 +1464,9 @@ Prewrite key:  Lock[key] = { startTS, primary, … }
 Commit key:    Write[key]@commitTS; delete Lock[key]
 ```
 
-![Prewrite / Commit MVCC](images/tikv-2pc-mvcc.svg)
+![2PC across Regions](images/tikv-2pc-cross-region.svg)
+
+Prewrite’s durable prepare is the **`lock` CF**: every key in the txn gets a `Lock` whose **`primary`** field names the commit-bit key. Commit (or resolve) deletes those locks after the primary’s `write@commitTS` exists.
 
 **Single-Region txn.** Prewrite then Commit are two Raft-committed applies on that Region’s leader—two entries, two MVCC updates, same propose/apply path as §4.1.
 
@@ -1420,8 +1477,70 @@ client (TiDB / client-go)
   ├─ Prewrite(primary) → Region P leader → Raft → lock CF
   ├─ Prewrite(secondaries) → Region S_i leaders → Raft → lock CF
   ├─ Commit(primary) → Region P → Raft → write CF; clear lock
-  └─ Commit(secondaries) → Region S_i → Raft → write CF; clear lock
+  └─ Commit(secondaries) → Region S_i leaders → Raft → write CF; clear lock
        (async / retry ok: primary Write is the source of truth)
 ```
+
+#### 4.3.1 Example: cross-Region atomicity
+
+Client runs one txn that updates two rows in different Regions (PD split the keyspace so each table’s row sits on its own Raft group):
+
+```sql
+-- logical SQL (TiDB)
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;   -- primary key row
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;   -- secondary
+COMMIT;
+```
+
+| Role in 2PC | Logical row | Encoded user key (sketch) | Region |
+|-------------|-------------|---------------------------|--------|
+| **primary** | `accounts.id=1` | `t_accounts_r1` | **R1** |
+| **secondary** | `accounts.id=2` | `t_accounts_r2` | **R2** |
+
+Client picks **`t_accounts_r1` as txn primaryKey**, `startTS=100`, `commitTS=120`. R1 and R2 never share one Raft apply—atomicity is the primary’s `write` record.
+
+**After Prewrite**
+
+| Store | `lock` CF | `write` CF |
+|-------|-----------|------------|
+| R1 | `lock[t_accounts_r1] = Lock { startTS:100, primary:t_accounts_r1, op:Put }` | prior committed version only (e.g. `@80`) |
+| R2 | `lock[t_accounts_r2] = Lock { startTS:100, primary:t_accounts_r1, op:Put }` | prior committed version only |
+
+Txn **not committed**—there is still no `write@120`. Snapshot reads use MVCC as follows:
+
+| Reader snapshot `ts` | vs `lock.startTS=100` | What the `SELECT` sees |
+|----------------------|------------------------|-------------------------|
+| `ts < 100` (e.g. 90) | lock is “in the future” | **Ignore lock**; newest `write` with `commitTS ≤ ts` → **original** balances |
+| `ts ≥ 100` (e.g. 110) | lock overlaps the snapshot | Must **wait / resolve** the lock (cannot skip it). If resolve finds the txn still open or rolled back, then read the prior `write` → original balances; the Prewrite mutation stays invisible until a `write@commitTS ≤ ts` exists |
+
+So uncommitted data is never returned: older snapshots skip the lock by timestamp; overlapping snapshots resolve first, then still fall back to the previous committed version while the txn has no commit `write`.
+
+**After Commit primary only** (R1 finished; R2 Commit delayed)
+
+| Store | `lock` CF | `write` CF |
+|-------|-----------|------------|
+| R1 | (empty for this key) | `write[t_accounts_r1@120] = Write { startTS:100 }` |
+| R2 | `lock[t_accounts_r2] = Lock { startTS:100, primary:t_accounts_r1, … }` | (no `@120` yet) |
+
+Whole txn is already **committed**: `write[t_accounts_r1@120]` is the commit bit. Row `id=2` may still show a lock until secondary Commit or resolve.
+
+**Resolve path** — reader on R2 sees `lock[t_accounts_r2]`, follows `primary → t_accounts_r1`, queries R1:
+
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | Read R1 for primary at `startTS=100` | `write[t_accounts_r1@120]` exists |
+| 2 | Decision | txn **COMMITTED** |
+| 3 | Finish R2 | `write[t_accounts_r2@120]`; delete `lock[t_accounts_r2]` |
+| 4 | Retry read | both balances visible at `commitTS=120` |
+
+**If Commit primary never succeeds** (crash after Prewrite)
+
+| Store | State | Resolve on R2 |
+|-------|--------|----------------|
+| R1 | no `write[t_accounts_r1@120]`; lock cleared / rolled back | — |
+| R2 | `lock[t_accounts_r2]` still points at `t_accounts_r1` | primary missing commit → **ROLLBACK** `lock[t_accounts_r2]` |
+
+Neither Region ends with only one side committed. Cross-Region atomicity is that **one primary `write`**, plus lock resolve forcing the secondary to the same decision—not a multi-Region Raft transaction.
 
 Failure modes stay local to the protocol: Prewrite conflict → lock or latch error to the client; majority loss on a Region → that Region cannot commit its phase (`NotLeader` / timeout); undetermined primary → lock resolution polls the primary Region until `write` or rollback appears.

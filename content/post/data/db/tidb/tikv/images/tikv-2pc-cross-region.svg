@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="660" viewBox="0 0 1000 660" role="img" aria-label="Percolator 2PC across two TiKV Regions with lock CF emphasis">
+  <defs>
+    <marker id="arrOr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arrGn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrRd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c62828"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="660" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">2PC across Regions (Percolator)</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Prepare = lock CF. Commit bit = write on primary. startTS=100, commitTS=120, primary=k1, secondary=k2</text>
+
+  <!-- lock emphasis banner -->
+  <g transform="translate(30,58)">
+    <rect width="940" height="44" fill="#fff8e1" stroke="#f9a825" stroke-width="1.6" rx="4"/>
+    <text x="16" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">2PC prepare = lock CF</text>
+    <text x="220" y="28" font-family="Consolas, monospace" font-size="11" fill="#37474f">Lock { startTS, primary, op, ttl }   -- all keys share primary=k1</text>
+  </g>
+
+  <!-- client -->
+  <g transform="translate(30,120)">
+    <rect width="200" height="200" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="100" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">client-go</text>
+    <text x="100" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">twoPhaseCommitter</text>
+    <text x="16" y="78" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">1. pick primaryKey k1</text>
+    <text x="16" y="102" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#ef6c00">2. Prewrite -&gt; locks</text>
+    <text x="16" y="126" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#2e7d32">3. Commit primary</text>
+    <text x="16" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#2e7d32">4. Commit secondaries</text>
+    <text x="16" y="180" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">TSO: startTS / commitTS</text>
+  </g>
+
+  <line x1="230" y1="180" x2="290" y2="180" stroke="#ef6c00" stroke-width="1.6" marker-end="url(#arrOr)"/>
+  <text x="260" y="168" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ef6c00">Prewrite</text>
+  <line x1="230" y1="240" x2="290" y2="240" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#arrGn)"/>
+  <text x="260" y="228" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">Commit</text>
+  <line x1="230" y1="280" x2="290" y2="400" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#arrGn)"/>
+
+  <!-- Region R1 primary -->
+  <g transform="translate(300,120)">
+    <rect width="340" height="210" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.8" rx="5"/>
+    <text x="170" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Region R1 leader</text>
+    <text x="170" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">primaryKey = k1</text>
+
+    <rect x="14" y="56" width="312" height="70" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="3"/>
+    <text x="24" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">lock CF (Prewrite)</text>
+    <text x="24" y="96" font-family="Consolas, monospace" font-size="10" fill="#37474f">lock[k1] = Lock {</text>
+    <text x="24" y="114" font-family="Consolas, monospace" font-size="10" fill="#37474f">  startTS:100, primary:k1, op:Put }</text>
+
+    <rect x="14" y="136" width="312" height="58" fill="#c8e6c9" stroke="#1b5e20" rx="3"/>
+    <text x="24" y="156" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1b5e20">Commit primary</text>
+    <text x="24" y="176" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">write[k1@120]; delete lock[k1]</text>
+  </g>
+
+  <!-- Region R2 secondary -->
+  <g transform="translate(300,350)">
+    <rect width="340" height="210" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.8" rx="5"/>
+    <text x="170" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e65100">Region R2 leader</text>
+    <text x="170" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">secondary = k2</text>
+
+    <rect x="14" y="56" width="312" height="70" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8" rx="3"/>
+    <text x="24" y="76" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">lock CF (Prewrite)</text>
+    <text x="24" y="96" font-family="Consolas, monospace" font-size="10" fill="#37474f">lock[k2] = Lock {</text>
+    <text x="24" y="114" font-family="Consolas, monospace" font-size="10" fill="#c62828">  startTS:100, primary:k1, op:Put }</text>
+
+    <rect x="14" y="136" width="312" height="58" fill="#c8e6c9" stroke="#1b5e20" rx="3"/>
+    <text x="24" y="156" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#1b5e20">Commit secondary</text>
+    <text x="24" y="176" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">write[k2@120]; delete lock[k2]</text>
+  </g>
+
+  <!-- resolve -->
+  <path d="M 640 450 L 720 450 L 720 200 L 640 200" fill="none" stroke="#c62828" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arrRd)"/>
+  <text x="740" y="310" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">resolve via lock</text>
+  <text x="740" y="330" font-family="Consolas, monospace" font-size="10" fill="#c62828">Lock.primary -&gt; k1</text>
+  <text x="740" y="348" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">read R1 write[k1]?</text>
+  <text x="740" y="366" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">yes =&gt; commit k2</text>
+  <text x="740" y="384" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">no  =&gt; wait/rollback</text>
+
+  <!-- atomicity -->
+  <g transform="translate(660,120)">
+    <rect width="310" height="150" fill="#ffffff" stroke="#455a64" stroke-width="1.4" rx="5"/>
+    <text x="155" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Atomicity rule</text>
+    <text x="16" y="52" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Prepare: locks on all keys</text>
+    <text x="16" y="74" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Committed iff</text>
+    <text x="16" y="96" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">write[k1@120] exists</text>
+    <text x="16" y="118" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Secondary Commit may lag;</text>
+    <text x="16" y="136" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">readers resolve via lock.primary</text>
+  </g>
+
+  <!-- bottom -->
+  <g transform="translate(30,580)">
+    <rect width="940" height="60" fill="#eceff1" stroke="#90a4ae" stroke-width="1.2" rx="5"/>
+    <text x="20" y="26" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">R1 and R2 are separate Raft groups. 2PC is client RPCs; the lock CF holds prepare state until Commit deletes it.</text>
+    <text x="20" y="46" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">primaryKey is the txn commit-bit key (one mutated key), not a SQL PRIMARY KEY column.</text>
+  </g>
+</svg>
