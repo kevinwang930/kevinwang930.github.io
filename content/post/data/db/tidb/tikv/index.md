@@ -18,6 +18,8 @@ keywords:
 **TiKV** is TiDB’s row store built on **Multi-Raft**: every Region is a Raft group, every durable write is a Raft log entry, and RocksDB holds the Raft log (**raftdb**) plus applied MVCC (**kvdb**).
 <!--more-->
 
+Related: [RocksDB (TiKV fork)](../rocksdb/).
+
 ---
 
 ## 1. Overview

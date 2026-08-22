@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="400" viewBox="0 0 1000 400" role="img" aria-label="TiDB rows and indexes share kvdb but use different keys and SST ranges">
+  <rect width="1000" height="400" fill="#f7f9fb"/>
+  <text x="500" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Same kvdb, different keys, different SST files</text>
+  <text x="500" y="44" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">One RocksDB engine and CF LSM; row and index data split by encoded key prefix</text>
+
+  <rect x="40" y="60" width="920" height="56" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+  <text x="500" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">kvdb (one RocksDB directory)</text>
+  <text x="500" y="104" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">shared WAL + lock / write / default column families</text>
+
+  <g transform="translate(60,130)">
+    <rect width="420" height="88" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4" rx="5"/>
+    <text x="210" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Row key</text>
+    <text x="20" y="50" font-family="Consolas, monospace" font-size="11" fill="#37474f">t42_r1001  (table 42, handle 1001)</text>
+    <text x="20" y="70" font-family="Consolas, monospace" font-size="10" fill="#546e7a">value: encoded columns</text>
+  </g>
+
+  <g transform="translate(520,130)">
+    <rect width="420" height="88" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.4" rx="5"/>
+    <text x="210" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Index key</text>
+    <text x="20" y="50" font-family="Consolas, monospace" font-size="11" fill="#37474f">t42_i1_2024-02-10  (index 1, hired date)</text>
+    <text x="20" y="70" font-family="Consolas, monospace" font-size="10" fill="#546e7a">value: row handle 1003</text>
+  </g>
+
+  <line x1="270" y1="218" x2="270" y2="248" stroke="#37474f" stroke-width="1.4"/>
+  <line x1="730" y1="218" x2="730" y2="248" stroke="#37474f" stroke-width="1.4"/>
+  <line x1="270" y1="248" x2="730" y2="248" stroke="#37474f" stroke-width="1.4"/>
+  <line x1="500" y1="248" x2="500" y2="264" stroke="#37474f" stroke-width="1.4"/>
+  <polygon points="495,264 500,276 505,264" fill="#37474f"/>
+
+  <text x="500" y="292" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Sorted keyspace -&gt; flush / compaction -&gt; SST files by key range</text>
+
+  <rect x="80" y="308" width="380" height="72" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.3" rx="4"/>
+  <text x="270" y="332" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">SST 000045.sst</text>
+  <text x="270" y="352" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">[t42_i1_2024-01-01 .. t42_i1_2024-12-31]</text>
+  <text x="270" y="370" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">index keys only</text>
+
+  <rect x="540" y="308" width="380" height="72" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.3" rx="4"/>
+  <text x="730" y="332" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">SST 000046.sst</text>
+  <text x="730" y="352" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">[t42_r1000 .. t42_r1999]</text>
+  <text x="730" y="370" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">record keys only</text>
+</svg>

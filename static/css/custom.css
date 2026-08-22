@@ -50,6 +50,15 @@ figure.highlight .code pre {
   max-width: min(calc(var(--main-content-width) - 50px), calc(100vw - 90px)) !important;
 }
 
+/* Scale wide diagram SVGs to post column width on Hugo */
+.post-content img[src$=".svg"],
+.post-content p img {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 1.25em auto;
+}
+
 /* Ensure modals match the content width */
 .modal {
   max-width: var(--main-content-width) !important;

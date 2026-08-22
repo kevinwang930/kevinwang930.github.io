@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Range scan walking LSM levels">
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Range Iterator through the LSM (one CF)</text>
+  <text x="500" y="44" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Seek(start) then Next() on a merging iterator; stop at end bound</text>
+
+  <!-- bounds -->
+  <rect x="40" y="58" width="920" height="36" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+  <text x="56" y="80" font-family="Consolas, monospace" font-size="11" fill="#e65100">ReadOptions: lower_bound = start   upper_bound = end   (half-open [start, end))</text>
+
+  <!-- LSM stack left -->
+  <text x="180" y="115" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Sources merged into one sorted stream</text>
+
+  <rect x="40" y="128" width="280" height="36" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="180" y="151" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">mem_  (active MemTable)</text>
+
+  <rect x="40" y="172" width="280" height="36" fill="#c8e6c9" stroke="#1b5e20" rx="3"/>
+  <text x="180" y="195" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">imm_  (flushing MemTable)</text>
+
+  <rect x="40" y="216" width="130" height="36" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+  <text x="105" y="239" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">L0 SST a</text>
+  <rect x="180" y="216" width="140" height="36" fill="#ffe0b2" stroke="#ef6c00" rx="3"/>
+  <text x="250" y="239" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">L0 SST b</text>
+
+  <rect x="40" y="260" width="280" height="36" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="180" y="283" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">L1 SST (non-overlap; file index seek)</text>
+
+  <rect x="40" y="304" width="280" height="36" fill="#bbdefb" stroke="#1565c0" rx="3"/>
+  <text x="180" y="327" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">L2 SST</text>
+
+  <!-- merge box -->
+  <rect x="360" y="200" width="200" height="120" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5" rx="6"/>
+  <text x="460" y="228" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">MergingIterator</text>
+  <text x="460" y="252" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">k-way merge by key</text>
+  <text x="460" y="272" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">newest seq wins per key</text>
+  <text x="460" y="298" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">Seek / Next</text>
+
+  <!-- arrows from layers to merge -->
+  <line x1="320" y1="146" x2="360" y2="230" stroke="#7b1fa2" stroke-width="1.2"/>
+  <line x1="320" y1="190" x2="360" y2="240" stroke="#7b1fa2" stroke-width="1.2"/>
+  <line x1="320" y1="234" x2="360" y2="250" stroke="#7b1fa2" stroke-width="1.2"/>
+  <line x1="320" y1="278" x2="360" y2="270" stroke="#7b1fa2" stroke-width="1.2"/>
+  <line x1="320" y1="322" x2="360" y2="290" stroke="#7b1fa2" stroke-width="1.2"/>
+
+  <!-- Iterator output -->
+  <g transform="translate(600,128)">
+    <rect width="360" height="320" fill="#ffffff" stroke="#455a64" stroke-width="1.4" rx="6"/>
+    <text x="180" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#263238">Iterator output (byte order in range)</text>
+    <text x="20" y="58" font-family="Consolas, monospace" font-size="10" fill="#546e7a">Seek(start):</text>
+    <text x="20" y="78" font-family="Consolas, monospace" font-size="10" fill="#1565c0">first key &gt;= start in merged stream</text>
+    <line x1="20" y1="92" x2="340" y2="92" stroke="#eceff1"/>
+    <text x="20" y="112" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1001@400</text>
+    <text x="20" y="132" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1001@500</text>
+    <text x="20" y="152" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1002@401</text>
+    <text x="20" y="172" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1002@500</text>
+    <text x="20" y="192" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1003@402</text>
+    <text x="20" y="212" font-family="Consolas, monospace" font-size="10" fill="#1b5e20">Next: t42_r1003@500</text>
+    <text x="20" y="240" font-family="Consolas, monospace" font-size="10" fill="#c62828">Stop: next key &gt;= end (t42_r1004)</text>
+    <rect x="20" y="258" width="320" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="32" y="278" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">TiKV MVCC above: group by user key,</text>
+    <text x="32" y="294" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1b5e20">pick version at read_ts, decode row</text>
+  </g>
+
+  <line x1="560" y1="260" x2="600" y2="260" stroke="#37474f" stroke-width="1.5"/>
+  <polygon points="595,255 605,260 595,265" fill="#37474f"/>
+
+  <!-- per-level notes bottom -->
+  <g transform="translate(40,460)">
+    <rect width="920" height="85" fill="#ffffff" stroke="#90a4ae" rx="4"/>
+    <text x="20" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Per-level range work</text>
+    <text x="20" y="44" font-family="Consolas, monospace" font-size="10" fill="#37474f">mem/imm: skiplist Seek(start) in RAM</text>
+    <text x="20" y="62" font-family="Consolas, monospace" font-size="10" fill="#37474f">L0: open every file whose range overlaps [start,end); merge</text>
+    <text x="460" y="44" font-family="Consolas, monospace" font-size="10" fill="#37474f">L1..Ln: pick &lt;=1 file per level overlapping range; index block seek</text>
+    <text x="460" y="62" font-family="Consolas, monospace" font-size="10" fill="#37474f">Each Next may read SST data blocks (block cache / bloom on first touch)</text>
+  </g>
+</svg>

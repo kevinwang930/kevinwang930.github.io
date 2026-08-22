@@ -16,10 +16,10 @@ keywords:
 - tiflash
 #thumbnailImage: //example.com/image.jpg
 ---
-TiDB is a MySQL-compatible distributed SQL system. A deployment is a **cluster** of TiDB servers (compute), **PD** (control), **TiKV** (row store), and optionally **TiFlash** (columnar). This post orients cluster roles, follows one TiDB server in `git/tidb` (dispatch → execute), then shows how **PD** in `git/pd` owns Region key ranges (split/merge), TSO, locate, and scheduling. TiKV store, Region Raft, and 2PC are in [TiKV](../tikv/); CAP theory and PD etcd Raft are in [CAP and Raft](../cap/).
+TiDB is a MySQL-compatible distributed SQL system. A deployment is a **cluster** of TiDB servers (compute), **PD** (control), **TiKV** (row store), and optionally **TiFlash** (columnar). This post orients cluster roles, follows one TiDB server in `git/tidb` (dispatch → execute), then shows how **PD** in `git/pd` owns Region key ranges (split/merge), TSO, locate, and scheduling. TiKV store, Region Raft, and 2PC are in [TiKV](../tikv/); the LSM under TiKV is in [RocksDB](../rocksdb/); CAP theory and PD etcd Raft are in [CAP and Raft](../cap/).
 <!--more-->
 
-Related: [TiKV: Multi-Raft Regions, peer Raft, and writes (MVCC / 2PC)](../tikv/), [CAP and Raft](../cap/).
+Related: [TiKV: Multi-Raft Regions, peer Raft, and writes (MVCC / 2PC)](../tikv/), [RocksDB (TiKV fork)](../rocksdb/), [CAP and Raft](../cap/).
 
 ![TiDB cluster planes and node relations](images/tidb-cluster-planes.svg)
 
