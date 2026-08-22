@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Sequential writes versus update in place">
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Why sequential writes matter</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Same 4 Puts to random keys: update-in-place vs LSM append path</text>
+
+  <!-- LEFT: random / B-tree style -->
+  <g transform="translate(30,70)">
+    <rect width="450" height="420" fill="#ffffff" stroke="#c62828" stroke-width="1.6" rx="6"/>
+    <text x="225" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#b71c1c">Update-in-place (e.g. B-tree pages)</text>
+    <text x="225" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#e53935">each Put = seek + read-modify-write</text>
+
+    <!-- disk track metaphor as row of pages -->
+    <text x="24" y="78" font-family="Consolas, monospace" font-size="11" fill="#546e7a">disk pages</text>
+    <rect x="24" y="88" width="50" height="36" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="49" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">P0</text>
+    <rect x="84" y="88" width="50" height="36" fill="#ffcdd2" stroke="#c62828" rx="2"/>
+    <text x="109" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">P1</text>
+    <rect x="144" y="88" width="50" height="36" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="169" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">P2</text>
+    <rect x="204" y="88" width="50" height="36" fill="#ffcdd2" stroke="#c62828" rx="2"/>
+    <text x="229" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">P3</text>
+    <rect x="264" y="88" width="50" height="36" fill="#eceff1" stroke="#90a4ae" rx="2"/>
+    <text x="289" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">P4</text>
+    <rect x="324" y="88" width="50" height="36" fill="#ffcdd2" stroke="#c62828" rx="2"/>
+    <text x="349" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">P5</text>
+    <rect x="384" y="88" width="50" height="36" fill="#ffcdd2" stroke="#c62828" rx="2"/>
+    <text x="409" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#b71c1c">P6</text>
+
+    <!-- zig-zag arrows for random access -->
+    <path d="M109 130 L109 150 L229 150 L229 130" fill="none" stroke="#c62828" stroke-width="1.5"/>
+    <path d="M229 130 L229 170 L349 170 L349 130" fill="none" stroke="#c62828" stroke-width="1.5"/>
+    <path d="M349 130 L349 190 L409 190 L409 130" fill="none" stroke="#c62828" stroke-width="1.5"/>
+    <text x="225" y="215" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#c62828">Put k1,k3,k5,k6 -&gt; 4 distant pages</text>
+
+    <rect x="24" y="240" width="402" height="150" fill="#fff5f5" stroke="#ef9a9a" rx="4"/>
+    <text x="40" y="268" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#b71c1c">Per Put on the hot path</text>
+    <text x="40" y="294" font-family="Consolas, monospace" font-size="11" fill="#37474f">1. locate leaf page (often random read)</text>
+    <text x="40" y="316" font-family="Consolas, monospace" font-size="11" fill="#37474f">2. read-modify-write that page</text>
+    <text x="40" y="338" font-family="Consolas, monospace" font-size="11" fill="#37474f">3. maybe split / write siblings</text>
+    <text x="40" y="360" font-family="Consolas, monospace" font-size="11" fill="#37474f">4. fsync scatters across the volume</text>
+
+    <text x="225" y="418" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#b71c1c">latency ~ random IOPS bound</text>
+  </g>
+
+  <!-- RIGHT: LSM sequential -->
+  <g transform="translate(520,70)">
+    <rect width="450" height="420" fill="#ffffff" stroke="#2e7d32" stroke-width="1.6" rx="6"/>
+    <text x="225" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">LSM sequential path</text>
+    <text x="225" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#43a047">same 4 Puts = append + in-memory sort</text>
+
+    <!-- WAL as continuous append bar -->
+    <text x="24" y="78" font-family="Consolas, monospace" font-size="11" fill="#546e7a">WAL *.log</text>
+    <rect x="24" y="88" width="402" height="36" fill="#fff8e1" stroke="#f9a825" rx="2"/>
+    <rect x="30" y="96" width="70" height="20" fill="#ffecb3" stroke="#f9a825" rx="2"/>
+    <text x="65" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">k1</text>
+    <rect x="108" y="96" width="70" height="20" fill="#ffecb3" stroke="#f9a825" rx="2"/>
+    <text x="143" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">k3</text>
+    <rect x="186" y="96" width="70" height="20" fill="#ffecb3" stroke="#f9a825" rx="2"/>
+    <text x="221" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">k5</text>
+    <rect x="264" y="96" width="70" height="20" fill="#ffecb3" stroke="#f9a825" rx="2"/>
+    <text x="299" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">k6</text>
+    <text x="380" y="110" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">append --&gt;</text>
+
+    <line x1="225" y1="124" x2="225" y2="148" stroke="#2e7d32" stroke-width="1.4"/>
+    <polygon points="220,148 225,158 230,148" fill="#2e7d32"/>
+
+    <text x="24" y="175" font-family="Consolas, monospace" font-size="11" fill="#546e7a">MemTable (RAM)</text>
+    <rect x="24" y="182" width="402" height="36" fill="#e8f5e9" stroke="#2e7d32" rx="2"/>
+    <text x="225" y="204" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">skiplist holds k1,k3,k5,k6 sorted</text>
+
+    <line x1="225" y1="218" x2="225" y2="236" stroke="#2e7d32" stroke-width="1.4"/>
+    <polygon points="220,236 225,246 230,236" fill="#2e7d32"/>
+    <text x="240" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#558b2f">Flush (later, batched)</text>
+
+    <text x="24" y="268" font-family="Consolas, monospace" font-size="11" fill="#546e7a">L0 SST</text>
+    <rect x="24" y="274" width="402" height="28" fill="#c8e6c9" stroke="#1b5e20" rx="2"/>
+    <text x="225" y="292" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">one sequential write of sorted block</text>
+
+    <rect x="24" y="320" width="402" height="70" fill="#f1f8e9" stroke="#aed581" rx="4"/>
+    <text x="40" y="344" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">On the Put hot path</text>
+    <text x="40" y="366" font-family="Consolas, monospace" font-size="11" fill="#37474f">append WAL (+ optional sync) then insert MemTable</text>
+    <text x="40" y="382" font-family="Consolas, monospace" font-size="11" fill="#37474f">no leaf-page read for each random key</text>
+
+    <text x="225" y="418" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">latency ~ sequential bandwidth / WAL sync</text>
+  </g>
+
+  <text x="500" y="530" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#455a64">Typical throughput factor (seq vs small random): HDD ~100-200x | SATA SSD ~5-20x | NVMe ~2-10x | per-Put fsync often ~1-3x</text>
+  <text x="500" y="548" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">Order-of-magnitude only; depends on QD, block size, and sync policy</text>
+</svg>

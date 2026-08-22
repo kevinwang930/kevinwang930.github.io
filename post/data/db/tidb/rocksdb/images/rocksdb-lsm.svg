@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="How RocksDB LSM works">
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">How the LSM works</text>
+  <text x="500" y="44" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Write -&gt; WAL + MemTable; Flush to L0; Compaction merges levels; Get searches newest first</text>
+
+  <g transform="translate(30,70)">
+    <rect width="150" height="60" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="75" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">WriteBatch</text>
+    <text x="75" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">Put / Delete</text>
+  </g>
+  <line x1="180" y1="100" x2="220" y2="100" stroke="#37474f" stroke-width="1.5"/>
+  <polygon points="220,95 232,100 220,105" fill="#37474f"/>
+
+  <g transform="translate(240,70)">
+    <rect width="130" height="60" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="65" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">WAL</text>
+    <text x="65" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">durable *.log</text>
+  </g>
+  <line x1="370" y1="100" x2="410" y2="100" stroke="#37474f" stroke-width="1.5"/>
+  <polygon points="410,95 422,100 410,105" fill="#37474f"/>
+
+  <g transform="translate(430,70)">
+    <rect width="150" height="60" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="75" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">MemTable</text>
+    <text x="75" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">+ sequence</text>
+  </g>
+  <line x1="505" y1="130" x2="505" y2="165" stroke="#37474f" stroke-width="1.5"/>
+  <polygon points="500,165 505,177 510,165" fill="#37474f"/>
+  <text x="520" y="155" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Flush</text>
+
+  <g transform="translate(430,185)">
+    <rect width="150" height="48" fill="#c8e6c9" stroke="#1b5e20" rx="4"/>
+    <text x="75" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">imm_ -&gt; L0 SST</text>
+  </g>
+
+  <g transform="translate(30,185)">
+    <rect width="200" height="100" fill="#ffffff" stroke="#90a4ae" rx="4"/>
+    <text x="16" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Get / Iterator</text>
+    <text x="16" y="46" font-family="Consolas, monospace" font-size="10" fill="#546e7a">1. mem_ / imm_</text>
+    <text x="16" y="66" font-family="Consolas, monospace" font-size="10" fill="#546e7a">2. L0 (overlap OK)</text>
+    <text x="16" y="86" font-family="Consolas, monospace" font-size="10" fill="#546e7a">3. L1..Ln (binary)</text>
+  </g>
+
+  <g transform="translate(40,320)">
+    <rect width="920" height="200" fill="#ffffff" stroke="#455a64" stroke-width="1.4" rx="5"/>
+    <text x="20" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#263238">Leveled compaction (when a level is over target)</text>
+
+    <rect x="20" y="48" width="280" height="130" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+    <text x="160" y="72" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">1. Pick</text>
+    <text x="36" y="98" font-family="Consolas, monospace" font-size="10" fill="#37474f">score L0 file count /</text>
+    <text x="36" y="116" font-family="Consolas, monospace" font-size="10" fill="#37474f">Li bytes vs target</text>
+    <text x="36" y="134" font-family="Consolas, monospace" font-size="10" fill="#37474f">overlapping SSTs from</text>
+    <text x="36" y="152" font-family="Consolas, monospace" font-size="10" fill="#37474f">Li and Li+1</text>
+
+    <rect x="320" y="48" width="280" height="130" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="460" y="72" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">2. Merge</text>
+    <text x="336" y="98" font-family="Consolas, monospace" font-size="10" fill="#37474f">merge by user key</text>
+    <text x="336" y="116" font-family="Consolas, monospace" font-size="10" fill="#37474f">keep highest seq needed</text>
+    <text x="336" y="134" font-family="Consolas, monospace" font-size="10" fill="#37474f">drop covered tombstones</text>
+    <text x="336" y="152" font-family="Consolas, monospace" font-size="10" fill="#37474f">emit sorted SST(s)</text>
+
+    <rect x="620" y="48" width="280" height="130" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="760" y="72" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">3. Install</text>
+    <text x="636" y="98" font-family="Consolas, monospace" font-size="10" fill="#37474f">VersionEdit: add outs,</text>
+    <text x="636" y="116" font-family="Consolas, monospace" font-size="10" fill="#37474f">delete inputs</text>
+    <text x="636" y="134" font-family="Consolas, monospace" font-size="10" fill="#37474f">LogAndApply -&gt; MANIFEST</text>
+    <text x="636" y="152" font-family="Consolas, monospace" font-size="10" fill="#37474f">new SuperVersion</text>
+  </g>
+</svg>

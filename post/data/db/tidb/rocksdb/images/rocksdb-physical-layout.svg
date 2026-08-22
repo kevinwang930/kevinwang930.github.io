@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-label="RocksDB on-disk directory layout">
+  <rect width="1000" height="480" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Physical layout (one DB directory)</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Shared WAL + Manifest; SST files per column family (paths may be CF-specific)</text>
+
+  <g transform="translate(40,70)">
+    <rect width="920" height="380" fill="#ffffff" stroke="#455a64" stroke-width="1.5" rx="5"/>
+    <text x="20" y="28" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#263238">/data/tikv/db  (example kvdb)</text>
+
+    <rect x="20" y="48" width="280" height="100" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="36" y="72" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Recovery / meta</text>
+    <text x="36" y="96" font-family="Consolas, monospace" font-size="11" fill="#37474f">CURRENT</text>
+    <text x="36" y="116" font-family="Consolas, monospace" font-size="11" fill="#37474f">MANIFEST-*</text>
+    <text x="36" y="136" font-family="Consolas, monospace" font-size="11" fill="#37474f">OPTIONS-*, IDENTITY</text>
+
+    <rect x="320" y="48" width="280" height="100" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="336" y="72" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">WAL (shared)</text>
+    <text x="336" y="96" font-family="Consolas, monospace" font-size="11" fill="#37474f">000123.log</text>
+    <text x="336" y="116" font-family="Consolas, monospace" font-size="11" fill="#37474f">000124.log</text>
+    <text x="336" y="136" font-family="Consolas, monospace" font-size="10" fill="#78909c">all CF writes append here</text>
+
+    <rect x="620" y="48" width="280" height="100" fill="#eceff1" stroke="#90a4ae" rx="4"/>
+    <text x="636" y="72" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#546e7a">Locks / misc</text>
+    <text x="636" y="96" font-family="Consolas, monospace" font-size="11" fill="#37474f">LOCK</text>
+    <text x="636" y="116" font-family="Consolas, monospace" font-size="11" fill="#37474f">LOG, LOG.old.*</text>
+    <text x="636" y="136" font-family="Consolas, monospace" font-size="10" fill="#78909c">single-process lock file</text>
+
+    <rect x="20" y="170" width="290" height="180" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+    <text x="36" y="194" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">CF lock  SST</text>
+    <text x="36" y="220" font-family="Consolas, monospace" font-size="11" fill="#37474f">000010.sst  (L0)</text>
+    <text x="36" y="240" font-family="Consolas, monospace" font-size="11" fill="#37474f">000011.sst  (L0)</text>
+    <text x="36" y="260" font-family="Consolas, monospace" font-size="11" fill="#37474f">000040.sst  (L1)</text>
+    <text x="36" y="280" font-family="Consolas, monospace" font-size="11" fill="#37474f">...</text>
+    <text x="36" y="310" font-family="Consolas, monospace" font-size="10" fill="#78909c">key = encoded user key</text>
+    <text x="36" y="330" font-family="Consolas, monospace" font-size="10" fill="#78909c">value = Lock bytes</text>
+
+    <rect x="325" y="170" width="290" height="180" fill="#e3f2fd" stroke="#1565c0" rx="4"/>
+    <text x="341" y="194" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">CF write  SST</text>
+    <text x="341" y="220" font-family="Consolas, monospace" font-size="11" fill="#37474f">000020.sst  (L0)</text>
+    <text x="341" y="240" font-family="Consolas, monospace" font-size="11" fill="#37474f">000050.sst  (L1)</text>
+    <text x="341" y="260" font-family="Consolas, monospace" font-size="11" fill="#37474f">000051.sst  (L1)</text>
+    <text x="341" y="280" font-family="Consolas, monospace" font-size="11" fill="#37474f">...</text>
+    <text x="341" y="310" font-family="Consolas, monospace" font-size="10" fill="#78909c">key = user@commitTS</text>
+    <text x="341" y="330" font-family="Consolas, monospace" font-size="10" fill="#78909c">value = Write record</text>
+
+    <rect x="630" y="170" width="290" height="180" fill="#f3e5f5" stroke="#7b1fa2" rx="4"/>
+    <text x="646" y="194" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6a1b9a">CF default  SST</text>
+    <text x="646" y="220" font-family="Consolas, monospace" font-size="11" fill="#37474f">000030.sst  (L0)</text>
+    <text x="646" y="240" font-family="Consolas, monospace" font-size="11" fill="#37474f">000060.sst  (L1)</text>
+    <text x="646" y="260" font-family="Consolas, monospace" font-size="11" fill="#37474f">...</text>
+    <text x="646" y="290" font-family="Consolas, monospace" font-size="10" fill="#78909c">(+ Titan blob files if on)</text>
+    <text x="646" y="310" font-family="Consolas, monospace" font-size="10" fill="#78909c">key = user@startTS</text>
+    <text x="646" y="330" font-family="Consolas, monospace" font-size="10" fill="#78909c">value = user bytes / blob idx</text>
+  </g>
+</svg>
