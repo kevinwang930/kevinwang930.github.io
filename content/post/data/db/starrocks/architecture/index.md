@@ -1,7 +1,7 @@
 ---
 title: "StarRocks: cluster topology and MPP query path"
 date: 2026-08-22T15:00:00+02:00
-draft:true
+draft: true
 categories:
 - data
 - db
