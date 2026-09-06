@@ -129,7 +129,7 @@ When the FE **`Deployer`** calls brpc **`exec_plan_fragment`**, the worker deser
 
 **Exchange** between fragments does not go through the FE. A producing instance sends batches with **`transmit_chunk`** to consuming instances' brpc addresses from the fragment destinations map. The root fragment's **`ResultSink`** retains batches for the FE **`ResultReceiver`** to **`fetch_data`**. Status and profiles return on Thrift **`reportExecStatus`**.
 
-That FE-side deploy / fetch loop is in [cluster topology and MPP](../architecture/) §2.3.
+That FE-side deploy / fetch loop is in [cluster topology and MPP](../architecture/) §3.
 
 ---
 
@@ -160,7 +160,7 @@ FE catalog and **`TabletScheduler`** decisions are in the [architecture](../arch
 
 ### 3.4 Worked example: worker view of `GROUP BY`
 
-Continuing the `sales` example from [architecture](../architecture/) §3.3: tablets **T100** / **T101**, fragments **F0** (scan), **F1** (partial agg), **F2** (merge + result).
+Continuing the `sales` example from [architecture](../architecture/) §3: tablets **T100** / **T101**, fragments **F0** (scan), **F1** (partial agg), **F2** (merge + result).
 
 **BE-1 (F0 for T100).** Pipeline scan reads columnar segments for the pushed-down `dt` predicate, projects `region` / `amount`, feeds partial hash aggregate (or ships to F1 per plan). Output batches go to F1/F2 destinations via **`transmit_chunk`**.
 

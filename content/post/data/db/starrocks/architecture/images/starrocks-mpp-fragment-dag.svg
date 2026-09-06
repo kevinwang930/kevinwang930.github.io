@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="700" viewBox="0 0 1100 700" role="img" aria-label="MPP fragment DAG: planning PlanFragments then scheduling FragmentInstances">
+  <defs>
+    <marker id="dag-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="sch-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="700" fill="#f7f9fb"/>
+  <text x="550" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Fragment DAG: planning then scheduling</text>
+  <text x="550" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Left is ExecPlan (one PlanFragment per stage, Exchange edges). Right is ExecutionDAG (FragmentInstances and many-to-many shuffle).</text>
+
+  <rect x="20" y="62" width="520" height="618" fill="#ffffff" stroke="#90caf9" stroke-width="1.5" rx="6"/>
+  <text x="280" y="86" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Planning  --  ExecPlan.fragments</text>
+  <text x="280" y="106" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">one box = one PlanFragment (stage)</text>
+
+  <g transform="translate(110,122)">
+    <rect width="320" height="64" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5" rx="5"/>
+    <text x="160" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">F0  PlanFragment</text>
+    <text x="160" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">GATHER + ResultSink</text>
+    <text x="160" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">UNPARTITIONED</text>
+  </g>
+  <line x1="270" y1="248" x2="270" y2="190" stroke="#37474f" stroke-width="1.5" marker-end="url(#dag-arr)"/>
+  <text x="330" y="224" font-family="Consolas, monospace" font-size="10" fill="#546e7a">edge GATHER</text>
+
+  <g transform="translate(110,252)">
+    <rect width="320" height="64" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="160" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">F1  PlanFragment</text>
+    <text x="160" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">AGGREGATE merge finalize</text>
+    <text x="160" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH_PARTITIONED: group key</text>
+  </g>
+  <line x1="270" y1="378" x2="270" y2="320" stroke="#37474f" stroke-width="1.5" marker-end="url(#dag-arr)"/>
+  <text x="330" y="354" font-family="Consolas, monospace" font-size="10" fill="#546e7a">edge HASH group key</text>
+
+  <g transform="translate(90,382)">
+    <rect width="360" height="72" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="180" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">F2  PlanFragment</text>
+    <text x="180" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">HashJoin + local AGGREGATE</text>
+    <text x="180" y="58" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH_PARTITIONED: join key</text>
+  </g>
+  <line x1="160" y1="536" x2="200" y2="458" stroke="#37474f" stroke-width="1.5" marker-end="url(#dag-arr)"/>
+  <line x1="380" y1="536" x2="340" y2="458" stroke="#37474f" stroke-width="1.5" marker-end="url(#dag-arr)"/>
+  <text x="118" y="504" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH</text>
+  <text x="392" y="504" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH</text>
+
+  <g transform="translate(36,540)">
+    <rect width="200" height="72" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="100" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">F3  PlanFragment</text>
+    <text x="100" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">OlapScan + DataSink</text>
+    <text x="100" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">RANDOM / tablet</text>
+  </g>
+  <g transform="translate(304,540)">
+    <rect width="200" height="72" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="100" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">F4  PlanFragment</text>
+    <text x="100" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">OlapScan + DataSink</text>
+    <text x="100" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">RANDOM / tablet</text>
+  </g>
+  <text x="280" y="662" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">visitPhysicalDistribution cuts each PhysicalDistributionOperator</text>
+
+  <rect x="560" y="62" width="520" height="618" fill="#ffffff" stroke="#81c784" stroke-width="1.5" rx="6"/>
+  <text x="820" y="86" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Scheduling  --  ExecutionDAG</text>
+  <text x="820" y="106" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">one stage = many FragmentInstances</text>
+
+  <g transform="translate(690,122)">
+    <rect width="260" height="64" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5" rx="5"/>
+    <text x="130" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">F0  instances</text>
+    <text x="130" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">1 instance  ResultSink</text>
+    <text x="130" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">FE fetch_data</text>
+  </g>
+  <line x1="820" y1="248" x2="820" y2="190" stroke="#1565c0" stroke-width="1.4" marker-end="url(#sch-arr)"/>
+  <text x="878" y="224" font-family="Consolas, monospace" font-size="10" fill="#1565c0">GATHER</text>
+
+  <g transform="translate(650,252)">
+    <rect width="340" height="64" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="170" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">F1  instances</text>
+    <rect x="16" y="28" width="148" height="28" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="90" y="47" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  region bucket 0</text>
+    <rect x="176" y="28" width="148" height="28" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="250" y="47" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  region bucket 1</text>
+  </g>
+  <line x1="760" y1="378" x2="760" y2="320" stroke="#1565c0" stroke-width="1.4" marker-end="url(#sch-arr)"/>
+  <line x1="880" y1="378" x2="880" y2="320" stroke="#1565c0" stroke-width="1.4" marker-end="url(#sch-arr)"/>
+  <text x="908" y="354" font-family="Consolas, monospace" font-size="10" fill="#1565c0">HASH region</text>
+
+  <g transform="translate(650,382)">
+    <rect width="340" height="72" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="170" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">F2  instances</text>
+    <rect x="16" y="28" width="148" height="36" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="90" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  join bucket 0</text>
+    <rect x="176" y="28" width="148" height="36" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="250" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  join bucket 1</text>
+  </g>
+
+  <line x1="676" y1="536" x2="740" y2="458" stroke="#1565c0" stroke-width="1.3" marker-end="url(#sch-arr)"/>
+  <line x1="676" y1="536" x2="860" y2="458" stroke="#1565c0" stroke-width="1.3" marker-end="url(#sch-arr)"/>
+  <line x1="964" y1="536" x2="740" y2="458" stroke="#1565c0" stroke-width="1.3" marker-end="url(#sch-arr)"/>
+  <line x1="964" y1="536" x2="860" y2="458" stroke="#1565c0" stroke-width="1.3" marker-end="url(#sch-arr)"/>
+  <text x="820" y="500" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">transmit_chunk  many-to-many</text>
+
+  <g transform="translate(576,540)">
+    <rect width="200" height="88" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="100" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">F3  instances</text>
+    <rect x="12" y="28" width="176" height="24" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="100" y="45" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  BE-1  tablet T100</text>
+    <rect x="12" y="56" width="176" height="24" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="100" y="73" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  BE-2  tablet T101</text>
+  </g>
+  <g transform="translate(864,540)">
+    <rect width="200" height="88" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="100" y="18" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">F4  instances</text>
+    <rect x="12" y="28" width="176" height="24" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="100" y="45" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  BE-2  tablet T200</text>
+    <rect x="12" y="56" width="176" height="24" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="100" y="73" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">I  BE-3  tablet T201</text>
+  </g>
+  <text x="820" y="662" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">computeFragmentInstances assigns workers; same edge, N x M shuffle</text>
+</svg>

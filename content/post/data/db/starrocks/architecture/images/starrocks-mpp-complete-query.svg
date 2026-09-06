@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Complete MPP query: two scans, hash join, two-phase aggregate, GATHER">
+  <defs>
+    <marker id="cq-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="560" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Complete query: shuffle join and two-phase aggregate</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#607d8b">orders JOIN customers GROUP BY region  --  five PlanFragments</text>
+
+  <g transform="translate(300,60)">
+    <rect width="400" height="64" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5" rx="5"/>
+    <text x="200" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">F0  UNPARTITIONED</text>
+    <text x="200" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">GATHER + ResultSink</text>
+  </g>
+  <line x1="500" y1="188" x2="500" y2="128" stroke="#37474f" stroke-width="1.5" marker-end="url(#cq-arr)"/>
+  <text x="568" y="164" font-family="Consolas, monospace" font-size="10" fill="#546e7a">GATHER / fetch_data</text>
+
+  <g transform="translate(300,192)">
+    <rect width="400" height="64" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="200" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">F1  HASH_PARTITIONED: region</text>
+    <text x="200" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">AGGREGATE merge finalize</text>
+  </g>
+  <line x1="500" y1="320" x2="500" y2="260" stroke="#37474f" stroke-width="1.5" marker-end="url(#cq-arr)"/>
+  <text x="588" y="296" font-family="Consolas, monospace" font-size="10" fill="#546e7a">transmit_chunk HASH region</text>
+
+  <g transform="translate(240,324)">
+    <rect width="520" height="80" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="260" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">F2  HASH_PARTITIONED: cust_id</text>
+    <text x="260" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">HASH JOIN on cust_id</text>
+    <text x="260" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">AGGREGATE update serialize STREAMING</text>
+  </g>
+
+  <line x1="230" y1="476" x2="380" y2="408" stroke="#37474f" stroke-width="1.5" marker-end="url(#cq-arr)"/>
+  <text x="248" y="448" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH cust_id</text>
+  <line x1="770" y1="476" x2="620" y2="408" stroke="#37474f" stroke-width="1.5" marker-end="url(#cq-arr)"/>
+  <text x="752" y="448" text-anchor="end" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH id</text>
+
+  <g transform="translate(40,480)">
+    <rect width="380" height="60" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="190" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">F3  OlapScan orders</text>
+    <text x="190" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">one instance per tablet</text>
+  </g>
+  <g transform="translate(580,480)">
+    <rect width="380" height="60" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="190" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">F4  OlapScan customers</text>
+    <text x="190" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">one instance per tablet</text>
+  </g>
+</svg>

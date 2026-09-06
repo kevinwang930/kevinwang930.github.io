@@ -24,7 +24,7 @@ Related: [Backend and Compute Node](../backend/).
 
 ## 1. Overview
 
-StarRocks speaks the **MySQL protocol** and ANSI SQL. Clients connect to any FE; the **leader FE** owns metadata writes and schedules work onto compute nodes. The FE that accepts SQL does **not** execute operators—that is the MPP split versus classic OLTP.
+StarRocks speaks the **MySQL protocol** and ANSI SQL. Clients connect to any FE; the **leader FE** owns metadata writes and schedules work onto compute nodes. **MPP** is the fundamental character of OLAP: a statement is a large **computation** over sharded tablets, so it must run as parallel stages on many workers. The FE that accepts SQL does **not** execute operators.
 
 | Piece | Language | Role in the cluster |
 |-------|----------|---------------------|
@@ -45,9 +45,7 @@ There is no external metadata service: FE metadata is replicated with **BDB JE**
 
 ---
 
-## 2. Architecture
-
-### 2.1 Cluster topology
+## 2. Cluster topology
 
 StarRocks keeps the surface small: **FE + BE** (shared-nothing) or **FE + CN + object storage** (shared-data). Nodes scale horizontally; FE metadata and data replicas have internal redundancy.
 
@@ -65,7 +63,7 @@ Each FE holds a full in-memory catalog copy backed by **BDB JE** (Berkeley DB Ja
 
 **Tablets as placement units.** OLAP tables are partitioned; each partition holds one or more **tablets** (the unit of sharding and replication). In shared-nothing, each **`LocalTablet`** has **`Replica`** objects on BEs; the FE **`TabletScheduler`** repairs and balances them. In shared-data, **`LakeTablet`** maps to a StarOS shard and object-storage segments. The Coordinator uses that placement map when assigning scan **`FragmentInstance`**s—worker storage layout is in the [Backend](../backend/) post.
 
-### 2.2 Frontend (FE)
+### 2.1 Frontend (FE)
 
 The FE process entry is **`StarRocksFE`** → **`StarRocksFEServer`**. **`GlobalStateMgr`** is the central singleton: it wires catalog, node registry, load/transaction managers, and HA state.
 
@@ -213,42 +211,49 @@ Coordinator ..> SystemInfoService
 
 On **shared-data** clusters the FE also starts **`StarMgrServer`** (StarOS metadata) alongside the BDB JE journal.
 
-### 2.3 MPP: PlanFragment planning and result collection
+### 2.2 FE ↔ worker protocols (query path)
 
-**MPP (Massively Parallel Processing)** means: one SQL statement becomes a **pipeline of stages**, each stage runs on **many machines at once**, and stages pass data to each other by **shuffling**—not by sharing memory in one process. That is the opposite of a classic single-node plan, where one server walks one operator tree end to end.
+| Direction | Protocol | Typical use |
+|-----------|----------|-------------|
+| Client → FE | MySQL | Interactive SQL, auth, result sets |
+| BE/CN → FE leader | Thrift **`HeartbeatService`** | Registration, master info, run mode |
+| BE → FE leader | Thrift **`FrontendService`** | `reportExecStatus`, task finish, load txn |
+| FE leader → BE/CN | brpc **`PInternalService`** | **`exec_plan_fragment`**, **`transmit_chunk`**, runtime filters, tablet writer |
+| FE leader → BE/CN | Thrift **`BackendService`** | Agent tasks, legacy sync APIs |
+| BE ↔ BE | brpc | Shuffle exchange, broadcast filters |
 
-In StarRocks a stage is a **`PlanFragment`**; each fragment runs as many **`FragmentInstance`**s on BE/CN workers; shuffle is **`transmit_chunk`** on **Exchange** edges. The FE only builds that plan, deploys instances, and pulls the root rows.
+The hot query path is **brpc/protobuf** on each node's **`brpc_port`**. Thrift remains for heartbeat, reporting, and tablet maintenance agents.
 
-OLAP needs this because analytics are large **computations** over sharded tablets—parallel workers finish the scan/join/agg faster than one node can. OLTP avoids it because its cost is the **transaction**: short updates want one node’s log and locks; MPP would make every small write a distributed commit.
+![StarRocks query path](images/starrocks-query-path.svg)
 
-| | OLTP | StarRocks MPP |
-|--|------|---------------|
-| Bottleneck | Transaction (commit, isolation) | Compute (scan / join / agg) |
-| Plan shape | One local operator tree | **`PlanFragment`** DAG across workers |
-| SQL endpoint | Executes | Plans and coordinates |
+---
 
+## 3. MPP: the OLAP execution model
 
-1. **Receive SQL** — **`ConnectProcessor.handleQuery()`** reads a MySQL **`COM_QUERY`**, parses it, and creates **`StmtExecutor`** bound to **`ConnectContext`**. Protocol looks like OLTP; steps 5–10 are MPP.
+**MPP (Massively Parallel Processing)** is the fundamental character of OLAP, not an optional accelerator. An analytical statement is a large **computation** over data that is already sharded into tablets. The only way to finish that computation at interactive latency is to run the same operators on **many machines at once** and move intermediate batches by **shuffle**—not to walk one operator tree in one process. StarRocks is built around that model: the FE plans and coordinates; BE/CN workers execute.
 
-2. **Analyze** — **`StmtExecutor.generateExecPlan()`** calls **`StatementPlanner.plan()`** → **`analyzeStatement()`** → **`Analyzer.analyze()`**. Catalog objects are resolved and partition-pruning metadata is collected.
+A stage is a **`PlanFragment`**: a **`PlanNode`** subtree that can run without an in-process call to another machine, plus a **`DataSink`**. An **edge** is the **Exchange** that connects two stages—the producer’s sink and the consumer’s **`ExchangeNode`**, carrying **`transmit_chunk`**. The **DAG** is those stages and edges: **`ExecPlan.fragments`** after **`visitPhysicalDistribution`** cuts the physical tree at every **`PhysicalDistributionOperator`**. The FE never joins those batches in its own heap.
 
-3. **Build logical plan** — **`RelationTransformer.transformWithSelectLimit()`** produces a **`LogicalPlan`** (logical operator tree + output columns).
+That is the opposite of classic OLTP, where the cost is the **SQL transaction** (one node’s log and locks) and a distributed shuffle would make every small write a distributed commit.
 
-4. **Optimize** — **`QueryOptimizer.optimize()`** runs CBO over a memo and outputs a physical **`OptExpression`** tree (scan/join/aggregate placement, runtime-filter hints).
+| | OLTP | StarRocks MPP (OLAP) |
+|--|------|----------------------|
+| What the statement *is* | A transaction | A computation |
+| Bottleneck | Commit, isolation, locks | Scan / join / agg CPU and IO |
+| Plan shape | One local operator tree | **`PlanFragment`** DAG + **`FragmentInstance`**s |
+| SQL endpoint | Executes | Plans, deploys, pulls the root |
 
-5. **Fragmentize (MPP split)** — Unlike OLTP's one tree, **`PlanFragmentBuilder.createPhysicalPlan()`** / **`PhysicalPlanTranslator.translate()`** cut the plan at **Exchange** boundaries into **`PlanFragment`** stages. Each fragment has a **`PlanNode`** subtree, **`DataPartition`**, and **`DataSink`** (shuffle or root **`ResultSink`**). **`createOutputFragment()`** may add a GATHER exchange; **`finalizeFragments()`** sets **`TResultSinkType.MYSQL_PROTOCAL`** on the root sink. Output is an **`ExecPlan`**.
+A typical analytical plan is two-phase: scan stages, a join stage (often with a local aggregate), a merge-aggregate stage, and a root GATHER into **`ResultSink`**. Data flows along edges toward the root (fragment 0 in **`EXPLAIN`**). Each Exchange is not drawn by hand: **`QueryOptimizer`** CBO picks a **join distribution** (shuffle / broadcast / colocate) and an **aggregate distribution** (local then global), then **`EnforceAndCostTask`** inserts a **`PhysicalDistributionOperator`**. **`visitPhysicalDistribution`** cuts the fragment DAG at those operators.
 
-6. **Schedule** — **`StmtExecutor.handleQueryStmt()`** builds **`DefaultCoordinator`**, registers the query in **`QeProcessorImpl`**, and calls **`execWithQueryDeployExecutor()`**. **`CoordinatorPreprocessor.computeFragmentInstances()`** maps tablets / scan ranges to BE replicas (shared-nothing) or warehouse CNs (shared-data) and builds an **`ExecutionDAG`** of **`FragmentInstance`** objects. Remote stages use **`RemoteFragmentAssignmentStrategy`**.
+![Fragment DAG: planning PlanFragments, then scheduling FragmentInstances](images/starrocks-mpp-fragment-dag.svg)
 
-7. **Deploy** — **`DefaultCoordinator.prepareExec()`** attaches a **`ResultReceiver`** to the root instance's worker. **`Deployer.deployFragments()`** sends **`TExecPlanFragmentParams`** via **`BackendServiceClient.execPlanFragmentAsync()`** (brpc **`exec_plan_fragment`**) to each **`FragmentInstanceExecState`**.
+The left half of the figure is **planning**: **`ExecPlan.fragments`**, one **`PlanFragment`** per stage, Exchange edges from **`PhysicalDistributionOperator`**. The right half is **scheduling**: **`ExecutionDAG`** unfolds each stage into **`FragmentInstance`**s (tablet replicas on the scan side, hash buckets on join/agg). The same edge becomes a many-to-many **`transmit_chunk`**.
 
-8. **Execute on workers** — Operators run on BE/CN (not on the FE session thread as in OLTP). Intermediate batches shuffle with **`transmit_chunk`**; the FE does not see that traffic. Pipeline execution on the worker is in [Backend and Compute Node](../backend/).
-
-9. **Report status** — workers call Thrift **`FrontendService.reportExecStatus`** → **`QeProcessorImpl`** → **`DefaultCoordinator.updateFragmentExecStatus()`**.
-
-10. **Collect results** — OLTP would return rows from the same process; here **`StmtExecutor`** loops **`coord.getNext()`** → **`ResultReceiver.getNext()`** → **`BackendServiceClient.fetchDataAsync()`** on the root worker, then encodes **`TResultBatch`** through **`MysqlChannel`**.
-
-**Fragment shape vs OLTP.** For `SELECT region, SUM(amount) … GROUP BY region` over two tablets, OLTP typically runs one local scan + aggregate. StarRocks MPP yields **F0** (scan instance per tablet), **F1** (partial hash aggregate + shuffle on group key), **F2** (merge aggregate + **`ResultSink`**)—parallel stages linked by Exchange, not a single-node tree.
+| DAG piece | Planning (`ExecPlan`) | Scheduling (`ExecutionDAG`) |
+|-----------|----------------------|------------------------------|
+| **Stage** | one **`PlanFragment`** (`planRoot`, `dataPartition`, `sink`) | N **`FragmentInstance`**s on BE/CN |
+| **Edge** | producer **`DataSink`** → dest **`ExchangeNode`** | instance × instance **`transmit_chunk`** |
+| **DAG** | fragment list after **`visitPhysicalDistribution`** | instances after **`computeFragmentInstances`** |
 
 ```plantuml
 @startuml
@@ -502,54 +507,1535 @@ FragmentInstance ..> PlanFragment : deploys
 @enduml
 ```
 
-### 2.4 FE ↔ worker protocols (query path)
+A MySQL **`COM_QUERY`** is how a session enters this machinery. **`StmtExecutor`** builds the DAG, **`DefaultCoordinator`** instantiates and deploys it, and the FE only **`fetch_data`**s the root.
 
-| Direction | Protocol | Typical use |
-|-----------|----------|-------------|
-| Client → FE | MySQL | Interactive SQL, auth, result sets |
-| BE/CN → FE leader | Thrift **`HeartbeatService`** | Registration, master info, run mode |
-| BE → FE leader | Thrift **`FrontendService`** | `reportExecStatus`, task finish, load txn |
-| FE leader → BE/CN | brpc **`PInternalService`** | **`exec_plan_fragment`**, **`transmit_chunk`**, runtime filters, tablet writer |
-| FE leader → BE/CN | Thrift **`BackendService`** | Agent tasks, legacy sync APIs |
-| BE ↔ BE | brpc | Shuffle exchange, broadcast filters |
+### 3.1 Statement generation
 
-The hot query path is **brpc/protobuf** on each node's **`brpc_port`**. Thrift remains for heartbeat, reporting, and tablet maintenance agents.
+**`ConnectProcessor.handleQuery()`** decodes the MySQL **`COM_QUERY`** payload to a SQL string. **`SqlParser.parse`** splits the string, walks the ANTLR tree with **`AstBuilder`**, and returns one **`StatementBase`** per statement. **`AstBuilder`** is the constructor: each `visit*` allocates the subclass and fills its fields. Names are still unresolved; this step does not plan or execute.
 
-![StarRocks query path](images/starrocks-query-path.svg)
+```java
+// ConnectProcessor.handleQuery
+originStmt = new String(bytes, 1, ending, StandardCharsets.UTF_8);
+List<StatementBase> stmts = parseStatements(originStmt);
+
+// ConnectProcessor.parseStatements
+return SqlParser.parse(originStmt, ctx.getSessionVariable());
+```
+
+```java
+// SqlParser.parseWithStarRocksDialect
+for (int idx = 0; idx < singleStatementContexts.size(); ++idx) {
+    HintCollector collector = new HintCollector(tokenStream, sessionVariable);
+    collector.collect(singleStatementContexts.get(idx));
+    AstBuilder astBuilder = astBuilderFactory.create(sqlMode, caseInsensitive, collector.getContextWithHintMap());
+    StatementBase statement = (StatementBase) astBuilder.visitSingleStatement(singleStatementContexts.get(idx));
+    statement.setOrigStmt(new OriginStatement(sql, idx));
+    statements.add(statement);
+}
+```
+
+A **`SELECT`** becomes **`QueryStatement(queryRelation)`**. **`INSERT VALUES`** wraps a **`ValuesRelation`** in a **`QueryStatement`** and hangs it on **`InsertStmt.queryStatement`**. **`UPDATE`** / **`DELETE`** store **`TableRef`**, assignments or USING, and **`wherePredicate`** only.
+
+```java
+// AstBuilder.visitQueryStatement
+QueryRelation queryRelation = (QueryRelation) visit(context.queryRelation());
+QueryStatement queryStatement = new QueryStatement(queryRelation);
+queryStatement.setQueryStartIndex(context.queryRelation().start.getStartIndex());
+return queryStatement;
+
+// AstBuilder.visitInsertStatement
+if (context.VALUES() != null) {
+    queryStatement = new QueryStatement(new ValuesRelation(rows, colNames, pos));
+} else {
+    queryStatement = (QueryStatement) visit(context.queryStatement());  // INSERT SELECT
+}
+return new InsertStmt(tableRef, partitionNames, label, columnAliases, queryStatement,
+        context.OVERWRITE() != null, properties, pos);
+
+// AstBuilder.visitUpdateStatement
+List<ColumnAssignment> assignments = visit(context.assignmentList().assignment(), ColumnAssignment.class);
+Expr where = context.where != null ? (Expr) visit(context.where) : null;
+return new UpdateStmt(tableRef, assignments, fromRelations, where, ctes, pos);
+
+// AstBuilder.visitDeleteStatement
+return new DeleteStmt(tableRef, partitionNames, usingRelations, where, ctes, pos);
+```
+
+```plantuml
+@startuml
+
+interface ParseNode {
+  + getPos() : NodePosition
+}
+
+abstract class StatementBase {
+  - pos : NodePosition
+  - explainLevel : ExplainLevel
+  - isExplain : boolean
+  # origStmt : OriginStatement
+  # hintNodes : List<HintNode>
+  # allQueryScopeHints : List<HintNode>
+}
+
+abstract class DmlStmt {
+  - txnId : long
+  # properties : Map<String, String>
+  + {abstract} getTableRef() : TableRef
+}
+
+class QueryStatement {
+  - queryRelation : QueryRelation
+  # outFileClause : OutFileClause
+  - queryStartIndex : int
+}
+
+class InsertStmt {
+  - tableRef : TableRef
+  - targetPartitionRef : PartitionRef
+  - targetPartitionIds : List<Long>
+  - targetColumnNames : List<String>
+  - queryStatement : QueryStatement
+  - resultExprs : ArrayList<Expr>
+  - targetTable : Table
+  - isOverwrite : boolean
+  - label : String
+}
+
+class UpdateStmt {
+  - tableRef : TableRef
+  - assignments : List<ColumnAssignment>
+  - fromRelations : List<Relation>
+  - wherePredicate : Expr
+  - commonTableExpressions : List<CTERelation>
+  - table : Table
+  - queryStatement : QueryStatement
+  - usePartialUpdate : boolean
+}
+
+class DeleteStmt {
+  - tableRef : TableRef
+  - partitionRef : PartitionRef
+  - usingRelations : List<Relation>
+  - wherePredicate : Expr
+  - commonTableExpressions : List<CTERelation>
+  - table : Table
+  - queryStatement : QueryStatement
+  - deleteConditions : List<Predicate>
+  - jobId : long
+}
+
+abstract class Relation {
+  - scope : Scope
+  # alias : TableName
+}
+
+abstract class QueryRelation {
+  # sortClause : List<OrderByElement>
+  # limit : LimitElement
+  - cteRelations : List<CTERelation>
+}
+
+class SelectRelation {
+  - selectList : SelectList
+  - outputExpr : List<Expr>
+  - predicate : Expr
+  - groupBy : List<Expr>
+  - aggregate : List<FunctionCallExpr>
+  - having : Expr
+  - isDistinct : boolean
+  - relation : Relation
+}
+
+class ValuesRelation {
+  - rows : List<List<Expr>>
+  - outputColumnTypes : List<Type>
+  - isNullValues : boolean
+}
+
+class TableRef {
+  - tableName : QualifiedName
+  - partitionRef : PartitionRef
+  - alias : String
+  - pos : NodePosition
+}
+
+class ColumnAssignment {
+  - column : String
+  - expr : Expr
+  - pos : NodePosition
+}
+
+ParseNode <|.. StatementBase
+ParseNode <|.. Relation
+ParseNode <|.. TableRef
+ParseNode <|.. ColumnAssignment
+StatementBase <|-- QueryStatement
+StatementBase <|-- DmlStmt
+DmlStmt <|-- InsertStmt
+DmlStmt <|-- UpdateStmt
+DmlStmt <|-- DeleteStmt
+Relation <|-- QueryRelation
+QueryRelation <|-- SelectRelation
+QueryRelation <|-- ValuesRelation
+
+QueryStatement *-- QueryRelation : queryRelation
+InsertStmt *-- QueryStatement : queryStatement
+InsertStmt --> TableRef : tableRef
+UpdateStmt *-- QueryStatement : queryStatement
+UpdateStmt --> TableRef : tableRef
+UpdateStmt *-- ColumnAssignment : assignments
+DeleteStmt *-- QueryStatement : queryStatement
+DeleteStmt --> TableRef : tableRef
+
+@enduml
+```
+
+Generation ends when each **`StatementBase`** is on the list. The next object is **`StmtExecutor`**: **`execute()`** → **`generateExecPlan()`** → **`StatementPlanner.plan(parsedStmt, context)`**. That call is the whole plan: it returns an **`ExecPlan`**.
+
+```java
+executor = new StmtExecutor(ctx, parsedStmt);
+ctx.setExecutor(executor);
+executor.execute();
+// StmtExecutor.generateExecPlan:
+execPlan = StatementPlanner.plan(parsedStmt, context);
+```
+
+### 3.2 Plan
+
+**`StatementPlanner.plan()`** turns a **`StatementBase`** into an **`ExecPlan`**. Analyze is the first phase inside that method, not a separate pipeline. For DML, **`beginTransaction()`** may set **`DmlStmt.txnId`** (a load transaction, not a SQL `BEGIN`). After analyze and **`Authorizer.check`**, the method branches: a **`QueryStatement`** goes to **`createQueryPlan()`** (or **`createQueryPlanWithReTry`**); **`InsertStmt`** / **`UpdateStmt`** / **`DeleteStmt`** / **`MergeIntoStmt`** go to their planners.
+
+```java
+public static ExecPlan plan(StatementBase stmt, ConnectContext session, TResultSinkType resultSinkType) {
+    if (stmt instanceof DmlStmt) {
+        beginTransaction((DmlStmt) stmt, session);
+    }
+    plannerMetaLocker = new PlannerMetaLocker(session, stmt);
+    analyzeStatement(stmt, session, plannerMetaLocker);
+    Authorizer.check(stmt, session);
+
+    if (stmt instanceof QueryStatement) {
+        return createQueryPlan(queryStmt, session, resultSinkType);
+    } else if (stmt instanceof InsertStmt) {
+        return planInsertStmt(plannerMetaLocker, (InsertStmt) stmt, session);
+    } else if (stmt instanceof UpdateStmt) {
+        return new UpdatePlanner().plan((UpdateStmt) stmt, session);
+    } else if (stmt instanceof DeleteStmt) {
+        return new DeletePlanner().plan((DeleteStmt) stmt, session);
+    } else if (stmt instanceof MergeIntoStmt) {
+        return new MergeIntoPlanner().plan((MergeIntoStmt) stmt, session);
+    }
+}
+```
+
+**`analyzeStatement()`** takes the metadata lock and **`Analyzer.analyze()`** visits the AST: resolve names, types, and partition metadata. For **`UpdateStmt`** / **`DeleteStmt`** it also writes the rewritten source **`queryStatement`**. No fragments yet.
+
+```java
+analyzeStatement(stmt, session, plannerMetaLocker);
+// Analyzer.analyze(statement, session) → AnalyzerVisitor.visit(...)
+```
+
+For a query, **`createQueryPlan()`** is the rest of **`plan()`**: transform → optimize → fragmentize. The three phases below are that body.
+
+```java
+logicalPlan = new RelationTransformer(transformerContext).transformWithSelectLimit(query);
+optimizedPlan = optimizer.optimize(logicalPlan.getRoot(),
+        new PhysicalPropertySet(), new ColumnRefSet(logicalPlan.getOutputColumn()));
+return PlanFragmentBuilder.createPhysicalPlan(
+        optimizedPlan, session, logicalPlan.getOutputColumn(), columnRefFactory, colNames,
+        resultSinkType, !session.getSessionVariable().isSingleNodeExecPlan(), isShortCircuit);
+```
+
+### 3.3 Logical plan
+
+First phase of **`createQueryPlan()`**: turn the analyzed **`QueryRelation`** into a tree of **`OptExpression`**s. **`LogicalPlan`** is not a subclass of that tree; it holds the **root** **`OptExpression`** and the output **`ColumnRefOperator`**s.
+
+Each **`OptExpression`** is one node:
+
+- **`op`** — this node’s own operator (`LogicalOlapScanOperator`, `LogicalJoinOperator`, …).
+- **`inputs`** — the child **`OptExpression`**s. A scan has none; a filter or agg has one; a join has two.
+
+```plantuml
+@startuml
+
+class OptExpression {
+  - op : Operator
+  - inputs : List<OptExpression>
+}
+
+abstract class Operator
+
+abstract class LogicalOperator
+
+OptExpression *-- Operator : op
+OptExpression o-- OptExpression : inputs
+Operator <|-- LogicalOperator
+
+@enduml
+```
+
+**`QueryTransformer.plan()`** stacks one **`OptExpression`** per clause (`OptExprBuilder` wraps **`op`** + child builders until **`getRoot()`**). **`SqlToScalarOperatorTranslator`** turns each **`Expr`** into a **`ScalarOperator`** on that **`op`**.
+
+```java
+OptExprBuilder builder = planFrom(queryBlock.getRelation(), cteContext);  // FROM
+builder = filter(builder, queryBlock.getPredicate());                     // WHERE
+builder = aggregate(builder, queryBlock.getGroupBy(), queryBlock.getAggregate(), ...);
+builder = filter(builder, queryBlock.getHaving());                        // HAVING
+builder = window(builder, analyticExprList);                              // OVER()
+builder = project(...);                                                   // SELECT / ORDER BY exprs
+builder = distinct(builder, queryBlock, queryBlock.isDistinct(), ...);
+builder = sort(builder, queryBlock.getOrderBy(), orderByColumns);         // ORDER BY
+builder = limit(builder, queryBlock.getLimit());                          // LIMIT / OFFSET
+return new LogicalPlan(builder, outputColumns, correlation);
+```
+
+| SQL clause | AST field | Logical operator |
+|------------|-----------|------------------|
+| `FROM t` | `SelectRelation.relation` (`TableRelation`) | **`LogicalOlapScanOperator`** (or other **`LogicalScanOperator`**) |
+| `JOIN … ON` | **`JoinRelation`** (`joinOp`, `onPredicate`) | **`LogicalJoinOperator`** (`onPredicate` kept distinct from WHERE) |
+| `WHERE` | `SelectRelation.predicate` | **`LogicalFilterOperator`** (below agg) |
+| `GROUP BY` / `SUM()` | `groupBy`, `aggregate` | **`LogicalAggregationOperator`** (`groupingKeys`, `aggregations` → **`CallOperator`**) |
+| `GROUPING SETS` | `groupingSetsList` | **`LogicalRepeatOperator`** under the agg |
+| `HAVING` | `having` | **`LogicalFilterOperator`** (above agg) |
+| `SELECT` list | `outputExpr` | **`LogicalProjectOperator`** (`columnRefMap`) |
+| `DISTINCT` | `isDistinct` | **`LogicalAggregationOperator`** (group keys = output, empty agg map) |
+| `ORDER BY` | `orderBy` | **`LogicalTopNOperator`** |
+| `LIMIT` / `OFFSET` | `limit` | **`LogicalLimitOperator`**; session **`sql_select_limit`** is an extra wrap in **`transformWithSelectLimit()`** |
+| `OVER()` | analytic exprs | **`LogicalWindowOperator`** |
+| `UNION` / `EXCEPT` / `INTERSECT` | **`SetOperationRelation`** | **`LogicalUnionOperator`** / **`Except`** / **`Intersect`** |
+| subquery in expr | `Subquery` | **`LogicalApplyOperator`** |
+
+WHERE and HAVING are the same operator class; only stack position differs. A join’s **`onPredicate`** stays on **`LogicalJoinOperator`** so MV rewrite can tell ON from WHERE. Filter pushdown into the scan is a later CBO rewrite, not this transform.
+
+```plantuml
+@startuml
+
+abstract class Relation {
+  - scope : Scope
+  # alias : TableName
+}
+
+class SelectRelation {
+  - relation : Relation
+  - predicate : Expr
+  - groupBy : List<Expr>
+  - aggregate : List<FunctionCallExpr>
+  - having : Expr
+  - outputExpr : List<Expr>
+  - isDistinct : boolean
+}
+
+class JoinRelation {
+  - joinOp : JoinOperator
+  - left : Relation
+  - right : Relation
+  - onPredicate : Expr
+  - lateral : boolean
+}
+
+class LogicalPlan {
+  - root : OptExprBuilder
+  - outputColumn : List<ColumnRefOperator>
+  - correlation : List<ColumnRefOperator>
+}
+
+class OptExprBuilder {
+  - root : Operator
+  - inputs : List<OptExprBuilder>
+  - expressionMapping : ExpressionMapping
+}
+
+class OptExpression {
+  - op : Operator
+  - inputs : List<OptExpression>
+}
+
+abstract class LogicalOperator {
+  # predicate : ScalarOperator
+  # limit : long
+}
+
+class LogicalOlapScanOperator {
+  # table : Table
+  # colRefToColumnMetaMap : ImmutableMap<ColumnRefOperator, Column>
+}
+
+class LogicalJoinOperator {
+  - joinType : JoinOperator
+  - onPredicate : ScalarOperator
+}
+
+class LogicalFilterOperator
+
+class LogicalAggregationOperator {
+  - type : AggType
+  - groupingKeys : ImmutableList<ColumnRefOperator>
+  - aggregations : ImmutableMap<ColumnRefOperator, CallOperator>
+}
+
+class LogicalProjectOperator {
+  - columnRefMap : Map<ColumnRefOperator, ScalarOperator>
+}
+
+abstract class ScalarOperator {
+  # opType : OperatorType
+  # type : Type
+}
+
+class ColumnRefOperator {
+  - id : int
+  - name : String
+  - nullable : boolean
+}
+
+class CallOperator {
+  - fnName : String
+  - fn : Function
+  - isDistinct : boolean
+}
+
+Relation <|-- SelectRelation
+Relation <|-- JoinRelation
+
+SelectRelation ..> LogicalPlan : QueryTransformer.plan()
+LogicalPlan *-- OptExprBuilder : root
+OptExprBuilder --> OptExpression : getRoot()
+OptExpression *-- LogicalOperator
+OptExpression o-- OptExpression : inputs
+LogicalOperator <|-- LogicalOlapScanOperator
+LogicalOperator <|-- LogicalJoinOperator
+LogicalOperator <|-- LogicalFilterOperator
+LogicalOperator <|-- LogicalAggregationOperator
+LogicalOperator <|-- LogicalProjectOperator
+
+LogicalJoinOperator --> ScalarOperator : onPredicate
+LogicalFilterOperator --> ScalarOperator : predicate
+LogicalProjectOperator --> ScalarOperator : columnRefMap
+LogicalAggregationOperator --> CallOperator : aggregations
+ScalarOperator <|-- ColumnRefOperator
+ScalarOperator <|-- CallOperator
+
+@enduml
+```
+
+The running query is revenue by customer region. Tables are not colocated: **`orders`** is hashed on **`cust_id`**, **`customers`** on **`id`**.
+
+```sql
+CREATE TABLE orders (
+    dt      DATE,
+    cust_id BIGINT,
+    amount  DECIMAL(12, 2)
+)
+DUPLICATE KEY(dt, cust_id)
+PARTITION BY RANGE(dt) (
+    PARTITION p2024 VALUES [('2024-01-01'), ('2025-01-01'))
+)
+DISTRIBUTED BY HASH(cust_id) BUCKETS 8;
+
+CREATE TABLE customers (
+    id     BIGINT,
+    region VARCHAR(32)
+)
+PRIMARY KEY(id)
+DISTRIBUTED BY HASH(id) BUCKETS 8;
+
+SELECT c.region, SUM(o.amount)
+FROM orders o
+JOIN customers c ON o.cust_id = c.id
+WHERE o.dt BETWEEN '2024-01-01' AND '2024-06-30'
+GROUP BY c.region;
+```
+
+**`planFrom`** builds the join; **`filter`** hangs WHERE on top of the join (not yet on the **`orders`** scan); **`aggregate`** then **`project`** produce the SELECT list. Each line below is one **`OptExpression`**: the name is **`op`**; indentation is **`inputs`**.
+
+```
+OptExpression  op=LogicalProject  { region, sum_amount }
+  OptExpression  op=LogicalAggregation  groupingKeys=[region]  aggregations={sum_amount: SUM(amount)}
+    OptExpression  op=LogicalFilter  predicate=(dt BETWEEN ...)
+      OptExpression  op=LogicalJoin  INNER  onPredicate=(cust_id = id)
+        OptExpression  op=LogicalOlapScan  orders     inputs=[]
+        OptExpression  op=LogicalOlapScan  customers  inputs=[]
+```
+
+### 3.4 Optimize
+
+**`QueryOptimizer.optimize()`** is the second phase of **`createQueryPlan()`**. The framework follows Graefe’s Cascades paper [[2]](#5-references): **Memo**, task-stack search, transformation and implementation **Rules**, and **property enforce**. A normal **`SELECT`** uses **`optimizeByCost`** (`OptimizerOptions` defaults to **`COST_BASED`**). **`optimizeByRule`** is rewrite only (MV’s own tree) and never initializes the Memo.
+
+![QueryOptimizer: rewrite, Cascades Memo search, extract, rewrite](images/starrocks-optimize-overview.svg)
+
+#### 3.4.1 Overall procedure
+
+**`optimizeByCost`** is a fixed pipeline:
+
+1. **Logical rewrite** — `rewriteAndValidatePlan` → `logicalRuleRewrite` (subquery, CTE inline, prune, pushdown) on the concrete **`OptExpression`** tree.
+2. **Init** — `memo.init(logicOperatorTree)` then `deriveAllGroupLogicalProperty`.
+3. **Memo search** — `memoOptimize`: extend the **`RuleSet`** for join reorder / implement, push `OptimizeGroupTask(rootGroup)`, run the **`TaskScheduler`** stack (transform, implement, **`EnforceAndCostTask`**).
+4. **Extract** — `extractBestPlan(requiredProperty, rootGroup)` rebuilds one physical **`OptExpression`** from the cheapest physical **`GroupExpression`**.
+5. **Physical rewrite** — `physicalRuleRewrite`, then feedback `dynamicRewrite`.
+
+What changes on the tree is **`op`** and which **`GroupExpression`** CBO kept. **`PlanFragmentBuilder`** later cuts at every **`PhysicalDistributionOperator`**.
+
+```java
+Optimizer optimizer = OptimizerFactory.create(optimizerContext);
+OptExpression optimizedPlan = optimizer.optimize(
+        logicalPlan.getRoot(),
+        new PhysicalPropertySet(),
+        new ColumnRefSet(logicalPlan.getOutputColumn()));
+
+OptExpression optimize(OptExpression logicOperatorTree, PhysicalPropertySet requiredProperty,
+        ColumnRefSet requiredColumns) {
+    prepare(logicOperatorTree);
+    prepareMvRewrite(...);
+    return optimizerOptions.isRuleBased() ?
+            optimizeByRule(logicOperatorTree, requiredProperty, requiredColumns) :
+            optimizeByCost(connectContext, logicOperatorTree, requiredProperty, requiredColumns);
+}
+
+OptExpression optimizeByCost(ConnectContext connectContext, OptExpression logicOperatorTree,
+        PhysicalPropertySet requiredProperty, ColumnRefSet requiredColumns) {
+    TaskContext rootTaskContext =
+            new TaskContext(context, requiredProperty, requiredColumns.clone(), Double.MAX_VALUE);
+    logicOperatorTree = rewriteAndValidatePlan(logicOperatorTree, rootTaskContext);
+    memo.init(logicOperatorTree);
+    memo.deriveAllGroupLogicalProperty();
+    memoOptimize(connectContext, memo, rootTaskContext);
+    OptExpression result = extractBestPlan(requiredProperty, memo.getRootGroup());
+    result = physicalRuleRewrite(connectContext, rootTaskContext, result);
+    result = dynamicRewrite(connectContext, rootTaskContext, result);
+    return result;
+}
+
+void memoOptimize(ConnectContext connectContext, Memo memo, TaskContext rootTaskContext) {
+    if (innerCrossJoinNode < sessionVariable.getCboMaxReorderNode()) {
+        if (innerCrossJoinNode > sessionVariable.getCboMaxReorderNodeUseExhaustive()) {
+            new ReorderJoinRule().transform(tree, context);
+            context.getRuleSet().addJoinCommutativityWithoutInnerRule();
+        } else {
+            context.getRuleSet().addJoinTransformationRules();  // commute / associate
+        }
+    }
+    context.getRuleSet().addAutoJoinImplementationRule();  // HashJoin + NestLoop
+    scheduler.pushTask(new OptimizeGroupTask(rootTaskContext, memo.getRootGroup()));
+    scheduler.executeTasks(rootTaskContext);
+}
+
+OptExpression extractBestPlan(PhysicalPropertySet requiredProperty, Group rootGroup) {
+    GroupExpression groupExpression = rootGroup.getBestExpression(requiredProperty);
+    List<PhysicalPropertySet> inputProperties = groupExpression.getInputProperties(requiredProperty);
+    List<OptExpression> childPlans = Lists.newArrayList();
+    for (int i = 0; i < groupExpression.arity(); ++i) {
+        childPlans.add(extractBestPlan(inputProperties.get(i), groupExpression.inputAt(i)));
+    }
+    return OptExpression.create(groupExpression.getOp(), childPlans);
+}
+```
+
+#### 3.4.2 Rules
+
+A **`Rule`** is one rewrite: match a subtree, optionally reject it, then emit zero or more equivalent **`OptExpression`** trees. It is identified by a **`RuleType`**, matched by a **`Pattern`**, gated by optional **`check(input, context)`** (default true), and realized by **`transform(input, context)`** (empty list means no change). **`promise()`** sets scheduler priority among valid rules (default 1).
+
+**`COST_BASED`** still means this **`Rule`** abstraction plus cost, not a separate non-rule planner. Applying a rule never mutates the matched expression in place inside the memo: **`ApplyRuleTask`** **`copyIn`s** each substitute as a new **`GroupExpression`**.
+
+StarRocks splits **`Rule`** into two subclasses by **what kind of operator `transform` returns**. **`TransformationRule`** is **logical → logical**: it explores equivalent logical plans (join commute, split agg / top-n, …). A new logical **`GroupExpression`** schedules another **`OptimizeExpressionTask`**. **`promise()`** stays 1. Example: **`JoinCommutativityRule`** turns `LogicalJoin(A, B)` into `LogicalJoin(B, A)`.
+
+**`ImplementationRule`** is **logical → physical**: it binds a logical operator to an executable physical one (hash join, olap scan, …). A new physical **`GroupExpression`** schedules **`EnforceAndCostTask`**. It overrides **`promise()`** to **2**, so implement tasks sit above transform on the scheduler stack and run first. Example: **`HashJoinImplementationRule`** turns `LogicalJoin` into `PhysicalHashJoin` with the same children.
+
+Both share the same match API (**`Pattern`** + **`check`** + **`transform`**). The difference is the substitute’s operator kind and the next Cascades task. Transformation widens the logical search space; implementation is the bridge into costing and property enforce. Cost, not the rule, chooses which physical expression **`extractBestPlan`** keeps.
+
+**`CombinationRule`** is a **`TransformationRule`** whose **`predecessorRules()`** is a batch (`PUSH_DOWN_PREDICATE_RULES`, `PRUNE_COLUMNS_RULES`); **`transform`** itself returns empty — the batch members do the work.
+
+**`Pattern`** is a tree of operator-type placeholders. **`Pattern.create(LOGICAL_JOIN)`** with two **`PATTERN_LEAF`** children matches any join whose children are unconstrained. **`RuleSet`** keeps two lists that mirror the subclass split: **`transformRules`** (constructor adds split-agg / top-n, …) and **`implementRules`** (starts as **`ALL_IMPLEMENT_RULES`**: scan, hash agg, filter, project, top-n — not join). **`memoOptimize`** appends join commute / associate and **`addAutoJoinImplementationRule`**.
+
+**`OptimizerContext`** holds **`RuleSet`**, **`OptimizerOptions`** (disabled **`RuleType`s**), **`TaskScheduler`**, and the **`Memo`**. Each Cascades task carries a **`TaskContext`**: the **`OptimizerContext`**, required **`PhysicalPropertySet`**, and **`upperBoundCost`**.
+
+The same **`Rule`** class runs in two engines:
+
+- **Before the memo** — `logicalRuleRewrite` pushes **`RewriteTreeTask`**: top-down match on the concrete tree, **`check`**, **`transform`**, replace in place (at most one expression). **`predecessorRules()`** runs before **`transform`**, which is how a **`CombinationRule`** batch executes.
+- **After extract** — `physicalRuleRewrite` uses **`TreeRewriteRule.rewrite`** on the chosen physical tree (prune shuffle, decode, scalar reuse), not **`Pattern`** / **`Binder`**.
+- **Inside the memo** — `OptimizeGroupTask` → `OptimizeExpressionTask` → `ApplyRuleTask` (below).
+
+```plantuml
+@startuml
+
+class OptimizerContext {
+  - ruleSet : RuleSet
+  - optimizerOptions : OptimizerOptions
+  - taskScheduler : TaskScheduler
+  - memo : Memo
+}
+
+class OptimizerOptions {
+  + isRuleDisable()
+}
+
+class TaskContext {
+  - requiredProperty : PhysicalPropertySet
+  - upperBoundCost : double
+}
+
+abstract class OptimizerTask {
+  # context : TaskContext
+  + execute()
+  + filterInValidRules()
+}
+
+class OptimizeGroupTask {
+  - group : Group
+}
+
+class OptimizeExpressionTask {
+  - groupExpression : GroupExpression
+  - isExplore : boolean
+  + getValidRules()
+}
+
+class ApplyRuleTask {
+  - groupExpression : GroupExpression
+  - rule : Rule
+}
+
+abstract class Rule {
+  - type : RuleType
+  - pattern : Pattern
+  + check()
+  + transform()
+  + promise()
+}
+
+abstract class TransformationRule
+abstract class ImplementationRule
+class CombinationRule {
+  - rules : List<Rule>
+}
+
+class JoinCommutativityRule
+class JoinAssociativityRule
+class SplitTwoPhaseAggRule
+
+abstract class JoinImplementationRule
+class HashJoinImplementationRule
+class NestLoopJoinImplementationRule
+class OlapScanImplementationRule
+class HashAggImplementationRule
+
+abstract class Pattern {
+  - children : List<Pattern>
+}
+
+class RuleSet {
+  - transformRules : List<Rule>
+  - implementRules : List<Rule>
+}
+
+class Binder {
+  + next()
+}
+
+OptimizerContext *-- RuleSet : ruleSet
+OptimizerContext *-- OptimizerOptions : optimizerOptions
+TaskContext *-- OptimizerContext : optimizerContext
+OptimizerTask o-- TaskContext : context
+OptimizerTask <|-- OptimizeGroupTask
+OptimizerTask <|-- OptimizeExpressionTask
+OptimizerTask <|-- ApplyRuleTask
+OptimizeGroupTask o-- Group : group
+OptimizeGroupTask ..> OptimizeExpressionTask : push logical GE
+OptimizeExpressionTask ..> RuleSet : getValidRules
+OptimizeExpressionTask ..> ApplyRuleTask : push valid Rule
+ApplyRuleTask o-- Rule : rule
+ApplyRuleTask ..> Binder
+
+Rule <|-- TransformationRule
+Rule <|-- ImplementationRule
+Rule o-- Pattern : pattern
+TransformationRule <|-- CombinationRule
+TransformationRule <|-- JoinCommutativityRule
+TransformationRule <|-- JoinAssociativityRule
+TransformationRule <|-- SplitTwoPhaseAggRule
+ImplementationRule <|-- JoinImplementationRule
+ImplementationRule <|-- OlapScanImplementationRule
+ImplementationRule <|-- HashAggImplementationRule
+JoinImplementationRule <|-- HashJoinImplementationRule
+JoinImplementationRule <|-- NestLoopJoinImplementationRule
+CombinationRule o-- Rule : rules
+RuleSet o-- Rule : transformRules
+RuleSet o-- Rule : implementRules
+Binder ..> Pattern
+Binder ..> GroupExpression
+
+@enduml
+```
+
+**`OptimizeGroupTask`** does not call **`Rule.check`**. It stops if **`group.getCostLowerBound(requiredProperty) >= upperBoundCost`** or **`group.hasBestExpression(requiredProperty)`**. Otherwise it pushes one **`OptimizeExpressionTask`** per logical **`GroupExpression`**, then one **`EnforceAndCostTask`** per physical expression already in the group.
+
+**`OptimizeExpressionTask.getValidRules`** takes all **`transformRules`**, and **`implementRules`** unless **`isExplore`**. **`filterInValidRules`** keeps a rule only if the expression has not **`hasRuleExplored`** it, **`pattern.matchWithoutChild`** fits, the rule is not disabled, and **`rule.exhausted`** is false. Surviving rules are sorted by **`promise`** into **`ApplyRuleTask`s**. The task also pushes **`DeriveStatsTask`** and **`ExploreGroupTask`** on each child group. The scheduler is a stack: child groups run first; implement (promise 2) sits above transform (promise 1) and therefore runs earlier.
+
+**`ApplyRuleTask`** uses **`Binder`**: children are **`Group`s**, so **`binder.next()`** yields each binding. Bindings are collected (**`check`** + **`transform`**), then each result is **`copyIn`** into the *same* group. A logical result becomes another **`OptimizeExpressionTask`**; a physical result becomes **`EnforceAndCostTask`**. The matched expression is then **`setRuleExplored`**.
+
+```java
+void OptimizeGroupTask.execute() {
+    if (group.getCostLowerBound(context.getRequiredProperty()) >= context.getUpperBoundCost()
+            || group.hasBestExpression(context.getRequiredProperty())) {
+        return;
+    }
+    for (int i = group.getLogicalExpressions().size() - 1; i >= 0; i--) {
+        pushTask(new OptimizeExpressionTask(context, group.getLogicalExpressions().get(i)));
+    }
+    for (int i = group.getPhysicalExpressions().size() - 1; i >= 0; i--) {
+        pushTask(new EnforceAndCostTask(context, group.getPhysicalExpressions().get(i)));
+    }
+}
+
+void filterInValidRules(GroupExpression groupExpression, List<Rule> candidateRules, List<Rule> validRules) {
+    OptimizerOptions optimizerOptions = context.getOptimizerContext().getOptimizerOptions();
+    for (Rule rule : candidateRules) {
+        if (groupExpression.hasRuleExplored(rule)
+                || !rule.getPattern().matchWithoutChild(groupExpression)
+                || optimizerOptions.isRuleDisable(rule.type())
+                || rule.exhausted(context.getOptimizerContext())) {
+            continue;
+        }
+        validRules.add(rule);
+    }
+}
+
+List<Rule> getValidRules() {
+    filterInValidRules(groupExpression, ruleSet.getTransformRules(), validRules);
+    if (!isExplore) {
+        filterInValidRules(groupExpression, ruleSet.getImplementRules(), validRules);
+    }
+    validRules.sort(Comparator.comparingInt(Rule::promise));
+    return validRules;
+}
+
+void ApplyRuleTask.execute() {
+    Binder binder = new Binder(optimizerContext, rule.getPattern(), groupExpression, ...);
+    List<OptExpression> newExpressions = Lists.newArrayList();
+    for (OptExpression extractExpr = binder.next(); extractExpr != null; extractExpr = binder.next()) {
+        if (rule.check(extractExpr, optimizerContext)) {
+            newExpressions.addAll(rule.transform(extractExpr, optimizerContext));
+        }
+    }
+    for (OptExpression expression : newExpressions) {
+        GroupExpression neu = memo.copyIn(groupExpression.getGroup(), expression).second;
+        if (neu.getOp().isLogical()) {
+            pushTask(new OptimizeExpressionTask(context, neu, isExplore));
+        } else {
+            pushTask(new EnforceAndCostTask(context, neu));
+        }
+    }
+    groupExpression.setRuleExplored(rule);
+}
+
+// HashJoinImplementationRule.check: not CROSS, ON has equality predicates
+List<OptExpression> transform(OptExpression input, OptimizerContext context) {
+    LogicalJoinOperator joinOperator = (LogicalJoinOperator) input.getOp();
+    PhysicalHashJoinOperator physicalHashJoin = new PhysicalHashJoinOperator(
+            joinOperator.getJoinType(), joinOperator.getOnPredicate(), ...);
+    return Lists.newArrayList(OptExpression.create(physicalHashJoin, input.getInputs()));
+}
+```
+
+On the running query, **`JoinCommutativityRule`** adds **`LogicalJoin(customers, orders)`**. **`HashJoinImplementationRule`** adds **`PhysicalHashJoin`** when ON has equality (`cust_id = id`); **`NestLoopJoinImplementationRule.check`** rejects that equi-join. Cost chooses which physical expression **`extractBestPlan`** keeps.
+
+#### 3.4.3 Memo
+
+The **Memo** is the Cascades search space: every alternative tried so far, keyed so equivalents share groups. A **`Group`** is a set of **logically equivalent** alternatives. A **`GroupExpression`** is one alternative: an **`op`** whose **`inputs`** are **`Group`s** (not child trees). Identity is **`(op, input group ids)`** — that is how **`copyIn`** detects a duplicate.
+
+```plantuml
+@startuml
+
+class Memo {
+  - groups : List<Group>
+  - groupExpressions : Map
+  - rootGroup : Group
+  + init()
+  + copyIn()
+}
+
+class Group {
+  - id : int
+  - logicalExpressions : List<GroupExpression>
+  - physicalExpressions : List<GroupExpression>
+  - lowestCostExpressions : Map
+}
+
+class GroupExpression {
+  - op : Operator
+  - inputs : List<Group>
+  - lowestCostTable : Map
+  - outputPropertyMap : Map
+}
+
+Memo o-- Group : groups
+Memo --> Group : rootGroup
+Group o-- GroupExpression : logical / physical
+GroupExpression o-- Group : inputs
+GroupExpression *-- Operator : op
+
+@enduml
+```
+
+**`memo.init`** **`copyIn`s** the rewritten tree bottom-up: one **`Group`** and one logical **`GroupExpression`** per node. Rule results call **`copyIn(targetGroup, expr)`** with **`targetGroup`** = the matched expression’s group, so equivalents stay together. If **`(op, inputs)`** already exists, the memo returns the old expression (and **`mergeGroup`** if it lived elsewhere). Implementation rules add **physical** expressions to the same groups; **`EnforceAndCostTask`** fills **`lowestCostTable`**.
+
+On the running query, **`init`** of the §3.3 tree is six groups:
+
+```
+G5  LogicalProject
+  G4  LogicalAggregation  groupingKeys=[region]
+    G3  LogicalFilter  predicate=(dt BETWEEN ...)
+      G2  LogicalJoin  INNER  onPredicate=(cust_id = id)
+        G0  LogicalOlapScan  orders
+        G1  LogicalOlapScan  customers
+```
+
+```
+G0  { LogicalOlapScan(orders) }
+G1  { LogicalOlapScan(customers) }
+G2  { LogicalJoin(G0, G1) }
+G3  { LogicalFilter(G2) }
+G4  { LogicalAggregation(G3) }
+G5  { LogicalProject(G4) }   // root
+```
+
+After commute and hash-join implement, **G2** holds:
+
+```
+G2  {
+  LogicalJoin(G0, G1)           // from init
+  LogicalJoin(G1, G0)           // JoinCommutativityRule
+  PhysicalHashJoin(G0, G1)      // HashJoinImplementationRule
+  PhysicalHashJoin(G1, G0)      // implement the commute
+}
+```
+
+**G0** gains **`PhysicalOlapScan(orders)`**. A second **`copyIn`** of **`LogicalJoin(G0, G1)`** hashes to the existing expression and is not inserted.
+
+```java
+GroupExpression init(OptExpression originExpression) {
+    GroupExpression rootGroupExpression = copyIn(null, originExpression).second;
+    rootGroup = rootGroupExpression.getGroup();
+    return rootGroupExpression;
+}
+
+Pair<Boolean, GroupExpression> copyIn(Group targetGroup, OptExpression expression) {
+    List<Group> inputs = Lists.newArrayList();
+    for (OptExpression input : expression.getInputs()) {
+        inputs.add(copyIn(null, input).second.getGroup());
+    }
+    GroupExpression groupExpression = new GroupExpression(expression.getOp(), inputs);
+    return insertGroupExpression(groupExpression, targetGroup);
+}
+
+// ApplyRuleTask: equivalents go into the same group as the matched expression
+copyIn(groupExpression.getGroup(), newExpression);
+```
+
+#### 3.4.4 Physical operator generation
+
+Physical operators appear only from **implementation rules** inside the memo: after **`copyIn`**, **`ApplyRuleTask`** pushes **`EnforceAndCostTask`**. Join and aggregate do not use separate task types. **`PhysicalDistributionOperator`** is not produced by an implementation rule; **`EnforceAndCostTask`** inserts it when a required layout is missing (§3.4.5–3.4.6).
+
+| Logical operator | Physical operator after implement |
+|------------------|-----------------------------------|
+| **`LogicalOlapScanOperator`** | **`PhysicalOlapScanOperator`** (`table`, `selectedPartitionId`, `selectedTabletId`; residual **`predicate`**) |
+| **`LogicalJoinOperator`** | **`PhysicalHashJoinOperator`** (`joinType`, `onPredicate`) |
+| **`LogicalAggregationOperator`** | **`PhysicalHashAggregateOperator`** (`type` **`LOCAL`** / **`GLOBAL`**, `isSplit`, `groupBys`) |
+| **`LogicalFilterOperator`** | **`PhysicalFilterOperator`**, or **`Operator.predicate`** on the scan when pushed |
+| **`LogicalProjectOperator`** | **`PhysicalProjectOperator.columnRefMap`**, or **`Operator.projection`** when folded |
+| **`LogicalTopNOperator`** | **`PhysicalTopNOperator`** (`orderSpec`, `sortPhase` **`PARTIAL`** / **`FINAL`**, `isSplit`) |
+| (no logical counterpart) | **`PhysicalDistributionOperator`** — enforcer only |
+
+```plantuml
+@startuml
+
+abstract class Operator {
+  # opType : OperatorType
+  # limit : long
+  # predicate : ScalarOperator
+  # projection : Projection
+}
+
+abstract class LogicalOperator
+abstract class PhysicalOperator
+
+abstract class PhysicalScanOperator {
+  # table : Table
+  # outputColumns : List<ColumnRefOperator>
+}
+
+class PhysicalOlapScanOperator {
+  - selectedPartitionId : List<Long>
+  - selectedTabletId : List<Long>
+}
+
+abstract class PhysicalJoinOperator {
+  # joinType : JoinOperator
+  # onPredicate : ScalarOperator
+}
+
+class PhysicalHashJoinOperator
+class PhysicalHashAggregateOperator {
+  - type : AggType
+  - groupBys : List<ColumnRefOperator>
+  - isSplit : boolean
+}
+
+class PhysicalDistributionOperator
+class PhysicalProjectOperator
+class PhysicalFilterOperator
+class PhysicalTopNOperator {
+  - sortPhase : SortPhase
+  - isSplit : boolean
+}
+
+Operator <|-- LogicalOperator
+Operator <|-- PhysicalOperator
+PhysicalOperator <|-- PhysicalScanOperator
+PhysicalOperator <|-- PhysicalJoinOperator
+PhysicalOperator <|-- PhysicalHashAggregateOperator
+PhysicalOperator <|-- PhysicalDistributionOperator
+PhysicalOperator <|-- PhysicalProjectOperator
+PhysicalOperator <|-- PhysicalFilterOperator
+PhysicalOperator <|-- PhysicalTopNOperator
+PhysicalScanOperator <|-- PhysicalOlapScanOperator
+PhysicalJoinOperator <|-- PhysicalHashJoinOperator
+
+@enduml
+```
+
+#### 3.4.5 EnforceAndCostTask
+
+**`EnforceAndCostTask`** runs only after a physical **`GroupExpression`** exists. It is one depth-first walk of that expression’s children — cost and property enforce together, not two passes:
+
+- **`requiredProperty`** flows **root → leaves** (`RequiredPropertyDeriver`). The root requirement is **`EMPTY`** (`optimizer.optimize(..., new PhysicalPropertySet(), ...)`).
+- **`outputProperty`** flows **leaves → root** (`OutputPropertyDeriver`). A scan delivers **`DISTRIBUTED BY`**; a join or agg derives from children’s outputs.
+- At each node, **`recordCostsAndEnforce`** compares this **`outputProperty`** to this **`requiredProperty`**. On distribution mismatch it inserts **`PhysicalDistributionOperator`**. The parent then reads the enforced spec as the child’s output.
+
+The walk is a stack, not a recursive Java call: **`optimizeChildGroup`** pushes a clone of this task, then **`OptimizeGroupTask`** for the child. When the child has a best expression, **`execute`** resumes and continues.
+
+Each visit is four steps:
+
+1. Read **`TaskContext.requiredProperty`**.
+2. **`RequiredPropertyDeriver`** → **`childrenRequiredProperties`** (each becomes that child’s **`TaskContext.requiredProperty`**).
+3. After children return: **`OutputPropertyDeriver`** → this **`outputProperty`**.
+4. **`recordCostsAndEnforce`**: if not **`isSatisfy`**, insert **`PhysicalDistributionOperator(required spec)`**.
+
+```java
+void initRequiredProperties() {
+    RequiredPropertyDeriver requiredPropertyDeriver = new RequiredPropertyDeriver(context);
+    childrenRequiredPropertiesList = requiredPropertyDeriver.getRequiredProps(groupExpression);
+}
+
+void execute() {
+    initRequiredProperties();
+    for (List<PhysicalPropertySet> childrenRequiredProperties : childrenRequiredPropertiesList) {
+        for (; curChildIndex < groupExpression.getInputs().size(); curChildIndex++) {
+            PhysicalPropertySet childRequiredProperty = childrenRequiredProperties.get(curChildIndex);
+            Group childGroup = groupExpression.getInputs().get(curChildIndex);
+            GroupExpression childBestExpr = childGroup.getBestExpression(childRequiredProperty);
+            if (childBestExpr == null) {
+                optimizeChildGroup(childRequiredProperty, childGroup);
+                return;
+            }
+            childrenOutputProperties.add(childBestExpr.getOutputProperty(childRequiredProperty));
+        }
+        OutputPropertyDeriver outputPropertyDeriver = new OutputPropertyDeriver(groupExpression,
+                context.getRequiredProperty(), childrenOutputProperties);
+        recordCostsAndEnforce(outputPropertyDeriver.getOutputProperty(), childrenRequiredProperties);
+    }
+}
+
+void optimizeChildGroup(PhysicalPropertySet inputProperty, Group childGroup) {
+    pushTask((EnforceAndCostTask) clone());
+    TaskContext taskContext = new TaskContext(context.getOptimizerContext(), inputProperty,
+            context.getRequiredColumns(), context.getUpperBoundCost() - curTotalCost);
+    pushTask(new OptimizeGroupTask(taskContext, childGroup));
+}
+
+void recordCostsAndEnforce(PhysicalPropertySet outputProperty,
+        List<PhysicalPropertySet> childrenOutputProperties) {
+    PhysicalPropertySet requiredProperty = context.getRequiredProperty();
+    if (!outputProperty.getDistributionProperty()
+            .isSatisfy(requiredProperty.getDistributionProperty())) {
+        enforceDistribute(outputProperty);
+    }
+}
+
+PhysicalPropertySet enforceDistribute(PhysicalPropertySet oldOutputProperty) {
+    PhysicalPropertySet requiredPropertySet = oldOutputProperty.copy();
+    requiredPropertySet.setDistributionProperty(context.getRequiredProperty()
+            .getDistributionProperty().getNullStrictProperty());
+    GroupExpression enforcer = requiredPropertySet.getDistributionProperty()
+            .appendEnforcers(groupExpression.getGroup());
+    return updateCostAndOutputPropertySet(enforcer, oldOutputProperty, requiredPropertySet);
+}
+
+GroupExpression appendEnforcers(Group child) {
+    return new GroupExpression(new PhysicalDistributionOperator(spec), Lists.newArrayList(child));
+}
+```
+
+On the running statement, solid edges are **down** (`requiredProperty`); dotted edges are **up** (`outputProperty`):
+
+```plantuml
+@startuml
+top to bottom direction
+
+rectangle "GLOBAL HashAggregate\nrequiredProperty = EMPTY" as G
+rectangle "LOCAL HashAggregate\nrequiredProperty = SHUFFLE_AGG(region)" as L
+rectangle "HashJoin ON cust_id = id\nrequiredProperty = EMPTY" as J
+rectangle "OlapScan orders\nrequired = SHUFFLE_JOIN(cust_id)\noutput = LOCAL(cust_id)" as So
+rectangle "OlapScan customers\nrequired = SHUFFLE_JOIN(id)\noutput = LOCAL(id)" as Sc
+
+G --> L : requiredProperty
+L --> J : requiredProperty
+J --> So : requiredProperty
+J --> Sc : requiredProperty
+
+So ..> J : outputProperty
+Sc ..> J : outputProperty
+J ..> L : outputProperty
+L ..> G : outputProperty
+
+@enduml
+```
+
+```plantuml
+@startuml
+
+class EnforceAndCostTask {
+  - groupExpression : GroupExpression
+  - childrenRequiredPropertiesList : List
+}
+
+class RequiredPropertyDeriver {
+  + visitPhysicalHashJoin()
+  + visitPhysicalHashAggregate()
+}
+
+class OutputPropertyDeriver {
+  + visitPhysicalHashJoin()
+  + visitPhysicalHashAggregate()
+}
+
+EnforceAndCostTask --> RequiredPropertyDeriver : getRequiredProps
+EnforceAndCostTask --> OutputPropertyDeriver : getOutputProperty
+EnforceAndCostTask ..> OptimizeGroupTask : pushTask child
+EnforceAndCostTask ..> EnforceAndCostTask : pushTask clone
+RequiredPropertyDeriver ..> PhysicalHashJoinOperator : visitPhysicalHashJoin
+RequiredPropertyDeriver ..> PhysicalHashAggregateOperator : visitPhysicalHashAggregate
+OutputPropertyDeriver ..> PhysicalHashJoinOperator : visitPhysicalHashJoin
+OutputPropertyDeriver ..> PhysicalHashAggregateOperator : visitPhysicalHashAggregate
+
+@enduml
+```
+
+#### 3.4.6 Distribution
+
+**Distribution** is how a node’s output rows are laid out across **tablets / hash buckets**. Catalog metadata is **`DistributionInfo`**. CBO carries a **`DistributionSpec`** inside **`PhysicalPropertySet.distributionProperty`**, and inserts a **`PhysicalDistributionOperator`** only when delivered layout does not **`isSatisfy`** the parent requirement. Fragmentize later cuts only where that operator exists; root **`ResultSink`** GATHER is **`createOutputFragment()`**, not this path.
+
+**`DistributionInfo`** is table metadata from `CREATE TABLE` on **`OlapTable`**. **`PARTITION BY`** (date ranges) is a different catalog object. **`DISTRIBUTED BY`** is this one: how **each partition** splits into tablets. For **`orders`**, **`DISTRIBUTED BY HASH(cust_id) BUCKETS 8`** is **`HashDistributionInfo`** (`cust_id`, `bucketNum = 8`). **`RANDOM`** is **`RandomDistributionInfo`**. Replica placement is not this object.
+
+```plantuml
+@startuml
+
+class OlapTable {
+  - defaultDistributionInfo : DistributionInfo
+}
+
+abstract class DistributionInfo {
+  # type : DistributionInfoType
+}
+
+class HashDistributionInfo {
+  - distributionColumnIds : List<ColumnId>
+  - bucketNum : int
+}
+
+class RandomDistributionInfo
+
+OlapTable *-- DistributionInfo : defaultDistributionInfo
+DistributionInfo <|-- HashDistributionInfo
+DistributionInfo <|-- RandomDistributionInfo
+
+@enduml
+```
+
+**`DistributionSpec`** is CBO’s encoding of a layout on an **`OptExpression`**, not a catalog field. Two specs are built independently and compared by **`isSatisfy`**.
+
+```plantuml
+@startuml
+
+class PhysicalPropertySet {
+  - distributionProperty : DistributionProperty
+  - sortProperty : SortProperty
+}
+
+class DistributionProperty {
+  - spec : DistributionSpec
+}
+
+class DistributionSpec {
+  # type : DistributionType
+}
+
+class HashDistributionSpec {
+  - hashDistributionDesc : HashDistributionDesc
+}
+
+class ReplicatedDistributionSpec
+class GatherDistributionSpec
+class AnyDistributionSpec
+
+class HashDistributionDesc {
+  - distributionCols : List<DistributionCol>
+  - sourceType : SourceType
+}
+
+enum SourceType <<enumeration>> {
+  LOCAL
+  SHUFFLE_JOIN
+  SHUFFLE_AGG
+  BUCKET
+}
+
+PhysicalPropertySet *-- DistributionProperty : distributionProperty
+DistributionProperty *-- DistributionSpec : spec
+DistributionSpec <|-- HashDistributionSpec
+DistributionSpec <|-- ReplicatedDistributionSpec
+DistributionSpec <|-- GatherDistributionSpec
+DistributionSpec <|-- AnyDistributionSpec
+HashDistributionSpec *-- HashDistributionDesc : hashDistributionDesc
+HashDistributionDesc --> SourceType : sourceType
+
+@enduml
+```
+
+**`HashDistributionDesc.sourceType`** distinguishes delivered scan layout from a required shuffle: **`LOCAL`** on the scan, **`SHUFFLE_JOIN`** / **`SHUFFLE_AGG`** / **`BUCKET`** on a parent. **`ReplicatedDistributionSpec`** is broadcast; **`GatherDistributionSpec`** is one stream; **`AnyDistributionSpec`** is **`EMPTY`**.
+
+| Spec | Origin | Layout |
+|------|--------|--------|
+| **`LOCAL`** | scan **`DISTRIBUTED BY HASH`** | Table tablets |
+| **`SHUFFLE_JOIN`** | required by hash join | Hash on ON-key column-refs |
+| **`SHUFFLE_AGG`** | required by **`GLOBAL`** agg | Hash on group keys |
+| **`BUCKET`** | bucket-shuffle join | Right child of a local-bucket join |
+| **`BROADCAST`** | required by hash join | Full copy on every consumer |
+| **`GATHER`** | scalar **`GLOBAL`** agg | One stream |
+| **`ANY`** | no requirement | **`EMPTY`**, root **`optimize()`** |
+
+**How `PhysicalDistributionOperator` is added.** The operator is never produced by an implementation rule. It appears in two places during **`EnforceAndCostTask`**: (1) when this node’s **`outputProperty`** fails **`isSatisfy(requiredProperty)`**, and (2) when **`ChildOutputPropertyGuarantor`** rewrites a join child’s delivered layout to **`BUCKET`**.
+
+**1. Parent writes the child’s required `DistributionSpec`.** **`RequiredPropertyDeriver`** fills **`childrenRequiredPropertiesList`**. For a hash join it records a broadcast pair and, unless **`onlyBroadcast()`**, a shuffle pair on the ON keys. For a non-local hash aggregate it requires **`GATHER`** (no group keys) or **`SHUFFLE_AGG`** on **`partitionByColumns`**; a local aggregate requires **`EMPTY`**.
+
+```java
+// RequiredPropertyDeriver — hash join
+PhysicalPropertySet rightBroadcastProperty = new PhysicalPropertySet(
+        DistributionProperty.createProperty(DistributionSpec.createReplicatedDistributionSpec()));
+requiredProperties.add(Lists.newArrayList(PhysicalPropertySet.EMPTY, rightBroadcastProperty));
+if (joinHelper.onlyShuffle()) {
+    requiredProperties.clear();
+}
+requiredProperties.add(computeShuffleJoinRequiredProperties(requirementsFromParent, leftCols, rightCols));
+// → SHUFFLE_JOIN(cust_id) / SHUFFLE_JOIN(id) on the two children
+
+// RequiredPropertyDeriver — hash aggregate
+if (!node.getType().isLocal()) {
+    if (columns.isEmpty()) {
+        requiredProperties.add(Lists.newArrayList(createGatherPropertySet()));  // GATHER
+    } else {
+        requiredProperties.add(Lists.newArrayList(computeAggRequiredShuffleProperties(columns)));
+        // → SHUFFLE_AGG(region)
+    }
+} else {
+    requiredProperties.add(Lists.newArrayList(PhysicalPropertySet.EMPTY));
+}
+```
+
+**2. Mismatch inserts the enforcer on this group.** After children return, **`recordCostsAndEnforce`** compares this node’s **`outputProperty`** to **`TaskContext.requiredProperty`**. If distribution does not satisfy, **`enforceDistribute`** takes the *required* distribution property and **`appendEnforcers`** builds a new **`GroupExpression`** whose **`op`** is **`PhysicalDistributionOperator(spec)`** and whose sole input is **this** group. That expression is costed and recorded as satisfying the required property; the parent later reads the enforced spec as the child’s output.
+
+```java
+// EnforceAndCostTask.recordCostsAndEnforce
+boolean satisfyDistributionProperty =
+        outputProperty.getDistributionProperty().isSatisfy(requiredProperty.getDistributionProperty());
+if (!satisfyOrderProperty || !satisfyDistributionProperty) {
+    enforcedProperty = enforceProperty(outputProperty, requiredProperty,
+            satisfyOrderProperty, satisfyDistributionProperty);
+}
+
+PhysicalPropertySet enforceDistribute(PhysicalPropertySet oldOutputProperty) {
+    PhysicalPropertySet requiredPropertySet = oldOutputProperty.copy();
+    requiredPropertySet.setDistributionProperty(context.getRequiredProperty()
+            .getDistributionProperty().getNullStrictProperty());
+    GroupExpression enforcer = requiredPropertySet.getDistributionProperty()
+            .appendEnforcers(groupExpression.getGroup());
+    return updateCostAndOutputPropertySet(enforcer, oldOutputProperty, requiredPropertySet);
+}
+
+// DistributionProperty.appendEnforcers — the only constructor of the enforcer op
+GroupExpression appendEnforcers(Group child) {
+    return new GroupExpression(new PhysicalDistributionOperator(spec), Lists.newArrayList(child));
+}
+```
+
+On the running query this path inserts **`PhysicalDistributionOperator(SHUFFLE_AGG(region))`** between LOCAL and GLOBAL aggregate: LOCAL’s **`outputProperty`** is still **`LOCAL(cust_id)`**, which does not **`isSatisfy`** **`SHUFFLE_AGG(region)`**. The same path inserts **`SHUFFLE_JOIN`** or **`BROADCAST`** at a scan when **`LOCAL`** fails **`isSatisfy`** of the join’s child requirement (several selected partitions, not colocate-eligible).
+
+**3. Bucket shuffle inserts on the join’s right child.** Before **`OutputPropertyDeriver`** on a hash join, **`ChildOutputPropertyGuarantor`** may decide the two **`LOCAL`** children cannot colocate. **`transToBucketShuffleJoin`** builds a **`HashDistributionSpec`** with **`SourceType.BUCKET`** and calls **`enforceChildDistribution`**, which again ends in **`appendEnforcers`** — but the child of the enforcer is the *right child’s group*, not the join’s group.
+
+```java
+// ChildOutputPropertyGuarantor.transToBucketShuffle
+DistributionSpec rightDistributionSpec = DistributionSpec.createHashDistributionSpec(
+        new HashDistributionDesc(bucketShuffleColumns, HashDistributionDesc.SourceType.BUCKET));
+enforceChildDistribution(rightDistributionSpec, rightChild, rightChildOutputProperty);
+
+Pair<GroupExpression, PhysicalPropertySet> enforceChildDistribution(
+        DistributionSpec distributionSpec, GroupExpression child, PhysicalPropertySet childOutputProperty) {
+    DistributionProperty newDistributionProperty = DistributionProperty.createProperty(distributionSpec);
+    GroupExpression enforcer = newDistributionProperty.appendEnforcers(child.getGroup());
+    // insertEnforceExpression / setBestExpression for BUCKET on that child group
+    return new Pair<>(enforcer, newOutputProperty);
+}
+```
+
+**Join / aggregate requirements (summary).** Shuffle join: both children **`SHUFFLE_JOIN`** on ON keys (or **`LOCAL`** if **`isSatisfy`**). Broadcast: left **`EMPTY`**, right **`ReplicatedDistributionSpec`**. Colocate: both **`LOCAL`**, no join-side enforcer. Bucket shuffle: left **`LOCAL`**, right **`BUCKET`**. Two-phase **`GROUP BY`**: GLOBAL requires **`SHUFFLE_AGG`** of the LOCAL child; scalar **`SUM`** requires **`GATHER`**.
+
+**Worked example — adding enforcers step by step.** Same **`EnforceAndCostTask`** four steps as §3.4.5 on the running statement. Depth-first: steps 1–2 on the way down, children, then steps 3–4 on the way up. After implement, before any **`PhysicalDistributionOperator`**:
+
+```sql
+SELECT c.region, SUM(o.amount)
+FROM orders o
+JOIN customers c ON o.cust_id = c.id
+WHERE o.dt BETWEEN '2024-01-01' AND '2024-06-30'
+GROUP BY c.region;
+```
+
+```
+PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}
+  PhysicalHashAggregate  LOCAL   groupBys=[region]
+    PhysicalHashJoin  INNER  onPredicate=(cust_id = id)
+      PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
+      PhysicalOlapScan  customers  LOCAL(id)
+```
+
+**Visit GLOBAL `HashAggregate` (`GROUP BY c.region`) — steps 1–2.**
+
+1. **`requiredProperty`** = **`EMPTY`**. Root: **`optimizer.optimize(..., new PhysicalPropertySet(), ...)`**.
+2. **`RequiredPropertyDeriver.visitPhysicalHashAggregate`**: not local, **`partitionByColumns`** = **`c.region`** → child required = **`SHUFFLE_AGG(region)`**. That value becomes the LOCAL agg’s **`TaskContext.requiredProperty`**.
+
+**Visit LOCAL `HashAggregate` — steps 1–2.**
+
+1. **`requiredProperty`** = **`SHUFFLE_AGG(region)`**.
+2. **`RequiredPropertyDeriver.visitPhysicalHashAggregate`**: **`isLocal()`** → child required = **`EMPTY`**. That value becomes the join’s **`TaskContext.requiredProperty`**.
+
+**Visit `HashJoin` (`ON o.cust_id = c.id`) — steps 1–2.**
+
+1. **`requiredProperty`** = **`EMPTY`**.
+2. **`RequiredPropertyDeriver.visitPhysicalHashJoin`**: child-requirement pairs from the ON keys:
+   - (**`EMPTY`**, **`BROADCAST`**)
+   - (**`SHUFFLE_JOIN(cust_id)`**, **`SHUFFLE_JOIN(id)`**)
+   Shuffle pair: left scan required = **`SHUFFLE_JOIN(cust_id)`**; right scan required = **`SHUFFLE_JOIN(id)`**.
+
+**Visit `OlapScan` `orders` — steps 1–4** (no children).
+
+1. **`requiredProperty`** = **`SHUFFLE_JOIN(cust_id)`**.
+2. No child requirements.
+3. **`OutputPropertyDeriver.visitPhysicalOlapScan`**: **`DISTRIBUTED BY HASH(cust_id)`** → **`outputProperty`** = **`LOCAL(cust_id)`**.
+4. Compare **`LOCAL(cust_id)`** with **`SHUFFLE_JOIN(cust_id)`**. Same hash column is not enough on its own: **`LOCAL`** is this table’s tablet map. **`HashDistributionSpec.isSatisfy`** for a native **`LOCAL`** also requires colocate eligibility — one selected partition, or a stable colocate group. This query selects only **`p2024`**, so **`isSatisfy`** succeeds. **No `appendEnforcers`.** Parent join still reads **`LOCAL(cust_id)`**.
+
+**Visit `OlapScan` `customers` — steps 1–4** (no children).
+
+1. **`requiredProperty`** = **`SHUFFLE_JOIN(id)`**.
+2. No child requirements.
+3. **`OutputPropertyDeriver.visitPhysicalOlapScan`**: **`DISTRIBUTED BY HASH(id)`** → **`outputProperty`** = **`LOCAL(id)`**.
+4. One partition, columns match → **`isSatisfy`** succeeds. **No enforcer on the scan.** Parent join still reads **`LOCAL(id)`**.
+
+**Visit `HashJoin` — steps 3–4.** Children returned **`LOCAL(cust_id)`** and **`LOCAL(id)`**. **`requiredProperty`** is still **`EMPTY`**.
+
+Before **`OutputPropertyDeriver`**, **`ChildOutputPropertyGuarantor`** checks whether those two **`LOCAL`** specs can colocate. They cannot: **`orders`** and **`customers`** are not **`COLOCATE WITH`** each other, so tablet `hash(cust_id) % 8` is not the same worker as tablet `hash(id) % 8`. **`transToBucketShuffleJoin`** → **`enforceChildDistribution`** → **`appendEnforcers`**: left stays **`LOCAL`**, right gets **`PhysicalDistributionOperator(BUCKET)`** (path **3** above).
+
+3. **`OutputPropertyDeriver.visitPhysicalHashJoin`**: left **`LOCAL`**, right **`BUCKET`** → **`outputProperty`** = **`LOCAL(cust_id)`** (dominated scan).
+4. Compare **`LOCAL(cust_id)`** with **`EMPTY`**: **`isSatisfy`**. **No enforcer on the join itself.** Parent LOCAL reads this child’s output as **`LOCAL(cust_id)`**.
+
+**Visit LOCAL `HashAggregate` — steps 3–4.** Child returned **`LOCAL(cust_id)`**. **`requiredProperty`** is still **`SHUFFLE_AGG(region)`**.
+
+3. **`OutputPropertyDeriver.visitPhysicalHashAggregate`**: copy the child → **`outputProperty`** = **`LOCAL(cust_id)`**.
+4. Compare **`LOCAL(cust_id)`** with **`SHUFFLE_AGG(region)`**: not **`isSatisfy`**. **`recordCostsAndEnforce`** → **`enforceDistribute`** → **`appendEnforcers`**: insert **`PhysicalDistributionOperator(SHUFFLE_AGG(region))`** (path **2**). Parent GLOBAL reads this child’s output as **`SHUFFLE_AGG(region)`**.
+
+**Visit GLOBAL `HashAggregate` — steps 3–4.** Child returned **`SHUFFLE_AGG(region)`**. **`requiredProperty`** is still **`EMPTY`**.
+
+3. **`OutputPropertyDeriver.visitPhysicalHashAggregate`**: copy the child → **`outputProperty`** = **`SHUFFLE_AGG(region)`**.
+4. Compare **`SHUFFLE_AGG(region)`** with **`EMPTY`**: **`isSatisfy`**. **No enforcer on GLOBAL.**
+
+After this walk the physical tree has the two enforcers: **`BUCKET`** on **`customers`**, **`SHUFFLE_AGG(region)`** between LOCAL and GLOBAL.
+
+```
+PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}  output=SHUFFLE_AGG(region)
+  PhysicalDistribution  SHUFFLE_AGG(region)
+    PhysicalHashAggregate  LOCAL   groupBys=[region]  output=LOCAL(cust_id)
+      PhysicalHashJoin  INNER  onPredicate=(cust_id = id)  output=LOCAL(cust_id)
+        PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
+        PhysicalDistribution  BUCKET(id)
+          PhysicalOlapScan  customers  LOCAL(id)
+```
+
+CBO also costs the join’s broadcast pair: left required **`EMPTY`**, right required **`BROADCAST`**. **`orders`** keeps **`LOCAL(cust_id)`**; **`customers`** fails **`isSatisfy(BROADCAST)`** and path **2** inserts **`PhysicalDistributionOperator(BROADCAST)`**. If a scan is **not** colocate-eligible (several selected partitions, and the table is not in a colocate group), **`LOCAL`** fails **`isSatisfy(SHUFFLE_JOIN)`** at the scan and path **2** inserts **`PhysicalDistributionOperator(SHUFFLE_JOIN)`** there instead.
+
+### 3.5 Fragmentize (the MPP cut)
+
+Last phase of **`createQueryPlan()`**. **`PlanFragmentBuilder.createPhysicalPlan()`** walks the physical tree. A **`PhysicalDistributionOperator`** becomes a new **`PlanFragment`** whose root is an **`ExchangeNode`**; the child fragment’s **`DataSink`** is set to that exchange. **`createOutputFragment()`** adds a GATHER exchange when the top fragment is still partitioned (more than one tablet, not short-circuit). **`finalizeFragments()`** attaches **`ResultSink`** (`TResultSinkType.MYSQL_PROTOCAL`) on the root.
+
+```java
+ExecPlan execPlan = new ExecPlan(connectContext, colNames, plan, outputColumns, isShortCircuit);
+createOutputFragment(new PhysicalPlanTranslator(columnRefFactory).translate(plan, execPlan),
+        execPlan, outputColumns, hasOutputFragment);
+return finalizeFragments(execPlan, resultSinkType);
+```
+
+The cut itself is **`visitPhysicalDistribution`**: one distribution requirement, one new fragment.
+
+```java
+ExchangeNode exchangeNode = new ExchangeNode(context.getNextNodeId(),
+        inputFragment.getPlanRoot(), distribution.getDistributionSpec().getType());
+DataPartition dataPartition =
+        translateDistributionToDataPartition(distribution.getDistributionSpec(), context);
+inputFragment.setDestination(exchangeNode);
+inputFragment.setOutputPartition(dataPartition);
+context.getFragments().add(new PlanFragment(context.getNextFragmentId(), exchangeNode, dataPartition));
+```
+
+A shuffle join sets the child’s output to **`TPartitionType.HASH_PARTITIONED`** on the join keys (`computeShuffleHashBucketPlanFragment`). A two-phase aggregate sets the local (update serialize) fragment’s output partition to **`DataPartition.hashPartitioned(group keys)`** so the merge (merge finalize) fragment receives one group on one worker.
+
+### 3.6 Schedule
+
+**`StmtExecutor.handleQueryStmt()`** builds **`DefaultCoordinator`**, registers the query, and starts scheduling. **`CoordinatorPreprocessor.computeFragmentInstances()`** assigns every fragment to workers: scan fragments via **`LocalFragmentAssignmentStrategy`** (tablet → replica BE in shared-nothing; lake shard → warehouse CN in shared-data); remote/exchange fragments via **`RemoteFragmentAssignmentStrategy`**.
+
+```plantuml
+@startuml
+
+class PlanFragment {
+  - dataPartition : DataPartition
+  - outputPartition : DataPartition
+  - destNode : ExchangeNode
+  - sink : DataSink
+}
+
+class ExecutionDAG {
+  - instanceIdToInstance : Map<TUniqueId, FragmentInstance>
+}
+
+class ExecutionFragment {
+  - planFragment : PlanFragment
+  - destinations : List<TPlanFragmentDestination>
+}
+
+class FragmentInstance {
+  - instanceId : TUniqueId
+  - worker : ComputeNode
+  - node2ScanRanges : Map<Integer, List<TScanRangeParams>>
+}
+
+ExecutionDAG o-- ExecutionFragment : fragments
+ExecutionFragment --> PlanFragment : planFragment
+ExecutionFragment o-- FragmentInstance : instances
+FragmentInstance --> ComputeNode : worker
+
+@enduml
+```
+
+A **`PlanFragment`** is still one stage. **`ExecutionFragment`** is that stage plus assignment: **`instances`** and Exchange **`destinations`**. Each **`FragmentInstance`** is one run of the stage on one **`worker`**, with **`node2ScanRanges`** (tablet ids) for scans. CBO distribution only named buckets; this step binds buckets to machines.
+
+```java
+coord = getCoordinatorFactory().createQueryScheduler(context, fragments, scanNodes, descTable, execPlan);
+QeProcessorImpl.INSTANCE.registerQuery(context.getExecutionId(), ...);
+coord.execWithQueryDeployExecutor(context);   // prepareExec() then deliverExecFragments()
+```
+
+```java
+void computeFragmentInstances() {
+    for (ExecutionFragment execFragment : executionDAG.getFragmentsInPostorder()) {
+        fragmentAssignmentStrategyFactory.create(execFragment, lazyWorkerProvider.get())
+                .assignFragmentToWorker(execFragment);
+    }
+    executionDAG.finalizeDAG();
+}
+```
+
+A scan fragment becomes one **`FragmentInstance`** per chosen worker, each carrying that worker’s **`TScanRangeParams`** (tablet ids). The same **`PlanFragment`** therefore runs in parallel without the FE copying rows.
+
+### 3.7 Deploy
+
+**`prepareExec()`** attaches a **`ResultReceiver`** to the root instance’s worker, then **`Deployer.deployFragments()`** RPCs each instance.
+
+```java
+receiver = new ResultReceiver(rootInstance.getInstanceId(), workerId, worker.getBrpcAddress(), timeoutMs);
+// Deployer:
+executions.forEach(FragmentInstanceExecState::deployAsync);
+// FragmentInstanceExecState:
+deployFuture = BackendServiceClient.getInstance()
+        .execPlanFragmentAsync(brpcAddress, requestToDeploy, jobSpec.getPlanProtocol());
+```
+
+### 3.8 Execute on workers
+
+Operators run in the BE/CN pipeline engine. Intermediate batches never return to the FE; they move worker-to-worker as **`transmit_chunk`** on Exchange edges. Pipeline internals are in [Backend and Compute Node](../backend/).
+
+### 3.9 Report status
+
+Workers call Thrift **`FrontendService.reportExecStatus`**. **`QeProcessorImpl`** forwards to **`DefaultCoordinator.updateFragmentExecStatus()`** so the FE can cancel remaining instances on failure and know when the root is done.
+
+### 3.10 Collect results
+
+The FE is only a client of the root worker. **`StmtExecutor`** loops until EOS and writes MySQL packets.
+
+```java
+do {
+    batch = coord.getNext();           // ResultReceiver → fetchDataAsync(root worker)
+    responseRowBatch(..., batch, channel);
+} while (!batch.isEos());
+```
+
+```java
+PFetchDataRequest request = new PFetchDataRequest(finstId);
+Future<PFetchDataResult> future = BackendServiceClient.getInstance().fetchDataAsync(address, request);
+// deserialize TResultBatch from the serialized payload
+```
+
+### 3.11 Simple query: scan, filter, project
+
+MPP still applies when there is no join and no aggregate. Parallelism is the **tablet instances**; the only shuffle is an optional GATHER so the client sees one stream.
+
+```sql
+CREATE TABLE sales (
+    dt     DATE,
+    id     BIGINT,
+    amount DECIMAL(12, 2)
+)
+DUPLICATE KEY(dt, id)
+PARTITION BY RANGE(dt) (
+    PARTITION p2024 VALUES [('2024-01-01'), ('2025-01-01'))
+)
+DISTRIBUTED BY HASH(id) BUCKETS 2;
+
+SELECT id, amount
+FROM sales
+WHERE dt = '2024-06-01';
+```
+
+Partition **`p2024`** has two tablets (**`BUCKETS 2`**): **T100** (replicas on BE-1, BE-2) and **T101** (replicas on BE-2, BE-3). After CBO the physical tree is **`OlapScan`** (predicate pushed to the scan) + project. **`createOutputFragment()`** sees two tablets, so it does **not** pin **`ResultSink`** on the scan fragment; it adds a GATHER exchange.
+
+```
+PLAN FRAGMENT 0                    -- root, UNPARTITIONED
+  RESULT SINK
+  1:EXCHANGE                       -- GATHER
+
+PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
+  STREAM DATA SINK
+    EXCHANGE ID: 01  UNPARTITIONED
+  0:OlapScanNode  TABLE: sales
+     PREDICATES: dt = '2024-06-01'
+     tablets: T100, T101
+```
+
+**`LocalFragmentAssignmentStrategy`** places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the **`ResultReceiver`** target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **`transmit_chunk`**s surviving rows to F0. The FE only **`fetch_data`**s F0.
+
+If the optimizer can prove a **single tablet** (or short-circuit PK lookup), **`createOutputFragment()`** skips the GATHER fragment and hangs **`ResultSink`** on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.
+
+![Simple query: tablet-parallel scan then GATHER](images/starrocks-mpp-simple-query.svg)
+
+### 3.12 Complete query: shuffle join and two-phase aggregate
+
+A join plus **`GROUP BY`** is the full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under **`ResultSink`**. **`orders`** is **`DISTRIBUTED BY HASH(cust_id)`**; **`customers`** is **`HASH(id)`**; they are not colocated.
+
+```sql
+CREATE TABLE orders (
+    dt      DATE,
+    cust_id BIGINT,
+    amount  DECIMAL(12, 2)
+)
+DUPLICATE KEY(dt, cust_id)
+PARTITION BY RANGE(dt) (
+    PARTITION p2024 VALUES [('2024-01-01'), ('2025-01-01'))
+)
+DISTRIBUTED BY HASH(cust_id) BUCKETS 8;
+
+CREATE TABLE customers (
+    id     BIGINT,
+    region VARCHAR(32)
+)
+PRIMARY KEY(id)
+DISTRIBUTED BY HASH(id) BUCKETS 8;
+
+SELECT c.region, SUM(o.amount)
+FROM orders o
+JOIN customers c ON o.cust_id = c.id
+WHERE o.dt BETWEEN '2024-01-01' AND '2024-06-30'
+GROUP BY c.region;
+```
+
+When the tables are **not** colocated on the join key, CBO requires **`HASH_PARTITIONED`** on **`o.cust_id` / `c.id`**. **`visitPhysicalDistribution`** therefore cuts a fragment per scan and a fragment for the join (that fragment’s **`DataPartition`** is the join key, not **`region`**). The aggregate is split: local **`AGGREGATE (update serialize) STREAMING`** stays with the join; **`AGGREGATE (merge finalize)`** runs after a second hash shuffle on **`c.region`**. **`createOutputFragment()`** then GATHERs the still-partitioned merge output into **`ResultSink`**.
+
+```
+PLAN FRAGMENT 0                    -- UNPARTITIONED
+  RESULT SINK
+  9:EXCHANGE                       -- GATHER
+
+PLAN FRAGMENT 1                    -- HASH_PARTITIONED: region
+  8:AGGREGATE (merge finalize)
+  7:EXCHANGE                       -- HASH_PARTITIONED: region
+
+PLAN FRAGMENT 2                    -- HASH_PARTITIONED: cust_id
+  STREAM DATA SINK
+    EXCHANGE ID: 07  HASH_PARTITIONED: region
+  6:AGGREGATE (update serialize)
+     STREAMING
+  5:Project
+  4:HASH JOIN
+     2:EXCHANGE                    -- HASH_PARTITIONED: o.cust_id
+     3:EXCHANGE                    -- HASH_PARTITIONED: c.id
+
+PLAN FRAGMENT 3                    -- RANDOM
+  STREAM DATA SINK
+    EXCHANGE ID: 02  HASH_PARTITIONED: cust_id
+  1:OlapScanNode  TABLE: orders
+     PREDICATES: dt BETWEEN ...
+
+PLAN FRAGMENT 4                    -- RANDOM
+  STREAM DATA SINK
+    EXCHANGE ID: 03  HASH_PARTITIONED: id
+  0:OlapScanNode  TABLE: customers
+```
+
+Execution, not a single tree:
+
+1. **F3 / F4 instances** start on the BEs that hold the chosen **`orders`** / **`customers`** tablet replicas. Scans run in parallel; each instance hashes outgoing chunks on the join key and **`transmit_chunk`**s to the F2 workers that own those hash buckets.
+2. **F2 instances** run the **`HASH JOIN`**, then the local aggregate. Partial **`(region, sum)`** groups are hashed on **`region`** and shuffled to F1.
+3. **F1 instances** merge partials for their **`region`** buckets. F0 GATHERs finalized rows and serves **`fetch_data`**. The FE session thread only entered the picture at this sink.
+
+![Complete query: shuffle join and two-phase aggregate](images/starrocks-mpp-complete-query.svg)
+
+CBO may replace the join shuffle with **broadcast** (small **`customers`**) or **colocate / local bucket shuffle** (same tablet mapping on the join key). Those plans drop one or both join-side Exchange fragments; they are still MPP—scan instances remain parallel—but they avoid a full network repartition. The two-phase aggregate remains whenever group keys are not already aligned with the fragment partition.
+
+**`EXPLAIN`** prints this fragment DAG; **`EXPLAIN SCHEDULER`** prints the **`FragmentInstance`** → worker assignment that **`computeFragmentInstances()`** produced. That pair is the MPP plan the cluster actually runs.
 
 ---
 
-## 3. Implementation
+## 4. Load transaction
 
-### 3.1 Run mode selection
+A StarRocks **transaction** is not a client SQL transaction. There is no `BEGIN` / `COMMIT` that isolates several statements the way InnoDB does. **`DmlStmt.txnId`** is a **load transaction**: a ticket for **one** INSERT, UPDATE, DELETE, MERGE, or stream load so that write becomes visible as a single tablet-version change.
 
-At FE boot, **`RunMode.detectRunMode()`** reads **`Config.run_mode`** and exits if the value is neither `shared_nothing` nor `shared_data`. The chosen mode flows to BE/CN heartbeats as **`TRunMode`** and drives which tablet class (`LocalTablet` vs `LakeTablet`) the catalog creates—and therefore how the Coordinator assigns scan instances.
+OLAP visibility is **tablet version**, not a mixed-statement WAL. **`StatementPlanner.plan()`** calls **`beginTransaction()`** for DML. **`GlobalTransactionMgr.beginTransaction`** creates a **`TransactionState`** (`label`, source usually **`INSERT_STREAMING`**) and stores the id on the statement. BE writers produce new rowsets under that id. **Commit** then **publish version** moves every replica of the affected tablets to the same new version, so readers either see the whole write or none of it. **Abort** discards unpublished deltas.
 
-### 3.2 Query execution path
+A **`SELECT`** never begins this path. **`EXPLAIN`** (except **`EXPLAIN ANALYZE`**), **`INSERT INTO FILES`**, and the old non-PK delete skip **`beginTransaction()`**. If **`session.getTxnId() != 0`**, the statement reuses that id (grouped inserts), still not a general SQL txn.
 
-The end-to-end MPP flow is in **§2.3**. At implementation level:
-
-1. **Connect** — client opens a MySQL session to an FE; **`ConnectContext`** holds session state.
-2. **Parse and plan** — **`StatementPlanner`** produces an **`ExecPlan`**; fragment boundaries and worker assignment differ by run mode.
-3. **Coordinate** — **`DefaultCoordinator`** deploys instances and **`ResultReceiver`** pulls root batches.
-4. **Execute on BE/CN** — pipeline engine runs fragments; **`transmit_chunk`** shuffles between workers ([Backend](../backend/)).
-5. **Collect** — **`StmtExecutor`** encodes **`TResultBatch`** rows into the MySQL protocol.
-
-For **shared-nothing**, **`LocalFragmentAssignmentStrategy`** places scan instances on BEs that hold tablet replicas. For **shared-data**, **`DefaultSharedDataWorkerProvider`** scopes workers to a warehouse **`ComputeResource`** and assigns lake scans via **`LakeTablet`** shard metadata.
-
-### 3.3 Worked example: `SELECT` on a shared-nothing table
-
-Table **`sales`** has partition **`p2024`** with tablets **T100** (replicas on BE-1, BE-2) and **T101** (replicas on BE-2, BE-3).
-
-```sql
-SELECT region, SUM(amount)
-FROM sales
-WHERE dt = '2024-06-01'
-GROUP BY region;
+```java
+txnId = transactionMgr.beginTransaction(
+        dbId, Lists.newArrayList(targetTable.getId()), label,
+        new TransactionState.TxnCoordinator(FE, localHost),
+        TransactionState.LoadJobSourceType.INSERT_STREAMING,
+        session.getExecTimeout(), session.getCurrentComputeResource());
+stmt.setTxnId(txnId);
 ```
 
-**FE (MPP).** Optimizer picks partition **`p2024`**, builds fragments: (F0) tablet scans with **`dt`** predicate pushdown; (F1) partial hash aggregate per tablet; (F2) merge aggregate + project. **`Coordinator`** sends F0 instances to BE-1 and BE-2 for T100/T101 respectively, then F1/F2 on a subset of BEs with shuffle edges. Root rows return through **`ResultReceiver`** → client.
+## 5. References
 
-**Workers.** Each F0 scan reads columnar segments from its local replica (or lake segments on CN), evaluates the filter, and emits batches; **`transmit_chunk`** moves partial groups toward F2. That worker-side path is in [Backend and Compute Node](../backend/).
-
-The same SQL on a **lake table** in shared-data mode replaces local replica lookup with **`LakeTablet`** shard metadata and CN cache/object-storage reads; the FE **`Coordinator`** path is unchanged.
+1. K. Kang, “StarRocks Query Optimizer,” CMU Database Group Seminar, 31 March 2025. [Notes](https://kangkaisen.com/post/cmu-starrocks-query-optimizer).
+2. G. Graefe, “The Cascades Framework for Query Optimization,” *IEEE Data Engineering Bulletin*, vol. 18, no. 3, pp. 19–29, 1995. [PDF](https://15721.courses.cs.cmu.edu/spring2016/papers/graefe-ieee1995.pdf).
+3. Y. Xu, “Efficiency in the Columbia Database Query Optimizer,” M.S. thesis, Portland State University, 1998. [PDF](https://15721.courses.cs.cmu.edu/spring2019/papers/22-optimizer1/xu-columbia-thesis1998.pdf).

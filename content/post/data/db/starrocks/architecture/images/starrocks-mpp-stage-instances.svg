@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="360" viewBox="0 0 1000 360" role="img" aria-label="One PlanFragment stage unfolds into FragmentInstances; Exchange edges shuffle between instances">
+  <defs>
+    <marker id="inst-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="360" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Stage to instances: an edge is a many-to-many shuffle</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">The DAG is planned as PlanFragments. Scheduling creates one FragmentInstance per worker (tablets or hash buckets).</text>
+
+  <g transform="translate(40,70)">
+    <rect width="380" height="250" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="6"/>
+    <text x="190" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">F_scan  stage</text>
+    <rect x="40" y="48" width="300" height="44" fill="#ffffff" stroke="#81c784" rx="4"/>
+    <text x="190" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">PlanFragment</text>
+    <line x1="190" y1="92" x2="110" y2="128" stroke="#607d8b" stroke-width="1.2"/>
+    <line x1="190" y1="92" x2="270" y2="128" stroke="#607d8b" stroke-width="1.2"/>
+    <rect x="24" y="132" width="172" height="88" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+    <text x="110" y="166" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Instance BE-1</text>
+    <text x="110" y="188" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">tablet T100</text>
+    <rect x="184" y="132" width="172" height="88" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+    <text x="270" y="166" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Instance BE-2</text>
+    <text x="270" y="188" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">tablet T101</text>
+  </g>
+
+  <g transform="translate(580,70)">
+    <rect width="380" height="250" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="6"/>
+    <text x="190" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">F_join  stage</text>
+    <rect x="24" y="80" width="172" height="88" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="110" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Instance bucket 0</text>
+    <text x="110" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH join_key</text>
+    <rect x="184" y="80" width="172" height="88" fill="#ffffff" stroke="#1565c0" rx="4"/>
+    <text x="270" y="114" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Instance bucket 1</text>
+    <text x="270" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">HASH join_key</text>
+  </g>
+
+  <line x1="420" y1="230" x2="602" y2="168" stroke="#1565c0" stroke-width="1.4" marker-end="url(#inst-arr)"/>
+  <line x1="420" y1="230" x2="764" y2="168" stroke="#1565c0" stroke-width="1.4" marker-end="url(#inst-arr)"/>
+  <line x1="420" y1="248" x2="602" y2="168" stroke="#1565c0" stroke-width="1.4" marker-end="url(#inst-arr)"/>
+  <line x1="420" y1="248" x2="764" y2="168" stroke="#1565c0" stroke-width="1.4" marker-end="url(#inst-arr)"/>
+  <text x="500" y="214" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">Exchange edge</text>
+  <text x="500" y="228" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1565c0">transmit_chunk</text>
+</svg>

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="680" viewBox="0 0 1100 680" role="img" aria-label="StarRocks optimizer: plan rewrite, Cascades Memo search, extract best plan">
+  <defs>
+    <marker id="opt-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="opt-arr-rev" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 10 1 L 1 5 L 10 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="opt-arr-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="680" fill="#f7f9fb"/>
+  <text x="40" y="28" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">QueryOptimizer.optimize</text>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Cascades / Columbia: Memo, task scheduler, rules, property enforce, cost</text>
+
+  <g transform="translate(36,56)">
+    <rect width="150" height="56" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="75" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Plan</text>
+    <text x="75" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">logical OptExpression</text>
+  </g>
+  <line x1="111" y1="112" x2="111" y2="138" stroke="#37474f" stroke-width="1.5" marker-end="url(#opt-arr)"/>
+  <text x="148" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Rewrite</text>
+
+  <g transform="translate(36,142)">
+    <rect width="150" height="56" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+    <text x="75" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Plan</text>
+    <text x="75" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">logicalRuleRewrite</text>
+  </g>
+  <path d="M 186 170 L 248 170 L 248 248 L 272 248" fill="none" stroke="#37474f" stroke-width="1.5" marker-end="url(#opt-arr)"/>
+  <text x="200" y="162" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Init</text>
+
+  <rect x="240" y="56" width="500" height="400" fill="none" stroke="#90caf9" stroke-width="1.6" stroke-dasharray="7 5" rx="8"/>
+  <text x="490" y="80" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Cascades search framework</text>
+  <text x="490" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">memoOptimize  /  TaskScheduler.executeTasks</text>
+
+  <g transform="translate(260,118)">
+    <rect width="176" height="318" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="88" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Memo</text>
+    <text x="88" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">Group + GroupExpression</text>
+    <rect x="16" y="56" width="68" height="44" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="50" y="82" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">logical</text>
+    <rect x="92" y="56" width="68" height="44" fill="#90a4ae" stroke="#546e7a" rx="3"/>
+    <text x="126" y="82" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">physical</text>
+    <rect x="16" y="112" width="68" height="44" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="50" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">logical</text>
+    <rect x="92" y="112" width="68" height="44" fill="#90a4ae" stroke="#546e7a" rx="3"/>
+    <text x="126" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">physical</text>
+    <rect x="16" y="168" width="68" height="44" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="50" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">logical</text>
+    <rect x="92" y="168" width="68" height="44" fill="#90a4ae" stroke="#546e7a" rx="3"/>
+    <text x="126" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">physical</text>
+    <rect x="16" y="224" width="68" height="44" fill="#eceff1" stroke="#90a4ae" rx="3"/>
+    <text x="50" y="250" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">logical</text>
+    <rect x="92" y="224" width="68" height="44" fill="#90a4ae" stroke="#546e7a" rx="3"/>
+    <text x="126" y="250" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">physical</text>
+    <text x="88" y="296" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">equivalents per Group</text>
+  </g>
+
+  <line x1="436" y1="200" x2="478" y2="200" stroke="#37474f" stroke-width="1.6" marker-end="url(#opt-arr)" marker-start="url(#opt-arr-rev)"/>
+
+  <g transform="translate(482,158)">
+    <rect width="236" height="84" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="118" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Task Scheduler</text>
+    <text x="118" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#37474f">OptimizeGroupTask</text>
+    <text x="118" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">ApplyRule / EnforceAndCost</text>
+  </g>
+
+  <line x1="600" y1="318" x2="600" y2="246" stroke="#37474f" stroke-width="1.5" marker-end="url(#opt-arr)"/>
+
+  <g transform="translate(482,322)">
+    <rect width="236" height="116" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="118" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Rules</text>
+    <rect x="16" y="36" width="204" height="32" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="118" y="57" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">Transformation</text>
+    <rect x="16" y="74" width="204" height="32" fill="#ffffff" stroke="#81c784" rx="3"/>
+    <text x="118" y="95" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">Implementation</text>
+  </g>
+
+  <g transform="translate(768,72)">
+    <rect width="300" height="148" fill="none" stroke="#f9a825" stroke-width="1.5" stroke-dasharray="7 5" rx="6"/>
+    <text x="150" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Property enforcement</text>
+    <rect x="20" y="40" width="120" height="80" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="80" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">Sort</text>
+    <text x="80" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">orderSpec</text>
+    <rect x="160" y="40" width="120" height="80" fill="#fff8e1" stroke="#f9a825" rx="4"/>
+    <text x="220" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">Distribution</text>
+    <text x="220" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">shuffle / broadcast</text>
+  </g>
+  <line x1="768" y1="146" x2="722" y2="190" stroke="#ef6c00" stroke-width="1.8" marker-end="url(#opt-arr)"/>
+
+  <g transform="translate(768,248)">
+    <rect width="300" height="148" fill="none" stroke="#607d8b" stroke-width="1.5" stroke-dasharray="7 5" rx="6"/>
+    <text x="150" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#37474f">Cost estimation</text>
+    <rect x="20" y="40" width="120" height="80" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="80" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#37474f">Cost model</text>
+    <text x="80" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">lowestCostTable</text>
+    <rect x="160" y="40" width="120" height="80" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="220" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#37474f">Statistics</text>
+    <text x="220" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">DeriveStatsTask</text>
+  </g>
+  <line x1="768" y1="300" x2="722" y2="230" stroke="#546e7a" stroke-width="1.8" marker-end="url(#opt-arr)"/>
+
+  <path d="M 272 400 L 186 400 L 186 478" fill="none" stroke="#1565c0" stroke-width="1.6" marker-end="url(#opt-arr-b)"/>
+  <text x="200" y="430" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">Extract</text>
+
+  <g transform="translate(36,478)">
+    <rect width="150" height="56" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
+    <text x="75" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">Best Plan</text>
+    <text x="75" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">extractBestPlan</text>
+  </g>
+  <line x1="111" y1="534" x2="111" y2="560" stroke="#37474f" stroke-width="1.5" marker-end="url(#opt-arr)"/>
+  <text x="148" y="552" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Rewrite</text>
+
+  <g transform="translate(36,564)">
+    <rect width="150" height="56" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5" rx="4"/>
+    <text x="75" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Final Plan</text>
+    <text x="75" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">physical / feedback</text>
+  </g>
+
+  <text x="550" y="656" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Based on the Cascades and Columbia papers. StarRocks wraps the search with tree rewrite before Init and after Extract.</text>
+</svg>
