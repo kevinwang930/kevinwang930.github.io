@@ -1,0 +1,1485 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e\u003cstrong\u003eStarRocks\u003c\/strong\u003e is a MySQL-compatible MPP OLAP engine. A cluster is \u003cstrong\u003eFrontend (FE)\u003c\/strong\u003e nodes for metadata and query coordination plus \u003cstrong\u003eBackend (BE)\u003c\/strong\u003e or \u003cstrong\u003eCompute Node (CN)\u003c\/strong\u003e workers for execution. This post follows \u003cstrong\u003eFE query planning\u003c\/strong\u003e—logical plan, Cascades optimize, fragmentize—and the \u003cstrong\u003eMPP\u003c\/strong\u003e path through schedule, deploy, and result pull. Worker process internals are in \u003ca href=\u0022..\/backend\/\u0022\u003eBackend and Compute Node\u003c\/a\u003e.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/starrocks\/architecture\/","keywords":"[starrocks, mpp]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.165.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="starrocks,mpp"><meta name=description content="StarRocks is a MySQL-compatible MPP OLAP engine. A cluster is Frontend (FE) nodes for metadata and query coordination plus Backend (BE) or Compute Node (CN) workers for execution. This post follows FE query planning—logical plan, Cascades optimize, fragmentize—and the MPP path through schedule, deploy, and result pull. Worker process internals are in Backend and Compute Node."><meta property="og:description" content="StarRocks is a MySQL-compatible MPP OLAP engine. A cluster is Frontend (FE) nodes for metadata and query coordination plus Backend (BE) or Compute Node (CN) workers for execution. This post follows FE query planning—logical plan, Cascades optimize, fragmentize—and the MPP path through schedule, deploy, and result pull. Worker process internals are in Backend and Compute Node."><meta property="og:type" content="article"><meta property="og:title" content="StarRocks: FE query planning and the MPP path"><meta name=twitter:title content="StarRocks: FE query planning and the MPP path"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/starrocks/architecture/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/starrocks/architecture/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="StarRocks is a MySQL-compatible MPP OLAP engine. A cluster is Frontend (FE) nodes for metadata and query coordination plus Backend (BE) or Compute Node (CN) workers for execution. This post follows FE query planning—logical plan, Cascades optimize, fragmentize—and the MPP path through schedule, deploy, and result pull. Worker process internals are in Backend and Compute Node."><meta name=twitter:description content="StarRocks is a MySQL-compatible MPP OLAP engine. A cluster is Frontend (FE) nodes for metadata and query coordination plus Backend (BE) or Compute Node (CN) workers for execution. This post follows FE query planning—logical plan, Cascades optimize, fragmentize—and the MPP path through schedule, deploy, and result pull. Worker process internals are in Backend and Compute Node."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-08-22T15:00:00"><meta property="article:modified_time" content="2026-08-22T15:00:00"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="starrocks"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="starrocks"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>StarRocks: FE query planning and the MPP path</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/starrocks/architecture/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>StarRocks: FE query planning and the MPP path</h1><div class="postShorten-meta post-meta"><time datetime=2026-08-22T15:00:00+02:00>August 22, 2026
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/db>db</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/starrocks>starrocks</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p><strong>StarRocks</strong> is a MySQL-compatible MPP OLAP engine. A cluster is <strong>Frontend (FE)</strong> nodes for metadata and query coordination plus <strong>Backend (BE)</strong> or <strong>Compute Node (CN)</strong> workers for execution. This post follows <strong>FE query planning</strong>—logical plan, Cascades optimize, fragmentize—and the <strong>MPP</strong> path through schedule, deploy, and result pull. Worker process internals are in <a href=../backend/>Backend and Compute Node</a>.</p><p>Related: <a href=../backend/>Backend and Compute Node</a>.</p><hr><h2 id=1-overview>1. Overview</h2><p>StarRocks speaks the <strong>MySQL protocol</strong> and ANSI SQL. Clients connect to any FE; the <strong>leader FE</strong> owns metadata writes and schedules work onto compute nodes. <strong>MPP</strong> is the fundamental character of OLAP: a statement is a large <strong>computation</strong> over sharded tablets, so it must run as parallel stages on many workers. The FE that accepts SQL does <strong>not</strong> execute operators.</p><table><thead><tr><th>Piece</th><th>Language</th><th>Role in the cluster</th></tr></thead><tbody><tr><td><strong>FE</strong></td><td>Java</td><td>Catalog, SQL plan, <strong>Coordinator</strong>, tablet/replica scheduling</td></tr><tr><td><strong>BE</strong></td><td>C++</td><td>Local OLAP storage + vectorized execution (shared-nothing)</td></tr><tr><td><strong>CN</strong></td><td>C++ (same binary as BE)</td><td>Compute + cache; data on object storage (shared-data)</td></tr></tbody></table><p>Deployment mode is fixed at cluster init via <strong><code>Config.run_mode</code></strong>, detected in <strong><code>RunMode.detectRunMode()</code></strong>:</p><table><thead><tr><th>Mode</th><th>Compute nodes</th><th>Storage</th></tr></thead><tbody><tr><td><strong><code>shared_nothing</code></strong></td><td><strong>Backend</strong> with local disks</td><td><strong><code>LocalTablet</code></strong> replicas on BEs</td></tr><tr><td><strong><code>shared_data</code></strong></td><td><strong>ComputeNode</strong> (<code>starrocks_be --cn</code>)</td><td><strong><code>LakeTablet</code></strong> segments on S3/HDFS/MinIO; StarOS manages shards</td></tr></tbody></table><p>There is no external metadata service: FE metadata is replicated with <strong>BDB JE</strong>, and tablet placement lives in the FE catalog. How a BE/CN process starts, stores tablets, and runs the pipeline engine is covered in <a href=../backend/>Backend and Compute Node</a>.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-cluster-topology.svg alt="StarRocks cluster topology"></p><hr><h2 id=2-cluster-topology>2. Cluster topology</h2><p>StarRocks keeps the surface small: <strong>FE + BE</strong> (shared-nothing) or <strong>FE + CN + object storage</strong> (shared-data). Nodes scale horizontally; FE metadata and data replicas have internal redundancy.</p><p><strong>Clients</strong> send SQL to any FE (typically via a load balancer). <strong>FEs</strong> form an HA group:</p><table><thead><tr><th>FE role (<code>FrontendNodeType</code>)</th><th>Metadata</th><th>Leader election</th></tr></thead><tbody><tr><td><strong>Leader</strong></td><td>Read/write; replicates journal to followers</td><td>Elected from followers (> half alive)</td></tr><tr><td><strong>Follower</strong></td><td>Read; replays leader journal</td><td>Participates in election</td></tr><tr><td><strong>Observer</strong></td><td>Read; replays journal</td><td>Does <strong>not</strong> vote — scales read/metadata fan-out</td></tr></tbody></table><p>Each FE holds a full in-memory catalog copy backed by <strong>BDB JE</strong> (Berkeley DB Java Edition). Metadata writes go to the leader and must replicate to a quorum of followers before they are considered durable.</p><p><strong>Compute registration.</strong> BEs and CNs heartbeat to the <strong>leader FE</strong> over Thrift <strong><code>HeartbeatService</code></strong>, reporting ports (<code>be_port</code>, <code>brpc_port</code>, <code>starlet_port</code>), disk capacity, and liveness. <strong><code>SystemInfoService</code></strong> tracks <strong><code>Backend</code></strong> and <strong><code>ComputeNode</code></strong> instances; <strong><code>HeartbeatMgr</code></strong> drives the heartbeat loop. Worker-side heartbeat and service ports are detailed in <a href=../backend/>Backend and Compute Node</a>.</p><p><strong>Tablets as placement units.</strong> OLAP tables are partitioned; each partition holds one or more <strong>tablets</strong> (the unit of sharding and replication). In shared-nothing, each <strong><code>LocalTablet</code></strong> has <strong><code>Replica</code></strong> objects on BEs; the FE <strong><code>TabletScheduler</code></strong> repairs and balances them. In shared-data, <strong><code>LakeTablet</code></strong> maps to a StarOS shard and object-storage segments. The Coordinator uses that placement map when assigning scan **<code>FragmentInstance</code>**s—worker storage layout is in the <a href=../backend/>Backend</a> post.</p><h3 id=21-frontend-fe>2.1 Frontend (FE)</h3><p>The FE process entry is <strong><code>StarRocksFE</code></strong> → <strong><code>StarRocksFEServer</code></strong>. <strong><code>GlobalStateMgr</code></strong> is the central singleton: it wires catalog, node registry, load/transaction managers, and HA state.</p><table><thead><tr><th>Subsystem</th><th>Responsibility</th></tr></thead><tbody><tr><td><strong><code>CatalogMgr</code> / <code>InternalCatalog</code></strong></td><td>Databases, tables, partitions, materialized views</td></tr><tr><td><strong><code>NodeMgr</code> / <code>SystemInfoService</code></strong></td><td>FE and BE/CN membership</td></tr><tr><td><strong><code>TabletInvertedIndex</code>, <code>TabletScheduler</code></strong></td><td>Tablet health, replica repair, balance</td></tr><tr><td><strong>SQL engine</strong> (<code>sql/</code>, <code>planner/</code>, optimizer)</td><td>Parse, analyze, CBO, physical <strong><code>PlanFragment</code></strong> generation</td></tr><tr><td><strong><code>Coordinator</code></strong></td><td>Deploy fragments to BE/CN, collect status, return results</td></tr><tr><td><strong><code>QeService</code></strong></td><td>MySQL wire protocol to clients</td></tr></tbody></table><p><strong>FE composition.</strong> <strong><code>StarRocksFEServer</code></strong> bootstraps <strong><code>GlobalStateMgr</code></strong> and network services. The singleton owns catalog and node registries, tablet scheduling, and the metadata journal; <strong><code>QeService</code></strong> accepts MySQL sessions and drives <strong><code>Coordinator</code></strong> instances per query.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class StarRocksFEServer {
+  main()
+  initialize()
+  start()
+}
+
+class GlobalStateMgr {
+  getCurrentState()
+  initialize()
+  waitForReady()
+}
+
+class CatalogMgr {
+  catalogs : external Catalog map
+}
+
+class LocalMetastore {
+  databases
+  tables
+  partitions
+}
+
+class NodeMgr {
+  frontends : FE membership
+}
+
+class Frontend {
+  nodeType : LEADER/FOLLOWER/OBSERVER
+}
+
+class SystemInfoService {
+  backends : Backend map
+  computeNodes : ComputeNode map
+}
+
+class HeartbeatMgr {
+  heartbeatLoop()
+}
+
+class TabletInvertedIndex {
+  tabletId to replica map
+}
+
+class TabletScheduler {
+  schedule()
+  balance()
+}
+
+class TabletChecker {
+  check()
+}
+
+class EditLog {
+  logEdit()
+  loadJournal()
+}
+
+interface Journal {
+  write()
+  read()
+}
+
+class BDBJEJournal {
+  replicate()
+}
+
+class BDBEnvironment {
+  bdbEnv : replicated JE
+}
+
+class JournalWriter {
+  writeQueue()
+}
+
+class QeService {
+  mysqlPort
+}
+
+class ConnectScheduler {
+  connectionMap
+}
+
+class ConnectContext {
+  session state
+}
+
+class Coordinator {
+  exec()
+  deployFragments()
+}
+
+class StarMgrServer {
+  starOS metadata
+}
+
+StarRocksFEServer ..&gt; GlobalStateMgr
+StarRocksFEServer ..&gt; QeService
+StarRocksFEServer ..&gt; StarMgrServer
+
+GlobalStateMgr *-- CatalogMgr
+GlobalStateMgr *-- LocalMetastore
+GlobalStateMgr *-- NodeMgr
+GlobalStateMgr *-- HeartbeatMgr
+GlobalStateMgr *-- TabletInvertedIndex
+GlobalStateMgr *-- TabletScheduler
+GlobalStateMgr *-- TabletChecker
+GlobalStateMgr *-- EditLog
+GlobalStateMgr o-- JournalWriter
+
+NodeMgr *-- SystemInfoService
+NodeMgr o-- Frontend
+
+EditLog --&gt; Journal
+Journal &lt;|-- BDBJEJournal
+BDBJEJournal *-- BDBEnvironment
+
+QeService *-- ConnectScheduler
+ConnectScheduler o-- ConnectContext
+ConnectContext ..&gt; Coordinator
+
+TabletChecker --&gt; TabletScheduler
+TabletScheduler ..&gt; TabletInvertedIndex
+HeartbeatMgr ..&gt; SystemInfoService
+Coordinator ..&gt; SystemInfoService
+
+@enduml
+</code></pre><p>On <strong>shared-data</strong> clusters the FE also starts <strong><code>StarMgrServer</code></strong> (StarOS metadata) alongside the BDB JE journal.</p><h3 id=22-fe--worker-protocols-query-path>2.2 FE ↔ worker protocols (query path)</h3><table><thead><tr><th>Direction</th><th>Protocol</th><th>Typical use</th></tr></thead><tbody><tr><td>Client → FE</td><td>MySQL</td><td>Interactive SQL, auth, result sets</td></tr><tr><td>BE/CN → FE leader</td><td>Thrift <strong><code>HeartbeatService</code></strong></td><td>Registration, master info, run mode</td></tr><tr><td>BE → FE leader</td><td>Thrift <strong><code>FrontendService</code></strong></td><td><code>reportExecStatus</code>, task finish, load txn</td></tr><tr><td>FE leader → BE/CN</td><td>brpc <strong><code>PInternalService</code></strong></td><td><strong><code>exec_plan_fragment</code></strong>, <strong><code>transmit_chunk</code></strong>, runtime filters, tablet writer</td></tr><tr><td>FE leader → BE/CN</td><td>Thrift <strong><code>BackendService</code></strong></td><td>Agent tasks, legacy sync APIs</td></tr><tr><td>BE ↔ BE</td><td>brpc</td><td>Shuffle exchange, broadcast filters</td></tr></tbody></table><p>The hot query path is <strong>brpc/protobuf</strong> on each node&rsquo;s <strong><code>brpc_port</code></strong>. Thrift remains for heartbeat, reporting, and tablet maintenance agents.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-query-path.svg alt="StarRocks query path"></p><hr><h2 id=3-mpp-the-olap-execution-model>3. MPP: the OLAP execution model</h2><p><strong>MPP (Massively Parallel Processing)</strong> is the fundamental character of OLAP, not an optional accelerator. An analytical statement is a large <strong>computation</strong> over data that is already sharded into tablets. The only way to finish that computation at interactive latency is to run the same operators on <strong>many machines at once</strong> and move intermediate batches by <strong>shuffle</strong>—not to walk one operator tree in one process. StarRocks is built around that model: the FE plans and coordinates; BE/CN workers execute.</p><p>A stage is a <strong><code>PlanFragment</code></strong>: a <strong><code>PlanNode</code></strong> subtree that can run without an in-process call to another machine, plus a <strong><code>DataSink</code></strong>. An <strong>edge</strong> is the <strong>Exchange</strong> that connects two stages—the producer’s sink and the consumer’s <strong><code>ExchangeNode</code></strong>, carrying <strong><code>transmit_chunk</code></strong>. The <strong>DAG</strong> is those stages and edges: <strong><code>ExecPlan.fragments</code></strong> after <strong><code>visitPhysicalDistribution</code></strong> cuts the physical tree at every <strong><code>PhysicalDistributionOperator</code></strong>. The FE never joins those batches in its own heap.</p><p>That is the opposite of classic OLTP, where the cost is the <strong>SQL transaction</strong> (one node’s log and locks) and a distributed shuffle would make every small write a distributed commit.</p><table><thead><tr><th></th><th>OLTP</th><th>StarRocks MPP (OLAP)</th></tr></thead><tbody><tr><td>What the statement <em>is</em></td><td>A transaction</td><td>A computation</td></tr><tr><td>Bottleneck</td><td>Commit, isolation, locks</td><td>Scan / join / agg CPU and IO</td></tr><tr><td>Plan shape</td><td>One local operator tree</td><td><strong><code>PlanFragment</code></strong> DAG + **<code>FragmentInstance</code>**s</td></tr><tr><td>SQL endpoint</td><td>Executes</td><td>Plans, deploys, pulls the root</td></tr></tbody></table><p>A typical analytical plan is two-phase: scan stages, a join stage (often with a local aggregate), a merge-aggregate stage, and a root GATHER into <strong><code>ResultSink</code></strong>. Data flows along edges toward the root (fragment 0 in <strong><code>EXPLAIN</code></strong>). Each Exchange is not drawn by hand: <strong><code>QueryOptimizer</code></strong> CBO picks a <strong>join distribution</strong> (shuffle / broadcast / colocate) and an <strong>aggregate distribution</strong> (local then global), then <strong><code>EnforceAndCostTask</code></strong> inserts a <strong><code>PhysicalDistributionOperator</code></strong>. <strong><code>visitPhysicalDistribution</code></strong> cuts the fragment DAG at those operators.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragment-dag.svg alt="Fragment DAG: planning PlanFragments, then scheduling FragmentInstances"></p><p>The left half of the figure is <strong>planning</strong>: <strong><code>ExecPlan.fragments</code></strong>, one <strong><code>PlanFragment</code></strong> per stage, Exchange edges from <strong><code>PhysicalDistributionOperator</code></strong>. The right half is <strong>scheduling</strong>: <strong><code>ExecutionDAG</code></strong> unfolds each stage into **<code>FragmentInstance</code>**s (tablet replicas on the scan side, hash buckets on join/agg). The same edge becomes a many-to-many <strong><code>transmit_chunk</code></strong>.</p><table><thead><tr><th>DAG piece</th><th>Planning (<code>ExecPlan</code>)</th><th>Scheduling (<code>ExecutionDAG</code>)</th></tr></thead><tbody><tr><td><strong>Stage</strong></td><td>one <strong><code>PlanFragment</code></strong> (<code>planRoot</code>, <code>dataPartition</code>, <code>sink</code>)</td><td>N **<code>FragmentInstance</code>**s on BE/CN</td></tr><tr><td><strong>Edge</strong></td><td>producer <strong><code>DataSink</code></strong> → dest <strong><code>ExchangeNode</code></strong></td><td>instance × instance <strong><code>transmit_chunk</code></strong></td></tr><tr><td><strong>DAG</strong></td><td>fragment list after <strong><code>visitPhysicalDistribution</code></strong></td><td>instances after <strong><code>computeFragmentInstances</code></strong></td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class ConnectContext {
+  queryId : UUID
+  executionId : TUniqueId
+  sessionVariable : SessionVariable
+  mysqlChannel : MysqlChannel
+  executor : StmtExecutor
+  computeResource : ComputeResource
+}
+
+class ConnectProcessor {
+  ctx : ConnectContext
+  --
+  dispatch()
+  handleQuery()
+}
+
+class StmtExecutor {
+  context : ConnectContext
+  parsedStmt : StatementBase
+  coord : Coordinator
+  --
+  execute()
+  generateExecPlan()
+  handleQueryStmt()
+}
+
+class StatementPlanner {
+  --
+  plan()
+  createQueryPlan()
+  analyzeStatement()
+}
+
+class Analyzer {
+  --
+  analyze()
+}
+
+class RelationTransformer {
+  transformerContext : TransformerContext
+  --
+  transformWithSelectLimit()
+}
+
+class LogicalPlan {
+  root : OptExpression
+  outputColumn : List&lt;ColumnRefOperator&gt;
+}
+
+abstract class Optimizer {
+  --
+  optimize()
+}
+
+class QueryOptimizer {
+  memo : Memo
+  --
+  optimize()
+}
+
+class OptExpression {
+  op : Operator
+  inputs : List&lt;OptExpression&gt;
+  cost : double
+  outputProperty : PhysicalPropertySet
+}
+
+class PlanFragmentBuilder {
+  --
+  createPhysicalPlan()
+  finalizeFragments()
+}
+
+class PhysicalPlanTranslator {
+  columnRefFactory : ColumnRefFactory
+  --
+  translate()
+}
+
+class ExecPlan {
+  fragments : List&lt;PlanFragment&gt;
+  scanNodes : List&lt;ScanNode&gt;
+  descTbl : DescriptorTable
+  outputExprs : List&lt;Expr&gt;
+  physicalPlan : OptExpression
+  connectContext : ConnectContext
+}
+
+class PlanFragment {
+  fragmentId : PlanFragmentId
+  planRoot : PlanNode
+  dataPartition : DataPartition
+  outputPartition : DataPartition
+  sink : DataSink
+  destNode : ExchangeNode
+  pipelineDop : int
+}
+
+abstract class PlanNode {
+  id : PlanNodeId
+  fragmentId : PlanFragmentId
+  conjuncts : List&lt;Expr&gt;
+  limit : long
+  fragment_ : PlanFragment
+}
+
+class ExchangeNode {
+  partitionType : TPartitionType
+}
+
+abstract class DataSink {
+  --
+  toThrift()
+}
+
+class ResultSink {
+  sinkType : TResultSinkType
+  exchNodeId : PlanNodeId
+  outputColumnNames : List&lt;String&gt;
+}
+
+abstract class Coordinator {
+  --
+  execWithQueryDeployExecutor()
+}
+
+class DefaultCoordinator {
+  jobSpec : JobSpec
+  executionDAG : ExecutionDAG
+  connectContext : ConnectContext
+  coordinatorPreprocessor : CoordinatorPreprocessor
+  receiver : ResultReceiver
+  queryStatus : Status
+  --
+  prepareExec()
+  getNext()
+}
+
+class CoordinatorPreprocessor {
+  executionDAG : ExecutionDAG
+  connectContext : ConnectContext
+  jobSpec : JobSpec
+  workerProviderFactory : WorkerProvider.Factory
+  --
+  computeFragmentInstances()
+}
+
+class ExecutionDAG {
+  fragments : List&lt;ExecutionFragment&gt;
+  instanceIdToInstance : Map&lt;TUniqueId, FragmentInstance&gt;
+  jobSpec : JobSpec
+}
+
+class ExecutionFragment {
+  planFragment : PlanFragment
+  instances : List&lt;FragmentInstance&gt;
+  scanRangeAssignment : FragmentScanRangeAssignment
+  destinations : List&lt;TPlanFragmentDestination&gt;
+}
+
+class FragmentInstance {
+  instanceId : TUniqueId
+  worker : ComputeNode
+  execFragment : ExecutionFragment
+  node2ScanRanges : Map&lt;Integer, List&lt;TScanRangeParams&gt;&gt;
+  pipelineDop : int
+  execution : FragmentInstanceExecState
+}
+
+class Deployer {
+  executionDAG : ExecutionDAG
+  jobSpec : JobSpec
+  context : ConnectContext
+  deployedWorkerIds : Set&lt;Long&gt;
+  --
+  deployFragments()
+}
+
+class FragmentInstanceExecState {
+  instanceId : TUniqueId
+  fragmentId : PlanFragmentId
+  worker : ComputeNode
+  address : TNetworkAddress
+  requestToDeploy : TExecPlanFragmentParams
+  deployFuture : Future&lt;PExecPlanFragmentResult&gt;
+  state : State
+  --
+  deployAsync()
+}
+
+class BackendServiceClient {
+  --
+  execPlanFragmentAsync()
+  fetchDataAsync()
+}
+
+class ResultReceiver {
+  address : TNetworkAddress
+  finstId : PUniqueId
+  backendId : Long
+  packetIdx : long
+  timeoutMs : int
+  isDone : boolean
+  --
+  getNext()
+}
+
+ConnectProcessor --&gt; ConnectContext
+ConnectProcessor ..&gt; StmtExecutor : execute()
+
+StmtExecutor --&gt; ConnectContext
+StmtExecutor ..&gt; StatementPlanner : plan()
+StmtExecutor ..&gt; DefaultCoordinator : create, exec, getNext()
+
+StatementPlanner ..&gt; Analyzer : analyzeStatement()
+StatementPlanner ..&gt; RelationTransformer
+RelationTransformer --&gt; LogicalPlan
+StatementPlanner ..&gt; QueryOptimizer : optimize()
+Optimizer &lt;|-- QueryOptimizer
+QueryOptimizer --&gt; OptExpression
+StatementPlanner ..&gt; PlanFragmentBuilder : createPhysicalPlan()
+PlanFragmentBuilder ..&gt; PhysicalPlanTranslator : translate()
+PhysicalPlanTranslator --&gt; ExecPlan
+PlanFragmentBuilder --&gt; ExecPlan
+
+ExecPlan *-- PlanFragment
+PlanFragment *-- PlanNode
+PlanNode &lt;|-- ExchangeNode
+PlanFragment --&gt; DataSink : sink
+DataSink &lt;|-- ResultSink
+
+Coordinator &lt;|-- DefaultCoordinator
+DefaultCoordinator *-- CoordinatorPreprocessor
+DefaultCoordinator *-- ExecutionDAG
+DefaultCoordinator --&gt; ResultReceiver
+CoordinatorPreprocessor ..&gt; ExecutionDAG : assign workers
+ExecutionDAG *-- ExecutionFragment
+ExecutionFragment *-- FragmentInstance
+
+DefaultCoordinator ..&gt; Deployer
+Deployer *-- FragmentInstanceExecState
+FragmentInstanceExecState --&gt; FragmentInstance
+FragmentInstanceExecState ..&gt; BackendServiceClient : exec_plan_fragment
+ResultReceiver ..&gt; BackendServiceClient : fetch_data
+FragmentInstance ..&gt; PlanFragment : deploys
+
+@enduml
+</code></pre><p>A MySQL <strong><code>COM_QUERY</code></strong> is how a session enters this machinery. <strong><code>StmtExecutor</code></strong> builds the DAG, <strong><code>DefaultCoordinator</code></strong> instantiates and deploys it, and the FE only **<code>fetch_data</code>**s the root.</p><h3 id=31-statement-generation>3.1 Statement generation</h3><p><strong><code>ConnectProcessor.handleQuery()</code></strong> decodes the MySQL <strong><code>COM_QUERY</code></strong> payload to a SQL string. <strong><code>SqlParser.parse</code></strong> splits the string, walks the ANTLR tree with <strong><code>AstBuilder</code></strong>, and returns one <strong><code>StatementBase</code></strong> per statement. <strong><code>AstBuilder</code></strong> is the constructor: each <code>visit*</code> allocates the subclass and fills its fields. Names are still unresolved; this step does not plan or execute.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ConnectProcessor.handleQuery</span>
+</span></span><span style=display:flex><span>originStmt <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> String(bytes, 1, ending, StandardCharsets.<span style=color:#a6e22e>UTF_8</span>);
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>StatementBase<span style=color:#f92672>&gt;</span> stmts <span style=color:#f92672>=</span> parseStatements(originStmt);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ConnectProcessor.parseStatements</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> SqlParser.<span style=color:#a6e22e>parse</span>(originStmt, ctx.<span style=color:#a6e22e>getSessionVariable</span>());
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// SqlParser.parseWithStarRocksDialect</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> idx <span style=color:#f92672>=</span> 0; idx <span style=color:#f92672>&lt;</span> singleStatementContexts.<span style=color:#a6e22e>size</span>(); <span style=color:#f92672>++</span>idx) {
+</span></span><span style=display:flex><span>    HintCollector collector <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> HintCollector(tokenStream, sessionVariable);
+</span></span><span style=display:flex><span>    collector.<span style=color:#a6e22e>collect</span>(singleStatementContexts.<span style=color:#a6e22e>get</span>(idx));
+</span></span><span style=display:flex><span>    AstBuilder astBuilder <span style=color:#f92672>=</span> astBuilderFactory.<span style=color:#a6e22e>create</span>(sqlMode, caseInsensitive, collector.<span style=color:#a6e22e>getContextWithHintMap</span>());
+</span></span><span style=display:flex><span>    StatementBase statement <span style=color:#f92672>=</span> (StatementBase) astBuilder.<span style=color:#a6e22e>visitSingleStatement</span>(singleStatementContexts.<span style=color:#a6e22e>get</span>(idx));
+</span></span><span style=display:flex><span>    statement.<span style=color:#a6e22e>setOrigStmt</span>(<span style=color:#66d9ef>new</span> OriginStatement(sql, idx));
+</span></span><span style=display:flex><span>    statements.<span style=color:#a6e22e>add</span>(statement);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A <strong><code>SELECT</code></strong> becomes <strong><code>QueryStatement(queryRelation)</code></strong>. <strong><code>INSERT VALUES</code></strong> wraps a <strong><code>ValuesRelation</code></strong> in a <strong><code>QueryStatement</code></strong> and hangs it on <strong><code>InsertStmt.queryStatement</code></strong>. <strong><code>UPDATE</code></strong> / <strong><code>DELETE</code></strong> store <strong><code>TableRef</code></strong>, assignments or USING, and <strong><code>wherePredicate</code></strong> only.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AstBuilder.visitQueryStatement</span>
+</span></span><span style=display:flex><span>QueryRelation queryRelation <span style=color:#f92672>=</span> (QueryRelation) visit(context.<span style=color:#a6e22e>queryRelation</span>());
+</span></span><span style=display:flex><span>QueryStatement queryStatement <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> QueryStatement(queryRelation);
+</span></span><span style=display:flex><span>queryStatement.<span style=color:#a6e22e>setQueryStartIndex</span>(context.<span style=color:#a6e22e>queryRelation</span>().<span style=color:#a6e22e>start</span>.<span style=color:#a6e22e>getStartIndex</span>());
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> queryStatement;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AstBuilder.visitInsertStatement</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (context.<span style=color:#a6e22e>VALUES</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>    queryStatement <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> QueryStatement(<span style=color:#66d9ef>new</span> ValuesRelation(rows, colNames, pos));
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    queryStatement <span style=color:#f92672>=</span> (QueryStatement) visit(context.<span style=color:#a6e22e>queryStatement</span>());  <span style=color:#75715e>// INSERT SELECT</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> InsertStmt(tableRef, partitionNames, label, columnAliases, queryStatement,
+</span></span><span style=display:flex><span>        context.<span style=color:#a6e22e>OVERWRITE</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>, properties, pos);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AstBuilder.visitUpdateStatement</span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>ColumnAssignment<span style=color:#f92672>&gt;</span> assignments <span style=color:#f92672>=</span> visit(context.<span style=color:#a6e22e>assignmentList</span>().<span style=color:#a6e22e>assignment</span>(), ColumnAssignment.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>Expr where <span style=color:#f92672>=</span> context.<span style=color:#a6e22e>where</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> (Expr) visit(context.<span style=color:#a6e22e>where</span>) : <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> UpdateStmt(tableRef, assignments, fromRelations, where, ctes, pos);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AstBuilder.visitDeleteStatement</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DeleteStmt(tableRef, partitionNames, usingRelations, where, ctes, pos);
+</span></span></code></pre></div><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+interface ParseNode {
+  + getPos() : NodePosition
+}
+
+abstract class StatementBase {
+  - pos : NodePosition
+  - explainLevel : ExplainLevel
+  - isExplain : boolean
+  # origStmt : OriginStatement
+  # hintNodes : List&lt;HintNode&gt;
+  # allQueryScopeHints : List&lt;HintNode&gt;
+}
+
+abstract class DmlStmt {
+  - txnId : long
+  # properties : Map&lt;String, String&gt;
+  + {abstract} getTableRef() : TableRef
+}
+
+class QueryStatement {
+  - queryRelation : QueryRelation
+  # outFileClause : OutFileClause
+  - queryStartIndex : int
+}
+
+class InsertStmt {
+  - tableRef : TableRef
+  - targetPartitionRef : PartitionRef
+  - targetPartitionIds : List&lt;Long&gt;
+  - targetColumnNames : List&lt;String&gt;
+  - queryStatement : QueryStatement
+  - resultExprs : ArrayList&lt;Expr&gt;
+  - targetTable : Table
+  - isOverwrite : boolean
+  - label : String
+}
+
+class UpdateStmt {
+  - tableRef : TableRef
+  - assignments : List&lt;ColumnAssignment&gt;
+  - fromRelations : List&lt;Relation&gt;
+  - wherePredicate : Expr
+  - commonTableExpressions : List&lt;CTERelation&gt;
+  - table : Table
+  - queryStatement : QueryStatement
+  - usePartialUpdate : boolean
+}
+
+class DeleteStmt {
+  - tableRef : TableRef
+  - partitionRef : PartitionRef
+  - usingRelations : List&lt;Relation&gt;
+  - wherePredicate : Expr
+  - commonTableExpressions : List&lt;CTERelation&gt;
+  - table : Table
+  - queryStatement : QueryStatement
+  - deleteConditions : List&lt;Predicate&gt;
+  - jobId : long
+}
+
+abstract class Relation {
+  - scope : Scope
+  # alias : TableName
+}
+
+abstract class QueryRelation {
+  # sortClause : List&lt;OrderByElement&gt;
+  # limit : LimitElement
+  - cteRelations : List&lt;CTERelation&gt;
+}
+
+class SelectRelation {
+  - selectList : SelectList
+  - outputExpr : List&lt;Expr&gt;
+  - predicate : Expr
+  - groupBy : List&lt;Expr&gt;
+  - aggregate : List&lt;FunctionCallExpr&gt;
+  - having : Expr
+  - isDistinct : boolean
+  - relation : Relation
+}
+
+class ValuesRelation {
+  - rows : List&lt;List&lt;Expr&gt;&gt;
+  - outputColumnTypes : List&lt;Type&gt;
+  - isNullValues : boolean
+}
+
+class TableRef {
+  - tableName : QualifiedName
+  - partitionRef : PartitionRef
+  - alias : String
+  - pos : NodePosition
+}
+
+class ColumnAssignment {
+  - column : String
+  - expr : Expr
+  - pos : NodePosition
+}
+
+ParseNode &lt;|.. StatementBase
+ParseNode &lt;|.. Relation
+ParseNode &lt;|.. TableRef
+ParseNode &lt;|.. ColumnAssignment
+StatementBase &lt;|-- QueryStatement
+StatementBase &lt;|-- DmlStmt
+DmlStmt &lt;|-- InsertStmt
+DmlStmt &lt;|-- UpdateStmt
+DmlStmt &lt;|-- DeleteStmt
+Relation &lt;|-- QueryRelation
+QueryRelation &lt;|-- SelectRelation
+QueryRelation &lt;|-- ValuesRelation
+
+QueryStatement *-- QueryRelation : queryRelation
+InsertStmt *-- QueryStatement : queryStatement
+InsertStmt --&gt; TableRef : tableRef
+UpdateStmt *-- QueryStatement : queryStatement
+UpdateStmt --&gt; TableRef : tableRef
+UpdateStmt *-- ColumnAssignment : assignments
+DeleteStmt *-- QueryStatement : queryStatement
+DeleteStmt --&gt; TableRef : tableRef
+
+@enduml
+</code></pre><p>Generation ends when each <strong><code>StatementBase</code></strong> is on the list. The next object is <strong><code>StmtExecutor</code></strong>: <strong><code>execute()</code></strong> → <strong><code>generateExecPlan()</code></strong> → <strong><code>StatementPlanner.plan(parsedStmt, context)</code></strong>. That call is the whole plan: it returns an <strong><code>ExecPlan</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>executor <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> StmtExecutor(ctx, parsedStmt);
+</span></span><span style=display:flex><span>ctx.<span style=color:#a6e22e>setExecutor</span>(executor);
+</span></span><span style=display:flex><span>executor.<span style=color:#a6e22e>execute</span>();
+</span></span><span style=display:flex><span><span style=color:#75715e>// StmtExecutor.generateExecPlan:</span>
+</span></span><span style=display:flex><span>execPlan <span style=color:#f92672>=</span> StatementPlanner.<span style=color:#a6e22e>plan</span>(parsedStmt, context);
+</span></span></code></pre></div><h3 id=32-plan>3.2 Plan</h3><p><strong><code>StatementPlanner.plan()</code></strong> turns a <strong><code>StatementBase</code></strong> into an <strong><code>ExecPlan</code></strong>. Analyze is the first phase inside that method, not a separate pipeline. For DML, <strong><code>beginTransaction()</code></strong> may set <strong><code>DmlStmt.txnId</code></strong> (a load transaction, not a SQL <code>BEGIN</code>). After analyze and <strong><code>Authorizer.check</code></strong>, the method branches: a <strong><code>QueryStatement</code></strong> goes to <strong><code>createQueryPlan()</code></strong> (or <strong><code>createQueryPlanWithReTry</code></strong>); <strong><code>InsertStmt</code></strong> / <strong><code>UpdateStmt</code></strong> / <strong><code>DeleteStmt</code></strong> / <strong><code>MergeIntoStmt</code></strong> go to their planners.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> ExecPlan <span style=color:#a6e22e>plan</span>(StatementBase stmt, ConnectContext session, TResultSinkType resultSinkType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> DmlStmt) {
+</span></span><span style=display:flex><span>        beginTransaction((DmlStmt) stmt, session);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    plannerMetaLocker <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PlannerMetaLocker(session, stmt);
+</span></span><span style=display:flex><span>    analyzeStatement(stmt, session, plannerMetaLocker);
+</span></span><span style=display:flex><span>    Authorizer.<span style=color:#a6e22e>check</span>(stmt, session);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> QueryStatement) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> createQueryPlan(queryStmt, session, resultSinkType);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> InsertStmt) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> planInsertStmt(plannerMetaLocker, (InsertStmt) stmt, session);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> UpdateStmt) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> UpdatePlanner().<span style=color:#a6e22e>plan</span>((UpdateStmt) stmt, session);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> DeleteStmt) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DeletePlanner().<span style=color:#a6e22e>plan</span>((DeleteStmt) stmt, session);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (stmt <span style=color:#66d9ef>instanceof</span> MergeIntoStmt) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> MergeIntoPlanner().<span style=color:#a6e22e>plan</span>((MergeIntoStmt) stmt, session);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong><code>analyzeStatement()</code></strong> takes the metadata lock and <strong><code>Analyzer.analyze()</code></strong> visits the AST: resolve names, types, and partition metadata. For <strong><code>UpdateStmt</code></strong> / <strong><code>DeleteStmt</code></strong> it also writes the rewritten source <strong><code>queryStatement</code></strong>. No fragments yet.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>analyzeStatement(stmt, session, plannerMetaLocker);
+</span></span><span style=display:flex><span><span style=color:#75715e>// Analyzer.analyze(statement, session) → AnalyzerVisitor.visit(...)</span>
+</span></span></code></pre></div><p>For a query, <strong><code>createQueryPlan()</code></strong> is the rest of <strong><code>plan()</code></strong>: transform → optimize → fragmentize. The three phases below are that body.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>logicalPlan <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> RelationTransformer(transformerContext).<span style=color:#a6e22e>transformWithSelectLimit</span>(query);
+</span></span><span style=display:flex><span>optimizedPlan <span style=color:#f92672>=</span> optimizer.<span style=color:#a6e22e>optimize</span>(logicalPlan.<span style=color:#a6e22e>getRoot</span>(),
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> PhysicalPropertySet(), <span style=color:#66d9ef>new</span> ColumnRefSet(logicalPlan.<span style=color:#a6e22e>getOutputColumn</span>()));
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> PlanFragmentBuilder.<span style=color:#a6e22e>createPhysicalPlan</span>(
+</span></span><span style=display:flex><span>        optimizedPlan, session, logicalPlan.<span style=color:#a6e22e>getOutputColumn</span>(), columnRefFactory, colNames,
+</span></span><span style=display:flex><span>        resultSinkType, <span style=color:#f92672>!</span>session.<span style=color:#a6e22e>getSessionVariable</span>().<span style=color:#a6e22e>isSingleNodeExecPlan</span>(), isShortCircuit);
+</span></span></code></pre></div><h3 id=33-logical-plan>3.3 Logical plan</h3><p>First phase of <strong><code>createQueryPlan()</code></strong>: turn the analyzed <strong><code>QueryRelation</code></strong> into a tree of **<code>OptExpression</code>**s. <strong><code>LogicalPlan</code></strong> is not a subclass of that tree; it holds the <strong>root</strong> <strong><code>OptExpression</code></strong> and the output **<code>ColumnRefOperator</code>**s.</p><p>Each <strong><code>OptExpression</code></strong> is one node:</p><ul><li><strong><code>op</code></strong> — this node’s own operator (<code>LogicalOlapScanOperator</code>, <code>LogicalJoinOperator</code>, …).</li><li><strong><code>inputs</code></strong> — the child **<code>OptExpression</code>**s. A scan has none; a filter or agg has one; a join has two.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class OptExpression {
+  - op : Operator
+  - inputs : List&lt;OptExpression&gt;
+}
+
+abstract class Operator
+
+abstract class LogicalOperator
+
+OptExpression *-- Operator : op
+OptExpression o-- OptExpression : inputs
+Operator &lt;|-- LogicalOperator
+
+@enduml
+</code></pre><p><strong><code>QueryTransformer.plan()</code></strong> stacks one <strong><code>OptExpression</code></strong> per clause (<code>OptExprBuilder</code> wraps <strong><code>op</code></strong> + child builders until <strong><code>getRoot()</code></strong>). <strong><code>SqlToScalarOperatorTranslator</code></strong> turns each <strong><code>Expr</code></strong> into a <strong><code>ScalarOperator</code></strong> on that <strong><code>op</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>OptExprBuilder builder <span style=color:#f92672>=</span> planFrom(queryBlock.<span style=color:#a6e22e>getRelation</span>(), cteContext);  <span style=color:#75715e>// FROM</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> filter(builder, queryBlock.<span style=color:#a6e22e>getPredicate</span>());                     <span style=color:#75715e>// WHERE</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> aggregate(builder, queryBlock.<span style=color:#a6e22e>getGroupBy</span>(), queryBlock.<span style=color:#a6e22e>getAggregate</span>(), ...);
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> filter(builder, queryBlock.<span style=color:#a6e22e>getHaving</span>());                        <span style=color:#75715e>// HAVING</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> window(builder, analyticExprList);                              <span style=color:#75715e>// OVER()</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> project(...);                                                   <span style=color:#75715e>// SELECT / ORDER BY exprs</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> distinct(builder, queryBlock, queryBlock.<span style=color:#a6e22e>isDistinct</span>(), ...);
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> sort(builder, queryBlock.<span style=color:#a6e22e>getOrderBy</span>(), orderByColumns);         <span style=color:#75715e>// ORDER BY</span>
+</span></span><span style=display:flex><span>builder <span style=color:#f92672>=</span> limit(builder, queryBlock.<span style=color:#a6e22e>getLimit</span>());                          <span style=color:#75715e>// LIMIT / OFFSET</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> LogicalPlan(builder, outputColumns, correlation);
+</span></span></code></pre></div><table><thead><tr><th>SQL clause</th><th>AST field</th><th>Logical operator</th></tr></thead><tbody><tr><td><code>FROM t</code></td><td><code>SelectRelation.relation</code> (<code>TableRelation</code>)</td><td><strong><code>LogicalOlapScanOperator</code></strong> (or other <strong><code>LogicalScanOperator</code></strong>)</td></tr><tr><td><code>JOIN … ON</code></td><td><strong><code>JoinRelation</code></strong> (<code>joinOp</code>, <code>onPredicate</code>)</td><td><strong><code>LogicalJoinOperator</code></strong> (<code>onPredicate</code> kept distinct from WHERE)</td></tr><tr><td><code>WHERE</code></td><td><code>SelectRelation.predicate</code></td><td><strong><code>LogicalFilterOperator</code></strong> (below agg)</td></tr><tr><td><code>GROUP BY</code> / <code>SUM()</code></td><td><code>groupBy</code>, <code>aggregate</code></td><td><strong><code>LogicalAggregationOperator</code></strong> (<code>groupingKeys</code>, <code>aggregations</code> → <strong><code>CallOperator</code></strong>)</td></tr><tr><td><code>GROUPING SETS</code></td><td><code>groupingSetsList</code></td><td><strong><code>LogicalRepeatOperator</code></strong> under the agg</td></tr><tr><td><code>HAVING</code></td><td><code>having</code></td><td><strong><code>LogicalFilterOperator</code></strong> (above agg)</td></tr><tr><td><code>SELECT</code> list</td><td><code>outputExpr</code></td><td><strong><code>LogicalProjectOperator</code></strong> (<code>columnRefMap</code>)</td></tr><tr><td><code>DISTINCT</code></td><td><code>isDistinct</code></td><td><strong><code>LogicalAggregationOperator</code></strong> (group keys = output, empty agg map)</td></tr><tr><td><code>ORDER BY</code></td><td><code>orderBy</code></td><td><strong><code>LogicalTopNOperator</code></strong></td></tr><tr><td><code>LIMIT</code> / <code>OFFSET</code></td><td><code>limit</code></td><td><strong><code>LogicalLimitOperator</code></strong>; session <strong><code>sql_select_limit</code></strong> is an extra wrap in <strong><code>transformWithSelectLimit()</code></strong></td></tr><tr><td><code>OVER()</code></td><td>analytic exprs</td><td><strong><code>LogicalWindowOperator</code></strong></td></tr><tr><td><code>UNION</code> / <code>EXCEPT</code> / <code>INTERSECT</code></td><td><strong><code>SetOperationRelation</code></strong></td><td><strong><code>LogicalUnionOperator</code></strong> / <strong><code>Except</code></strong> / <strong><code>Intersect</code></strong></td></tr><tr><td>subquery in expr</td><td><code>Subquery</code></td><td><strong><code>LogicalApplyOperator</code></strong></td></tr></tbody></table><p>WHERE and HAVING are the same operator class; only stack position differs. A join’s <strong><code>onPredicate</code></strong> stays on <strong><code>LogicalJoinOperator</code></strong> so MV rewrite can tell ON from WHERE. Filter pushdown into the scan is a later CBO rewrite, not this transform.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+abstract class Relation {
+  - scope : Scope
+  # alias : TableName
+}
+
+class SelectRelation {
+  - relation : Relation
+  - predicate : Expr
+  - groupBy : List&lt;Expr&gt;
+  - aggregate : List&lt;FunctionCallExpr&gt;
+  - having : Expr
+  - outputExpr : List&lt;Expr&gt;
+  - isDistinct : boolean
+}
+
+class JoinRelation {
+  - joinOp : JoinOperator
+  - left : Relation
+  - right : Relation
+  - onPredicate : Expr
+  - lateral : boolean
+}
+
+class LogicalPlan {
+  - root : OptExprBuilder
+  - outputColumn : List&lt;ColumnRefOperator&gt;
+  - correlation : List&lt;ColumnRefOperator&gt;
+}
+
+class OptExprBuilder {
+  - root : Operator
+  - inputs : List&lt;OptExprBuilder&gt;
+  - expressionMapping : ExpressionMapping
+}
+
+class OptExpression {
+  - op : Operator
+  - inputs : List&lt;OptExpression&gt;
+}
+
+abstract class LogicalOperator {
+  # predicate : ScalarOperator
+  # limit : long
+}
+
+class LogicalOlapScanOperator {
+  # table : Table
+  # colRefToColumnMetaMap : ImmutableMap&lt;ColumnRefOperator, Column&gt;
+}
+
+class LogicalJoinOperator {
+  - joinType : JoinOperator
+  - onPredicate : ScalarOperator
+}
+
+class LogicalFilterOperator
+
+class LogicalAggregationOperator {
+  - type : AggType
+  - groupingKeys : ImmutableList&lt;ColumnRefOperator&gt;
+  - aggregations : ImmutableMap&lt;ColumnRefOperator, CallOperator&gt;
+}
+
+class LogicalProjectOperator {
+  - columnRefMap : Map&lt;ColumnRefOperator, ScalarOperator&gt;
+}
+
+abstract class ScalarOperator {
+  # opType : OperatorType
+  # type : Type
+}
+
+class ColumnRefOperator {
+  - id : int
+  - name : String
+  - nullable : boolean
+}
+
+class CallOperator {
+  - fnName : String
+  - fn : Function
+  - isDistinct : boolean
+}
+
+Relation &lt;|-- SelectRelation
+Relation &lt;|-- JoinRelation
+
+SelectRelation ..&gt; LogicalPlan : QueryTransformer.plan()
+LogicalPlan *-- OptExprBuilder : root
+OptExprBuilder --&gt; OptExpression : getRoot()
+OptExpression *-- LogicalOperator
+OptExpression o-- OptExpression : inputs
+LogicalOperator &lt;|-- LogicalOlapScanOperator
+LogicalOperator &lt;|-- LogicalJoinOperator
+LogicalOperator &lt;|-- LogicalFilterOperator
+LogicalOperator &lt;|-- LogicalAggregationOperator
+LogicalOperator &lt;|-- LogicalProjectOperator
+
+LogicalJoinOperator --&gt; ScalarOperator : onPredicate
+LogicalFilterOperator --&gt; ScalarOperator : predicate
+LogicalProjectOperator --&gt; ScalarOperator : columnRefMap
+LogicalAggregationOperator --&gt; CallOperator : aggregations
+ScalarOperator &lt;|-- ColumnRefOperator
+ScalarOperator &lt;|-- CallOperator
+
+@enduml
+</code></pre><p>The running query is revenue by customer region. Tables are not colocated: <strong><code>orders</code></strong> is hashed on <strong><code>cust_id</code></strong>, <strong><code>customers</code></strong> on <strong><code>id</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
+</span></span><span style=display:flex><span>    dt      DATE,
+</span></span><span style=display:flex><span>    cust_id BIGINT,
+</span></span><span style=display:flex><span>    amount  DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, cust_id)
+</span></span><span style=display:flex><span>PARTITION <span style=color:#66d9ef>BY</span> RANGE(dt) (
+</span></span><span style=display:flex><span>    PARTITION p2024 <span style=color:#66d9ef>VALUES</span> [(<span style=color:#e6db74>&#39;2024-01-01&#39;</span>), (<span style=color:#e6db74>&#39;2025-01-01&#39;</span>))
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(cust_id) BUCKETS <span style=color:#ae81ff>8</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> customers (
+</span></span><span style=display:flex><span>    id     BIGINT,
+</span></span><span style=display:flex><span>    region VARCHAR(<span style=color:#ae81ff>32</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>(id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>8</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#66d9ef>c</span>.region, <span style=color:#66d9ef>SUM</span>(o.amount)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o
+</span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.cust_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> o.dt <span style=color:#66d9ef>BETWEEN</span> <span style=color:#e6db74>&#39;2024-01-01&#39;</span> <span style=color:#66d9ef>AND</span> <span style=color:#e6db74>&#39;2024-06-30&#39;</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>GROUP</span> <span style=color:#66d9ef>BY</span> <span style=color:#66d9ef>c</span>.region;
+</span></span></code></pre></div><p><strong><code>planFrom</code></strong> builds the join; <strong><code>filter</code></strong> hangs WHERE on top of the join (not yet on the <strong><code>orders</code></strong> scan); <strong><code>aggregate</code></strong> then <strong><code>project</code></strong> produce the SELECT list. Each line below is one <strong><code>OptExpression</code></strong>: the name is <strong><code>op</code></strong>; indentation is <strong><code>inputs</code></strong>.</p><pre tabindex=0><code>OptExpression  op=LogicalProject  { region, sum_amount }
+  OptExpression  op=LogicalAggregation  groupingKeys=[region]  aggregations={sum_amount: SUM(amount)}
+    OptExpression  op=LogicalFilter  predicate=(dt BETWEEN ...)
+      OptExpression  op=LogicalJoin  INNER  onPredicate=(cust_id = id)
+        OptExpression  op=LogicalOlapScan  orders     inputs=[]
+        OptExpression  op=LogicalOlapScan  customers  inputs=[]
+</code></pre><h3 id=34-optimize>3.4 Optimize</h3><p><strong><code>QueryOptimizer.optimize()</code></strong> is the second phase of <strong><code>createQueryPlan()</code></strong>. The framework follows Graefe’s Cascades paper <a href=https://kevinwang930.github.io/post/data/db/starrocks/architecture/#5-references>[2]</a>: <strong>Memo</strong>, task-stack search, transformation and implementation <strong>Rules</strong>, and <strong>property enforce</strong>. A normal <strong><code>SELECT</code></strong> uses <strong><code>optimizeByCost</code></strong> (<code>OptimizerOptions</code> defaults to <strong><code>COST_BASED</code></strong>). <strong><code>optimizeByRule</code></strong> is rewrite only (MV’s own tree) and never initializes the Memo.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-optimize-overview.svg alt="QueryOptimizer: rewrite, Cascades Memo search, extract, rewrite"></p><h4 id=341-overall-procedure>3.4.1 Overall procedure</h4><p><strong><code>optimizeByCost</code></strong> is a fixed pipeline:</p><ol><li><strong>Logical rewrite</strong> — <code>rewriteAndValidatePlan</code> → <code>logicalRuleRewrite</code> (subquery, CTE inline, prune, pushdown) on the concrete <strong><code>OptExpression</code></strong> tree.</li><li><strong>Init</strong> — <code>memo.init(logicOperatorTree)</code> then <code>deriveAllGroupLogicalProperty</code>.</li><li><strong>Memo search</strong> — <code>memoOptimize</code>: extend the <strong><code>RuleSet</code></strong> for join reorder / implement, push <code>OptimizeGroupTask(rootGroup)</code>, run the <strong><code>TaskScheduler</code></strong> stack (transform, implement, <strong><code>EnforceAndCostTask</code></strong>).</li><li><strong>Extract</strong> — <code>extractBestPlan(requiredProperty, rootGroup)</code> rebuilds one physical <strong><code>OptExpression</code></strong> from the cheapest physical <strong><code>GroupExpression</code></strong>.</li><li><strong>Physical rewrite</strong> — <code>physicalRuleRewrite</code>, then feedback <code>dynamicRewrite</code>.</li></ol><p>What changes on the tree is <strong><code>op</code></strong> and which <strong><code>GroupExpression</code></strong> CBO kept. <strong><code>PlanFragmentBuilder</code></strong> later cuts at every <strong><code>PhysicalDistributionOperator</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>Optimizer optimizer <span style=color:#f92672>=</span> OptimizerFactory.<span style=color:#a6e22e>create</span>(optimizerContext);
+</span></span><span style=display:flex><span>OptExpression optimizedPlan <span style=color:#f92672>=</span> optimizer.<span style=color:#a6e22e>optimize</span>(
+</span></span><span style=display:flex><span>        logicalPlan.<span style=color:#a6e22e>getRoot</span>(),
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> PhysicalPropertySet(),
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> ColumnRefSet(logicalPlan.<span style=color:#a6e22e>getOutputColumn</span>()));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>OptExpression <span style=color:#a6e22e>optimize</span>(OptExpression logicOperatorTree, PhysicalPropertySet requiredProperty,
+</span></span><span style=display:flex><span>        ColumnRefSet requiredColumns) {
+</span></span><span style=display:flex><span>    prepare(logicOperatorTree);
+</span></span><span style=display:flex><span>    prepareMvRewrite(...);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> optimizerOptions.<span style=color:#a6e22e>isRuleBased</span>() <span style=color:#f92672>?</span>
+</span></span><span style=display:flex><span>            optimizeByRule(logicOperatorTree, requiredProperty, requiredColumns) :
+</span></span><span style=display:flex><span>            optimizeByCost(connectContext, logicOperatorTree, requiredProperty, requiredColumns);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>OptExpression <span style=color:#a6e22e>optimizeByCost</span>(ConnectContext connectContext, OptExpression logicOperatorTree,
+</span></span><span style=display:flex><span>        PhysicalPropertySet requiredProperty, ColumnRefSet requiredColumns) {
+</span></span><span style=display:flex><span>    TaskContext rootTaskContext <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> TaskContext(context, requiredProperty, requiredColumns.<span style=color:#a6e22e>clone</span>(), Double.<span style=color:#a6e22e>MAX_VALUE</span>);
+</span></span><span style=display:flex><span>    logicOperatorTree <span style=color:#f92672>=</span> rewriteAndValidatePlan(logicOperatorTree, rootTaskContext);
+</span></span><span style=display:flex><span>    memo.<span style=color:#a6e22e>init</span>(logicOperatorTree);
+</span></span><span style=display:flex><span>    memo.<span style=color:#a6e22e>deriveAllGroupLogicalProperty</span>();
+</span></span><span style=display:flex><span>    memoOptimize(connectContext, memo, rootTaskContext);
+</span></span><span style=display:flex><span>    OptExpression result <span style=color:#f92672>=</span> extractBestPlan(requiredProperty, memo.<span style=color:#a6e22e>getRootGroup</span>());
+</span></span><span style=display:flex><span>    result <span style=color:#f92672>=</span> physicalRuleRewrite(connectContext, rootTaskContext, result);
+</span></span><span style=display:flex><span>    result <span style=color:#f92672>=</span> dynamicRewrite(connectContext, rootTaskContext, result);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>memoOptimize</span>(ConnectContext connectContext, Memo memo, TaskContext rootTaskContext) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (innerCrossJoinNode <span style=color:#f92672>&lt;</span> sessionVariable.<span style=color:#a6e22e>getCboMaxReorderNode</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (innerCrossJoinNode <span style=color:#f92672>&gt;</span> sessionVariable.<span style=color:#a6e22e>getCboMaxReorderNodeUseExhaustive</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> ReorderJoinRule().<span style=color:#a6e22e>transform</span>(tree, context);
+</span></span><span style=display:flex><span>            context.<span style=color:#a6e22e>getRuleSet</span>().<span style=color:#a6e22e>addJoinCommutativityWithoutInnerRule</span>();
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            context.<span style=color:#a6e22e>getRuleSet</span>().<span style=color:#a6e22e>addJoinTransformationRules</span>();  <span style=color:#75715e>// commute / associate</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    context.<span style=color:#a6e22e>getRuleSet</span>().<span style=color:#a6e22e>addAutoJoinImplementationRule</span>();  <span style=color:#75715e>// HashJoin + NestLoop</span>
+</span></span><span style=display:flex><span>    scheduler.<span style=color:#a6e22e>pushTask</span>(<span style=color:#66d9ef>new</span> OptimizeGroupTask(rootTaskContext, memo.<span style=color:#a6e22e>getRootGroup</span>()));
+</span></span><span style=display:flex><span>    scheduler.<span style=color:#a6e22e>executeTasks</span>(rootTaskContext);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>OptExpression <span style=color:#a6e22e>extractBestPlan</span>(PhysicalPropertySet requiredProperty, Group rootGroup) {
+</span></span><span style=display:flex><span>    GroupExpression groupExpression <span style=color:#f92672>=</span> rootGroup.<span style=color:#a6e22e>getBestExpression</span>(requiredProperty);
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>PhysicalPropertySet<span style=color:#f92672>&gt;</span> inputProperties <span style=color:#f92672>=</span> groupExpression.<span style=color:#a6e22e>getInputProperties</span>(requiredProperty);
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>OptExpression<span style=color:#f92672>&gt;</span> childPlans <span style=color:#f92672>=</span> Lists.<span style=color:#a6e22e>newArrayList</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> groupExpression.<span style=color:#a6e22e>arity</span>(); <span style=color:#f92672>++</span>i) {
+</span></span><span style=display:flex><span>        childPlans.<span style=color:#a6e22e>add</span>(extractBestPlan(inputProperties.<span style=color:#a6e22e>get</span>(i), groupExpression.<span style=color:#a6e22e>inputAt</span>(i)));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> OptExpression.<span style=color:#a6e22e>create</span>(groupExpression.<span style=color:#a6e22e>getOp</span>(), childPlans);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h4 id=342-rules>3.4.2 Rules</h4><p>A <strong><code>Rule</code></strong> is one rewrite: match a subtree, optionally reject it, then emit zero or more equivalent <strong><code>OptExpression</code></strong> trees. It is identified by a <strong><code>RuleType</code></strong>, matched by a <strong><code>Pattern</code></strong>, gated by optional <strong><code>check(input, context)</code></strong> (default true), and realized by <strong><code>transform(input, context)</code></strong> (empty list means no change). <strong><code>promise()</code></strong> sets scheduler priority among valid rules (default 1).</p><p><strong><code>COST_BASED</code></strong> still means this <strong><code>Rule</code></strong> abstraction plus cost, not a separate non-rule planner. Applying a rule never mutates the matched expression in place inside the memo: <strong><code>ApplyRuleTask</code></strong> <strong><code>copyIn</code>s</strong> each substitute as a new <strong><code>GroupExpression</code></strong>.</p><p>StarRocks splits <strong><code>Rule</code></strong> into two subclasses by <strong>what kind of operator <code>transform</code> returns</strong>. <strong><code>TransformationRule</code></strong> is <strong>logical → logical</strong>: it explores equivalent logical plans (join commute, split agg / top-n, …). A new logical <strong><code>GroupExpression</code></strong> schedules another <strong><code>OptimizeExpressionTask</code></strong>. <strong><code>promise()</code></strong> stays 1. Example: <strong><code>JoinCommutativityRule</code></strong> turns <code>LogicalJoin(A, B)</code> into <code>LogicalJoin(B, A)</code>.</p><p><strong><code>ImplementationRule</code></strong> is <strong>logical → physical</strong>: it binds a logical operator to an executable physical one (hash join, olap scan, …). A new physical <strong><code>GroupExpression</code></strong> schedules <strong><code>EnforceAndCostTask</code></strong>. It overrides <strong><code>promise()</code></strong> to <strong>2</strong>, so implement tasks sit above transform on the scheduler stack and run first. Example: <strong><code>HashJoinImplementationRule</code></strong> turns <code>LogicalJoin</code> into <code>PhysicalHashJoin</code> with the same children.</p><p>Both share the same match API (<strong><code>Pattern</code></strong> + <strong><code>check</code></strong> + <strong><code>transform</code></strong>). The difference is the substitute’s operator kind and the next Cascades task. Transformation widens the logical search space; implementation is the bridge into costing and property enforce. Cost, not the rule, chooses which physical expression <strong><code>extractBestPlan</code></strong> keeps.</p><p><strong><code>CombinationRule</code></strong> is a <strong><code>TransformationRule</code></strong> whose <strong><code>predecessorRules()</code></strong> is a batch (<code>PUSH_DOWN_PREDICATE_RULES</code>, <code>PRUNE_COLUMNS_RULES</code>); <strong><code>transform</code></strong> itself returns empty — the batch members do the work.</p><p><strong><code>Pattern</code></strong> is a tree of operator-type placeholders. <strong><code>Pattern.create(LOGICAL_JOIN)</code></strong> with two <strong><code>PATTERN_LEAF</code></strong> children matches any join whose children are unconstrained. <strong><code>RuleSet</code></strong> keeps two lists that mirror the subclass split: <strong><code>transformRules</code></strong> (constructor adds split-agg / top-n, …) and <strong><code>implementRules</code></strong> (starts as <strong><code>ALL_IMPLEMENT_RULES</code></strong>: scan, hash agg, filter, project, top-n — not join). <strong><code>memoOptimize</code></strong> appends join commute / associate and <strong><code>addAutoJoinImplementationRule</code></strong>.</p><p><strong><code>OptimizerContext</code></strong> holds <strong><code>RuleSet</code></strong>, <strong><code>OptimizerOptions</code></strong> (disabled <strong><code>RuleType</code>s</strong>), <strong><code>TaskScheduler</code></strong>, and the <strong><code>Memo</code></strong>. Each Cascades task carries a <strong><code>TaskContext</code></strong>: the <strong><code>OptimizerContext</code></strong>, required <strong><code>PhysicalPropertySet</code></strong>, and <strong><code>upperBoundCost</code></strong>.</p><p>The same <strong><code>Rule</code></strong> class runs in two engines:</p><ul><li><strong>Before the memo</strong> — <code>logicalRuleRewrite</code> pushes <strong><code>RewriteTreeTask</code></strong>: top-down match on the concrete tree, <strong><code>check</code></strong>, <strong><code>transform</code></strong>, replace in place (at most one expression). <strong><code>predecessorRules()</code></strong> runs before <strong><code>transform</code></strong>, which is how a <strong><code>CombinationRule</code></strong> batch executes.</li><li><strong>After extract</strong> — <code>physicalRuleRewrite</code> uses <strong><code>TreeRewriteRule.rewrite</code></strong> on the chosen physical tree (prune shuffle, decode, scalar reuse), not <strong><code>Pattern</code></strong> / <strong><code>Binder</code></strong>.</li><li><strong>Inside the memo</strong> — <code>OptimizeGroupTask</code> → <code>OptimizeExpressionTask</code> → <code>ApplyRuleTask</code> (below).</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class OptimizerContext {
+  - ruleSet : RuleSet
+  - optimizerOptions : OptimizerOptions
+  - taskScheduler : TaskScheduler
+  - memo : Memo
+}
+
+class OptimizerOptions {
+  + isRuleDisable()
+}
+
+class TaskContext {
+  - requiredProperty : PhysicalPropertySet
+  - upperBoundCost : double
+}
+
+abstract class OptimizerTask {
+  # context : TaskContext
+  + execute()
+  + filterInValidRules()
+}
+
+class OptimizeGroupTask {
+  - group : Group
+}
+
+class OptimizeExpressionTask {
+  - groupExpression : GroupExpression
+  - isExplore : boolean
+  + getValidRules()
+}
+
+class ApplyRuleTask {
+  - groupExpression : GroupExpression
+  - rule : Rule
+}
+
+abstract class Rule {
+  - type : RuleType
+  - pattern : Pattern
+  + check()
+  + transform()
+  + promise()
+}
+
+abstract class TransformationRule
+abstract class ImplementationRule
+class CombinationRule {
+  - rules : List&lt;Rule&gt;
+}
+
+class JoinCommutativityRule
+class JoinAssociativityRule
+class SplitTwoPhaseAggRule
+
+abstract class JoinImplementationRule
+class HashJoinImplementationRule
+class NestLoopJoinImplementationRule
+class OlapScanImplementationRule
+class HashAggImplementationRule
+
+abstract class Pattern {
+  - children : List&lt;Pattern&gt;
+}
+
+class RuleSet {
+  - transformRules : List&lt;Rule&gt;
+  - implementRules : List&lt;Rule&gt;
+}
+
+class Binder {
+  + next()
+}
+
+OptimizerContext *-- RuleSet : ruleSet
+OptimizerContext *-- OptimizerOptions : optimizerOptions
+TaskContext *-- OptimizerContext : optimizerContext
+OptimizerTask o-- TaskContext : context
+OptimizerTask &lt;|-- OptimizeGroupTask
+OptimizerTask &lt;|-- OptimizeExpressionTask
+OptimizerTask &lt;|-- ApplyRuleTask
+OptimizeGroupTask o-- Group : group
+OptimizeGroupTask ..&gt; OptimizeExpressionTask : push logical GE
+OptimizeExpressionTask ..&gt; RuleSet : getValidRules
+OptimizeExpressionTask ..&gt; ApplyRuleTask : push valid Rule
+ApplyRuleTask o-- Rule : rule
+ApplyRuleTask ..&gt; Binder
+
+Rule &lt;|-- TransformationRule
+Rule &lt;|-- ImplementationRule
+Rule o-- Pattern : pattern
+TransformationRule &lt;|-- CombinationRule
+TransformationRule &lt;|-- JoinCommutativityRule
+TransformationRule &lt;|-- JoinAssociativityRule
+TransformationRule &lt;|-- SplitTwoPhaseAggRule
+ImplementationRule &lt;|-- JoinImplementationRule
+ImplementationRule &lt;|-- OlapScanImplementationRule
+ImplementationRule &lt;|-- HashAggImplementationRule
+JoinImplementationRule &lt;|-- HashJoinImplementationRule
+JoinImplementationRule &lt;|-- NestLoopJoinImplementationRule
+CombinationRule o-- Rule : rules
+RuleSet o-- Rule : transformRules
+RuleSet o-- Rule : implementRules
+Binder ..&gt; Pattern
+Binder ..&gt; GroupExpression
+
+@enduml
+</code></pre><p><strong><code>OptimizeGroupTask</code></strong> does not call <strong><code>Rule.check</code></strong>. It stops if <strong><code>group.getCostLowerBound(requiredProperty) >= upperBoundCost</code></strong> or <strong><code>group.hasBestExpression(requiredProperty)</code></strong>. Otherwise it pushes one <strong><code>OptimizeExpressionTask</code></strong> per logical <strong><code>GroupExpression</code></strong>, then one <strong><code>EnforceAndCostTask</code></strong> per physical expression already in the group.</p><p><strong><code>OptimizeExpressionTask.getValidRules</code></strong> takes all <strong><code>transformRules</code></strong>, and <strong><code>implementRules</code></strong> unless <strong><code>isExplore</code></strong>. <strong><code>filterInValidRules</code></strong> keeps a rule only if the expression has not <strong><code>hasRuleExplored</code></strong> it, <strong><code>pattern.matchWithoutChild</code></strong> fits, the rule is not disabled, and <strong><code>rule.exhausted</code></strong> is false. Surviving rules are sorted by <strong><code>promise</code></strong> into <strong><code>ApplyRuleTask</code>s</strong>. The task also pushes <strong><code>DeriveStatsTask</code></strong> and <strong><code>ExploreGroupTask</code></strong> on each child group. The scheduler is a stack: child groups run first; implement (promise 2) sits above transform (promise 1) and therefore runs earlier.</p><p><strong><code>ApplyRuleTask</code></strong> uses <strong><code>Binder</code></strong>: children are <strong><code>Group</code>s</strong>, so <strong><code>binder.next()</code></strong> yields each binding. Bindings are collected (<strong><code>check</code></strong> + <strong><code>transform</code></strong>), then each result is <strong><code>copyIn</code></strong> into the <em>same</em> group. A logical result becomes another <strong><code>OptimizeExpressionTask</code></strong>; a physical result becomes <strong><code>EnforceAndCostTask</code></strong>. The matched expression is then <strong><code>setRuleExplored</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>void</span> OptimizeGroupTask.<span style=color:#a6e22e>execute</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (group.<span style=color:#a6e22e>getCostLowerBound</span>(context.<span style=color:#a6e22e>getRequiredProperty</span>()) <span style=color:#f92672>&gt;=</span> context.<span style=color:#a6e22e>getUpperBoundCost</span>()
+</span></span><span style=display:flex><span>            <span style=color:#f92672>||</span> group.<span style=color:#a6e22e>hasBestExpression</span>(context.<span style=color:#a6e22e>getRequiredProperty</span>())) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> group.<span style=color:#a6e22e>getLogicalExpressions</span>().<span style=color:#a6e22e>size</span>() <span style=color:#f92672>-</span> 1; i <span style=color:#f92672>&gt;=</span> 0; i<span style=color:#f92672>--</span>) {
+</span></span><span style=display:flex><span>        pushTask(<span style=color:#66d9ef>new</span> OptimizeExpressionTask(context, group.<span style=color:#a6e22e>getLogicalExpressions</span>().<span style=color:#a6e22e>get</span>(i)));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> group.<span style=color:#a6e22e>getPhysicalExpressions</span>().<span style=color:#a6e22e>size</span>() <span style=color:#f92672>-</span> 1; i <span style=color:#f92672>&gt;=</span> 0; i<span style=color:#f92672>--</span>) {
+</span></span><span style=display:flex><span>        pushTask(<span style=color:#66d9ef>new</span> EnforceAndCostTask(context, group.<span style=color:#a6e22e>getPhysicalExpressions</span>().<span style=color:#a6e22e>get</span>(i)));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>filterInValidRules</span>(GroupExpression groupExpression, List<span style=color:#f92672>&lt;</span>Rule<span style=color:#f92672>&gt;</span> candidateRules, List<span style=color:#f92672>&lt;</span>Rule<span style=color:#f92672>&gt;</span> validRules) {
+</span></span><span style=display:flex><span>    OptimizerOptions optimizerOptions <span style=color:#f92672>=</span> context.<span style=color:#a6e22e>getOptimizerContext</span>().<span style=color:#a6e22e>getOptimizerOptions</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Rule rule : candidateRules) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (groupExpression.<span style=color:#a6e22e>hasRuleExplored</span>(rule)
+</span></span><span style=display:flex><span>                <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>rule.<span style=color:#a6e22e>getPattern</span>().<span style=color:#a6e22e>matchWithoutChild</span>(groupExpression)
+</span></span><span style=display:flex><span>                <span style=color:#f92672>||</span> optimizerOptions.<span style=color:#a6e22e>isRuleDisable</span>(rule.<span style=color:#a6e22e>type</span>())
+</span></span><span style=display:flex><span>                <span style=color:#f92672>||</span> rule.<span style=color:#a6e22e>exhausted</span>(context.<span style=color:#a6e22e>getOptimizerContext</span>())) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        validRules.<span style=color:#a6e22e>add</span>(rule);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>Rule<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getValidRules</span>() {
+</span></span><span style=display:flex><span>    filterInValidRules(groupExpression, ruleSet.<span style=color:#a6e22e>getTransformRules</span>(), validRules);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isExplore) {
+</span></span><span style=display:flex><span>        filterInValidRules(groupExpression, ruleSet.<span style=color:#a6e22e>getImplementRules</span>(), validRules);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    validRules.<span style=color:#a6e22e>sort</span>(Comparator.<span style=color:#a6e22e>comparingInt</span>(Rule::promise));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> validRules;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> ApplyRuleTask.<span style=color:#a6e22e>execute</span>() {
+</span></span><span style=display:flex><span>    Binder binder <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Binder(optimizerContext, rule.<span style=color:#a6e22e>getPattern</span>(), groupExpression, ...);
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>OptExpression<span style=color:#f92672>&gt;</span> newExpressions <span style=color:#f92672>=</span> Lists.<span style=color:#a6e22e>newArrayList</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (OptExpression extractExpr <span style=color:#f92672>=</span> binder.<span style=color:#a6e22e>next</span>(); extractExpr <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>; extractExpr <span style=color:#f92672>=</span> binder.<span style=color:#a6e22e>next</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (rule.<span style=color:#a6e22e>check</span>(extractExpr, optimizerContext)) {
+</span></span><span style=display:flex><span>            newExpressions.<span style=color:#a6e22e>addAll</span>(rule.<span style=color:#a6e22e>transform</span>(extractExpr, optimizerContext));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (OptExpression expression : newExpressions) {
+</span></span><span style=display:flex><span>        GroupExpression neu <span style=color:#f92672>=</span> memo.<span style=color:#a6e22e>copyIn</span>(groupExpression.<span style=color:#a6e22e>getGroup</span>(), expression).<span style=color:#a6e22e>second</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (neu.<span style=color:#a6e22e>getOp</span>().<span style=color:#a6e22e>isLogical</span>()) {
+</span></span><span style=display:flex><span>            pushTask(<span style=color:#66d9ef>new</span> OptimizeExpressionTask(context, neu, isExplore));
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            pushTask(<span style=color:#66d9ef>new</span> EnforceAndCostTask(context, neu));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    groupExpression.<span style=color:#a6e22e>setRuleExplored</span>(rule);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// HashJoinImplementationRule.check: not CROSS, ON has equality predicates</span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>OptExpression<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>transform</span>(OptExpression input, OptimizerContext context) {
+</span></span><span style=display:flex><span>    LogicalJoinOperator joinOperator <span style=color:#f92672>=</span> (LogicalJoinOperator) input.<span style=color:#a6e22e>getOp</span>();
+</span></span><span style=display:flex><span>    PhysicalHashJoinOperator physicalHashJoin <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PhysicalHashJoinOperator(
+</span></span><span style=display:flex><span>            joinOperator.<span style=color:#a6e22e>getJoinType</span>(), joinOperator.<span style=color:#a6e22e>getOnPredicate</span>(), ...);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Lists.<span style=color:#a6e22e>newArrayList</span>(OptExpression.<span style=color:#a6e22e>create</span>(physicalHashJoin, input.<span style=color:#a6e22e>getInputs</span>()));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the running query, <strong><code>JoinCommutativityRule</code></strong> adds <strong><code>LogicalJoin(customers, orders)</code></strong>. <strong><code>HashJoinImplementationRule</code></strong> adds <strong><code>PhysicalHashJoin</code></strong> when ON has equality (<code>cust_id = id</code>); <strong><code>NestLoopJoinImplementationRule.check</code></strong> rejects that equi-join. Cost chooses which physical expression <strong><code>extractBestPlan</code></strong> keeps.</p><h4 id=343-memo>3.4.3 Memo</h4><p>The <strong>Memo</strong> is the Cascades search space: every alternative tried so far, keyed so equivalents share groups. A <strong><code>Group</code></strong> is a set of <strong>logically equivalent</strong> alternatives. A <strong><code>GroupExpression</code></strong> is one alternative: an <strong><code>op</code></strong> whose <strong><code>inputs</code></strong> are <strong><code>Group</code>s</strong> (not child trees). Identity is <strong><code>(op, input group ids)</code></strong> — that is how <strong><code>copyIn</code></strong> detects a duplicate.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class Memo {
+  - groups : List&lt;Group&gt;
+  - groupExpressions : Map
+  - rootGroup : Group
+  + init()
+  + copyIn()
+}
+
+class Group {
+  - id : int
+  - logicalExpressions : List&lt;GroupExpression&gt;
+  - physicalExpressions : List&lt;GroupExpression&gt;
+  - lowestCostExpressions : Map
+}
+
+class GroupExpression {
+  - op : Operator
+  - inputs : List&lt;Group&gt;
+  - lowestCostTable : Map
+  - outputPropertyMap : Map
+}
+
+Memo o-- Group : groups
+Memo --&gt; Group : rootGroup
+Group o-- GroupExpression : logical / physical
+GroupExpression o-- Group : inputs
+GroupExpression *-- Operator : op
+
+@enduml
+</code></pre><p><strong><code>memo.init</code></strong> <strong><code>copyIn</code>s</strong> the rewritten tree bottom-up: one <strong><code>Group</code></strong> and one logical <strong><code>GroupExpression</code></strong> per node. Rule results call <strong><code>copyIn(targetGroup, expr)</code></strong> with <strong><code>targetGroup</code></strong> = the matched expression’s group, so equivalents stay together. If <strong><code>(op, inputs)</code></strong> already exists, the memo returns the old expression (and <strong><code>mergeGroup</code></strong> if it lived elsewhere). Implementation rules add <strong>physical</strong> expressions to the same groups; <strong><code>EnforceAndCostTask</code></strong> fills <strong><code>lowestCostTable</code></strong>.</p><p>On the running query, <strong><code>init</code></strong> of the §3.3 tree is six groups:</p><pre tabindex=0><code>G5  LogicalProject
+  G4  LogicalAggregation  groupingKeys=[region]
+    G3  LogicalFilter  predicate=(dt BETWEEN ...)
+      G2  LogicalJoin  INNER  onPredicate=(cust_id = id)
+        G0  LogicalOlapScan  orders
+        G1  LogicalOlapScan  customers
+</code></pre><pre tabindex=0><code>G0  { LogicalOlapScan(orders) }
+G1  { LogicalOlapScan(customers) }
+G2  { LogicalJoin(G0, G1) }
+G3  { LogicalFilter(G2) }
+G4  { LogicalAggregation(G3) }
+G5  { LogicalProject(G4) }   // root
+</code></pre><p>After commute and hash-join implement, <strong>G2</strong> holds:</p><pre tabindex=0><code>G2  {
+  LogicalJoin(G0, G1)           // from init
+  LogicalJoin(G1, G0)           // JoinCommutativityRule
+  PhysicalHashJoin(G0, G1)      // HashJoinImplementationRule
+  PhysicalHashJoin(G1, G0)      // implement the commute
+}
+</code></pre><p><strong>G0</strong> gains <strong><code>PhysicalOlapScan(orders)</code></strong>. A second <strong><code>copyIn</code></strong> of <strong><code>LogicalJoin(G0, G1)</code></strong> hashes to the existing expression and is not inserted.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>GroupExpression <span style=color:#a6e22e>init</span>(OptExpression originExpression) {
+</span></span><span style=display:flex><span>    GroupExpression rootGroupExpression <span style=color:#f92672>=</span> copyIn(<span style=color:#66d9ef>null</span>, originExpression).<span style=color:#a6e22e>second</span>;
+</span></span><span style=display:flex><span>    rootGroup <span style=color:#f92672>=</span> rootGroupExpression.<span style=color:#a6e22e>getGroup</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> rootGroupExpression;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Pair<span style=color:#f92672>&lt;</span>Boolean, GroupExpression<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>copyIn</span>(Group targetGroup, OptExpression expression) {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>Group<span style=color:#f92672>&gt;</span> inputs <span style=color:#f92672>=</span> Lists.<span style=color:#a6e22e>newArrayList</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (OptExpression input : expression.<span style=color:#a6e22e>getInputs</span>()) {
+</span></span><span style=display:flex><span>        inputs.<span style=color:#a6e22e>add</span>(copyIn(<span style=color:#66d9ef>null</span>, input).<span style=color:#a6e22e>second</span>.<span style=color:#a6e22e>getGroup</span>());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    GroupExpression groupExpression <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> GroupExpression(expression.<span style=color:#a6e22e>getOp</span>(), inputs);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> insertGroupExpression(groupExpression, targetGroup);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ApplyRuleTask: equivalents go into the same group as the matched expression</span>
+</span></span><span style=display:flex><span>copyIn(groupExpression.<span style=color:#a6e22e>getGroup</span>(), newExpression);
+</span></span></code></pre></div><h4 id=344-physical-operator-generation>3.4.4 Physical operator generation</h4><p>Physical operators appear only from <strong>implementation rules</strong> inside the memo: after <strong><code>copyIn</code></strong>, <strong><code>ApplyRuleTask</code></strong> pushes <strong><code>EnforceAndCostTask</code></strong>. Join and aggregate do not use separate task types. <strong><code>PhysicalDistributionOperator</code></strong> is not produced by an implementation rule; <strong><code>EnforceAndCostTask</code></strong> inserts it when a required layout is missing (§3.4.5–3.4.6).</p><table><thead><tr><th>Logical operator</th><th>Physical operator after implement</th></tr></thead><tbody><tr><td><strong><code>LogicalOlapScanOperator</code></strong></td><td><strong><code>PhysicalOlapScanOperator</code></strong> (<code>table</code>, <code>selectedPartitionId</code>, <code>selectedTabletId</code>; residual <strong><code>predicate</code></strong>)</td></tr><tr><td><strong><code>LogicalJoinOperator</code></strong></td><td><strong><code>PhysicalHashJoinOperator</code></strong> (<code>joinType</code>, <code>onPredicate</code>)</td></tr><tr><td><strong><code>LogicalAggregationOperator</code></strong></td><td><strong><code>PhysicalHashAggregateOperator</code></strong> (<code>type</code> <strong><code>LOCAL</code></strong> / <strong><code>GLOBAL</code></strong>, <code>isSplit</code>, <code>groupBys</code>)</td></tr><tr><td><strong><code>LogicalFilterOperator</code></strong></td><td><strong><code>PhysicalFilterOperator</code></strong>, or <strong><code>Operator.predicate</code></strong> on the scan when pushed</td></tr><tr><td><strong><code>LogicalProjectOperator</code></strong></td><td><strong><code>PhysicalProjectOperator.columnRefMap</code></strong>, or <strong><code>Operator.projection</code></strong> when folded</td></tr><tr><td><strong><code>LogicalTopNOperator</code></strong></td><td><strong><code>PhysicalTopNOperator</code></strong> (<code>orderSpec</code>, <code>sortPhase</code> <strong><code>PARTIAL</code></strong> / <strong><code>FINAL</code></strong>, <code>isSplit</code>)</td></tr><tr><td>(no logical counterpart)</td><td><strong><code>PhysicalDistributionOperator</code></strong> — enforcer only</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+abstract class Operator {
+  # opType : OperatorType
+  # limit : long
+  # predicate : ScalarOperator
+  # projection : Projection
+}
+
+abstract class LogicalOperator
+abstract class PhysicalOperator
+
+abstract class PhysicalScanOperator {
+  # table : Table
+  # outputColumns : List&lt;ColumnRefOperator&gt;
+}
+
+class PhysicalOlapScanOperator {
+  - selectedPartitionId : List&lt;Long&gt;
+  - selectedTabletId : List&lt;Long&gt;
+}
+
+abstract class PhysicalJoinOperator {
+  # joinType : JoinOperator
+  # onPredicate : ScalarOperator
+}
+
+class PhysicalHashJoinOperator
+class PhysicalHashAggregateOperator {
+  - type : AggType
+  - groupBys : List&lt;ColumnRefOperator&gt;
+  - isSplit : boolean
+}
+
+class PhysicalDistributionOperator
+class PhysicalProjectOperator
+class PhysicalFilterOperator
+class PhysicalTopNOperator {
+  - sortPhase : SortPhase
+  - isSplit : boolean
+}
+
+Operator &lt;|-- LogicalOperator
+Operator &lt;|-- PhysicalOperator
+PhysicalOperator &lt;|-- PhysicalScanOperator
+PhysicalOperator &lt;|-- PhysicalJoinOperator
+PhysicalOperator &lt;|-- PhysicalHashAggregateOperator
+PhysicalOperator &lt;|-- PhysicalDistributionOperator
+PhysicalOperator &lt;|-- PhysicalProjectOperator
+PhysicalOperator &lt;|-- PhysicalFilterOperator
+PhysicalOperator &lt;|-- PhysicalTopNOperator
+PhysicalScanOperator &lt;|-- PhysicalOlapScanOperator
+PhysicalJoinOperator &lt;|-- PhysicalHashJoinOperator
+
+@enduml
+</code></pre><h4 id=345-enforceandcosttask>3.4.5 EnforceAndCostTask</h4><p><strong><code>EnforceAndCostTask</code></strong> runs only after a physical <strong><code>GroupExpression</code></strong> exists. It is one depth-first walk of that expression’s children — cost and property enforce together, not two passes:</p><ul><li><strong><code>requiredProperty</code></strong> flows <strong>root → leaves</strong> (<code>RequiredPropertyDeriver</code>). The root requirement is <strong><code>EMPTY</code></strong> (<code>optimizer.optimize(..., new PhysicalPropertySet(), ...)</code>).</li><li><strong><code>outputProperty</code></strong> flows <strong>leaves → root</strong> (<code>OutputPropertyDeriver</code>). A scan delivers <strong><code>DISTRIBUTED BY</code></strong>; a join or agg derives from children’s outputs.</li><li>At each node, <strong><code>recordCostsAndEnforce</code></strong> compares this <strong><code>outputProperty</code></strong> to this <strong><code>requiredProperty</code></strong>. On distribution mismatch it inserts <strong><code>PhysicalDistributionOperator</code></strong>. The parent then reads the enforced spec as the child’s output.</li></ul><p>The walk is a stack, not a recursive Java call: <strong><code>optimizeChildGroup</code></strong> pushes a clone of this task, then <strong><code>OptimizeGroupTask</code></strong> for the child. When the child has a best expression, <strong><code>execute</code></strong> resumes and continues.</p><p>Each visit is four steps:</p><ol><li>Read <strong><code>TaskContext.requiredProperty</code></strong>.</li><li><strong><code>RequiredPropertyDeriver</code></strong> → <strong><code>childrenRequiredProperties</code></strong> (each becomes that child’s <strong><code>TaskContext.requiredProperty</code></strong>).</li><li>After children return: <strong><code>OutputPropertyDeriver</code></strong> → this <strong><code>outputProperty</code></strong>.</li><li><strong><code>recordCostsAndEnforce</code></strong>: if not <strong><code>isSatisfy</code></strong>, insert <strong><code>PhysicalDistributionOperator(required spec)</code></strong>.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>initRequiredProperties</span>() {
+</span></span><span style=display:flex><span>    RequiredPropertyDeriver requiredPropertyDeriver <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> RequiredPropertyDeriver(context);
+</span></span><span style=display:flex><span>    childrenRequiredPropertiesList <span style=color:#f92672>=</span> requiredPropertyDeriver.<span style=color:#a6e22e>getRequiredProps</span>(groupExpression);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>execute</span>() {
+</span></span><span style=display:flex><span>    initRequiredProperties();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (List<span style=color:#f92672>&lt;</span>PhysicalPropertySet<span style=color:#f92672>&gt;</span> childrenRequiredProperties : childrenRequiredPropertiesList) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (; curChildIndex <span style=color:#f92672>&lt;</span> groupExpression.<span style=color:#a6e22e>getInputs</span>().<span style=color:#a6e22e>size</span>(); curChildIndex<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>            PhysicalPropertySet childRequiredProperty <span style=color:#f92672>=</span> childrenRequiredProperties.<span style=color:#a6e22e>get</span>(curChildIndex);
+</span></span><span style=display:flex><span>            Group childGroup <span style=color:#f92672>=</span> groupExpression.<span style=color:#a6e22e>getInputs</span>().<span style=color:#a6e22e>get</span>(curChildIndex);
+</span></span><span style=display:flex><span>            GroupExpression childBestExpr <span style=color:#f92672>=</span> childGroup.<span style=color:#a6e22e>getBestExpression</span>(childRequiredProperty);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (childBestExpr <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                optimizeChildGroup(childRequiredProperty, childGroup);
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            childrenOutputProperties.<span style=color:#a6e22e>add</span>(childBestExpr.<span style=color:#a6e22e>getOutputProperty</span>(childRequiredProperty));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        OutputPropertyDeriver outputPropertyDeriver <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> OutputPropertyDeriver(groupExpression,
+</span></span><span style=display:flex><span>                context.<span style=color:#a6e22e>getRequiredProperty</span>(), childrenOutputProperties);
+</span></span><span style=display:flex><span>        recordCostsAndEnforce(outputPropertyDeriver.<span style=color:#a6e22e>getOutputProperty</span>(), childrenRequiredProperties);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>optimizeChildGroup</span>(PhysicalPropertySet inputProperty, Group childGroup) {
+</span></span><span style=display:flex><span>    pushTask((EnforceAndCostTask) clone());
+</span></span><span style=display:flex><span>    TaskContext taskContext <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> TaskContext(context.<span style=color:#a6e22e>getOptimizerContext</span>(), inputProperty,
+</span></span><span style=display:flex><span>            context.<span style=color:#a6e22e>getRequiredColumns</span>(), context.<span style=color:#a6e22e>getUpperBoundCost</span>() <span style=color:#f92672>-</span> curTotalCost);
+</span></span><span style=display:flex><span>    pushTask(<span style=color:#66d9ef>new</span> OptimizeGroupTask(taskContext, childGroup));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>recordCostsAndEnforce</span>(PhysicalPropertySet outputProperty,
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>PhysicalPropertySet<span style=color:#f92672>&gt;</span> childrenOutputProperties) {
+</span></span><span style=display:flex><span>    PhysicalPropertySet requiredProperty <span style=color:#f92672>=</span> context.<span style=color:#a6e22e>getRequiredProperty</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>outputProperty.<span style=color:#a6e22e>getDistributionProperty</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>isSatisfy</span>(requiredProperty.<span style=color:#a6e22e>getDistributionProperty</span>())) {
+</span></span><span style=display:flex><span>        enforceDistribute(outputProperty);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>PhysicalPropertySet <span style=color:#a6e22e>enforceDistribute</span>(PhysicalPropertySet oldOutputProperty) {
+</span></span><span style=display:flex><span>    PhysicalPropertySet requiredPropertySet <span style=color:#f92672>=</span> oldOutputProperty.<span style=color:#a6e22e>copy</span>();
+</span></span><span style=display:flex><span>    requiredPropertySet.<span style=color:#a6e22e>setDistributionProperty</span>(context.<span style=color:#a6e22e>getRequiredProperty</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>getDistributionProperty</span>().<span style=color:#a6e22e>getNullStrictProperty</span>());
+</span></span><span style=display:flex><span>    GroupExpression enforcer <span style=color:#f92672>=</span> requiredPropertySet.<span style=color:#a6e22e>getDistributionProperty</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>appendEnforcers</span>(groupExpression.<span style=color:#a6e22e>getGroup</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> updateCostAndOutputPropertySet(enforcer, oldOutputProperty, requiredPropertySet);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>GroupExpression <span style=color:#a6e22e>appendEnforcers</span>(Group child) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> GroupExpression(<span style=color:#66d9ef>new</span> PhysicalDistributionOperator(spec), Lists.<span style=color:#a6e22e>newArrayList</span>(child));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the running statement, solid edges are <strong>down</strong> (<code>requiredProperty</code>); dotted edges are <strong>up</strong> (<code>outputProperty</code>):</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+rectangle &#34;GLOBAL HashAggregate\nrequiredProperty = EMPTY&#34; as G
+rectangle &#34;LOCAL HashAggregate\nrequiredProperty = SHUFFLE_AGG(region)&#34; as L
+rectangle &#34;HashJoin ON cust_id = id\nrequiredProperty = EMPTY&#34; as J
+rectangle &#34;OlapScan orders\nrequired = SHUFFLE_JOIN(cust_id)\noutput = LOCAL(cust_id)&#34; as So
+rectangle &#34;OlapScan customers\nrequired = SHUFFLE_JOIN(id)\noutput = LOCAL(id)&#34; as Sc
+
+G --&gt; L : requiredProperty
+L --&gt; J : requiredProperty
+J --&gt; So : requiredProperty
+J --&gt; Sc : requiredProperty
+
+So ..&gt; J : outputProperty
+Sc ..&gt; J : outputProperty
+J ..&gt; L : outputProperty
+L ..&gt; G : outputProperty
+
+@enduml
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class EnforceAndCostTask {
+  - groupExpression : GroupExpression
+  - childrenRequiredPropertiesList : List
+}
+
+class RequiredPropertyDeriver {
+  + visitPhysicalHashJoin()
+  + visitPhysicalHashAggregate()
+}
+
+class OutputPropertyDeriver {
+  + visitPhysicalHashJoin()
+  + visitPhysicalHashAggregate()
+}
+
+EnforceAndCostTask --&gt; RequiredPropertyDeriver : getRequiredProps
+EnforceAndCostTask --&gt; OutputPropertyDeriver : getOutputProperty
+EnforceAndCostTask ..&gt; OptimizeGroupTask : pushTask child
+EnforceAndCostTask ..&gt; EnforceAndCostTask : pushTask clone
+RequiredPropertyDeriver ..&gt; PhysicalHashJoinOperator : visitPhysicalHashJoin
+RequiredPropertyDeriver ..&gt; PhysicalHashAggregateOperator : visitPhysicalHashAggregate
+OutputPropertyDeriver ..&gt; PhysicalHashJoinOperator : visitPhysicalHashJoin
+OutputPropertyDeriver ..&gt; PhysicalHashAggregateOperator : visitPhysicalHashAggregate
+
+@enduml
+</code></pre><h4 id=346-distribution>3.4.6 Distribution</h4><p><strong>Distribution</strong> is how a node’s output rows are laid out across <strong>tablets / hash buckets</strong>. Catalog metadata is <strong><code>DistributionInfo</code></strong>. CBO carries a <strong><code>DistributionSpec</code></strong> inside <strong><code>PhysicalPropertySet.distributionProperty</code></strong>, and inserts a <strong><code>PhysicalDistributionOperator</code></strong> only when delivered layout does not <strong><code>isSatisfy</code></strong> the parent requirement. Fragmentize later cuts only where that operator exists; root <strong><code>ResultSink</code></strong> GATHER is <strong><code>createOutputFragment()</code></strong>, not this path.</p><p><strong><code>DistributionInfo</code></strong> is table metadata from <code>CREATE TABLE</code> on <strong><code>OlapTable</code></strong>. <strong><code>PARTITION BY</code></strong> (date ranges) is a different catalog object. <strong><code>DISTRIBUTED BY</code></strong> is this one: how <strong>each partition</strong> splits into tablets. For <strong><code>orders</code></strong>, <strong><code>DISTRIBUTED BY HASH(cust_id) BUCKETS 8</code></strong> is <strong><code>HashDistributionInfo</code></strong> (<code>cust_id</code>, <code>bucketNum = 8</code>). <strong><code>RANDOM</code></strong> is <strong><code>RandomDistributionInfo</code></strong>. Replica placement is not this object.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class OlapTable {
+  - defaultDistributionInfo : DistributionInfo
+}
+
+abstract class DistributionInfo {
+  # type : DistributionInfoType
+}
+
+class HashDistributionInfo {
+  - distributionColumnIds : List&lt;ColumnId&gt;
+  - bucketNum : int
+}
+
+class RandomDistributionInfo
+
+OlapTable *-- DistributionInfo : defaultDistributionInfo
+DistributionInfo &lt;|-- HashDistributionInfo
+DistributionInfo &lt;|-- RandomDistributionInfo
+
+@enduml
+</code></pre><p><strong><code>DistributionSpec</code></strong> is CBO’s encoding of a layout on an <strong><code>OptExpression</code></strong>, not a catalog field. Two specs are built independently and compared by <strong><code>isSatisfy</code></strong>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class PhysicalPropertySet {
+  - distributionProperty : DistributionProperty
+  - sortProperty : SortProperty
+}
+
+class DistributionProperty {
+  - spec : DistributionSpec
+}
+
+class DistributionSpec {
+  # type : DistributionType
+}
+
+class HashDistributionSpec {
+  - hashDistributionDesc : HashDistributionDesc
+}
+
+class ReplicatedDistributionSpec
+class GatherDistributionSpec
+class AnyDistributionSpec
+
+class HashDistributionDesc {
+  - distributionCols : List&lt;DistributionCol&gt;
+  - sourceType : SourceType
+}
+
+enum SourceType &lt;&lt;enumeration&gt;&gt; {
+  LOCAL
+  SHUFFLE_JOIN
+  SHUFFLE_AGG
+  BUCKET
+}
+
+PhysicalPropertySet *-- DistributionProperty : distributionProperty
+DistributionProperty *-- DistributionSpec : spec
+DistributionSpec &lt;|-- HashDistributionSpec
+DistributionSpec &lt;|-- ReplicatedDistributionSpec
+DistributionSpec &lt;|-- GatherDistributionSpec
+DistributionSpec &lt;|-- AnyDistributionSpec
+HashDistributionSpec *-- HashDistributionDesc : hashDistributionDesc
+HashDistributionDesc --&gt; SourceType : sourceType
+
+@enduml
+</code></pre><p><strong><code>HashDistributionDesc.sourceType</code></strong> distinguishes delivered scan layout from a required shuffle: <strong><code>LOCAL</code></strong> on the scan, <strong><code>SHUFFLE_JOIN</code></strong> / <strong><code>SHUFFLE_AGG</code></strong> / <strong><code>BUCKET</code></strong> on a parent. <strong><code>ReplicatedDistributionSpec</code></strong> is broadcast; <strong><code>GatherDistributionSpec</code></strong> is one stream; <strong><code>AnyDistributionSpec</code></strong> is <strong><code>EMPTY</code></strong>.</p><table><thead><tr><th>Spec</th><th>Origin</th><th>Layout</th></tr></thead><tbody><tr><td><strong><code>LOCAL</code></strong></td><td>scan <strong><code>DISTRIBUTED BY HASH</code></strong></td><td>Table tablets</td></tr><tr><td><strong><code>SHUFFLE_JOIN</code></strong></td><td>required by hash join</td><td>Hash on ON-key column-refs</td></tr><tr><td><strong><code>SHUFFLE_AGG</code></strong></td><td>required by <strong><code>GLOBAL</code></strong> agg</td><td>Hash on group keys</td></tr><tr><td><strong><code>BUCKET</code></strong></td><td>bucket-shuffle join</td><td>Right child of a local-bucket join</td></tr><tr><td><strong><code>BROADCAST</code></strong></td><td>required by hash join</td><td>Full copy on every consumer</td></tr><tr><td><strong><code>GATHER</code></strong></td><td>scalar <strong><code>GLOBAL</code></strong> agg</td><td>One stream</td></tr><tr><td><strong><code>ANY</code></strong></td><td>no requirement</td><td><strong><code>EMPTY</code></strong>, root <strong><code>optimize()</code></strong></td></tr></tbody></table><p><strong>How <code>PhysicalDistributionOperator</code> is added.</strong> The operator is never produced by an implementation rule. It appears in two places during <strong><code>EnforceAndCostTask</code></strong>: (1) when this node’s <strong><code>outputProperty</code></strong> fails <strong><code>isSatisfy(requiredProperty)</code></strong>, and (2) when <strong><code>ChildOutputPropertyGuarantor</code></strong> rewrites a join child’s delivered layout to <strong><code>BUCKET</code></strong>.</p><p><strong>1. Parent writes the child’s required <code>DistributionSpec</code>.</strong> <strong><code>RequiredPropertyDeriver</code></strong> fills <strong><code>childrenRequiredPropertiesList</code></strong>. For a hash join it records a broadcast pair and, unless <strong><code>onlyBroadcast()</code></strong>, a shuffle pair on the ON keys. For a non-local hash aggregate it requires <strong><code>GATHER</code></strong> (no group keys) or <strong><code>SHUFFLE_AGG</code></strong> on <strong><code>partitionByColumns</code></strong>; a local aggregate requires <strong><code>EMPTY</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// RequiredPropertyDeriver — hash join</span>
+</span></span><span style=display:flex><span>PhysicalPropertySet rightBroadcastProperty <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PhysicalPropertySet(
+</span></span><span style=display:flex><span>        DistributionProperty.<span style=color:#a6e22e>createProperty</span>(DistributionSpec.<span style=color:#a6e22e>createReplicatedDistributionSpec</span>()));
+</span></span><span style=display:flex><span>requiredProperties.<span style=color:#a6e22e>add</span>(Lists.<span style=color:#a6e22e>newArrayList</span>(PhysicalPropertySet.<span style=color:#a6e22e>EMPTY</span>, rightBroadcastProperty));
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (joinHelper.<span style=color:#a6e22e>onlyShuffle</span>()) {
+</span></span><span style=display:flex><span>    requiredProperties.<span style=color:#a6e22e>clear</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>requiredProperties.<span style=color:#a6e22e>add</span>(computeShuffleJoinRequiredProperties(requirementsFromParent, leftCols, rightCols));
+</span></span><span style=display:flex><span><span style=color:#75715e>// → SHUFFLE_JOIN(cust_id) / SHUFFLE_JOIN(id) on the two children</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// RequiredPropertyDeriver — hash aggregate</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>node.<span style=color:#a6e22e>getType</span>().<span style=color:#a6e22e>isLocal</span>()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (columns.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        requiredProperties.<span style=color:#a6e22e>add</span>(Lists.<span style=color:#a6e22e>newArrayList</span>(createGatherPropertySet()));  <span style=color:#75715e>// GATHER</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        requiredProperties.<span style=color:#a6e22e>add</span>(Lists.<span style=color:#a6e22e>newArrayList</span>(computeAggRequiredShuffleProperties(columns)));
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// → SHUFFLE_AGG(region)</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    requiredProperties.<span style=color:#a6e22e>add</span>(Lists.<span style=color:#a6e22e>newArrayList</span>(PhysicalPropertySet.<span style=color:#a6e22e>EMPTY</span>));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>2. Mismatch inserts the enforcer on this group.</strong> After children return, <strong><code>recordCostsAndEnforce</code></strong> compares this node’s <strong><code>outputProperty</code></strong> to <strong><code>TaskContext.requiredProperty</code></strong>. If distribution does not satisfy, <strong><code>enforceDistribute</code></strong> takes the <em>required</em> distribution property and <strong><code>appendEnforcers</code></strong> builds a new <strong><code>GroupExpression</code></strong> whose <strong><code>op</code></strong> is <strong><code>PhysicalDistributionOperator(spec)</code></strong> and whose sole input is <strong>this</strong> group. That expression is costed and recorded as satisfying the required property; the parent later reads the enforced spec as the child’s output.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// EnforceAndCostTask.recordCostsAndEnforce</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>boolean</span> satisfyDistributionProperty <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        outputProperty.<span style=color:#a6e22e>getDistributionProperty</span>().<span style=color:#a6e22e>isSatisfy</span>(requiredProperty.<span style=color:#a6e22e>getDistributionProperty</span>());
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>satisfyOrderProperty <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>satisfyDistributionProperty) {
+</span></span><span style=display:flex><span>    enforcedProperty <span style=color:#f92672>=</span> enforceProperty(outputProperty, requiredProperty,
+</span></span><span style=display:flex><span>            satisfyOrderProperty, satisfyDistributionProperty);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>PhysicalPropertySet <span style=color:#a6e22e>enforceDistribute</span>(PhysicalPropertySet oldOutputProperty) {
+</span></span><span style=display:flex><span>    PhysicalPropertySet requiredPropertySet <span style=color:#f92672>=</span> oldOutputProperty.<span style=color:#a6e22e>copy</span>();
+</span></span><span style=display:flex><span>    requiredPropertySet.<span style=color:#a6e22e>setDistributionProperty</span>(context.<span style=color:#a6e22e>getRequiredProperty</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>getDistributionProperty</span>().<span style=color:#a6e22e>getNullStrictProperty</span>());
+</span></span><span style=display:flex><span>    GroupExpression enforcer <span style=color:#f92672>=</span> requiredPropertySet.<span style=color:#a6e22e>getDistributionProperty</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>appendEnforcers</span>(groupExpression.<span style=color:#a6e22e>getGroup</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> updateCostAndOutputPropertySet(enforcer, oldOutputProperty, requiredPropertySet);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// DistributionProperty.appendEnforcers — the only constructor of the enforcer op</span>
+</span></span><span style=display:flex><span>GroupExpression <span style=color:#a6e22e>appendEnforcers</span>(Group child) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> GroupExpression(<span style=color:#66d9ef>new</span> PhysicalDistributionOperator(spec), Lists.<span style=color:#a6e22e>newArrayList</span>(child));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the running query this path inserts <strong><code>PhysicalDistributionOperator(SHUFFLE_AGG(region))</code></strong> between LOCAL and GLOBAL aggregate: LOCAL’s <strong><code>outputProperty</code></strong> is still <strong><code>LOCAL(cust_id)</code></strong>, which does not <strong><code>isSatisfy</code></strong> <strong><code>SHUFFLE_AGG(region)</code></strong>. The same path inserts <strong><code>SHUFFLE_JOIN</code></strong> or <strong><code>BROADCAST</code></strong> at a scan when <strong><code>LOCAL</code></strong> fails <strong><code>isSatisfy</code></strong> of the join’s child requirement (several selected partitions, not colocate-eligible).</p><p><strong>3. Bucket shuffle inserts on the join’s right child.</strong> Before <strong><code>OutputPropertyDeriver</code></strong> on a hash join, <strong><code>ChildOutputPropertyGuarantor</code></strong> may decide the two <strong><code>LOCAL</code></strong> children cannot colocate. <strong><code>transToBucketShuffleJoin</code></strong> builds a <strong><code>HashDistributionSpec</code></strong> with <strong><code>SourceType.BUCKET</code></strong> and calls <strong><code>enforceChildDistribution</code></strong>, which again ends in <strong><code>appendEnforcers</code></strong> — but the child of the enforcer is the <em>right child’s group</em>, not the join’s group.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ChildOutputPropertyGuarantor.transToBucketShuffle</span>
+</span></span><span style=display:flex><span>DistributionSpec rightDistributionSpec <span style=color:#f92672>=</span> DistributionSpec.<span style=color:#a6e22e>createHashDistributionSpec</span>(
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> HashDistributionDesc(bucketShuffleColumns, HashDistributionDesc.<span style=color:#a6e22e>SourceType</span>.<span style=color:#a6e22e>BUCKET</span>));
+</span></span><span style=display:flex><span>enforceChildDistribution(rightDistributionSpec, rightChild, rightChildOutputProperty);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Pair<span style=color:#f92672>&lt;</span>GroupExpression, PhysicalPropertySet<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>enforceChildDistribution</span>(
+</span></span><span style=display:flex><span>        DistributionSpec distributionSpec, GroupExpression child, PhysicalPropertySet childOutputProperty) {
+</span></span><span style=display:flex><span>    DistributionProperty newDistributionProperty <span style=color:#f92672>=</span> DistributionProperty.<span style=color:#a6e22e>createProperty</span>(distributionSpec);
+</span></span><span style=display:flex><span>    GroupExpression enforcer <span style=color:#f92672>=</span> newDistributionProperty.<span style=color:#a6e22e>appendEnforcers</span>(child.<span style=color:#a6e22e>getGroup</span>());
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// insertEnforceExpression / setBestExpression for BUCKET on that child group</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> Pair<span style=color:#f92672>&lt;&gt;</span>(enforcer, newOutputProperty);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Join / aggregate requirements (summary).</strong> Shuffle join: both children <strong><code>SHUFFLE_JOIN</code></strong> on ON keys (or <strong><code>LOCAL</code></strong> if <strong><code>isSatisfy</code></strong>). Broadcast: left <strong><code>EMPTY</code></strong>, right <strong><code>ReplicatedDistributionSpec</code></strong>. Colocate: both <strong><code>LOCAL</code></strong>, no join-side enforcer. Bucket shuffle: left <strong><code>LOCAL</code></strong>, right <strong><code>BUCKET</code></strong>. Two-phase <strong><code>GROUP BY</code></strong>: GLOBAL requires <strong><code>SHUFFLE_AGG</code></strong> of the LOCAL child; scalar <strong><code>SUM</code></strong> requires <strong><code>GATHER</code></strong>.</p><p><strong>Worked example — adding enforcers step by step.</strong> Same <strong><code>EnforceAndCostTask</code></strong> four steps as §3.4.5 on the running statement. Depth-first: steps 1–2 on the way down, children, then steps 3–4 on the way up. After implement, before any <strong><code>PhysicalDistributionOperator</code></strong>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#66d9ef>c</span>.region, <span style=color:#66d9ef>SUM</span>(o.amount)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o
+</span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.cust_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> o.dt <span style=color:#66d9ef>BETWEEN</span> <span style=color:#e6db74>&#39;2024-01-01&#39;</span> <span style=color:#66d9ef>AND</span> <span style=color:#e6db74>&#39;2024-06-30&#39;</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>GROUP</span> <span style=color:#66d9ef>BY</span> <span style=color:#66d9ef>c</span>.region;
+</span></span></code></pre></div><pre tabindex=0><code>PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}
+  PhysicalHashAggregate  LOCAL   groupBys=[region]
+    PhysicalHashJoin  INNER  onPredicate=(cust_id = id)
+      PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
+      PhysicalOlapScan  customers  LOCAL(id)
+</code></pre><p><strong>Visit GLOBAL <code>HashAggregate</code> (<code>GROUP BY c.region</code>) — steps 1–2.</strong></p><ol><li><strong><code>requiredProperty</code></strong> = <strong><code>EMPTY</code></strong>. Root: <strong><code>optimizer.optimize(..., new PhysicalPropertySet(), ...)</code></strong>.</li><li><strong><code>RequiredPropertyDeriver.visitPhysicalHashAggregate</code></strong>: not local, <strong><code>partitionByColumns</code></strong> = <strong><code>c.region</code></strong> → child required = <strong><code>SHUFFLE_AGG(region)</code></strong>. That value becomes the LOCAL agg’s <strong><code>TaskContext.requiredProperty</code></strong>.</li></ol><p><strong>Visit LOCAL <code>HashAggregate</code> — steps 1–2.</strong></p><ol><li><strong><code>requiredProperty</code></strong> = <strong><code>SHUFFLE_AGG(region)</code></strong>.</li><li><strong><code>RequiredPropertyDeriver.visitPhysicalHashAggregate</code></strong>: <strong><code>isLocal()</code></strong> → child required = <strong><code>EMPTY</code></strong>. That value becomes the join’s <strong><code>TaskContext.requiredProperty</code></strong>.</li></ol><p><strong>Visit <code>HashJoin</code> (<code>ON o.cust_id = c.id</code>) — steps 1–2.</strong></p><ol><li><strong><code>requiredProperty</code></strong> = <strong><code>EMPTY</code></strong>.</li><li><strong><code>RequiredPropertyDeriver.visitPhysicalHashJoin</code></strong>: child-requirement pairs from the ON keys:<ul><li>(<strong><code>EMPTY</code></strong>, <strong><code>BROADCAST</code></strong>)</li><li>(<strong><code>SHUFFLE_JOIN(cust_id)</code></strong>, <strong><code>SHUFFLE_JOIN(id)</code></strong>)
+Shuffle pair: left scan required = <strong><code>SHUFFLE_JOIN(cust_id)</code></strong>; right scan required = <strong><code>SHUFFLE_JOIN(id)</code></strong>.</li></ul></li></ol><p><strong>Visit <code>OlapScan</code> <code>orders</code> — steps 1–4</strong> (no children).</p><ol><li><strong><code>requiredProperty</code></strong> = <strong><code>SHUFFLE_JOIN(cust_id)</code></strong>.</li><li>No child requirements.</li><li><strong><code>OutputPropertyDeriver.visitPhysicalOlapScan</code></strong>: <strong><code>DISTRIBUTED BY HASH(cust_id)</code></strong> → <strong><code>outputProperty</code></strong> = <strong><code>LOCAL(cust_id)</code></strong>.</li><li>Compare <strong><code>LOCAL(cust_id)</code></strong> with <strong><code>SHUFFLE_JOIN(cust_id)</code></strong>. Same hash column is not enough on its own: <strong><code>LOCAL</code></strong> is this table’s tablet map. <strong><code>HashDistributionSpec.isSatisfy</code></strong> for a native <strong><code>LOCAL</code></strong> also requires colocate eligibility — one selected partition, or a stable colocate group. This query selects only <strong><code>p2024</code></strong>, so <strong><code>isSatisfy</code></strong> succeeds. <strong>No <code>appendEnforcers</code>.</strong> Parent join still reads <strong><code>LOCAL(cust_id)</code></strong>.</li></ol><p><strong>Visit <code>OlapScan</code> <code>customers</code> — steps 1–4</strong> (no children).</p><ol><li><strong><code>requiredProperty</code></strong> = <strong><code>SHUFFLE_JOIN(id)</code></strong>.</li><li>No child requirements.</li><li><strong><code>OutputPropertyDeriver.visitPhysicalOlapScan</code></strong>: <strong><code>DISTRIBUTED BY HASH(id)</code></strong> → <strong><code>outputProperty</code></strong> = <strong><code>LOCAL(id)</code></strong>.</li><li>One partition, columns match → <strong><code>isSatisfy</code></strong> succeeds. <strong>No enforcer on the scan.</strong> Parent join still reads <strong><code>LOCAL(id)</code></strong>.</li></ol><p><strong>Visit <code>HashJoin</code> — steps 3–4.</strong> Children returned <strong><code>LOCAL(cust_id)</code></strong> and <strong><code>LOCAL(id)</code></strong>. <strong><code>requiredProperty</code></strong> is still <strong><code>EMPTY</code></strong>.</p><p>Before <strong><code>OutputPropertyDeriver</code></strong>, <strong><code>ChildOutputPropertyGuarantor</code></strong> checks whether those two <strong><code>LOCAL</code></strong> specs can colocate. They cannot: <strong><code>orders</code></strong> and <strong><code>customers</code></strong> are not <strong><code>COLOCATE WITH</code></strong> each other, so tablet <code>hash(cust_id) % 8</code> is not the same worker as tablet <code>hash(id) % 8</code>. <strong><code>transToBucketShuffleJoin</code></strong> → <strong><code>enforceChildDistribution</code></strong> → <strong><code>appendEnforcers</code></strong>: left stays <strong><code>LOCAL</code></strong>, right gets <strong><code>PhysicalDistributionOperator(BUCKET)</code></strong> (path <strong>3</strong> above).</p><ol start=3><li><strong><code>OutputPropertyDeriver.visitPhysicalHashJoin</code></strong>: left <strong><code>LOCAL</code></strong>, right <strong><code>BUCKET</code></strong> → <strong><code>outputProperty</code></strong> = <strong><code>LOCAL(cust_id)</code></strong> (dominated scan).</li><li>Compare <strong><code>LOCAL(cust_id)</code></strong> with <strong><code>EMPTY</code></strong>: <strong><code>isSatisfy</code></strong>. <strong>No enforcer on the join itself.</strong> Parent LOCAL reads this child’s output as <strong><code>LOCAL(cust_id)</code></strong>.</li></ol><p><strong>Visit LOCAL <code>HashAggregate</code> — steps 3–4.</strong> Child returned <strong><code>LOCAL(cust_id)</code></strong>. <strong><code>requiredProperty</code></strong> is still <strong><code>SHUFFLE_AGG(region)</code></strong>.</p><ol start=3><li><strong><code>OutputPropertyDeriver.visitPhysicalHashAggregate</code></strong>: copy the child → <strong><code>outputProperty</code></strong> = <strong><code>LOCAL(cust_id)</code></strong>.</li><li>Compare <strong><code>LOCAL(cust_id)</code></strong> with <strong><code>SHUFFLE_AGG(region)</code></strong>: not <strong><code>isSatisfy</code></strong>. <strong><code>recordCostsAndEnforce</code></strong> → <strong><code>enforceDistribute</code></strong> → <strong><code>appendEnforcers</code></strong>: insert <strong><code>PhysicalDistributionOperator(SHUFFLE_AGG(region))</code></strong> (path <strong>2</strong>). Parent GLOBAL reads this child’s output as <strong><code>SHUFFLE_AGG(region)</code></strong>.</li></ol><p><strong>Visit GLOBAL <code>HashAggregate</code> — steps 3–4.</strong> Child returned <strong><code>SHUFFLE_AGG(region)</code></strong>. <strong><code>requiredProperty</code></strong> is still <strong><code>EMPTY</code></strong>.</p><ol start=3><li><strong><code>OutputPropertyDeriver.visitPhysicalHashAggregate</code></strong>: copy the child → <strong><code>outputProperty</code></strong> = <strong><code>SHUFFLE_AGG(region)</code></strong>.</li><li>Compare <strong><code>SHUFFLE_AGG(region)</code></strong> with <strong><code>EMPTY</code></strong>: <strong><code>isSatisfy</code></strong>. <strong>No enforcer on GLOBAL.</strong></li></ol><p>After this walk the physical tree has the two enforcers: <strong><code>BUCKET</code></strong> on <strong><code>customers</code></strong>, <strong><code>SHUFFLE_AGG(region)</code></strong> between LOCAL and GLOBAL.</p><pre tabindex=0><code>PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}  output=SHUFFLE_AGG(region)
+  PhysicalDistribution  SHUFFLE_AGG(region)
+    PhysicalHashAggregate  LOCAL   groupBys=[region]  output=LOCAL(cust_id)
+      PhysicalHashJoin  INNER  onPredicate=(cust_id = id)  output=LOCAL(cust_id)
+        PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
+        PhysicalDistribution  BUCKET(id)
+          PhysicalOlapScan  customers  LOCAL(id)
+</code></pre><p>CBO also costs the join’s broadcast pair: left required <strong><code>EMPTY</code></strong>, right required <strong><code>BROADCAST</code></strong>. <strong><code>orders</code></strong> keeps <strong><code>LOCAL(cust_id)</code></strong>; <strong><code>customers</code></strong> fails <strong><code>isSatisfy(BROADCAST)</code></strong> and path <strong>2</strong> inserts <strong><code>PhysicalDistributionOperator(BROADCAST)</code></strong>. If a scan is <strong>not</strong> colocate-eligible (several selected partitions, and the table is not in a colocate group), <strong><code>LOCAL</code></strong> fails <strong><code>isSatisfy(SHUFFLE_JOIN)</code></strong> at the scan and path <strong>2</strong> inserts <strong><code>PhysicalDistributionOperator(SHUFFLE_JOIN)</code></strong> there instead.</p><h3 id=35-fragmentize-the-mpp-cut>3.5 Fragmentize (the MPP cut)</h3><p>Last phase of <strong><code>createQueryPlan()</code></strong>. <strong><code>PlanFragmentBuilder.createPhysicalPlan()</code></strong> walks the physical tree. A <strong><code>PhysicalDistributionOperator</code></strong> becomes a new <strong><code>PlanFragment</code></strong> whose root is an <strong><code>ExchangeNode</code></strong>; the child fragment’s <strong><code>DataSink</code></strong> is set to that exchange. <strong><code>createOutputFragment()</code></strong> adds a GATHER exchange when the top fragment is still partitioned (more than one tablet, not short-circuit). <strong><code>finalizeFragments()</code></strong> attaches <strong><code>ResultSink</code></strong> (<code>TResultSinkType.MYSQL_PROTOCAL</code>) on the root.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>ExecPlan execPlan <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExecPlan(connectContext, colNames, plan, outputColumns, isShortCircuit);
+</span></span><span style=display:flex><span>createOutputFragment(<span style=color:#66d9ef>new</span> PhysicalPlanTranslator(columnRefFactory).<span style=color:#a6e22e>translate</span>(plan, execPlan),
+</span></span><span style=display:flex><span>        execPlan, outputColumns, hasOutputFragment);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> finalizeFragments(execPlan, resultSinkType);
+</span></span></code></pre></div><p>The cut itself is <strong><code>visitPhysicalDistribution</code></strong>: one distribution requirement, one new fragment.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>ExchangeNode exchangeNode <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExchangeNode(context.<span style=color:#a6e22e>getNextNodeId</span>(),
+</span></span><span style=display:flex><span>        inputFragment.<span style=color:#a6e22e>getPlanRoot</span>(), distribution.<span style=color:#a6e22e>getDistributionSpec</span>().<span style=color:#a6e22e>getType</span>());
+</span></span><span style=display:flex><span>DataPartition dataPartition <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        translateDistributionToDataPartition(distribution.<span style=color:#a6e22e>getDistributionSpec</span>(), context);
+</span></span><span style=display:flex><span>inputFragment.<span style=color:#a6e22e>setDestination</span>(exchangeNode);
+</span></span><span style=display:flex><span>inputFragment.<span style=color:#a6e22e>setOutputPartition</span>(dataPartition);
+</span></span><span style=display:flex><span>context.<span style=color:#a6e22e>getFragments</span>().<span style=color:#a6e22e>add</span>(<span style=color:#66d9ef>new</span> PlanFragment(context.<span style=color:#a6e22e>getNextFragmentId</span>(), exchangeNode, dataPartition));
+</span></span></code></pre></div><p>A shuffle join sets the child’s output to <strong><code>TPartitionType.HASH_PARTITIONED</code></strong> on the join keys (<code>computeShuffleHashBucketPlanFragment</code>). A two-phase aggregate sets the local (update serialize) fragment’s output partition to <strong><code>DataPartition.hashPartitioned(group keys)</code></strong> so the merge (merge finalize) fragment receives one group on one worker.</p><h3 id=36-schedule>3.6 Schedule</h3><p><strong><code>StmtExecutor.handleQueryStmt()</code></strong> builds <strong><code>DefaultCoordinator</code></strong>, registers the query, and starts scheduling. <strong><code>CoordinatorPreprocessor.computeFragmentInstances()</code></strong> assigns every fragment to workers: scan fragments via <strong><code>LocalFragmentAssignmentStrategy</code></strong> (tablet → replica BE in shared-nothing; lake shard → warehouse CN in shared-data); remote/exchange fragments via <strong><code>RemoteFragmentAssignmentStrategy</code></strong>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class PlanFragment {
+  - dataPartition : DataPartition
+  - outputPartition : DataPartition
+  - destNode : ExchangeNode
+  - sink : DataSink
+}
+
+class ExecutionDAG {
+  - instanceIdToInstance : Map&lt;TUniqueId, FragmentInstance&gt;
+}
+
+class ExecutionFragment {
+  - planFragment : PlanFragment
+  - destinations : List&lt;TPlanFragmentDestination&gt;
+}
+
+class FragmentInstance {
+  - instanceId : TUniqueId
+  - worker : ComputeNode
+  - node2ScanRanges : Map&lt;Integer, List&lt;TScanRangeParams&gt;&gt;
+}
+
+ExecutionDAG o-- ExecutionFragment : fragments
+ExecutionFragment --&gt; PlanFragment : planFragment
+ExecutionFragment o-- FragmentInstance : instances
+FragmentInstance --&gt; ComputeNode : worker
+
+@enduml
+</code></pre><p>A <strong><code>PlanFragment</code></strong> is still one stage. <strong><code>ExecutionFragment</code></strong> is that stage plus assignment: <strong><code>instances</code></strong> and Exchange <strong><code>destinations</code></strong>. Each <strong><code>FragmentInstance</code></strong> is one run of the stage on one <strong><code>worker</code></strong>, with <strong><code>node2ScanRanges</code></strong> (tablet ids) for scans. CBO distribution only named buckets; this step binds buckets to machines.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>coord <span style=color:#f92672>=</span> getCoordinatorFactory().<span style=color:#a6e22e>createQueryScheduler</span>(context, fragments, scanNodes, descTable, execPlan);
+</span></span><span style=display:flex><span>QeProcessorImpl.<span style=color:#a6e22e>INSTANCE</span>.<span style=color:#a6e22e>registerQuery</span>(context.<span style=color:#a6e22e>getExecutionId</span>(), ...);
+</span></span><span style=display:flex><span>coord.<span style=color:#a6e22e>execWithQueryDeployExecutor</span>(context);   <span style=color:#75715e>// prepareExec() then deliverExecFragments()</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>computeFragmentInstances</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ExecutionFragment execFragment : executionDAG.<span style=color:#a6e22e>getFragmentsInPostorder</span>()) {
+</span></span><span style=display:flex><span>        fragmentAssignmentStrategyFactory.<span style=color:#a6e22e>create</span>(execFragment, lazyWorkerProvider.<span style=color:#a6e22e>get</span>())
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>assignFragmentToWorker</span>(execFragment);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    executionDAG.<span style=color:#a6e22e>finalizeDAG</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A scan fragment becomes one <strong><code>FragmentInstance</code></strong> per chosen worker, each carrying that worker’s <strong><code>TScanRangeParams</code></strong> (tablet ids). The same <strong><code>PlanFragment</code></strong> therefore runs in parallel without the FE copying rows.</p><h3 id=37-deploy>3.7 Deploy</h3><p><strong><code>prepareExec()</code></strong> attaches a <strong><code>ResultReceiver</code></strong> to the root instance’s worker, then <strong><code>Deployer.deployFragments()</code></strong> RPCs each instance.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>receiver <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ResultReceiver(rootInstance.<span style=color:#a6e22e>getInstanceId</span>(), workerId, worker.<span style=color:#a6e22e>getBrpcAddress</span>(), timeoutMs);
+</span></span><span style=display:flex><span><span style=color:#75715e>// Deployer:</span>
+</span></span><span style=display:flex><span>executions.<span style=color:#a6e22e>forEach</span>(FragmentInstanceExecState::deployAsync);
+</span></span><span style=display:flex><span><span style=color:#75715e>// FragmentInstanceExecState:</span>
+</span></span><span style=display:flex><span>deployFuture <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>()
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>execPlanFragmentAsync</span>(brpcAddress, requestToDeploy, jobSpec.<span style=color:#a6e22e>getPlanProtocol</span>());
+</span></span></code></pre></div><h3 id=38-execute-on-workers>3.8 Execute on workers</h3><p>Operators run in the BE/CN pipeline engine. Intermediate batches never return to the FE; they move worker-to-worker as <strong><code>transmit_chunk</code></strong> on Exchange edges. Pipeline internals are in <a href=../backend/>Backend and Compute Node</a>.</p><h3 id=39-report-status>3.9 Report status</h3><p>Workers call Thrift <strong><code>FrontendService.reportExecStatus</code></strong>. <strong><code>QeProcessorImpl</code></strong> forwards to <strong><code>DefaultCoordinator.updateFragmentExecStatus()</code></strong> so the FE can cancel remaining instances on failure and know when the root is done.</p><h3 id=310-collect-results>3.10 Collect results</h3><p>The FE is only a client of the root worker. <strong><code>StmtExecutor</code></strong> loops until EOS and writes MySQL packets.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>do</span> {
+</span></span><span style=display:flex><span>    batch <span style=color:#f92672>=</span> coord.<span style=color:#a6e22e>getNext</span>();           <span style=color:#75715e>// ResultReceiver → fetchDataAsync(root worker)</span>
+</span></span><span style=display:flex><span>    responseRowBatch(..., batch, channel);
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>while</span> (<span style=color:#f92672>!</span>batch.<span style=color:#a6e22e>isEos</span>());
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>PFetchDataRequest request <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PFetchDataRequest(finstId);
+</span></span><span style=display:flex><span>Future<span style=color:#f92672>&lt;</span>PFetchDataResult<span style=color:#f92672>&gt;</span> future <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>().<span style=color:#a6e22e>fetchDataAsync</span>(address, request);
+</span></span><span style=display:flex><span><span style=color:#75715e>// deserialize TResultBatch from the serialized payload</span>
+</span></span></code></pre></div><h3 id=311-simple-query-scan-filter-project>3.11 Simple query: scan, filter, project</h3><p>MPP still applies when there is no join and no aggregate. Parallelism is the <strong>tablet instances</strong>; the only shuffle is an optional GATHER so the client sees one stream.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span><span style=display:flex><span>    dt     DATE,
+</span></span><span style=display:flex><span>    id     BIGINT,
+</span></span><span style=display:flex><span>    amount DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, id)
+</span></span><span style=display:flex><span>PARTITION <span style=color:#66d9ef>BY</span> RANGE(dt) (
+</span></span><span style=display:flex><span>    PARTITION p2024 <span style=color:#66d9ef>VALUES</span> [(<span style=color:#e6db74>&#39;2024-01-01&#39;</span>), (<span style=color:#e6db74>&#39;2025-01-01&#39;</span>))
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> id, amount
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> sales
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> dt <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;2024-06-01&#39;</span>;
+</span></span></code></pre></div><p>Partition <strong><code>p2024</code></strong> has two tablets (<strong><code>BUCKETS 2</code></strong>): <strong>T100</strong> (replicas on BE-1, BE-2) and <strong>T101</strong> (replicas on BE-2, BE-3). After CBO the physical tree is <strong><code>OlapScan</code></strong> (predicate pushed to the scan) + project. <strong><code>createOutputFragment()</code></strong> sees two tablets, so it does <strong>not</strong> pin <strong><code>ResultSink</code></strong> on the scan fragment; it adds a GATHER exchange.</p><pre tabindex=0><code>PLAN FRAGMENT 0                    -- root, UNPARTITIONED
+  RESULT SINK
+  1:EXCHANGE                       -- GATHER
+
+PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
+  STREAM DATA SINK
+    EXCHANGE ID: 01  UNPARTITIONED
+  0:OlapScanNode  TABLE: sales
+     PREDICATES: dt = &#39;2024-06-01&#39;
+     tablets: T100, T101
+</code></pre><p><strong><code>LocalFragmentAssignmentStrategy</code></strong> places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the <strong><code>ResultReceiver</code></strong> target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **<code>transmit_chunk</code>**s surviving rows to F0. The FE only **<code>fetch_data</code>**s F0.</p><p>If the optimizer can prove a <strong>single tablet</strong> (or short-circuit PK lookup), <strong><code>createOutputFragment()</code></strong> skips the GATHER fragment and hangs <strong><code>ResultSink</code></strong> on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-simple-query.svg alt="Simple query: tablet-parallel scan then GATHER"></p><h3 id=312-complete-query-shuffle-join-and-two-phase-aggregate>3.12 Complete query: shuffle join and two-phase aggregate</h3><p>A join plus <strong><code>GROUP BY</code></strong> is the full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under <strong><code>ResultSink</code></strong>. <strong><code>orders</code></strong> is <strong><code>DISTRIBUTED BY HASH(cust_id)</code></strong>; <strong><code>customers</code></strong> is <strong><code>HASH(id)</code></strong>; they are not colocated.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
+</span></span><span style=display:flex><span>    dt      DATE,
+</span></span><span style=display:flex><span>    cust_id BIGINT,
+</span></span><span style=display:flex><span>    amount  DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, cust_id)
+</span></span><span style=display:flex><span>PARTITION <span style=color:#66d9ef>BY</span> RANGE(dt) (
+</span></span><span style=display:flex><span>    PARTITION p2024 <span style=color:#66d9ef>VALUES</span> [(<span style=color:#e6db74>&#39;2024-01-01&#39;</span>), (<span style=color:#e6db74>&#39;2025-01-01&#39;</span>))
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(cust_id) BUCKETS <span style=color:#ae81ff>8</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> customers (
+</span></span><span style=display:flex><span>    id     BIGINT,
+</span></span><span style=display:flex><span>    region VARCHAR(<span style=color:#ae81ff>32</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>(id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>8</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#66d9ef>c</span>.region, <span style=color:#66d9ef>SUM</span>(o.amount)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> orders o
+</span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.cust_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> o.dt <span style=color:#66d9ef>BETWEEN</span> <span style=color:#e6db74>&#39;2024-01-01&#39;</span> <span style=color:#66d9ef>AND</span> <span style=color:#e6db74>&#39;2024-06-30&#39;</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>GROUP</span> <span style=color:#66d9ef>BY</span> <span style=color:#66d9ef>c</span>.region;
+</span></span></code></pre></div><p>When the tables are <strong>not</strong> colocated on the join key, CBO requires <strong><code>HASH_PARTITIONED</code></strong> on <strong><code>o.cust_id</code> / <code>c.id</code></strong>. <strong><code>visitPhysicalDistribution</code></strong> therefore cuts a fragment per scan and a fragment for the join (that fragment’s <strong><code>DataPartition</code></strong> is the join key, not <strong><code>region</code></strong>). The aggregate is split: local <strong><code>AGGREGATE (update serialize) STREAMING</code></strong> stays with the join; <strong><code>AGGREGATE (merge finalize)</code></strong> runs after a second hash shuffle on <strong><code>c.region</code></strong>. <strong><code>createOutputFragment()</code></strong> then GATHERs the still-partitioned merge output into <strong><code>ResultSink</code></strong>.</p><pre tabindex=0><code>PLAN FRAGMENT 0                    -- UNPARTITIONED
+  RESULT SINK
+  9:EXCHANGE                       -- GATHER
+
+PLAN FRAGMENT 1                    -- HASH_PARTITIONED: region
+  8:AGGREGATE (merge finalize)
+  7:EXCHANGE                       -- HASH_PARTITIONED: region
+
+PLAN FRAGMENT 2                    -- HASH_PARTITIONED: cust_id
+  STREAM DATA SINK
+    EXCHANGE ID: 07  HASH_PARTITIONED: region
+  6:AGGREGATE (update serialize)
+     STREAMING
+  5:Project
+  4:HASH JOIN
+     2:EXCHANGE                    -- HASH_PARTITIONED: o.cust_id
+     3:EXCHANGE                    -- HASH_PARTITIONED: c.id
+
+PLAN FRAGMENT 3                    -- RANDOM
+  STREAM DATA SINK
+    EXCHANGE ID: 02  HASH_PARTITIONED: cust_id
+  1:OlapScanNode  TABLE: orders
+     PREDICATES: dt BETWEEN ...
+
+PLAN FRAGMENT 4                    -- RANDOM
+  STREAM DATA SINK
+    EXCHANGE ID: 03  HASH_PARTITIONED: id
+  0:OlapScanNode  TABLE: customers
+</code></pre><p>Execution, not a single tree:</p><ol><li><strong>F3 / F4 instances</strong> start on the BEs that hold the chosen <strong><code>orders</code></strong> / <strong><code>customers</code></strong> tablet replicas. Scans run in parallel; each instance hashes outgoing chunks on the join key and **<code>transmit_chunk</code>**s to the F2 workers that own those hash buckets.</li><li><strong>F2 instances</strong> run the <strong><code>HASH JOIN</code></strong>, then the local aggregate. Partial <strong><code>(region, sum)</code></strong> groups are hashed on <strong><code>region</code></strong> and shuffled to F1.</li><li><strong>F1 instances</strong> merge partials for their <strong><code>region</code></strong> buckets. F0 GATHERs finalized rows and serves <strong><code>fetch_data</code></strong>. The FE session thread only entered the picture at this sink.</li></ol><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-complete-query.svg alt="Complete query: shuffle join and two-phase aggregate"></p><p>CBO may replace the join shuffle with <strong>broadcast</strong> (small <strong><code>customers</code></strong>) or <strong>colocate / local bucket shuffle</strong> (same tablet mapping on the join key). Those plans drop one or both join-side Exchange fragments; they are still MPP—scan instances remain parallel—but they avoid a full network repartition. The two-phase aggregate remains whenever group keys are not already aligned with the fragment partition.</p><p><strong><code>EXPLAIN</code></strong> prints this fragment DAG; <strong><code>EXPLAIN SCHEDULER</code></strong> prints the <strong><code>FragmentInstance</code></strong> → worker assignment that <strong><code>computeFragmentInstances()</code></strong> produced. That pair is the MPP plan the cluster actually runs.</p><hr><h2 id=4-load-transaction>4. Load transaction</h2><p>A StarRocks <strong>transaction</strong> is not a client SQL transaction. There is no <code>BEGIN</code> / <code>COMMIT</code> that isolates several statements the way InnoDB does. <strong><code>DmlStmt.txnId</code></strong> is a <strong>load transaction</strong>: a ticket for <strong>one</strong> INSERT, UPDATE, DELETE, MERGE, or stream load so that write becomes visible as a single tablet-version change.</p><p>OLAP visibility is <strong>tablet version</strong>, not a mixed-statement WAL. <strong><code>StatementPlanner.plan()</code></strong> calls <strong><code>beginTransaction()</code></strong> for DML. <strong><code>GlobalTransactionMgr.beginTransaction</code></strong> creates a <strong><code>TransactionState</code></strong> (<code>label</code>, source usually <strong><code>INSERT_STREAMING</code></strong>) and stores the id on the statement. BE writers produce new rowsets under that id. <strong>Commit</strong> then <strong>publish version</strong> moves every replica of the affected tablets to the same new version, so readers either see the whole write or none of it. <strong>Abort</strong> discards unpublished deltas.</p><p>A <strong><code>SELECT</code></strong> never begins this path. <strong><code>EXPLAIN</code></strong> (except <strong><code>EXPLAIN ANALYZE</code></strong>), <strong><code>INSERT INTO FILES</code></strong>, and the old non-PK delete skip <strong><code>beginTransaction()</code></strong>. If <strong><code>session.getTxnId() != 0</code></strong>, the statement reuses that id (grouped inserts), still not a general SQL txn.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>txnId <span style=color:#f92672>=</span> transactionMgr.<span style=color:#a6e22e>beginTransaction</span>(
+</span></span><span style=display:flex><span>        dbId, Lists.<span style=color:#a6e22e>newArrayList</span>(targetTable.<span style=color:#a6e22e>getId</span>()), label,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> TransactionState.<span style=color:#a6e22e>TxnCoordinator</span>(FE, localHost),
+</span></span><span style=display:flex><span>        TransactionState.<span style=color:#a6e22e>LoadJobSourceType</span>.<span style=color:#a6e22e>INSERT_STREAMING</span>,
+</span></span><span style=display:flex><span>        session.<span style=color:#a6e22e>getExecTimeout</span>(), session.<span style=color:#a6e22e>getCurrentComputeResource</span>());
+</span></span><span style=display:flex><span>stmt.<span style=color:#a6e22e>setTxnId</span>(txnId);
+</span></span></code></pre></div><h2 id=5-references>5. References</h2><ol><li>K. Kang, “StarRocks Query Optimizer,” CMU Database Group Seminar, 31 March 2025. <a href=https://kangkaisen.com/post/cmu-starrocks-query-optimizer>Notes</a>.</li><li>G. Graefe, “The Cascades Framework for Query Optimization,” <em>IEEE Data Engineering Bulletin</em>, vol. 18, no. 3, pp. 19–29, 1995. <a href=https://15721.courses.cs.cmu.edu/spring2016/papers/graefe-ieee1995.pdf>PDF</a>.</li><li>Y. Xu, “Efficiency in the Columbia Database Query Optimizer,” M.S. thesis, Portland State University, 1998. <a href=https://15721.courses.cs.cmu.edu/spring2019/papers/22-optimizer1/xu-columbia-thesis1998.pdf>PDF</a>.</li></ol></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/db/>db</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/starrocks/>starrocks</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/tidb/rocksdb/ data-tooltip="RocksDB : storage engine for TiKV " aria-label="PREVIOUS: RocksDB : storage engine for TiKV "><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/data/db/starrocks/architecture/",this.page.identifier="/post/data/db/starrocks/architecture/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/tidb/rocksdb/ data-tooltip="RocksDB : storage engine for TiKV " aria-label="PREVIOUS: RocksDB : storage engine for TiKV "><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/starrocks/architecture/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Farchitecture%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Farchitecture%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Farchitecture%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+    MathJax.Hub.Config({
+      CommonHTML: { linebreaks: { automatic: true } },
+      tex2jax: {
+        inlineMath: [ ['$', '$'], ['\\(', '\\)'] ],
+        displayMath: [ ['$$', '$$'], ['\\[', '\\]'] ],
+        processEscapes: true,
+        processEnvironments: true,
+        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      },
+      messageStyle: 'none'
+    });
+  </script><script type=text/javascript async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_CHTML-full" integrity="sha256-GhM+5JHb6QUzOQPXSJLEWP7R73CbkisjzK5Eyij4U9w=" crossorigin=anonymous></script></body></html>

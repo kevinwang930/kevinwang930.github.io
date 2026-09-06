@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420" role="img" aria-label="StarRocks query path from SQL to BE execution">
+  <defs>
+    <marker id="qp-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="420" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Query path: SQL to distributed execution</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">FE plans and coordinates; BE/CN execute fragments locally and shuffle intermediate results</text>
+
+  <g transform="translate(30,70)">
+    <rect width="120" height="64" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="60" y="94" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Client</text>
+    <text x="60" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">MySQL</text>
+  </g>
+  <line x1="150" y1="102" x2="178" y2="102" stroke="#37474f" stroke-width="1.5" marker-end="url(#qp-arr)"/>
+
+  <g transform="translate(180,58)">
+    <rect width="640" height="88" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="20" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">Frontend (FE)</text>
+    <rect x="16" y="36" width="110" height="40" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="71" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Parse / Analyze</text>
+    <rect x="140" y="36" width="110" height="40" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="195" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">CBO Optimizer</text>
+    <rect x="264" y="36" width="120" height="40" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="324" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">PlanFragment(s)</text>
+    <rect x="398" y="36" width="110" height="40" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+    <text x="453" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">Coordinator</text>
+    <rect x="522" y="36" width="100" height="40" fill="#ffffff" stroke="#90caf9" rx="3"/>
+    <text x="572" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Deploy</text>
+  </g>
+  <line x1="820" y1="102" x2="848" y2="102" stroke="#37474f" stroke-width="1.5" marker-end="url(#qp-arr)"/>
+  <text x="834" y="92" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">brpc</text>
+
+  <g transform="translate(850,58)">
+    <rect width="120" height="88" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+    <text x="60" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">BE / CN</text>
+    <text x="60" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">exec_plan_fragment</text>
+    <text x="60" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">scan local tablet</text>
+    <text x="60" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">pipeline operators</text>
+  </g>
+
+  <!-- BE cluster row -->
+  <g transform="translate(180,180)">
+    <rect width="790" height="100" fill="#ffffff" stroke="#2e7d32" stroke-width="1.3" rx="5"/>
+    <text x="20" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">Parallel execution on data-holding nodes</text>
+
+    <rect x="20" y="40" width="220" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+    <text x="130" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Fragment 0: Scan tablet T1</text>
+    <text x="130" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">BE-1 (has replica)</text>
+
+    <rect x="260" y="40" width="220" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+    <text x="370" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Fragment 0: Scan tablet T2</text>
+    <text x="370" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">BE-2 (has replica)</text>
+
+    <rect x="500" y="40" width="270" height="48" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+    <text x="635" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#37474f">Fragment 1: HashAgg / Join</text>
+    <text x="635" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">transmit_chunk shuffle between BEs</text>
+  </g>
+
+  <line x1="300" y1="146" x2="300" y2="180" stroke="#2e7d32" stroke-width="1.2"/>
+  <line x1="530" y1="146" x2="530" y2="180" stroke="#2e7d32" stroke-width="1.2"/>
+  <line x1="760" y1="146" x2="760" y2="180" stroke="#7b1fa2" stroke-width="1.2"/>
+
+  <line x1="240" y1="228" x2="500" y2="228" stroke="#7b1fa2" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="480" y1="228" x2="635" y2="228" stroke="#7b1fa2" stroke-width="1" stroke-dasharray="4 3"/>
+
+  <g transform="translate(180,300)">
+    <rect width="790" height="96" fill="#ffffff" stroke="#90a4ae" rx="5"/>
+    <text x="20" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Coordinator collects status and rows</text>
+    <text x="20" y="48" font-family="Consolas, monospace" font-size="10" fill="#37474f">BE -&gt; FE: reportExecStatus (Thrift FrontendService)</text>
+    <text x="20" y="68" font-family="Consolas, monospace" font-size="10" fill="#37474f">Root fragment result rows streamed back to client via MySQL protocol</text>
+    <text x="20" y="88" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">Load / DDL use the same FE-&gt;BE agent and brpc paths with different Coordinator factories.</text>
+  </g>
+
+  <line x1="910" y1="146" x2="910" y2="300" stroke="#1565c0" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="910" y1="300" x2="130" y2="300" stroke="#1565c0" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="130" y1="300" x2="130" y2="134" stroke="#1565c0" stroke-width="1.2" stroke-dasharray="4 3"/>
+</svg>

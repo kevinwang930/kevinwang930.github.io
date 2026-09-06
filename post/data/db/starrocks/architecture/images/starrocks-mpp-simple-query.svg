@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="340" viewBox="0 0 1000 340" role="img" aria-label="Simple MPP query: tablet-parallel scan then GATHER to ResultSink">
+  <defs>
+    <marker id="sq-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="sq-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="340" fill="#f7f9fb"/>
+  <text x="500" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Simple query: scan instances plus GATHER</text>
+  <text x="500" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#607d8b">SELECT id, amount FROM sales WHERE dt = '2024-06-01'</text>
+
+  <g transform="translate(24,80)">
+    <rect width="130" height="72" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="65" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">SQL</text>
+    <text x="65" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">COM_QUERY</text>
+  </g>
+  <line x1="154" y1="116" x2="186" y2="116" stroke="#37474f" stroke-width="1.5" marker-end="url(#sq-arr)"/>
+
+  <g transform="translate(188,80)">
+    <rect width="160" height="72" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="4"/>
+    <text x="80" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">FE plan</text>
+    <text x="80" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">F1 scan + F0 GATHER</text>
+  </g>
+  <line x1="348" y1="100" x2="398" y2="80" stroke="#37474f" stroke-width="1.5" marker-end="url(#sq-arr)"/>
+  <line x1="348" y1="132" x2="398" y2="200" stroke="#37474f" stroke-width="1.5" marker-end="url(#sq-arr)"/>
+
+  <g transform="translate(400,52)">
+    <rect width="200" height="64" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+    <text x="100" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">F1 @ BE-1</text>
+    <text x="100" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">tablet T100</text>
+  </g>
+  <g transform="translate(400,172)">
+    <rect width="200" height="64" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+    <text x="100" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">F1 @ BE-2</text>
+    <text x="100" y="46" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">tablet T101</text>
+  </g>
+
+  <line x1="600" y1="84" x2="668" y2="140" stroke="#1565c0" stroke-width="1.5" marker-end="url(#sq-arr-blue)"/>
+  <line x1="600" y1="204" x2="668" y2="156" stroke="#1565c0" stroke-width="1.5" marker-end="url(#sq-arr-blue)"/>
+  <text x="634" y="128" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">transmit_chunk</text>
+
+  <g transform="translate(670,108)">
+    <rect width="150" height="80" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5" rx="4"/>
+    <text x="75" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">F0 GATHER</text>
+    <text x="75" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">ResultSink</text>
+  </g>
+  <line x1="820" y1="148" x2="854" y2="148" stroke="#37474f" stroke-width="1.5" marker-end="url(#sq-arr)"/>
+  <text x="837" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">fetch_data</text>
+
+  <g transform="translate(856,112)">
+    <rect width="120" height="72" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="60" y="32" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Client</text>
+    <text x="60" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">MySQL rows</text>
+  </g>
+</svg>

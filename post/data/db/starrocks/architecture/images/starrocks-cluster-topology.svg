@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="720" viewBox="0 0 1100 720" role="img" aria-label="StarRocks cluster topology FE BE CN">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arrGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="720" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#263238">StarRocks cluster topology</text>
+  <text x="550" y="50" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">MySQL clients to FE cluster; FE coordinates BE (shared-nothing) or CN + object storage (shared-data)</text>
+
+  <!-- Clients -->
+  <g transform="translate(40, 80)">
+    <rect width="150" height="120" fill="#eceff1" stroke="#607d8b" stroke-width="1.2" rx="6"/>
+    <text x="75" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#455a64">CLIENTS</text>
+    <rect x="16" y="40" width="118" height="56" fill="#ffffff" stroke="#455a64" rx="4"/>
+    <text x="75" y="62" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">JDBC / BI</text>
+    <text x="75" y="80" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">MySQL protocol</text>
+  </g>
+  <line x1="190" y1="140" x2="248" y2="140" stroke="#1565c0" stroke-width="1.8" marker-end="url(#arrBlue)"/>
+  <text x="219" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#1565c0">SQL</text>
+
+  <!-- FE cluster -->
+  <g transform="translate(250, 70)">
+    <rect width="360" height="220" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.8" rx="6"/>
+    <text x="180" y="22" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">FE cluster (Java)</text>
+    <text x="180" y="40" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">metadata replicated via BDB JE (Raft-style leader election)</text>
+
+    <rect x="16" y="56" width="100" height="68" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="4"/>
+    <text x="66" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">Leader FE</text>
+    <text x="66" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">read/write meta</text>
+    <text x="66" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">plan + schedule</text>
+
+    <rect x="130" y="56" width="100" height="68" fill="#ffffff" stroke="#1976d2" rx="4"/>
+    <text x="180" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0d47a1">Follower FE</text>
+    <text x="180" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">replay journal</text>
+    <text x="180" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">votes in election</text>
+
+    <rect x="244" y="56" width="100" height="68" fill="#ffffff" stroke="#90caf9" rx="4"/>
+    <text x="294" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1565c0">Observer FE</text>
+    <text x="294" y="96" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">read-only meta</text>
+    <text x="294" y="112" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">no election vote</text>
+
+    <rect x="16" y="140" width="328" height="64" fill="#ffffff" stroke="#90caf9" rx="4"/>
+    <text x="28" y="162" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#37474f">GlobalStateMgr</text>
+    <text x="28" y="180" font-family="Consolas, monospace" font-size="9" fill="#546e7a">CatalogMgr | NodeMgr | HeartbeatMgr | TabletScheduler</text>
+    <text x="28" y="196" font-family="Consolas, monospace" font-size="9" fill="#546e7a">SQL planner/optimizer | Coordinator</text>
+  </g>
+
+  <line x1="430" y1="290" x2="430" y2="330" stroke="#37474f" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- Shared-nothing branch -->
+  <g transform="translate(40, 340)">
+    <rect width="500" height="200" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="6"/>
+    <text x="250" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">Shared-nothing (run_mode = shared_nothing)</text>
+    <text x="250" y="42" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">Backend = storage + compute on local disks</text>
+
+    <rect x="24" y="60" width="140" height="72" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+    <text x="94" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">BE-1</text>
+    <text x="94" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">LocalTablet replicas</text>
+    <text x="94" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">vectorized exec</text>
+
+    <rect x="180" y="60" width="140" height="72" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+    <text x="250" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">BE-2</text>
+    <text x="250" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">LocalTablet replicas</text>
+    <text x="250" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">pipeline engine</text>
+
+    <rect x="336" y="60" width="140" height="72" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+    <text x="406" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b5e20">BE-3</text>
+    <text x="406" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">LocalTablet replicas</text>
+    <text x="406" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">compaction</text>
+
+    <rect x="24" y="148" width="452" height="40" fill="#f1f8e9" stroke="#aed581" rx="4"/>
+    <text x="250" y="172" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#33691e">table -&gt; partition -&gt; LocalTablet -&gt; Replica on each BE</text>
+  </g>
+
+  <!-- Shared-data branch -->
+  <g transform="translate(560, 340)">
+    <rect width="500" height="200" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.6" rx="6"/>
+    <text x="250" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#e65100">Shared-data (run_mode = shared_data)</text>
+    <text x="250" y="42" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">CN = compute + cache; data on object storage / HDFS</text>
+
+    <rect x="40" y="60" width="160" height="72" fill="#ffffff" stroke="#ef6c00" rx="4"/>
+    <text x="120" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">CN-1</text>
+    <text x="120" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">starrocks_be --cn</text>
+    <text x="120" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">local cache only</text>
+
+    <rect x="220" y="60" width="160" height="72" fill="#ffffff" stroke="#ef6c00" rx="4"/>
+    <text x="300" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#e65100">CN-2</text>
+    <text x="300" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">LakeTablet shards</text>
+    <text x="300" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#546e7a">StarOS / Starlet</text>
+
+    <rect x="400" y="60" width="80" height="72" fill="#eceff1" stroke="#607d8b" rx="4"/>
+    <text x="440" y="88" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#37474f">S3</text>
+    <text x="440" y="106" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#546e7a">HDFS</text>
+    <text x="440" y="122" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8" fill="#546e7a">MinIO</text>
+
+    <rect x="24" y="148" width="452" height="40" fill="#fff8e1" stroke="#ffcc80" rx="4"/>
+    <text x="250" y="172" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#e65100">LakeTablet: data in object storage; compute via StarOS Shard</text>
+  </g>
+
+  <!-- Heartbeat / brpc labels -->
+  <line x1="430" y1="290" x2="250" y2="340" stroke="#37474f" stroke-width="1.2"/>
+  <line x1="430" y1="290" x2="810" y2="340" stroke="#37474f" stroke-width="1.2"/>
+
+  <rect x="40" y="560" width="1020" height="140" fill="#ffffff" stroke="#90a4ae" rx="6"/>
+  <text x="56" y="586" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#37474f">Control and data planes</text>
+  <text x="56" y="610" font-family="Consolas, monospace" font-size="10" fill="#37474f">BE/CN -&gt; Leader FE: HeartbeatService (Thrift) - register ports, disk stats, liveness</text>
+  <text x="56" y="632" font-family="Consolas, monospace" font-size="10" fill="#37474f">Leader FE -&gt; BE/CN: brpc PInternalService (exec_plan_fragment, transmit_chunk, tablet_writer)</text>
+  <text x="56" y="654" font-family="Consolas, monospace" font-size="10" fill="#37474f">BE &lt;-&gt; BE: brpc shuffle (runtime filters, exchange)</text>
+  <text x="56" y="676" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#78909c">No external metadata store; FE HA and tablet placement are internal to StarRocks.</text>
+</svg>
