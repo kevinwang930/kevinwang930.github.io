@@ -16,10 +16,10 @@ keywords:
 - compute-node
 #thumbnailImage: //example.com/image.jpg
 ---
-**Backend (BE)** and **Compute Node (CN)** are the C++ workers that execute StarRocks **`PlanFragment`** instances. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data). Cluster topology and FE MPP planning are in [cluster topology and MPP](../architecture/).
+**Backend (BE)** and **Compute Node (CN)** are the C++ workers that execute StarRocks **`PlanFragment`** instances. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data). FE query planning and the MPP path are in [FE query planning and the MPP path](../architecture/).
 <!--more-->
 
-Related: [Cluster topology and MPP](../architecture/).
+Related: [FE query planning and the MPP path](../architecture/).
 
 ---
 
@@ -129,7 +129,7 @@ When the FE **`Deployer`** calls brpc **`exec_plan_fragment`**, the worker deser
 
 **Exchange** between fragments does not go through the FE. A producing instance sends batches with **`transmit_chunk`** to consuming instances' brpc addresses from the fragment destinations map. The root fragment's **`ResultSink`** retains batches for the FE **`ResultReceiver`** to **`fetch_data`**. Status and profiles return on Thrift **`reportExecStatus`**.
 
-That FE-side deploy / fetch loop is in [cluster topology and MPP](../architecture/) §3.
+That FE-side deploy / fetch loop is in [FE query planning and the MPP path](../architecture/) §3.
 
 ---
 

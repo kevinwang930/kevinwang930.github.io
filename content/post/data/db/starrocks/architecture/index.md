@@ -1,7 +1,6 @@
 ---
-title: "StarRocks: cluster topology and MPP query path"
+title: "StarRocks: FE query planning and the MPP path"
 date: 2026-08-22T15:00:00+02:00
-draft: true
 categories:
 - data
 - db
@@ -15,7 +14,7 @@ keywords:
 - mpp
 #thumbnailImage: //example.com/image.jpg
 ---
-**StarRocks** is a MySQL-compatible MPP OLAP engine. A cluster is **Frontend (FE)** nodes for metadata and query coordination plus **Backend (BE)** or **Compute Node (CN)** workers for execution. This post covers **cluster topology** and the **MPP** path from SQL on the FE to fragment deploy and result pull. Worker process internals are in [Backend and Compute Node](../backend/).
+**StarRocks** is a MySQL-compatible MPP OLAP engine. A cluster is **Frontend (FE)** nodes for metadata and query coordination plus **Backend (BE)** or **Compute Node (CN)** workers for execution. This post follows **FE query planning**—logical plan, Cascades optimize, fragmentize—and the **MPP** path through schedule, deploy, and result pull. Worker process internals are in [Backend and Compute Node](../backend/).
 <!--more-->
 
 Related: [Backend and Compute Node](../backend/).
