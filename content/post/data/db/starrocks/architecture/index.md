@@ -963,11 +963,11 @@ OptExpression  op=LogicalProject  { region, sum_amount }
 
 #### 3.4.1 Overall procedure
 
-**`optimizeByCost`** is a fixed pipeline:
+**`optimizeByCost`** is a fixed pipeline. Logical rewrite still runs on the concrete tree; from **`memo.init`** onward, Cascades search happens **inside the Memo**.
 
 1. **Logical rewrite** — `rewriteAndValidatePlan` → `logicalRuleRewrite` (subquery, CTE inline, prune, pushdown) on the concrete **`OptExpression`** tree.
-2. **Init** — `memo.init(logicOperatorTree)` then `deriveAllGroupLogicalProperty`.
-3. **Memo search** — `memoOptimize`: extend the **`RuleSet`** for join reorder / implement, push `OptimizeGroupTask(rootGroup)`, run the **`TaskScheduler`** stack (transform, implement, **`EnforceAndCostTask`**).
+2. **Init Memo** — `memo.init(logicOperatorTree)` then `deriveAllGroupLogicalProperty` (§3.4.2).
+3. **Memo search** — `memoOptimize`: prepare join rules, push `OptimizeGroupTask(rootGroup)`, run the task stack until physical alternatives are costed (§3.4.2–3.4.4).
 4. **Extract** — `extractBestPlan(requiredProperty, rootGroup)` rebuilds one physical **`OptExpression`** from the cheapest physical **`GroupExpression`**.
 5. **Physical rewrite** — `physicalRuleRewrite`, then feedback `dynamicRewrite`.
 
@@ -1003,20 +1003,6 @@ OptExpression optimizeByCost(ConnectContext connectContext, OptExpression logicO
     return result;
 }
 
-void memoOptimize(ConnectContext connectContext, Memo memo, TaskContext rootTaskContext) {
-    if (innerCrossJoinNode < sessionVariable.getCboMaxReorderNode()) {
-        if (innerCrossJoinNode > sessionVariable.getCboMaxReorderNodeUseExhaustive()) {
-            new ReorderJoinRule().transform(tree, context);
-            context.getRuleSet().addJoinCommutativityWithoutInnerRule();
-        } else {
-            context.getRuleSet().addJoinTransformationRules();  // commute / associate
-        }
-    }
-    context.getRuleSet().addAutoJoinImplementationRule();  // HashJoin + NestLoop
-    scheduler.pushTask(new OptimizeGroupTask(rootTaskContext, memo.getRootGroup()));
-    scheduler.executeTasks(rootTaskContext);
-}
-
 OptExpression extractBestPlan(PhysicalPropertySet requiredProperty, Group rootGroup) {
     GroupExpression groupExpression = rootGroup.getBestExpression(requiredProperty);
     List<PhysicalPropertySet> inputProperties = groupExpression.getInputProperties(requiredProperty);
@@ -1028,217 +1014,9 @@ OptExpression extractBestPlan(PhysicalPropertySet requiredProperty, Group rootGr
 }
 ```
 
-#### 3.4.2 Rules
+#### 3.4.2 Memo
 
-A **`Rule`** is one rewrite: match a subtree, optionally reject it, then emit zero or more equivalent **`OptExpression`** trees. It is identified by a **`RuleType`**, matched by a **`Pattern`**, gated by optional **`check(input, context)`** (default true), and realized by **`transform(input, context)`** (empty list means no change). **`promise()`** sets scheduler priority among valid rules (default 1).
-
-**`COST_BASED`** still means this **`Rule`** abstraction plus cost, not a separate non-rule planner. Applying a rule never mutates the matched expression in place inside the memo: **`ApplyRuleTask`** **`copyIn`s** each substitute as a new **`GroupExpression`**.
-
-StarRocks splits **`Rule`** into two subclasses by **what kind of operator `transform` returns**. **`TransformationRule`** is **logical → logical**: it explores equivalent logical plans (join commute, split agg / top-n, …). A new logical **`GroupExpression`** schedules another **`OptimizeExpressionTask`**. **`promise()`** stays 1. Example: **`JoinCommutativityRule`** turns `LogicalJoin(A, B)` into `LogicalJoin(B, A)`.
-
-**`ImplementationRule`** is **logical → physical**: it binds a logical operator to an executable physical one (hash join, olap scan, …). A new physical **`GroupExpression`** schedules **`EnforceAndCostTask`**. It overrides **`promise()`** to **2**, so implement tasks sit above transform on the scheduler stack and run first. Example: **`HashJoinImplementationRule`** turns `LogicalJoin` into `PhysicalHashJoin` with the same children.
-
-Both share the same match API (**`Pattern`** + **`check`** + **`transform`**). The difference is the substitute’s operator kind and the next Cascades task. Transformation widens the logical search space; implementation is the bridge into costing and property enforce. Cost, not the rule, chooses which physical expression **`extractBestPlan`** keeps.
-
-**`CombinationRule`** is a **`TransformationRule`** whose **`predecessorRules()`** is a batch (`PUSH_DOWN_PREDICATE_RULES`, `PRUNE_COLUMNS_RULES`); **`transform`** itself returns empty — the batch members do the work.
-
-**`Pattern`** is a tree of operator-type placeholders. **`Pattern.create(LOGICAL_JOIN)`** with two **`PATTERN_LEAF`** children matches any join whose children are unconstrained. **`RuleSet`** keeps two lists that mirror the subclass split: **`transformRules`** (constructor adds split-agg / top-n, …) and **`implementRules`** (starts as **`ALL_IMPLEMENT_RULES`**: scan, hash agg, filter, project, top-n — not join). **`memoOptimize`** appends join commute / associate and **`addAutoJoinImplementationRule`**.
-
-**`OptimizerContext`** holds **`RuleSet`**, **`OptimizerOptions`** (disabled **`RuleType`s**), **`TaskScheduler`**, and the **`Memo`**. Each Cascades task carries a **`TaskContext`**: the **`OptimizerContext`**, required **`PhysicalPropertySet`**, and **`upperBoundCost`**.
-
-The same **`Rule`** class runs in two engines:
-
-- **Before the memo** — `logicalRuleRewrite` pushes **`RewriteTreeTask`**: top-down match on the concrete tree, **`check`**, **`transform`**, replace in place (at most one expression). **`predecessorRules()`** runs before **`transform`**, which is how a **`CombinationRule`** batch executes.
-- **After extract** — `physicalRuleRewrite` uses **`TreeRewriteRule.rewrite`** on the chosen physical tree (prune shuffle, decode, scalar reuse), not **`Pattern`** / **`Binder`**.
-- **Inside the memo** — `OptimizeGroupTask` → `OptimizeExpressionTask` → `ApplyRuleTask` (below).
-
-```plantuml
-@startuml
-
-class OptimizerContext {
-  - ruleSet : RuleSet
-  - optimizerOptions : OptimizerOptions
-  - taskScheduler : TaskScheduler
-  - memo : Memo
-}
-
-class OptimizerOptions {
-  + isRuleDisable()
-}
-
-class TaskContext {
-  - requiredProperty : PhysicalPropertySet
-  - upperBoundCost : double
-}
-
-abstract class OptimizerTask {
-  # context : TaskContext
-  + execute()
-  + filterInValidRules()
-}
-
-class OptimizeGroupTask {
-  - group : Group
-}
-
-class OptimizeExpressionTask {
-  - groupExpression : GroupExpression
-  - isExplore : boolean
-  + getValidRules()
-}
-
-class ApplyRuleTask {
-  - groupExpression : GroupExpression
-  - rule : Rule
-}
-
-abstract class Rule {
-  - type : RuleType
-  - pattern : Pattern
-  + check()
-  + transform()
-  + promise()
-}
-
-abstract class TransformationRule
-abstract class ImplementationRule
-class CombinationRule {
-  - rules : List<Rule>
-}
-
-class JoinCommutativityRule
-class JoinAssociativityRule
-class SplitTwoPhaseAggRule
-
-abstract class JoinImplementationRule
-class HashJoinImplementationRule
-class NestLoopJoinImplementationRule
-class OlapScanImplementationRule
-class HashAggImplementationRule
-
-abstract class Pattern {
-  - children : List<Pattern>
-}
-
-class RuleSet {
-  - transformRules : List<Rule>
-  - implementRules : List<Rule>
-}
-
-class Binder {
-  + next()
-}
-
-OptimizerContext *-- RuleSet : ruleSet
-OptimizerContext *-- OptimizerOptions : optimizerOptions
-TaskContext *-- OptimizerContext : optimizerContext
-OptimizerTask o-- TaskContext : context
-OptimizerTask <|-- OptimizeGroupTask
-OptimizerTask <|-- OptimizeExpressionTask
-OptimizerTask <|-- ApplyRuleTask
-OptimizeGroupTask o-- Group : group
-OptimizeGroupTask ..> OptimizeExpressionTask : push logical GE
-OptimizeExpressionTask ..> RuleSet : getValidRules
-OptimizeExpressionTask ..> ApplyRuleTask : push valid Rule
-ApplyRuleTask o-- Rule : rule
-ApplyRuleTask ..> Binder
-
-Rule <|-- TransformationRule
-Rule <|-- ImplementationRule
-Rule o-- Pattern : pattern
-TransformationRule <|-- CombinationRule
-TransformationRule <|-- JoinCommutativityRule
-TransformationRule <|-- JoinAssociativityRule
-TransformationRule <|-- SplitTwoPhaseAggRule
-ImplementationRule <|-- JoinImplementationRule
-ImplementationRule <|-- OlapScanImplementationRule
-ImplementationRule <|-- HashAggImplementationRule
-JoinImplementationRule <|-- HashJoinImplementationRule
-JoinImplementationRule <|-- NestLoopJoinImplementationRule
-CombinationRule o-- Rule : rules
-RuleSet o-- Rule : transformRules
-RuleSet o-- Rule : implementRules
-Binder ..> Pattern
-Binder ..> GroupExpression
-
-@enduml
-```
-
-**`OptimizeGroupTask`** does not call **`Rule.check`**. It stops if **`group.getCostLowerBound(requiredProperty) >= upperBoundCost`** or **`group.hasBestExpression(requiredProperty)`**. Otherwise it pushes one **`OptimizeExpressionTask`** per logical **`GroupExpression`**, then one **`EnforceAndCostTask`** per physical expression already in the group.
-
-**`OptimizeExpressionTask.getValidRules`** takes all **`transformRules`**, and **`implementRules`** unless **`isExplore`**. **`filterInValidRules`** keeps a rule only if the expression has not **`hasRuleExplored`** it, **`pattern.matchWithoutChild`** fits, the rule is not disabled, and **`rule.exhausted`** is false. Surviving rules are sorted by **`promise`** into **`ApplyRuleTask`s**. The task also pushes **`DeriveStatsTask`** and **`ExploreGroupTask`** on each child group. The scheduler is a stack: child groups run first; implement (promise 2) sits above transform (promise 1) and therefore runs earlier.
-
-**`ApplyRuleTask`** uses **`Binder`**: children are **`Group`s**, so **`binder.next()`** yields each binding. Bindings are collected (**`check`** + **`transform`**), then each result is **`copyIn`** into the *same* group. A logical result becomes another **`OptimizeExpressionTask`**; a physical result becomes **`EnforceAndCostTask`**. The matched expression is then **`setRuleExplored`**.
-
-```java
-void OptimizeGroupTask.execute() {
-    if (group.getCostLowerBound(context.getRequiredProperty()) >= context.getUpperBoundCost()
-            || group.hasBestExpression(context.getRequiredProperty())) {
-        return;
-    }
-    for (int i = group.getLogicalExpressions().size() - 1; i >= 0; i--) {
-        pushTask(new OptimizeExpressionTask(context, group.getLogicalExpressions().get(i)));
-    }
-    for (int i = group.getPhysicalExpressions().size() - 1; i >= 0; i--) {
-        pushTask(new EnforceAndCostTask(context, group.getPhysicalExpressions().get(i)));
-    }
-}
-
-void filterInValidRules(GroupExpression groupExpression, List<Rule> candidateRules, List<Rule> validRules) {
-    OptimizerOptions optimizerOptions = context.getOptimizerContext().getOptimizerOptions();
-    for (Rule rule : candidateRules) {
-        if (groupExpression.hasRuleExplored(rule)
-                || !rule.getPattern().matchWithoutChild(groupExpression)
-                || optimizerOptions.isRuleDisable(rule.type())
-                || rule.exhausted(context.getOptimizerContext())) {
-            continue;
-        }
-        validRules.add(rule);
-    }
-}
-
-List<Rule> getValidRules() {
-    filterInValidRules(groupExpression, ruleSet.getTransformRules(), validRules);
-    if (!isExplore) {
-        filterInValidRules(groupExpression, ruleSet.getImplementRules(), validRules);
-    }
-    validRules.sort(Comparator.comparingInt(Rule::promise));
-    return validRules;
-}
-
-void ApplyRuleTask.execute() {
-    Binder binder = new Binder(optimizerContext, rule.getPattern(), groupExpression, ...);
-    List<OptExpression> newExpressions = Lists.newArrayList();
-    for (OptExpression extractExpr = binder.next(); extractExpr != null; extractExpr = binder.next()) {
-        if (rule.check(extractExpr, optimizerContext)) {
-            newExpressions.addAll(rule.transform(extractExpr, optimizerContext));
-        }
-    }
-    for (OptExpression expression : newExpressions) {
-        GroupExpression neu = memo.copyIn(groupExpression.getGroup(), expression).second;
-        if (neu.getOp().isLogical()) {
-            pushTask(new OptimizeExpressionTask(context, neu, isExplore));
-        } else {
-            pushTask(new EnforceAndCostTask(context, neu));
-        }
-    }
-    groupExpression.setRuleExplored(rule);
-}
-
-// HashJoinImplementationRule.check: not CROSS, ON has equality predicates
-List<OptExpression> transform(OptExpression input, OptimizerContext context) {
-    LogicalJoinOperator joinOperator = (LogicalJoinOperator) input.getOp();
-    PhysicalHashJoinOperator physicalHashJoin = new PhysicalHashJoinOperator(
-            joinOperator.getJoinType(), joinOperator.getOnPredicate(), ...);
-    return Lists.newArrayList(OptExpression.create(physicalHashJoin, input.getInputs()));
-}
-```
-
-On the running query, **`JoinCommutativityRule`** adds **`LogicalJoin(customers, orders)`**. **`HashJoinImplementationRule`** adds **`PhysicalHashJoin`** when ON has equality (`cust_id = id`); **`NestLoopJoinImplementationRule.check`** rejects that equi-join. Cost chooses which physical expression **`extractBestPlan`** keeps.
-
-#### 3.4.3 Memo
-
-The **Memo** is the Cascades search space: every alternative tried so far, keyed so equivalents share groups. A **`Group`** is a set of **logically equivalent** alternatives. A **`GroupExpression`** is one alternative: an **`op`** whose **`inputs`** are **`Group`s** (not child trees). Identity is **`(op, input group ids)`** — that is how **`copyIn`** detects a duplicate.
+All cost-based search after logical rewrite runs **against the Memo**. A **`Group`** holds **logically equivalent** alternatives. A **`GroupExpression`** is one alternative: an **`op`** whose **`inputs`** are **`Group`s**. Identity **`(op, input group ids)`** makes **`copyIn`** share duplicates.
 
 ```plantuml
 @startuml
@@ -1274,45 +1052,39 @@ GroupExpression *-- Operator : op
 @enduml
 ```
 
-**`memo.init`** **`copyIn`s** the rewritten tree bottom-up: one **`Group`** and one logical **`GroupExpression`** per node. Rule results call **`copyIn(targetGroup, expr)`** with **`targetGroup`** = the matched expression’s group, so equivalents stay together. If **`(op, inputs)`** already exists, the memo returns the old expression (and **`mergeGroup`** if it lived elsewhere). Implementation rules add **physical** expressions to the same groups; **`EnforceAndCostTask`** fills **`lowestCostTable`**.
+**`memo.init`** loads groups → **`memoOptimize`** prepares join rules and drains the task stack from the root → **`extractBestPlan`** (§3.4.1) reads the filled memo.
 
-On the running query, **`init`** of the §3.3 tree is six groups:
-
-```
-G5  LogicalProject
-  G4  LogicalAggregation  groupingKeys=[region]
-    G3  LogicalFilter  predicate=(dt BETWEEN ...)
-      G2  LogicalJoin  INNER  onPredicate=(cust_id = id)
-        G0  LogicalOlapScan  orders
-        G1  LogicalOlapScan  customers
-```
+After init the running query is a **group DAG** (`memo.rootGroup` = **G5**). 
 
 ```
-G0  { LogicalOlapScan(orders) }
-G1  { LogicalOlapScan(customers) }
-G2  { LogicalJoin(G0, G1) }
-G3  { LogicalFilter(G2) }
-G4  { LogicalAggregation(G3) }
-G5  { LogicalProject(G4) }   // root
+memo.rootGroup ──► G5  { LogicalProject          inputs=[G4] }
+                         │
+                         ▼
+                       G4  { LogicalAggregation    inputs=[G3] }
+                         │
+                         ▼
+                       G3  { LogicalFilter         inputs=[G2] }
+                         │
+                         ▼
+                       G2  { LogicalJoin           inputs=[G0, G1] }
+                        / \
+                       ▼   ▼
+        G0 { LogicalOlapScan(orders) }   G1 { LogicalOlapScan(customers) }
+             inputs=[]                        inputs=[]
 ```
 
-After commute and hash-join implement, **G2** holds:
+**`memoOptimize` traversal.** The scheduler is a **stack** (LIFO). Only **`OptimizeGroupTask(G5)`** is pushed at entry.
 
-```
-G2  {
-  LogicalJoin(G0, G1)           // from init
-  LogicalJoin(G1, G0)           // JoinCommutativityRule
-  PhysicalHashJoin(G0, G1)      // HashJoinImplementationRule
-  PhysicalHashJoin(G1, G0)      // implement the commute
-}
-```
+Two different orders share that stack:
 
-**G0** gains **`PhysicalOlapScan(orders)`**. A second **`copyIn`** of **`LogicalJoin(G0, G1)`** hashes to the existing expression and is not inserted.
+- **Explore (transform-only).** **`OptimizeExpressionTask`** pushes **`ExploreGroupTask`** on each input group *after* other work, so children are popped first: logical exploration descends **G5 → G4 → G3 → G2 → (G0, G1)** before the parent’s own transform rules finish draining.
+- **Implement + enforce/cost.** Full **`OptimizeGroupTask`** (with implement rules) on a child is usually started from a parent’s **`EnforceAndCostTask`**: the parent physical expression is already **`copyIn`**, costing begins at the parent, then the parent **suspends** and pushes **`OptimizeGroupTask(child)`**. So for the join group **G2**, implement/enforce **starts on G2 first**; **G0** / **G1** run **after** that suspension, while G2’s cost task waits; G2 **resumes** when the scans have a best expression. How that suspend/resume walk works is §3.4.4.
 
 ```java
+// --- 1. memo.init: bottom-up copy into groups ---
 GroupExpression init(OptExpression originExpression) {
     GroupExpression rootGroupExpression = copyIn(null, originExpression).second;
-    rootGroup = rootGroupExpression.getGroup();
+    rootGroup = rootGroupExpression.getGroup();  // G5
     return rootGroupExpression;
 }
 
@@ -1325,26 +1097,178 @@ Pair<Boolean, GroupExpression> copyIn(Group targetGroup, OptExpression expressio
     return insertGroupExpression(groupExpression, targetGroup);
 }
 
-// ApplyRuleTask: equivalents go into the same group as the matched expression
-copyIn(groupExpression.getGroup(), newExpression);
+// --- 2–4. memoOptimize: bookkeeping, extend RuleSet, push root, drain stack ---
+void memoOptimize(ConnectContext connectContext, Memo memo, TaskContext rootTaskContext) {
+    context.setInMemoPhase(true);
+    OptExpression tree = memo.getRootGroup().extractLogicalTree();
+    CTEUtils.collectCteOperators(tree, context);
+
+    int innerCrossJoinNode = Utils.countJoinNodeSize(tree, JoinOperator.innerCrossJoinSet());
+    if (!sessionVariable.isDisableJoinReorder()
+            && innerCrossJoinNode < sessionVariable.getCboMaxReorderNode()) {
+        if (innerCrossJoinNode > sessionVariable.getCboMaxReorderNodeUseExhaustive()) {
+            new ReorderJoinRule().transform(tree, context);
+            context.getRuleSet().addJoinCommutativityWithoutInnerRule();
+        } else {
+            context.getRuleSet().addJoinTransformationRules();
+        }
+    }
+    context.getRuleSet().addAutoJoinImplementationRule();
+
+    scheduler.pushTask(new OptimizeGroupTask(rootTaskContext, memo.getRootGroup())); // G5
+    scheduler.executeTasks(rootTaskContext);
+}
+
+// --- 5. OptimizeGroupTask: explore logical exprs, cost physical exprs ---
+void OptimizeGroupTask.execute() {
+    if (group.getCostLowerBound(context.getRequiredProperty()) >= context.getUpperBoundCost()
+            || group.hasBestExpression(context.getRequiredProperty())) {
+        return;
+    }
+    for (int i = group.getLogicalExpressions().size() - 1; i >= 0; i--) {
+        pushTask(new OptimizeExpressionTask(context, group.getLogicalExpressions().get(i)));
+    }
+    for (int i = group.getPhysicalExpressions().size() - 1; i >= 0; i--) {
+        pushTask(new EnforceAndCostTask(context, group.getPhysicalExpressions().get(i)));
+    }
+}
+
+// --- descend explore: children before parent ApplyRuleTasks (LIFO) ---
+void OptimizeExpressionTask.execute() {
+    for (Rule rule : getValidRules()) {
+        pushTask(new ApplyRuleTask(context, groupExpression, rule, isExplore));
+    }
+    pushTask(new DeriveStatsTask(context, groupExpression));
+    for (int i = groupExpression.arity() - 1; i >= 0; i--) {
+        pushTask(new ExploreGroupTask(context, groupExpression.getInputs().get(i)));
+    }
+}
+
+// --- 6. ApplyRuleTask: copyIn substitutes; logical → explore, physical → enforce/cost ---
+void ApplyRuleTask.execute() {
+    Binder binder = new Binder(optimizerContext, rule.getPattern(), groupExpression, ...);
+    List<OptExpression> newExpressions = Lists.newArrayList();
+    for (OptExpression extractExpr = binder.next(); extractExpr != null; extractExpr = binder.next()) {
+        if (rule.check(extractExpr, optimizerContext)) {
+            newExpressions.addAll(rule.transform(extractExpr, optimizerContext));
+        }
+    }
+    for (OptExpression expression : newExpressions) {
+        GroupExpression neu = memo.copyIn(groupExpression.getGroup(), expression).second;
+        if (neu.getOp().isLogical()) {
+            pushTask(new OptimizeExpressionTask(context, neu, isExplore));
+        } else {
+            pushTask(new EnforceAndCostTask(context, neu));
+        }
+    }
+    groupExpression.setRuleExplored(rule);
+}
 ```
 
-#### 3.4.4 Physical operator generation
+Match / check / transform details are §3.4.3; EnforceAndCost top→bottom→top walk is §3.4.4; distribution enforcers are §3.4.5. After commute and hash-join implement:
 
-Physical operators appear only from **implementation rules** inside the memo: after **`copyIn`**, **`ApplyRuleTask`** pushes **`EnforceAndCostTask`**. Join and aggregate do not use separate task types. **`PhysicalDistributionOperator`** is not produced by an implementation rule; **`EnforceAndCostTask`** inserts it when a required layout is missing (§3.4.5–3.4.6).
+```
+G2  {
+  LogicalJoin(G0, G1)           // from init
+  LogicalJoin(G1, G0)           // JoinCommutativityRule
+  PhysicalHashJoin(G0, G1)      // HashJoinImplementationRule
+  PhysicalHashJoin(G1, G0)      // implement the commute
+}
+```
 
-| Logical operator | Physical operator after implement |
-|------------------|-----------------------------------|
-| **`LogicalOlapScanOperator`** | **`PhysicalOlapScanOperator`** (`table`, `selectedPartitionId`, `selectedTabletId`; residual **`predicate`**) |
-| **`LogicalJoinOperator`** | **`PhysicalHashJoinOperator`** (`joinType`, `onPredicate`) |
-| **`LogicalAggregationOperator`** | **`PhysicalHashAggregateOperator`** (`type` **`LOCAL`** / **`GLOBAL`**, `isSplit`, `groupBys`) |
-| **`LogicalFilterOperator`** | **`PhysicalFilterOperator`**, or **`Operator.predicate`** on the scan when pushed |
-| **`LogicalProjectOperator`** | **`PhysicalProjectOperator.columnRefMap`**, or **`Operator.projection`** when folded |
-| **`LogicalTopNOperator`** | **`PhysicalTopNOperator`** (`orderSpec`, `sortPhase` **`PARTIAL`** / **`FINAL`**, `isSplit`) |
-| (no logical counterpart) | **`PhysicalDistributionOperator`** — enforcer only |
+#### 3.4.3 Rules
+
+**How a rule runs.** Cascades explores plans by applying **`Rule`s**. Each rule is one rewrite of a matched fragment. Inside the memo the steps are:
+
+1. **Match** — **`Pattern`** is a tree of operator-type placeholders. The binder walks a **`GroupExpression`** and its child groups until the shape fits (for example `LOGICAL_JOIN` over two unconstrained leaves).
+2. **Gate** — optional **`check(input, context)`** rejects matches that are structurally valid but semantically wrong (for example nest-loop implement refusing an equi-join).
+3. **Rewrite** — **`transform(input, context)`** builds zero or more new **`OptExpression`** trees. An empty list means “no change.” The matched expression is not mutated.
+4. **Insert** — each substitute is **`copyIn`** into the same equivalence group as a new **`GroupExpression`**. Later search sees it as another alternative.
+
+**`COST_BASED`** means: apply rules to grow the search space, then pick the cheapest physical alternative — not a separate non-rule planner.
+
+**Two subclasses.** **`Rule`** splits by what **`transform`** puts at the root of each substitute:
+
+- **`TransformationRule`** — **logical → logical**. Same result, different logical shape (join commute, split agg into local/global, …). The search space grows before any executable operator exists. Example: **`JoinCommutativityRule`** produces `LogicalJoin(B, A)` from `LogicalJoin(A, B)`.
+- **`ImplementationRule`** — **logical → physical**. Replaces a logical operator with one the executor can run, usually keeping the same children. Example: **`HashJoinImplementationRule`** produces `PhysicalHashJoin` from `LogicalJoin`.
+
+Both share **`Pattern` / `check` / `transform`**. Transformation widens logical alternatives; implementation adds executable ones. Cost chooses among physical alternatives. Implementation rules use higher **`promise`** so they are tried before more transforms on the same expression. **`RuleSet`** keeps **`transformRules`** and **`implementRules`**.
 
 ```plantuml
 @startuml
+
+abstract class Rule {
+  - type : RuleType
+  - pattern : Pattern
+  + check()
+  + transform()
+  + promise()
+}
+
+abstract class Pattern {
+  - children : List<Pattern>
+}
+
+abstract class TransformationRule
+abstract class ImplementationRule
+
+class JoinCommutativityRule
+class SplitTwoPhaseAggRule
+class HashJoinImplementationRule
+class OlapScanImplementationRule
+class HashAggImplementationRule
+
+class RuleSet {
+  - transformRules : List<Rule>
+  - implementRules : List<Rule>
+}
+
+Rule o-- Pattern : pattern
+Rule <|-- TransformationRule
+Rule <|-- ImplementationRule
+TransformationRule <|-- JoinCommutativityRule
+TransformationRule <|-- SplitTwoPhaseAggRule
+ImplementationRule <|-- HashJoinImplementationRule
+ImplementationRule <|-- OlapScanImplementationRule
+ImplementationRule <|-- HashAggImplementationRule
+RuleSet o-- Rule : transformRules
+RuleSet o-- Rule : implementRules
+
+@enduml
+```
+
+```java
+// ImplementationRule: logical join → physical hash join (same children)
+List<OptExpression> transform(OptExpression input, OptimizerContext context) {
+    LogicalJoinOperator join = (LogicalJoinOperator) input.getOp();
+    PhysicalHashJoinOperator hashJoin =
+            new PhysicalHashJoinOperator(join.getJoinType(), join.getOnPredicate(), ...);
+    return Lists.newArrayList(OptExpression.create(hashJoin, input.getInputs()));
+}
+```
+
+**Physical operators from implementation rules.** After a successful implement **`copyIn`**, the new expression is physical and the optimizer costs it (and may insert distribution enforcers — §3.4.4–3.4.5). **`RuleSet`** starts with **`ALL_IMPLEMENT_RULES`** (scan, hash agg, filter, project, top-n, … — not join). **`memoOptimize`** adds **`HashJoinImplementationRule`** and **`NestLoopJoinImplementationRule`**. **`PhysicalDistributionOperator`** is not from an implementation rule; **`EnforceAndCostTask`** inserts it when delivered layout does not satisfy the parent requirement. Its **`distributionSpec`** is the required layout (`SHUFFLE_JOIN` / **`SHUFFLE_AGG`** / **`BUCKET`** / **`BROADCAST`** / **`GATHER`**).
+
+| Implementation rule | Logical input | Physical operator |
+|---------------------|---------------|-------------------|
+| **`OlapScanImplementationRule`** | **`LogicalOlapScanOperator`** | **`PhysicalOlapScanOperator`** (`table`, `selectedPartitionId`, `selectedTabletId`; residual **`predicate`**; **`distributionSpec`** = **`LOCAL`**) |
+| **`HashJoinImplementationRule`** | **`LogicalJoinOperator`** (equi-join; not CROSS) | **`PhysicalHashJoinOperator`** (`joinType`, `onPredicate`) |
+| **`NestLoopJoinImplementationRule`** | **`LogicalJoinOperator`** (when **`check`** allows) | **`PhysicalNestLoopJoinOperator`** |
+| **`HashAggImplementationRule`** | **`LogicalAggregationOperator`** | **`PhysicalHashAggregateOperator`** (`type` **`LOCAL`** / **`GLOBAL`**, `isSplit`, `groupBys`, `partitionByColumns`) |
+| **`FilterImplementationRule`** | **`LogicalFilterOperator`** | **`PhysicalFilterOperator`** (or residual **`Operator.predicate`** on the scan when pushed earlier) |
+| **`ProjectImplementationRule`** | **`LogicalProjectOperator`** | **`PhysicalProjectOperator`** (`columnRefMap`; or folded **`Operator.projection`**) |
+| **`TopNImplementationRule`** | **`LogicalTopNOperator`** | **`PhysicalTopNOperator`** (`orderSpec`, `sortPhase` **`PARTIAL`** / **`FINAL`**, `isSplit`) |
+| *(enforcer, not a rule)* | — | **`PhysicalDistributionOperator`** — **`appendEnforcers`**; carries **`distributionSpec`** |
+
+```plantuml
+@startuml
+
+class OptExpression {
+  - op : Operator
+  - inputs : List<OptExpression>
+  - requiredProperties : List<PhysicalPropertySet>
+  - outputProperty : PhysicalPropertySet
+}
 
 abstract class Operator {
   # opType : OperatorType
@@ -1354,7 +1278,11 @@ abstract class Operator {
 }
 
 abstract class LogicalOperator
-abstract class PhysicalOperator
+
+abstract class PhysicalOperator {
+  # distributionSpec : DistributionSpec
+  # orderSpec : OrderSpec
+}
 
 abstract class PhysicalScanOperator {
   # table : Table
@@ -1362,6 +1290,7 @@ abstract class PhysicalScanOperator {
 }
 
 class PhysicalOlapScanOperator {
+  - distributionSpec : DistributionSpec
   - selectedPartitionId : List<Long>
   - selectedTabletId : List<Long>
 }
@@ -1372,19 +1301,62 @@ abstract class PhysicalJoinOperator {
 }
 
 class PhysicalHashJoinOperator
+
 class PhysicalHashAggregateOperator {
   - type : AggType
   - groupBys : List<ColumnRefOperator>
+  - partitionByColumns : List<ColumnRefOperator>
   - isSplit : boolean
 }
 
 class PhysicalDistributionOperator
+
 class PhysicalProjectOperator
 class PhysicalFilterOperator
+
 class PhysicalTopNOperator {
+  - orderSpec : OrderSpec
   - sortPhase : SortPhase
   - isSplit : boolean
 }
+
+class PhysicalPropertySet {
+  - distributionProperty : DistributionProperty
+  - sortProperty : SortProperty
+}
+
+class DistributionProperty {
+  - spec : DistributionSpec
+}
+
+abstract class DistributionSpec {
+  # type : DistributionType
+}
+
+class HashDistributionSpec {
+  - hashDistributionDesc : HashDistributionDesc
+}
+
+class ReplicatedDistributionSpec
+class GatherDistributionSpec
+class AnyDistributionSpec
+
+class HashDistributionDesc {
+  - distributionCols : List<DistributionCol>
+  - sourceType : SourceType
+}
+
+enum SourceType <<enumeration>> {
+  LOCAL
+  SHUFFLE_JOIN
+  SHUFFLE_AGG
+  BUCKET
+}
+
+OptExpression *-- Operator : op
+OptExpression o-- OptExpression : inputs
+OptExpression --> PhysicalPropertySet : outputProperty
+OptExpression o-- PhysicalPropertySet : requiredProperties
 
 Operator <|-- LogicalOperator
 Operator <|-- PhysicalOperator
@@ -1398,18 +1370,34 @@ PhysicalOperator <|-- PhysicalTopNOperator
 PhysicalScanOperator <|-- PhysicalOlapScanOperator
 PhysicalJoinOperator <|-- PhysicalHashJoinOperator
 
+PhysicalPropertySet *-- DistributionProperty : distributionProperty
+DistributionProperty *-- DistributionSpec : spec
+DistributionSpec <|-- HashDistributionSpec
+DistributionSpec <|-- ReplicatedDistributionSpec
+DistributionSpec <|-- GatherDistributionSpec
+DistributionSpec <|-- AnyDistributionSpec
+HashDistributionSpec *-- HashDistributionDesc : hashDistributionDesc
+HashDistributionDesc --> SourceType : sourceType
+
+PhysicalOperator o-- DistributionSpec : distributionSpec
+
 @enduml
 ```
 
-#### 3.4.5 EnforceAndCostTask
+Scan **`LOCAL`** lives on **`PhysicalOlapScanOperator.distributionSpec`** (from **`DISTRIBUTED BY`**). Join / agg carry the keys that required-property derivation turns into child requirements (`onPredicate`, **`partitionByColumns`**). The enforcer’s **`PhysicalDistributionOperator.distributionSpec`** is the required layout that did not satisfy the delivered output.
 
-**`EnforceAndCostTask`** runs only after a physical **`GroupExpression`** exists. It is one depth-first walk of that expression’s children — cost and property enforce together, not two passes:
+#### 3.4.4 EnforceAndCostTask
 
-- **`requiredProperty`** flows **root → leaves** (`RequiredPropertyDeriver`). The root requirement is **`EMPTY`** (`optimizer.optimize(..., new PhysicalPropertySet(), ...)`).
-- **`outputProperty`** flows **leaves → root** (`OutputPropertyDeriver`). A scan delivers **`DISTRIBUTED BY`**; a join or agg derives from children’s outputs.
-- At each node, **`recordCostsAndEnforce`** compares this **`outputProperty`** to this **`requiredProperty`**. On distribution mismatch it inserts **`PhysicalDistributionOperator`**. The parent then reads the enforced spec as the child’s output.
+**`EnforceAndCostTask`** runs only after a physical **`GroupExpression`** exists (`copyIn` from an implementation rule). The physical DAG shape is already there (input **Group**s link parent to children); this task does **not** build the tree leaf-first. It costs and enforces properties on that existing expression.
 
-The walk is a stack, not a recursive Java call: **`optimizeChildGroup`** pushes a clone of this task, then **`OptimizeGroupTask`** for the child. When the child has a best expression, **`execute`** resumes and continues.
+**Top → bottom → top (suspend / resume).** The walk is a stack, not a recursive Java call. A parent is **not** finished when a child runs — on the join/scans example, **G2** (physical hash join) **starts first**; **G0** / **G1** run **while G2 is suspended**; G2 **resumes** afterward:
+
+1. **Start at the parent** (e.g. physical join in **G2** / **E3**). Read **`requiredProperty`**, derive each child’s requirement (steps 1–2 below). The parent has only *started*.
+2. **Suspend the parent.** **`optimizeChildGroup`** pushes a **clone** of this **`EnforceAndCostTask`** (resume later), then **`OptimizeGroupTask(child)`** — that is what runs implement+cost on **G0** / **G1** if they still lack a best expression under the derived requirement.
+3. **Run the child to completion** (e.g. **E1**): leaf steps 1–4, **`outputProperty`**, maybe an enforcer.
+4. **Resume the parent.** After all inputs have a best expression, derive this node’s **`outputProperty`**, compare, maybe **`appendEnforcers`** (steps 3–4), then return to *its* parent.
+
+Required properties flow **down** as the stack deepens; output properties and enforcers are decided **up** as clones resume. The same pattern links **E5 → E4 → E3 → E1/E2** and back.
 
 Each visit is four steps:
 
@@ -1425,18 +1413,20 @@ void initRequiredProperties() {
 }
 
 void execute() {
-    initRequiredProperties();
+    initRequiredProperties();  // parent → child requirements (down)
     for (List<PhysicalPropertySet> childrenRequiredProperties : childrenRequiredPropertiesList) {
         for (; curChildIndex < groupExpression.getInputs().size(); curChildIndex++) {
             PhysicalPropertySet childRequiredProperty = childrenRequiredProperties.get(curChildIndex);
             Group childGroup = groupExpression.getInputs().get(curChildIndex);
             GroupExpression childBestExpr = childGroup.getBestExpression(childRequiredProperty);
             if (childBestExpr == null) {
+                // G2 suspends here; G0/G1 OptimizeGroupTask (+ implement) run next
                 optimizeChildGroup(childRequiredProperty, childGroup);
                 return;
             }
             childrenOutputProperties.add(childBestExpr.getOutputProperty(childRequiredProperty));
         }
+        // all children done → outputProperty / enforce (up); G2 resumes after G0/G1
         OutputPropertyDeriver outputPropertyDeriver = new OutputPropertyDeriver(groupExpression,
                 context.getRequiredProperty(), childrenOutputProperties);
         recordCostsAndEnforce(outputPropertyDeriver.getOutputProperty(), childrenRequiredProperties);
@@ -1528,7 +1518,7 @@ OutputPropertyDeriver ..> PhysicalHashAggregateOperator : visitPhysicalHashAggre
 @enduml
 ```
 
-#### 3.4.6 Distribution
+#### 3.4.5 Distribution
 
 **Distribution** is how a node’s output rows are laid out across **tablets / hash buckets**. Catalog metadata is **`DistributionInfo`**. CBO carries a **`DistributionSpec`** inside **`PhysicalPropertySet.distributionProperty`**, and inserts a **`PhysicalDistributionOperator`** only when delivered layout does not **`isSatisfy`** the parent requirement. Fragmentize later cuts only where that operator exists; root **`ResultSink`** GATHER is **`createOutputFragment()`**, not this path.
 
@@ -1621,7 +1611,7 @@ HashDistributionDesc --> SourceType : sourceType
 | **`GATHER`** | scalar **`GLOBAL`** agg | One stream |
 | **`ANY`** | no requirement | **`EMPTY`**, root **`optimize()`** |
 
-**How `PhysicalDistributionOperator` is added.** The operator is never produced by an implementation rule. It appears in two places during **`EnforceAndCostTask`**: (1) when this node’s **`outputProperty`** fails **`isSatisfy(requiredProperty)`**, and (2) when **`ChildOutputPropertyGuarantor`** rewrites a join child’s delivered layout to **`BUCKET`**.
+**`PhysicalDistributionOperator`** is never produced by an implementation rule. It appears in two places during **`EnforceAndCostTask`**: (1) when this node’s **`outputProperty`** fails **`isSatisfy(requiredProperty)`**, and (2) when **`ChildOutputPropertyGuarantor`** rewrites a join child’s delivered layout to **`BUCKET`**.
 
 **1. Parent writes the child’s required `DistributionSpec`.** **`RequiredPropertyDeriver`** fills **`childrenRequiredPropertiesList`**. For a hash join it records a broadcast pair and, unless **`onlyBroadcast()`**, a shuffle pair on the ON keys. For a non-local hash aggregate it requires **`GATHER`** (no group keys) or **`SHUFFLE_AGG`** on **`partitionByColumns`**; a local aggregate requires **`EMPTY`**.
 
@@ -1696,7 +1686,7 @@ Pair<GroupExpression, PhysicalPropertySet> enforceChildDistribution(
 
 **Join / aggregate requirements (summary).** Shuffle join: both children **`SHUFFLE_JOIN`** on ON keys (or **`LOCAL`** if **`isSatisfy`**). Broadcast: left **`EMPTY`**, right **`ReplicatedDistributionSpec`**. Colocate: both **`LOCAL`**, no join-side enforcer. Bucket shuffle: left **`LOCAL`**, right **`BUCKET`**. Two-phase **`GROUP BY`**: GLOBAL requires **`SHUFFLE_AGG`** of the LOCAL child; scalar **`SUM`** requires **`GATHER`**.
 
-**Worked example — adding enforcers step by step.** Same **`EnforceAndCostTask`** four steps as §3.4.5 on the running statement. Depth-first: steps 1–2 on the way down, children, then steps 3–4 on the way up. After implement, before any **`PhysicalDistributionOperator`**:
+**Worked example — adding enforcers step by step.** Same **`EnforceAndCostTask`** four steps as §3.4.4 on the running statement. Depth-first: steps 1–2 on the way down, children, then steps 3–4 on the way up. Each node is an expression; **`inputs`** are its children.
 
 ```sql
 SELECT c.region, SUM(o.amount)
@@ -1706,80 +1696,175 @@ WHERE o.dt BETWEEN '2024-01-01' AND '2024-06-30'
 GROUP BY c.region;
 ```
 
+Before enforcers:
+
 ```
-PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}
-  PhysicalHashAggregate  LOCAL   groupBys=[region]
-    PhysicalHashJoin  INNER  onPredicate=(cust_id = id)
-      PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
-      PhysicalOlapScan  customers  LOCAL(id)
+E5  PhysicalHashAggregate GLOBAL  groupBys=[region]                    inputs=[E4]
+ └─ E4 PhysicalHashAggregate LOCAL  groupBys=[region]                  inputs=[E3]
+     └─ E3 PhysicalHashJoin INNER  onPredicate=(cust_id = id)          inputs=[E1, E2]
+         ├─ E1 PhysicalOlapScan orders     LOCAL(cust_id)              inputs=[]
+         └─ E2 PhysicalOlapScan customers  LOCAL(id)                   inputs=[]
 ```
 
-**Visit GLOBAL `HashAggregate` (`GROUP BY c.region`) — steps 1–2.**
+**Visit E5 (`GLOBAL` HashAggregate) — steps 1–2.** Expression **E5**, input **E4**.
 
-1. **`requiredProperty`** = **`EMPTY`**. Root: **`optimizer.optimize(..., new PhysicalPropertySet(), ...)`**.
-2. **`RequiredPropertyDeriver.visitPhysicalHashAggregate`**: not local, **`partitionByColumns`** = **`c.region`** → child required = **`SHUFFLE_AGG(region)`**. That value becomes the LOCAL agg’s **`TaskContext.requiredProperty`**.
+1. **`requiredProperty`** = **`EMPTY`** (root).
+2. Child requirement for **E4** = **`SHUFFLE_AGG(region)`** (`partitionByColumns` = **`c.region`**).
 
-**Visit LOCAL `HashAggregate` — steps 1–2.**
+**Visit E4 (`LOCAL` HashAggregate) — steps 1–2.** Expression **E4**, input **E3**.
 
-1. **`requiredProperty`** = **`SHUFFLE_AGG(region)`**.
-2. **`RequiredPropertyDeriver.visitPhysicalHashAggregate`**: **`isLocal()`** → child required = **`EMPTY`**. That value becomes the join’s **`TaskContext.requiredProperty`**.
+1. **`requiredProperty`** = **`SHUFFLE_AGG(region)`** (from E5).
+2. Child requirement for **E3** = **`EMPTY`** (`isLocal()`).
 
-**Visit `HashJoin` (`ON o.cust_id = c.id`) — steps 1–2.**
+**Visit E3 (`HashJoin`) — steps 1–2.** Expression **E3**, inputs **E1** (left), **E2** (right).
 
-1. **`requiredProperty`** = **`EMPTY`**.
-2. **`RequiredPropertyDeriver.visitPhysicalHashJoin`**: child-requirement pairs from the ON keys:
-   - (**`EMPTY`**, **`BROADCAST`**)
-   - (**`SHUFFLE_JOIN(cust_id)`**, **`SHUFFLE_JOIN(id)`**)
-   Shuffle pair: left scan required = **`SHUFFLE_JOIN(cust_id)`**; right scan required = **`SHUFFLE_JOIN(id)`**.
+1. **`requiredProperty`** = **`EMPTY`** (from E4).
+2. Child-requirement pairs from ON (`cust_id = id`):
+   - (**`EMPTY`**, **`BROADCAST`**) on (**E1**, **E2**)
+   - (**`SHUFFLE_JOIN(cust_id)`**, **`SHUFFLE_JOIN(id)`**) on (**E1**, **E2**)
+   Shuffle pair drives the scan visits below.
 
-**Visit `OlapScan` `orders` — steps 1–4** (no children).
+**Visit E1 (`OlapScan` orders) — steps 1–4.** Expression **E1**, **`inputs=[]`**.
 
 1. **`requiredProperty`** = **`SHUFFLE_JOIN(cust_id)`**.
 2. No child requirements.
-3. **`OutputPropertyDeriver.visitPhysicalOlapScan`**: **`DISTRIBUTED BY HASH(cust_id)`** → **`outputProperty`** = **`LOCAL(cust_id)`**.
-4. Compare **`LOCAL(cust_id)`** with **`SHUFFLE_JOIN(cust_id)`**. Same hash column is not enough on its own: **`LOCAL`** is this table’s tablet map. **`HashDistributionSpec.isSatisfy`** for a native **`LOCAL`** also requires colocate eligibility — one selected partition, or a stable colocate group. This query selects only **`p2024`**, so **`isSatisfy`** succeeds. **No `appendEnforcers`.** Parent join still reads **`LOCAL(cust_id)`**.
+3. **`outputProperty`** = **`LOCAL(cust_id)`** (`DISTRIBUTED BY HASH(cust_id)`).
+4. **`LOCAL(cust_id)`** **`isSatisfy`** **`SHUFFLE_JOIN(cust_id)`** (one selected partition **`p2024`**). **No enforcer.** Parent E3 reads **E1** output **`LOCAL(cust_id)`**.
 
-**Visit `OlapScan` `customers` — steps 1–4** (no children).
+**Visit E2 (`OlapScan` customers) — steps 1–4.** Expression **E2**, **`inputs=[]`**.
 
 1. **`requiredProperty`** = **`SHUFFLE_JOIN(id)`**.
 2. No child requirements.
-3. **`OutputPropertyDeriver.visitPhysicalOlapScan`**: **`DISTRIBUTED BY HASH(id)`** → **`outputProperty`** = **`LOCAL(id)`**.
-4. One partition, columns match → **`isSatisfy`** succeeds. **No enforcer on the scan.** Parent join still reads **`LOCAL(id)`**.
+3. **`outputProperty`** = **`LOCAL(id)`**.
+4. **`isSatisfy`** succeeds. **No enforcer.** Parent E3 reads **E2** output **`LOCAL(id)`**.
 
-**Visit `HashJoin` — steps 3–4.** Children returned **`LOCAL(cust_id)`** and **`LOCAL(id)`**. **`requiredProperty`** is still **`EMPTY`**.
+**Visit E3 — steps 3–4.** Inputs **E1**, **E2** returned **`LOCAL(cust_id)`** and **`LOCAL(id)`**. **`requiredProperty`** still **`EMPTY`**.
 
-Before **`OutputPropertyDeriver`**, **`ChildOutputPropertyGuarantor`** checks whether those two **`LOCAL`** specs can colocate. They cannot: **`orders`** and **`customers`** are not **`COLOCATE WITH`** each other, so tablet `hash(cust_id) % 8` is not the same worker as tablet `hash(id) % 8`. **`transToBucketShuffleJoin`** → **`enforceChildDistribution`** → **`appendEnforcers`**: left stays **`LOCAL`**, right gets **`PhysicalDistributionOperator(BUCKET)`** (path **3** above).
+**`ChildOutputPropertyGuarantor`**: the two **`LOCAL`** specs cannot colocate across tables. **`appendEnforcers`** on **E2**’s group inserts **E2′** = **`PhysicalDistributionOperator(BUCKET)`** with **`inputs=[E2]`**. E3’s right input becomes **E2′** (path **3**).
 
-3. **`OutputPropertyDeriver.visitPhysicalHashJoin`**: left **`LOCAL`**, right **`BUCKET`** → **`outputProperty`** = **`LOCAL(cust_id)`** (dominated scan).
-4. Compare **`LOCAL(cust_id)`** with **`EMPTY`**: **`isSatisfy`**. **No enforcer on the join itself.** Parent LOCAL reads this child’s output as **`LOCAL(cust_id)`**.
+3. **`outputProperty`** of **E3** = **`LOCAL(cust_id)`** (left dominates; right is **`BUCKET`**).
+4. **`LOCAL(cust_id)`** satisfies **`EMPTY`**. **No enforcer on E3.** Parent E4 reads **E3** as **`LOCAL(cust_id)`**.
 
-**Visit LOCAL `HashAggregate` — steps 3–4.** Child returned **`LOCAL(cust_id)`**. **`requiredProperty`** is still **`SHUFFLE_AGG(region)`**.
+**Visit E4 — steps 3–4.** Input **E3** returned **`LOCAL(cust_id)`**. **`requiredProperty`** still **`SHUFFLE_AGG(region)`**.
 
-3. **`OutputPropertyDeriver.visitPhysicalHashAggregate`**: copy the child → **`outputProperty`** = **`LOCAL(cust_id)`**.
-4. Compare **`LOCAL(cust_id)`** with **`SHUFFLE_AGG(region)`**: not **`isSatisfy`**. **`recordCostsAndEnforce`** → **`enforceDistribute`** → **`appendEnforcers`**: insert **`PhysicalDistributionOperator(SHUFFLE_AGG(region))`** (path **2**). Parent GLOBAL reads this child’s output as **`SHUFFLE_AGG(region)`**.
+3. **`outputProperty`** of **E4** = **`LOCAL(cust_id)`** (copy child).
+4. Not **`isSatisfy(SHUFFLE_AGG(region))`**. **`appendEnforcers`** inserts **E4′** = **`PhysicalDistributionOperator(SHUFFLE_AGG(region))`** with **`inputs=[E4]`** (path **2**). Parent E5 reads **E4′** as **`SHUFFLE_AGG(region)`**.
 
-**Visit GLOBAL `HashAggregate` — steps 3–4.** Child returned **`SHUFFLE_AGG(region)`**. **`requiredProperty`** is still **`EMPTY`**.
+**Visit E5 — steps 3–4.** Input **E4′** returned **`SHUFFLE_AGG(region)`**. **`requiredProperty`** still **`EMPTY`**.
 
-3. **`OutputPropertyDeriver.visitPhysicalHashAggregate`**: copy the child → **`outputProperty`** = **`SHUFFLE_AGG(region)`**.
-4. Compare **`SHUFFLE_AGG(region)`** with **`EMPTY`**: **`isSatisfy`**. **No enforcer on GLOBAL.**
+3. **`outputProperty`** of **E5** = **`SHUFFLE_AGG(region)`**.
+4. Satisfies **`EMPTY`**. **No enforcer on E5.**
 
-After this walk the physical tree has the two enforcers: **`BUCKET`** on **`customers`**, **`SHUFFLE_AGG(region)`** between LOCAL and GLOBAL.
+After enforcers:
 
 ```
-PhysicalHashAggregate  GLOBAL  groupBys=[region]  aggregations={sum_amount: SUM(amount)}  output=SHUFFLE_AGG(region)
-  PhysicalDistribution  SHUFFLE_AGG(region)
-    PhysicalHashAggregate  LOCAL   groupBys=[region]  output=LOCAL(cust_id)
-      PhysicalHashJoin  INNER  onPredicate=(cust_id = id)  output=LOCAL(cust_id)
-        PhysicalOlapScan  orders     predicate=(dt BETWEEN ...)  LOCAL(cust_id)
-        PhysicalDistribution  BUCKET(id)
-          PhysicalOlapScan  customers  LOCAL(id)
+E5  PhysicalHashAggregate GLOBAL  groupBys=[region]  output=SHUFFLE_AGG(region)   inputs=[E4′]
+ └─ E4′ PhysicalDistribution SHUFFLE_AGG(region)                                   inputs=[E4]
+     └─ E4 PhysicalHashAggregate LOCAL  groupBys=[region]  output=LOCAL(cust_id)   inputs=[E3]
+         └─ E3 PhysicalHashJoin INNER  onPredicate=(cust_id = id)  output=LOCAL(cust_id)
+                                                                       inputs=[E1, E2′]
+             ├─ E1 PhysicalOlapScan orders     LOCAL(cust_id)          inputs=[]
+             └─ E2′ PhysicalDistribution BUCKET(id)                    inputs=[E2]
+                 └─ E2 PhysicalOlapScan customers  LOCAL(id)           inputs=[]
 ```
 
-CBO also costs the join’s broadcast pair: left required **`EMPTY`**, right required **`BROADCAST`**. **`orders`** keeps **`LOCAL(cust_id)`**; **`customers`** fails **`isSatisfy(BROADCAST)`** and path **2** inserts **`PhysicalDistributionOperator(BROADCAST)`**. If a scan is **not** colocate-eligible (several selected partitions, and the table is not in a colocate group), **`LOCAL`** fails **`isSatisfy(SHUFFLE_JOIN)`** at the scan and path **2** inserts **`PhysicalDistributionOperator(SHUFFLE_JOIN)`** there instead.
+CBO also costs the join’s broadcast pair on (**E1**, **E2**): E1 keeps **`LOCAL`**; E2 fails **`isSatisfy(BROADCAST)`** and path **2** inserts a broadcast enforcer with **`inputs=[E2]`**. If a scan is not colocate-eligible, **`LOCAL`** fails **`isSatisfy(SHUFFLE_JOIN)`** at E1/E2 and path **2** inserts **`PhysicalDistributionOperator(SHUFFLE_JOIN)`** with that scan as its sole input.
 
 ### 3.5 Fragmentize (the MPP cut)
 
 Last phase of **`createQueryPlan()`**. **`PlanFragmentBuilder.createPhysicalPlan()`** walks the physical tree. A **`PhysicalDistributionOperator`** becomes a new **`PlanFragment`** whose root is an **`ExchangeNode`**; the child fragment’s **`DataSink`** is set to that exchange. **`createOutputFragment()`** adds a GATHER exchange when the top fragment is still partitioned (more than one tablet, not short-circuit). **`finalizeFragments()`** attaches **`ResultSink`** (`TResultSinkType.MYSQL_PROTOCAL`) on the root.
+
+**`PhysicalDistributionOperator`** nodes on the physical tree are the only cut points. Each becomes an **Exchange** that separates producer and consumer fragments. Broadcast (one small side) keeps the other scan in the join fragment:
+
+![Fragmentize: PhysicalDistributionOperator BROADCAST cuts become Exchange edges](images/starrocks-mpp-fragmentize.svg)
+
+When both join children need **`SHUFFLE_JOIN`** and the aggregate needs **`SHUFFLE_AGG`** (the §3.12 shape), every child is cut—three distribution operators, five fragments after root GATHER:
+
+![Fragmentize: both join sides SHUFFLE_JOIN plus SHUFFLE_AGG](images/starrocks-mpp-fragmentize-shuffle.svg)
+
+Bucket shuffle (§3.4.5 **`E2′`**) is between those shapes: the left scan stays with the join (**`LOCAL`** satisfies), the right scan is cut by **`PhysicalDistributionOperator(BUCKET)`**, and **`SHUFFLE_AGG`** still cuts local from global aggregate.
+
+```plantuml
+@startuml
+
+class PlanFragmentBuilder {
+  + createPhysicalPlan()
+  + createOutputFragment()
+  + finalizeFragments()
+}
+
+class PhysicalPlanTranslator {
+  + translate()
+  + visitPhysicalDistribution()
+  + visitPhysicalHashJoin()
+  + visitPhysicalOlapScan()
+}
+
+class ExecPlan {
+  - fragments : List~PlanFragment~
+  - scanNodes : List~ScanNode~
+  - outputExprs : List~Expr~
+}
+
+class PlanFragment {
+  - fragmentId : PlanFragmentId
+  - planRoot : PlanNode
+  - dataPartition : DataPartition
+  - outputPartition : DataPartition
+  - destNode : ExchangeNode
+  - sink : DataSink
+  + setDestination()
+  + setOutputPartition()
+}
+
+abstract class PlanNode {
+  - id : PlanNodeId
+  - children : List~PlanNode~
+}
+
+class ExchangeNode {
+  - dataPartition : DataPartition
+}
+
+abstract class DataSink
+class DataStreamSink
+class ResultSink {
+  - sinkType : TResultSinkType
+}
+
+class DataPartition {
+  - type : TPartitionType
+  - partitionExprs : List~Expr~
+}
+
+class OptExpression {
+  - op : Operator
+  - inputs : List~OptExpression~
+}
+
+class PhysicalDistributionOperator {
+  - distributionSpec : DistributionSpec
+}
+
+PlanFragmentBuilder --> PhysicalPlanTranslator : translate
+PhysicalPlanTranslator ..> OptExpression : visit
+PhysicalPlanTranslator ..> PhysicalDistributionOperator : cut
+PhysicalPlanTranslator --> ExecPlan : context
+ExecPlan o-- PlanFragment : fragments
+PlanFragment --> PlanNode : planRoot
+PlanFragment --> DataPartition : dataPartition
+PlanFragment --> DataPartition : outputPartition
+PlanFragment --> ExchangeNode : destNode
+PlanFragment --> DataSink : sink
+PlanNode <|-- ExchangeNode
+DataSink <|-- DataStreamSink
+DataSink <|-- ResultSink
+OptExpression --> PhysicalDistributionOperator : op
+
+@enduml
+```
+
+**`PhysicalPlanTranslator`** turns each physical operator into **`PlanNode`s** inside a **`PlanFragment`**. Only **`visitPhysicalDistribution`** starts a new fragment and wires the producer’s **`destNode`** / **`outputPartition`**. **`ResultSink`** is attached later on the root fragment; intermediate edges use a stream sink toward the consumer **`ExchangeNode`**.
 
 ```java
 ExecPlan execPlan = new ExecPlan(connectContext, colNames, plan, outputColumns, isShortCircuit);
@@ -1788,7 +1873,7 @@ createOutputFragment(new PhysicalPlanTranslator(columnRefFactory).translate(plan
 return finalizeFragments(execPlan, resultSinkType);
 ```
 
-The cut itself is **`visitPhysicalDistribution`**: one distribution requirement, one new fragment.
+The cut itself is **`visitPhysicalDistribution`**: one distribution requirement, one new fragment. Translate the child first (**`inputFragment`**), then splice an **`ExchangeNode`** above it and return the consumer fragment:
 
 ```java
 ExchangeNode exchangeNode = new ExchangeNode(context.getNextNodeId(),
