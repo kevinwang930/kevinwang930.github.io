@@ -1318,7 +1318,7 @@ Shuffle pair drives the scan visits below.</li></ul></li></ol><p><strong>Visit E
              ├─ E1 PhysicalOlapScan orders     LOCAL(cust_id)          inputs=[]
              └─ E2′ PhysicalDistribution BUCKET(id)                    inputs=[E2]
                  └─ E2 PhysicalOlapScan customers  LOCAL(id)           inputs=[]
-</code></pre><p>CBO also costs the join’s broadcast pair on (<strong>E1</strong>, <strong>E2</strong>): E1 keeps <strong><code>LOCAL</code></strong>; E2 fails <strong><code>isSatisfy(BROADCAST)</code></strong> and path <strong>2</strong> inserts a broadcast enforcer with <strong><code>inputs=[E2]</code></strong>. If a scan is not colocate-eligible, <strong><code>LOCAL</code></strong> fails <strong><code>isSatisfy(SHUFFLE_JOIN)</code></strong> at E1/E2 and path <strong>2</strong> inserts <strong><code>PhysicalDistributionOperator(SHUFFLE_JOIN)</code></strong> with that scan as its sole input.</p><h3 id=35-fragmentize-the-mpp-cut>3.5 Fragmentize (the MPP cut)</h3><p>Last phase of <strong><code>createQueryPlan()</code></strong>. <strong><code>PlanFragmentBuilder.createPhysicalPlan()</code></strong> walks the physical tree. A <strong><code>PhysicalDistributionOperator</code></strong> becomes a new <strong><code>PlanFragment</code></strong> whose root is an <strong><code>ExchangeNode</code></strong>; the child fragment’s <strong><code>DataSink</code></strong> is set to that exchange. <strong><code>createOutputFragment()</code></strong> adds a GATHER exchange when the top fragment is still partitioned (more than one tablet, not short-circuit). <strong><code>finalizeFragments()</code></strong> attaches <strong><code>ResultSink</code></strong> (<code>TResultSinkType.MYSQL_PROTOCAL</code>) on the root.</p><p><strong><code>PhysicalDistributionOperator</code></strong> nodes on the physical tree are the only cut points. Each becomes an <strong>Exchange</strong> that separates producer and consumer fragments. Broadcast (one small side) keeps the other scan in the join fragment:</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragmentize.svg alt="Fragmentize: PhysicalDistributionOperator BROADCAST cuts become Exchange edges"></p><p>When both join children need <strong><code>SHUFFLE_JOIN</code></strong> and the aggregate needs <strong><code>SHUFFLE_AGG</code></strong> (the §3.12 shape), every child is cut—three distribution operators, five fragments after root GATHER:</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragmentize-shuffle.svg alt="Fragmentize: both join sides SHUFFLE_JOIN plus SHUFFLE_AGG"></p><p>Bucket shuffle (§3.4.5 <strong><code>E2′</code></strong>) is between those shapes: the left scan stays with the join (<strong><code>LOCAL</code></strong> satisfies), the right scan is cut by <strong><code>PhysicalDistributionOperator(BUCKET)</code></strong>, and <strong><code>SHUFFLE_AGG</code></strong> still cuts local from global aggregate.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><p>CBO also costs the join’s broadcast pair on (<strong>E1</strong>, <strong>E2</strong>): E1 keeps <strong><code>LOCAL</code></strong>; E2 fails <strong><code>isSatisfy(BROADCAST)</code></strong> and path <strong>2</strong> inserts a broadcast enforcer with <strong><code>inputs=[E2]</code></strong>. If a scan is not colocate-eligible, <strong><code>LOCAL</code></strong> fails <strong><code>isSatisfy(SHUFFLE_JOIN)</code></strong> at E1/E2 and path <strong>2</strong> inserts <strong><code>PhysicalDistributionOperator(SHUFFLE_JOIN)</code></strong> with that scan as its sole input.</p><h3 id=35-fragmentize-the-mpp-cut>3.5 Fragmentize (the MPP cut)</h3><p>Last phase of <strong><code>createQueryPlan()</code></strong>. Input is the physical <strong><code>OptExpression</code></strong> from CBO; output is <strong><code>ExecPlan.fragments</code></strong>: a DAG of **<code>PlanFragment</code>**s linked by Exchange edges. Cuts happen only at <strong><code>PhysicalDistributionOperator</code></strong>.</p><p><strong><code>PhysicalDistributionOperator</code></strong> cuts become **<code>ExchangeNode</code>**s inside new **<code>PlanFragment</code>**s. Broadcast keeps one scan with the join:</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragmentize.svg alt="Fragmentize: PhysicalOperators to PlanFragments with ExchangeNodes"></p><p>Both-side <strong><code>SHUFFLE_JOIN</code></strong> plus <strong><code>SHUFFLE_AGG</code></strong> (§3.8): three distribution cuts, five fragments after GATHER:</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragmentize-shuffle.svg alt="Fragmentize: both join sides SHUFFLE_JOIN plus SHUFFLE_AGG"></p><p>Bucket shuffle (§3.4.5 <strong><code>E2′</code></strong>) is between those shapes: the left scan stays with the join (<strong><code>LOCAL</code></strong> satisfies), the right scan is cut by <strong><code>PhysicalDistributionOperator(BUCKET)</code></strong>, and <strong><code>SHUFFLE_AGG</code></strong> still cuts local from global aggregate.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class PlanFragmentBuilder {
   + createPhysicalPlan()
@@ -1339,6 +1339,12 @@ class ExecPlan {
   - outputExprs : List~Expr~
 }
 
+abstract class TreeNode {
+  # children : List
+  + getChildren()
+  + addChild()
+}
+
 class PlanFragment {
   - fragmentId : PlanFragmentId
   - planRoot : PlanNode
@@ -1352,12 +1358,17 @@ class PlanFragment {
 
 abstract class PlanNode {
   - id : PlanNodeId
-  - children : List~PlanNode~
+  - fragment : PlanFragment
 }
 
 class ExchangeNode {
   - dataPartition : DataPartition
 }
+
+class OlapScanNode
+class HashJoinNode
+class AggregationNode
+class ProjectNode
 
 abstract class DataSink
 class DataStreamSink
@@ -1384,82 +1395,501 @@ PhysicalPlanTranslator ..&gt; OptExpression : visit
 PhysicalPlanTranslator ..&gt; PhysicalDistributionOperator : cut
 PhysicalPlanTranslator --&gt; ExecPlan : context
 ExecPlan o-- PlanFragment : fragments
+
+TreeNode &lt;|-- PlanFragment
 PlanFragment --&gt; PlanNode : planRoot
 PlanFragment --&gt; DataPartition : dataPartition
 PlanFragment --&gt; DataPartition : outputPartition
 PlanFragment --&gt; ExchangeNode : destNode
 PlanFragment --&gt; DataSink : sink
+PlanNode --&gt; PlanFragment : fragment
 PlanNode &lt;|-- ExchangeNode
+PlanNode &lt;|-- OlapScanNode
+PlanNode &lt;|-- HashJoinNode
+PlanNode &lt;|-- AggregationNode
+PlanNode &lt;|-- ProjectNode
 DataSink &lt;|-- DataStreamSink
 DataSink &lt;|-- ResultSink
 OptExpression --&gt; PhysicalDistributionOperator : op
 
 @enduml
-</code></pre><p><strong><code>PhysicalPlanTranslator</code></strong> turns each physical operator into <strong><code>PlanNode</code>s</strong> inside a <strong><code>PlanFragment</code></strong>. Only <strong><code>visitPhysicalDistribution</code></strong> starts a new fragment and wires the producer’s <strong><code>destNode</code></strong> / <strong><code>outputPartition</code></strong>. <strong><code>ResultSink</code></strong> is attached later on the root fragment; intermediate edges use a stream sink toward the consumer <strong><code>ExchangeNode</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>ExecPlan execPlan <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExecPlan(connectContext, colNames, plan, outputColumns, isShortCircuit);
-</span></span><span style=display:flex><span>createOutputFragment(<span style=color:#66d9ef>new</span> PhysicalPlanTranslator(columnRefFactory).<span style=color:#a6e22e>translate</span>(plan, execPlan),
-</span></span><span style=display:flex><span>        execPlan, outputColumns, hasOutputFragment);
-</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> finalizeFragments(execPlan, resultSinkType);
-</span></span></code></pre></div><p>The cut itself is <strong><code>visitPhysicalDistribution</code></strong>: one distribution requirement, one new fragment. Translate the child first (<strong><code>inputFragment</code></strong>), then splice an <strong><code>ExchangeNode</code></strong> above it and return the consumer fragment:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>ExchangeNode exchangeNode <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExchangeNode(context.<span style=color:#a6e22e>getNextNodeId</span>(),
-</span></span><span style=display:flex><span>        inputFragment.<span style=color:#a6e22e>getPlanRoot</span>(), distribution.<span style=color:#a6e22e>getDistributionSpec</span>().<span style=color:#a6e22e>getType</span>());
-</span></span><span style=display:flex><span>DataPartition dataPartition <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>        translateDistributionToDataPartition(distribution.<span style=color:#a6e22e>getDistributionSpec</span>(), context);
-</span></span><span style=display:flex><span>inputFragment.<span style=color:#a6e22e>setDestination</span>(exchangeNode);
-</span></span><span style=display:flex><span>inputFragment.<span style=color:#a6e22e>setOutputPartition</span>(dataPartition);
-</span></span><span style=display:flex><span>context.<span style=color:#a6e22e>getFragments</span>().<span style=color:#a6e22e>add</span>(<span style=color:#66d9ef>new</span> PlanFragment(context.<span style=color:#a6e22e>getNextFragmentId</span>(), exchangeNode, dataPartition));
-</span></span></code></pre></div><p>A shuffle join sets the child’s output to <strong><code>TPartitionType.HASH_PARTITIONED</code></strong> on the join keys (<code>computeShuffleHashBucketPlanFragment</code>). A two-phase aggregate sets the local (update serialize) fragment’s output partition to <strong><code>DataPartition.hashPartitioned(group keys)</code></strong> so the merge (merge finalize) fragment receives one group on one worker.</p><h3 id=36-schedule>3.6 Schedule</h3><p><strong><code>StmtExecutor.handleQueryStmt()</code></strong> builds <strong><code>DefaultCoordinator</code></strong>, registers the query, and starts scheduling. <strong><code>CoordinatorPreprocessor.computeFragmentInstances()</code></strong> assigns every fragment to workers: scan fragments via <strong><code>LocalFragmentAssignmentStrategy</code></strong> (tablet → replica BE in shared-nothing; lake shard → warehouse CN in shared-data); remote/exchange fragments via <strong><code>RemoteFragmentAssignmentStrategy</code></strong>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><p><strong><code>PlanFragment</code></strong> extends <strong><code>TreeNode</code></strong>. That is the plan’s fragment DAG: <strong><code>setDestination</code></strong> adds the producer fragment as a child of the consumer. Each fragment’s <strong><code>planRoot</code></strong> is a <strong><code>PlanNode</code></strong> (join, scan, exchange, …) for the operators that run inside that fragment.</p><p><strong><code>ExchangeNode</code> and <code>DataSink</code></strong> are the two ends of one MPP edge. They are not interchangeable.</p><ul><li><p><strong><code>ExchangeNode</code></strong> is a <strong><code>PlanNode</code></strong>: the <strong>receive</strong> side. <strong><code>visitPhysicalDistribution</code></strong> (and root GATHER in <strong><code>createOutputFragment</code></strong>) creates it as the <strong><code>planRoot</code></strong> of the <strong>consumer</strong> fragment. At runtime it pulls batches that remote producers have already shipped (<strong><code>transmit_chunk</code></strong>). Its <strong><code>dataPartition</code></strong> is how those producers must hash or broadcast rows (HASH / BROADCAST / UNPARTITIONED). <strong><code>EXPLAIN</code></strong> prints it as <strong><code>EXCHANGE</code></strong>.</p></li><li><p><strong><code>DataSink</code></strong> is attached to a <strong><code>PlanFragment</code></strong>, not to a <strong><code>PlanNode</code></strong>: the <strong>send</strong> side of that fragment’s output. <strong><code>finalizeFragments</code> → <code>createDataSink</code></strong> chooses the concrete type from whether the fragment has a destination:</p><ul><li><strong><code>destNode != null</code></strong> → <strong><code>DataStreamSink</code></strong>: stream to that <strong><code>ExchangeNode</code></strong> id, partitioned by <strong><code>outputPartition</code></strong> (the same layout the exchange expects). <strong><code>EXPLAIN</code></strong>: <strong><code>STREAM DATA SINK</code></strong> / <strong><code>EXCHANGE ID: …</code></strong>.</li><li><strong><code>destNode == null</code></strong> (root) → <strong><code>ResultSink</code></strong>: hand rows to the FE (<strong><code>fetch_data</code></strong>, usually <strong><code>MYSQL_PROTOCAL</code></strong>). <strong><code>EXPLAIN</code></strong>: <strong><code>RESULT SINK</code></strong>.</li></ul></li></ul><p>So after a cut: producer fragment has <strong><code>destNode = ExchangeNode</code></strong>, <strong><code>outputPartition</code></strong>, and later a <strong><code>DataStreamSink</code></strong>; consumer fragment has that <strong><code>ExchangeNode</code></strong> as <strong><code>planRoot</code></strong>. One edge = one sink + one exchange.</p><p><strong>Overall procedure.</strong> <strong><code>PlanFragmentBuilder.createPhysicalPlan()</code></strong> is a fixed pipeline: allocate the plan shell, walk the physical tree into fragments, optionally GATHER at the root, then attach sinks.</p><ol><li><strong>Allocate <code>ExecPlan</code></strong> — holds the growing <strong><code>fragments</code></strong> list, scan nodes, and column metadata.</li><li><strong>Translate</strong> — <strong><code>PhysicalPlanTranslator.translate</code></strong> does a post-order visit of the physical <strong><code>OptExpression</code></strong>. Each visitor returns the <strong><code>PlanFragment</code></strong> whose root is the node just built:<ul><li><strong>Scan</strong> — new <strong><code>PlanFragment</code></strong> with <strong><code>OlapScanNode</code></strong> (or other scan), <strong><code>DataPartition.RANDOM</code></strong>, append to <strong><code>fragments</code></strong>.</li><li><strong>Join / agg / project / …</strong> — visit children; build a <strong><code>PlanNode</code></strong>; set it as <strong><code>planRoot</code></strong> on the surviving fragment (no new fragment unless a child already cut).</li><li><strong><code>PhysicalDistributionOperator</code></strong> — visit the child fragment, then <strong>cut</strong>: new <strong><code>ExchangeNode</code></strong>, new consumer <strong><code>PlanFragment</code></strong>, <strong><code>inputFragment.setDestination</code> / <code>setOutputPartition</code></strong>, append consumer to <strong><code>fragments</code></strong>, return the consumer.</li></ul></li><li><strong><code>createOutputFragment</code></strong> — if the top fragment is still partitioned (multi-tablet, not short-circuit), add a GATHER <strong><code>ExchangeNode</code></strong> fragment so the client sees one stream; otherwise hang output exprs on the current top.</li><li><strong><code>finalizeFragments</code></strong> — for every fragment <strong><code>createDataSink</code></strong>: <strong><code>DataStreamSink</code></strong> toward <strong><code>destNode</code></strong> when the fragment has a destination, else <strong><code>ResultSink</code></strong> on the root. Reverse the fragment list for <strong><code>EXPLAIN</code></strong> numbering (root = fragment 0), then runtime-filter bookkeeping.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// --- createPhysicalPlan: steps 1-4 ---</span>
+</span></span><span style=display:flex><span>ExecPlan <span style=color:#a6e22e>createPhysicalPlan</span>(OptExpression plan, ConnectContext connectContext,
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>ColumnRefOperator<span style=color:#f92672>&gt;</span> outputColumns, ColumnRefFactory columnRefFactory,
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> colNames, TResultSinkType resultSinkType,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> hasOutputFragment, <span style=color:#66d9ef>boolean</span> isShortCircuit) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Allocate ExecPlan</span>
+</span></span><span style=display:flex><span>    ExecPlan execPlan <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExecPlan(connectContext, colNames, plan, outputColumns, isShortCircuit);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. Translate OptExpression → PlanFragment DAG (cuts at PhysicalDistributionOperator)</span>
+</span></span><span style=display:flex><span>    PlanFragment top <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PhysicalPlanTranslator(columnRefFactory).<span style=color:#a6e22e>translate</span>(plan, execPlan);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 3. Optional root GATHER</span>
+</span></span><span style=display:flex><span>    createOutputFragment(top, execPlan, outputColumns, hasOutputFragment);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 4. Sinks + EXPLAIN order</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> finalizeFragments(execPlan, resultSinkType);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 2a. translate entry ---</span>
+</span></span><span style=display:flex><span>PlanFragment <span style=color:#a6e22e>translate</span>(OptExpression optExpression, ExecPlan context) {
+</span></span><span style=display:flex><span>    PlanFragment fragment <span style=color:#f92672>=</span> visit(optExpression, context);  <span style=color:#75715e>// dispatch by op type</span>
+</span></span><span style=display:flex><span>    computeFragmentCost(context, fragment);
+</span></span><span style=display:flex><span>    context.<span style=color:#a6e22e>setExecGroups</span>(execGroups.<span style=color:#a6e22e>getExecGroups</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> fragment;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 2b. scan: new fragment ---</span>
+</span></span><span style=display:flex><span>PlanFragment <span style=color:#a6e22e>visitPhysicalOlapScan</span>(OptExpression optExpr, ExecPlan context) {
+</span></span><span style=display:flex><span>    OlapScanNode scanNode <span style=color:#f92672>=</span> <span style=color:#75715e>/* build from PhysicalOlapScanOperator */</span>;
+</span></span><span style=display:flex><span>    PlanFragment fragment <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> PlanFragment(context.<span style=color:#a6e22e>getNextFragmentId</span>(), scanNode, DataPartition.<span style=color:#a6e22e>RANDOM</span>);
+</span></span><span style=display:flex><span>    context.<span style=color:#a6e22e>getFragments</span>().<span style=color:#a6e22e>add</span>(fragment);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> fragment;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 2c. join: visit children, attach HashJoinNode (no cut by itself) ---</span>
+</span></span><span style=display:flex><span>PlanFragment <span style=color:#a6e22e>visitPhysicalHashJoin</span>(OptExpression optExpr, ExecPlan context) {
+</span></span><span style=display:flex><span>    PlanFragment leftFragment <span style=color:#f92672>=</span> visit(optExpr.<span style=color:#a6e22e>inputAt</span>(0), context);
+</span></span><span style=display:flex><span>    PlanFragment rightFragment <span style=color:#f92672>=</span> visit(optExpr.<span style=color:#a6e22e>inputAt</span>(1), context);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> visitPhysicalJoin(leftFragment, rightFragment, ..., optExpr, context);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// HashJoinNode becomes planRoot of the left-side fragment when right is already an Exchange</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 2d. THE CUT: one PhysicalDistributionOperator → one new fragment ---</span>
+</span></span><span style=display:flex><span>PlanFragment <span style=color:#a6e22e>visitPhysicalDistribution</span>(OptExpression optExpr, ExecPlan context) {
+</span></span><span style=display:flex><span>    PlanFragment inputFragment <span style=color:#f92672>=</span> visit(optExpr.<span style=color:#a6e22e>inputAt</span>(0), context);  <span style=color:#75715e>// producer subtree</span>
+</span></span><span style=display:flex><span>    PhysicalDistributionOperator distribution <span style=color:#f92672>=</span> (PhysicalDistributionOperator) optExpr.<span style=color:#a6e22e>getOp</span>();
+</span></span><span style=display:flex><span>    ExchangeNode exchangeNode <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExchangeNode(context.<span style=color:#a6e22e>getNextNodeId</span>(),
+</span></span><span style=display:flex><span>            inputFragment.<span style=color:#a6e22e>getPlanRoot</span>(), distribution.<span style=color:#a6e22e>getDistributionSpec</span>().<span style=color:#a6e22e>getType</span>());
+</span></span><span style=display:flex><span>    DataPartition dataPartition <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            translateDistributionToDataPartition(distribution.<span style=color:#a6e22e>getDistributionSpec</span>(), context);
+</span></span><span style=display:flex><span>    exchangeNode.<span style=color:#a6e22e>setDataPartition</span>(dataPartition);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    PlanFragment fragment <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> PlanFragment(context.<span style=color:#a6e22e>getNextFragmentId</span>(), exchangeNode, dataPartition);
+</span></span><span style=display:flex><span>    inputFragment.<span style=color:#a6e22e>setDestination</span>(exchangeNode);       <span style=color:#75715e>// producer → this Exchange</span>
+</span></span><span style=display:flex><span>    inputFragment.<span style=color:#a6e22e>setOutputPartition</span>(dataPartition);  <span style=color:#75715e>// HASH / BROADCAST / ...</span>
+</span></span><span style=display:flex><span>    context.<span style=color:#a6e22e>getFragments</span>().<span style=color:#a6e22e>add</span>(fragment);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> fragment;  <span style=color:#75715e>// consumer continues above the Exchange</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 3. createOutputFragment: GATHER when top is still partitioned ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>createOutputFragment</span>(PlanFragment inputFragment, ExecPlan execPlan,
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>ColumnRefOperator<span style=color:#f92672>&gt;</span> outputColumns, <span style=color:#66d9ef>boolean</span> hasOutputFragment) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (inputFragment.<span style=color:#a6e22e>getPlanRoot</span>() <span style=color:#66d9ef>instanceof</span> ExchangeNode
+</span></span><span style=display:flex><span>            <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>inputFragment.<span style=color:#a6e22e>isPartitioned</span>() <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>hasOutputFragment) {
+</span></span><span style=display:flex><span>        inputFragment.<span style=color:#a6e22e>setOutputExprs</span>(<span style=color:#75715e>/* output exprs */</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// single-tablet / short-circuit: ResultSink on this fragment, no extra GATHER</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#75715e>/* one tablet or shortCircuit */</span>) {
+</span></span><span style=display:flex><span>        inputFragment.<span style=color:#a6e22e>setOutputExprs</span>(<span style=color:#75715e>/* output exprs */</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    ExchangeNode exchangeNode <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExchangeNode(execPlan.<span style=color:#a6e22e>getNextNodeId</span>(),
+</span></span><span style=display:flex><span>            inputFragment.<span style=color:#a6e22e>getPlanRoot</span>(), DataPartition.<span style=color:#a6e22e>UNPARTITIONED</span>);
+</span></span><span style=display:flex><span>    PlanFragment exchangeFragment <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> PlanFragment(execPlan.<span style=color:#a6e22e>getNextFragmentId</span>(), exchangeNode, DataPartition.<span style=color:#a6e22e>UNPARTITIONED</span>);
+</span></span><span style=display:flex><span>    inputFragment.<span style=color:#a6e22e>setDestination</span>(exchangeNode);
+</span></span><span style=display:flex><span>    inputFragment.<span style=color:#a6e22e>setOutputPartition</span>(DataPartition.<span style=color:#a6e22e>UNPARTITIONED</span>);
+</span></span><span style=display:flex><span>    execPlan.<span style=color:#a6e22e>getFragments</span>().<span style=color:#a6e22e>add</span>(exchangeFragment);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 4. finalizeFragments: DataStreamSink vs ResultSink, reverse list ---</span>
+</span></span><span style=display:flex><span>ExecPlan <span style=color:#a6e22e>finalizeFragments</span>(ExecPlan execPlan, TResultSinkType resultSinkType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (PlanFragment fragment : execPlan.<span style=color:#a6e22e>getFragments</span>()) {
+</span></span><span style=display:flex><span>        fragment.<span style=color:#a6e22e>createDataSink</span>(resultSinkType, execPlan);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Collections.<span style=color:#a6e22e>reverse</span>(execPlan.<span style=color:#a6e22e>getFragments</span>());  <span style=color:#75715e>// root → fragment 0 in EXPLAIN</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// runtime-filter waiting sets / adaptive DOP ...</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> execPlan;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> PlanFragment.<span style=color:#a6e22e>createDataSink</span>(TResultSinkType resultSinkType, ExecPlan execPlan) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (destNode <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        DataStreamSink streamSink <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> DataStreamSink(destNode.<span style=color:#a6e22e>getId</span>());
+</span></span><span style=display:flex><span>        streamSink.<span style=color:#a6e22e>setPartition</span>(outputPartition);
+</span></span><span style=display:flex><span>        sink <span style=color:#f92672>=</span> streamSink;           <span style=color:#75715e>// intermediate edge → Exchange</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        sink <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ResultSink(planRoot.<span style=color:#a6e22e>getId</span>(), resultSinkType);  <span style=color:#75715e>// root → FE fetch_data</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A shuffle join sets the child’s output to <strong><code>TPartitionType.HASH_PARTITIONED</code></strong> on the join keys (<code>computeShuffleHashBucketPlanFragment</code>). A two-phase aggregate sets the local (update serialize) fragment’s output partition to <strong><code>DataPartition.hashPartitioned(group keys)</code></strong> so the merge (merge finalize) fragment receives one group on one worker.</p><h3 id=36-schedule>3.6 Schedule</h3><p>After fragmentize, <strong><code>ExecPlan</code></strong> holds <strong><code>fragments</code></strong>, <strong><code>scanNodes</code></strong>, and the descriptor table. Schedule turns that into an <strong><code>ExecutionDAG</code></strong>: every <strong><code>PlanFragment</code></strong> becomes an <strong><code>ExecutionFragment</code></strong> with **<code>FragmentInstance</code>**s bound to workers. CBO only named bucket layouts; this step chooses machines and tablet scan ranges.</p><p><strong>Overall procedure.</strong> From <strong><code>handleQueryStmt(execPlan)</code></strong> through assignment (deploy is §3.7):</p><ol><li><strong>Read <code>ExecPlan</code></strong> — <strong><code>getFragments()</code></strong>, <strong><code>getScanNodes()</code></strong>, <strong><code>descTbl.toThrift()</code></strong>.</li><li><strong>Build coordinator</strong> — <strong><code>createQueryScheduler</code></strong> wraps them in a <strong><code>JobSpec</code></strong> and constructs <strong><code>DefaultCoordinator</code></strong> (builds <strong><code>ExecutionDAG</code></strong> / <strong><code>CoordinatorPreprocessor</code></strong> from those fragments).</li><li><strong>Register</strong> — <strong><code>QeProcessorImpl.registerQuery</code></strong> so status reports can find this <strong><code>coord</code></strong>.</li><li><strong>Start scheduling</strong> — <strong><code>execWithQueryDeployExecutor</code> → <code>startScheduling</code></strong>: queue wait, then <strong><code>prepareExec</code></strong>, then deploy.</li><li><strong><code>prepareExec</code></strong> — <strong><code>computeFragmentInstances</code></strong> (assign each fragment to workers), <strong><code>prepareResultSink</code></strong> (root instance → <strong><code>ResultReceiver</code></strong>).</li><li><strong>Assign instances</strong> — for each <strong><code>ExecutionFragment</code></strong> in post-order: scan fragments use <strong><code>LocalFragmentAssignmentStrategy</code></strong> (tablet → replica BE / lake shard → CN); exchange-only fragments use <strong><code>RemoteFragmentAssignmentStrategy</code></strong>. Then <strong><code>executionDAG.finalizeDAG()</code></strong> fills Exchange <strong><code>destinations</code></strong>.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
-class PlanFragment {
-  - dataPartition : DataPartition
-  - outputPartition : DataPartition
-  - destNode : ExchangeNode
-  - sink : DataSink
+class ExecPlan {
+  - fragments : List~PlanFragment~
+  - scanNodes : List~ScanNode~
+  + getFragments()
+  + getScanNodes()
+  + getDescTbl()
 }
 
+class JobSpec {
+  - fragments : List~PlanFragment~
+  - scanNodes : List~ScanNode~
+  - descTable : TDescriptorTable
+  - queryId : TUniqueId
+  + fromQuerySpec()
+  + getFragments()
+}
+
+class DefaultCoordinator {
+  - jobSpec : JobSpec
+  - coordinatorPreprocessor : CoordinatorPreprocessor
+  - executionDAG : ExecutionDAG
+  - receiver : ResultReceiver
+  + prepareExec()
+  + startScheduling()
+  + prepareResultSink()
+  + deliverExecFragments()
+  + getNext()
+}
+
+class CoordinatorPreprocessor {
+  - jobSpec : JobSpec
+  - executionDAG : ExecutionDAG
+  - lazyWorkerProvider : LazyWorkerProvider
+  + prepareExec()
+  + computeFragmentInstances()
+}
+
+class FragmentAssignmentStrategyFactory {
+  + create()
+}
+
+interface FragmentAssignmentStrategy {
+  + assignFragmentToWorker()
+}
+
+class LocalFragmentAssignmentStrategy
+class RemoteFragmentAssignmentStrategy
+
 class ExecutionDAG {
-  - instanceIdToInstance : Map&lt;TUniqueId, FragmentInstance&gt;
+  - fragments : List~ExecutionFragment~
+  - idToFragment : Map~PlanFragmentId, ExecutionFragment~
+  - instanceIdToInstance : Map~TUniqueId, FragmentInstance~
+  + build()
+  + getFragmentsInPostorder()
+  + getRootFragment()
+  + finalizeDAG()
 }
 
 class ExecutionFragment {
   - planFragment : PlanFragment
-  - destinations : List&lt;TPlanFragmentDestination&gt;
+  - instances : List~FragmentInstance~
+  - destinations : List~TPlanFragmentDestination~
+  - scanRangeAssignment : FragmentScanRangeAssignment
+  + addInstance()
+  + getInstances()
+  + addDestination()
+  + getScanNodes()
 }
 
 class FragmentInstance {
   - instanceId : TUniqueId
   - worker : ComputeNode
-  - node2ScanRanges : Map&lt;Integer, List&lt;TScanRangeParams&gt;&gt;
+  - execFragment : ExecutionFragment
+  - node2ScanRanges : Map~Integer, List~TScanRangeParams~~
+  + getWorkerId()
+  + addScanRanges()
 }
 
+class PlanFragment {
+  - fragmentId : PlanFragmentId
+  - planRoot : PlanNode
+  - sink : DataSink
+  - destNode : ExchangeNode
+}
+
+class ResultReceiver {
+  - finstId : TUniqueId
+  - address : TNetworkAddress
+  + getNext()
+}
+
+class ComputeNode {
+  - id : long
+  + getBrpcAddress()
+}
+
+ExecPlan ..&gt; JobSpec : fromQuerySpec
+JobSpec --&gt; PlanFragment : fragments
+DefaultCoordinator --&gt; JobSpec : jobSpec
+DefaultCoordinator --&gt; CoordinatorPreprocessor
+DefaultCoordinator --&gt; ExecutionDAG
+DefaultCoordinator --&gt; ResultReceiver : receiver
+CoordinatorPreprocessor --&gt; ExecutionDAG
+CoordinatorPreprocessor --&gt; FragmentAssignmentStrategyFactory
+FragmentAssignmentStrategyFactory --&gt; FragmentAssignmentStrategy : create
+FragmentAssignmentStrategy &lt;|-- LocalFragmentAssignmentStrategy
+FragmentAssignmentStrategy &lt;|-- RemoteFragmentAssignmentStrategy
+FragmentAssignmentStrategy ..&gt; ExecutionFragment : assignFragmentToWorker
 ExecutionDAG o-- ExecutionFragment : fragments
 ExecutionFragment --&gt; PlanFragment : planFragment
 ExecutionFragment o-- FragmentInstance : instances
 FragmentInstance --&gt; ComputeNode : worker
+FragmentInstance --&gt; ExecutionFragment : execFragment
+ResultReceiver ..&gt; FragmentInstance : root instanceId
 
 @enduml
-</code></pre><p>A <strong><code>PlanFragment</code></strong> is still one stage. <strong><code>ExecutionFragment</code></strong> is that stage plus assignment: <strong><code>instances</code></strong> and Exchange <strong><code>destinations</code></strong>. Each <strong><code>FragmentInstance</code></strong> is one run of the stage on one <strong><code>worker</code></strong>, with <strong><code>node2ScanRanges</code></strong> (tablet ids) for scans. CBO distribution only named buckets; this step binds buckets to machines.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>coord <span style=color:#f92672>=</span> getCoordinatorFactory().<span style=color:#a6e22e>createQueryScheduler</span>(context, fragments, scanNodes, descTable, execPlan);
-</span></span><span style=display:flex><span>QeProcessorImpl.<span style=color:#a6e22e>INSTANCE</span>.<span style=color:#a6e22e>registerQuery</span>(context.<span style=color:#a6e22e>getExecutionId</span>(), ...);
-</span></span><span style=display:flex><span>coord.<span style=color:#a6e22e>execWithQueryDeployExecutor</span>(context);   <span style=color:#75715e>// prepareExec() then deliverExecFragments()</span>
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>computeFragmentInstances</span>() {
+</code></pre><p>A <strong><code>PlanFragment</code></strong> is still one stage. <strong><code>ExecutionFragment</code></strong> is that stage plus assignment: <strong><code>instances</code></strong> and Exchange <strong><code>destinations</code></strong>. Each <strong><code>FragmentInstance</code></strong> is one run of the stage on one <strong><code>worker</code></strong>, with <strong><code>node2ScanRanges</code></strong> (tablet ids) for scans.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// --- steps 1-4: ExecPlan → coordinator → register → schedule ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>handleQueryStmt</span>(ExecPlan execPlan) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>PlanFragment<span style=color:#f92672>&gt;</span> fragments <span style=color:#f92672>=</span> execPlan.<span style=color:#a6e22e>getFragments</span>();
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>ScanNode<span style=color:#f92672>&gt;</span> scanNodes <span style=color:#f92672>=</span> execPlan.<span style=color:#a6e22e>getScanNodes</span>();
+</span></span><span style=display:flex><span>    TDescriptorTable descTable <span style=color:#f92672>=</span> execPlan.<span style=color:#a6e22e>getDescTbl</span>().<span style=color:#a6e22e>toThrift</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    coord <span style=color:#f92672>=</span> getCoordinatorFactory().<span style=color:#a6e22e>createQueryScheduler</span>(
+</span></span><span style=display:flex><span>            context, fragments, scanNodes, descTable, execPlan);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    QeProcessorImpl.<span style=color:#a6e22e>INSTANCE</span>.<span style=color:#a6e22e>registerQuery</span>(context.<span style=color:#a6e22e>getExecutionId</span>(),
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> QeProcessorImpl.<span style=color:#a6e22e>QueryInfo</span>(context, ..., coord));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    coord.<span style=color:#a6e22e>execWithQueryDeployExecutor</span>(context);  <span style=color:#75715e>// → startScheduling</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// then getNext() / collect results (§3.7)</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>DefaultCoordinator <span style=color:#a6e22e>createQueryScheduler</span>(ConnectContext context, List<span style=color:#f92672>&lt;</span>PlanFragment<span style=color:#f92672>&gt;</span> fragments,
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>ScanNode<span style=color:#f92672>&gt;</span> scanNodes, TDescriptorTable descTable, ExecPlan execPlan) {
+</span></span><span style=display:flex><span>    JobSpec jobSpec <span style=color:#f92672>=</span> JobSpec.<span style=color:#a6e22e>Factory</span>.<span style=color:#a6e22e>fromQuerySpec</span>(
+</span></span><span style=display:flex><span>            context, fragments, scanNodes, descTable, TQueryType.<span style=color:#a6e22e>SELECT</span>, execPlan);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DefaultCoordinator(context, jobSpec);  <span style=color:#75715e>// ExecutionDAG from jobSpec fragments</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startScheduling</span>(ScheduleOption option) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    QueryQueueManager.<span style=color:#a6e22e>getInstance</span>().<span style=color:#a6e22e>maybeWait</span>(connectContext, <span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    prepareExec();                 <span style=color:#75715e>// step 5: instances + ResultReceiver</span>
+</span></span><span style=display:flex><span>    deliverExecFragments(option);  <span style=color:#75715e>// §3.7 deploy + collect</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 5: prepareExec ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> DefaultCoordinator.<span style=color:#a6e22e>prepareExec</span>() <span style=color:#66d9ef>throws</span> StarRocksException {
+</span></span><span style=display:flex><span>    coordinatorPreprocessor.<span style=color:#a6e22e>prepareExec</span>();  <span style=color:#75715e>// computeFragmentInstances</span>
+</span></span><span style=display:flex><span>    prepareResultSink();
+</span></span><span style=display:flex><span>    prepareProfile();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> CoordinatorPreprocessor.<span style=color:#a6e22e>prepareExec</span>() <span style=color:#66d9ef>throws</span> StarRocksException {
+</span></span><span style=display:flex><span>    resetExec();                 <span style=color:#75715e>// capture available workers</span>
+</span></span><span style=display:flex><span>    computeFragmentInstances();  <span style=color:#75715e>// step 6</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- step 6: PlanFragment → FragmentInstance on workers ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>computeFragmentInstances</span>() <span style=color:#66d9ef>throws</span> StarRocksException {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ExecutionFragment execFragment : executionDAG.<span style=color:#a6e22e>getFragmentsInPostorder</span>()) {
-</span></span><span style=display:flex><span>        fragmentAssignmentStrategyFactory.<span style=color:#a6e22e>create</span>(execFragment, lazyWorkerProvider.<span style=color:#a6e22e>get</span>())
+</span></span><span style=display:flex><span>        fragmentAssignmentStrategyFactory
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>create</span>(execFragment, lazyWorkerProvider.<span style=color:#a6e22e>get</span>())
 </span></span><span style=display:flex><span>                .<span style=color:#a6e22e>assignFragmentToWorker</span>(execFragment);
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    executionDAG.<span style=color:#a6e22e>finalizeDAG</span>();
+</span></span><span style=display:flex><span>    executionDAG.<span style=color:#a6e22e>finalizeDAG</span>();  <span style=color:#75715e>// wire Exchange destinations instance → instance</span>
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>A scan fragment becomes one <strong><code>FragmentInstance</code></strong> per chosen worker, each carrying that worker’s <strong><code>TScanRangeParams</code></strong> (tablet ids). The same <strong><code>PlanFragment</code></strong> therefore runs in parallel without the FE copying rows.</p><h3 id=37-deploy>3.7 Deploy</h3><p><strong><code>prepareExec()</code></strong> attaches a <strong><code>ResultReceiver</code></strong> to the root instance’s worker, then <strong><code>Deployer.deployFragments()</code></strong> RPCs each instance.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>receiver <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ResultReceiver(rootInstance.<span style=color:#a6e22e>getInstanceId</span>(), workerId, worker.<span style=color:#a6e22e>getBrpcAddress</span>(), timeoutMs);
-</span></span><span style=display:flex><span><span style=color:#75715e>// Deployer:</span>
-</span></span><span style=display:flex><span>executions.<span style=color:#a6e22e>forEach</span>(FragmentInstanceExecState::deployAsync);
-</span></span><span style=display:flex><span><span style=color:#75715e>// FragmentInstanceExecState:</span>
-</span></span><span style=display:flex><span>deployFuture <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>()
-</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>execPlanFragmentAsync</span>(brpcAddress, requestToDeploy, jobSpec.<span style=color:#a6e22e>getPlanProtocol</span>());
-</span></span></code></pre></div><h3 id=38-execute-on-workers>3.8 Execute on workers</h3><p>Operators run in the BE/CN pipeline engine. Intermediate batches never return to the FE; they move worker-to-worker as <strong><code>transmit_chunk</code></strong> on Exchange edges. Pipeline internals are in <a href=../backend/>Backend and Compute Node</a>.</p><h3 id=39-report-status>3.9 Report status</h3><p>Workers call Thrift <strong><code>FrontendService.reportExecStatus</code></strong>. <strong><code>QeProcessorImpl</code></strong> forwards to <strong><code>DefaultCoordinator.updateFragmentExecStatus()</code></strong> so the FE can cancel remaining instances on failure and know when the root is done.</p><h3 id=310-collect-results>3.10 Collect results</h3><p>The FE is only a client of the root worker. <strong><code>StmtExecutor</code></strong> loops until EOS and writes MySQL packets.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>do</span> {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// LocalFragmentAssignmentStrategy (scan fragments):</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>assignFragmentToWorker</span>(ExecutionFragment execFragment) <span style=color:#66d9ef>throws</span> StarRocksException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ScanNode scanNode : execFragment.<span style=color:#a6e22e>getScanNodes</span>()) {
+</span></span><span style=display:flex><span>        assignScanRangesToWorker(execFragment, scanNode);  <span style=color:#75715e>// tablet → BackendSelector → BE/CN</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    assignScanRangesToFragmentInstancePerWorker(execFragment);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// one FragmentInstance per chosen worker, node2ScanRanges = that worker&#39;s tablets</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// after instances exist: root ResultReceiver for FE fetch_data</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>prepareResultSink</span>() {
+</span></span><span style=display:flex><span>    ExecutionFragment root <span style=color:#f92672>=</span> executionDAG.<span style=color:#a6e22e>getRootFragment</span>();
+</span></span><span style=display:flex><span>    FragmentInstance rootInstance <span style=color:#f92672>=</span> root.<span style=color:#a6e22e>getInstances</span>().<span style=color:#a6e22e>get</span>(0);
+</span></span><span style=display:flex><span>    ComputeNode worker <span style=color:#f92672>=</span> workerProvider.<span style=color:#a6e22e>getWorkerById</span>(rootInstance.<span style=color:#a6e22e>getWorkerId</span>());
+</span></span><span style=display:flex><span>    receiver <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ResultReceiver(rootInstance.<span style=color:#a6e22e>getInstanceId</span>(), workerId,
+</span></span><span style=display:flex><span>            worker.<span style=color:#a6e22e>getBrpcAddress</span>(), timeoutMs);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A scan fragment becomes one <strong><code>FragmentInstance</code></strong> per chosen worker, each carrying that worker’s <strong><code>TScanRangeParams</code></strong>. The same <strong><code>PlanFragment</code></strong> therefore runs in parallel without the FE copying rows.</p><h3 id=37-deploy-and-collect-results>3.7 Deploy and collect results</h3><p>Schedule (§3.6) produced an <strong><code>ExecutionDAG</code></strong> of **<code>FragmentInstance</code>**s. Deploy ships each instance to its worker so the BE/CN can build the pipeline. The FE does <strong>not</strong> send rows on deploy—only the plan, descriptors, scan ranges, and Exchange destinations. Intermediate batches then move worker-to-worker as <strong><code>transmit_chunk</code></strong>; the FE only **<code>fetch_data</code>**s the root. Pipeline internals are in <a href=../backend/>Backend and Compute Node</a>. Workers report progress via Thrift <strong><code>FrontendService.reportExecStatus</code></strong> → <strong><code>DefaultCoordinator.updateFragmentExecStatus()</code></strong> (cancel on failure, know when the root finishes).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class DefaultCoordinator {
+  - executionDAG : ExecutionDAG
+  - receiver : ResultReceiver
+  + deliverExecFragments()
+  + prepareResultSink()
+  + getNext()
+  + updateFragmentExecStatus()
+}
+
+interface ExecutionSchedule {
+  + prepareSchedule()
+  + schedule()
+}
+
+class AllAtOnceExecutionSchedule
+class PhasedExecutionSchedule
+
+class Deployer {
+  - jobSpec : JobSpec
+  - executionDAG : ExecutionDAG
+  - needDeploy : boolean
+  + createFragmentExecStates()
+  + deployFragments()
+}
+
+class DeployState {
+  - threeStageExecutionsToDeploy : List
+}
+
+class TFragmentInstanceFactory {
+  + create()
+  + toThriftFromCommonParams()
+  + toThriftForUniqueParams()
+}
+
+class FragmentInstanceExecState {
+  - instanceId : TUniqueId
+  - worker : ComputeNode
+  - requestToDeploy : TExecPlanFragmentParams
+  - serializedRequest : byte[]
+  - deployFuture : Future
+  + serializeRequest()
+  + deployAsync()
+  + waitForDeploymentCompletion()
+}
+
+class TExecPlanFragmentParams {
+  - fragment : TPlanFragment
+  - desc_tbl : TDescriptorTable
+  - params : TPlanFragmentExecParams
+  - coord : TNetworkAddress
+  - query_options : TQueryOptions
+  - is_pipeline : boolean
+  - pipeline_dop : i32
+}
+
+class TPlanFragmentExecParams {
+  - query_id : TUniqueId
+  - fragment_instance_id : TUniqueId
+  - per_node_scan_ranges : Map
+  - destinations : List~TPlanFragmentDestination~
+  - per_exch_num_senders : Map
+}
+
+class TPlanFragmentDestination {
+  - fragment_instance_id : TUniqueId
+  - brpc_server : TNetworkAddress
+}
+
+class BackendServiceClient {
+  + execPlanFragmentAsync()
+  + fetchDataAsync()
+}
+
+class PExecPlanFragmentRequest {
+  - attachment_protocol : string
+}
+
+class PExecPlanFragmentResult {
+  - status : StatusPB
+}
+
+class ResultReceiver {
+  - finstId : PUniqueId
+  - address : TNetworkAddress
+  - backendId : Long
+  + getNext()
+}
+
+class PFetchDataRequest {
+  - finst_id : PUniqueId
+}
+
+class PFetchDataResult {
+  - packet_seq : i64
+  - eos : bool
+  - query_statistics : PQueryStatistics
+}
+
+class FragmentInstance {
+  - instanceId : TUniqueId
+  - worker : ComputeNode
+  - node2ScanRanges : Map
+}
+
+DefaultCoordinator --&gt; ExecutionSchedule : scheduler
+DefaultCoordinator --&gt; Deployer : deliverExecFragments
+DefaultCoordinator --&gt; ResultReceiver : receiver
+ExecutionSchedule &lt;|-- AllAtOnceExecutionSchedule
+ExecutionSchedule &lt;|-- PhasedExecutionSchedule
+ExecutionSchedule --&gt; Deployer : schedule
+Deployer --&gt; DeployState : createFragmentExecStates
+Deployer --&gt; TFragmentInstanceFactory : create
+Deployer o-- FragmentInstanceExecState : deployFragments
+TFragmentInstanceFactory ..&gt; FragmentInstance : create
+TFragmentInstanceFactory ..&gt; TExecPlanFragmentParams : build
+FragmentInstanceExecState --&gt; TExecPlanFragmentParams : requestToDeploy
+FragmentInstanceExecState --&gt; BackendServiceClient : deployAsync
+TExecPlanFragmentParams *-- TPlanFragmentExecParams : params
+TPlanFragmentExecParams o-- TPlanFragmentDestination : destinations
+BackendServiceClient ..&gt; PExecPlanFragmentRequest : exec_plan_fragment
+BackendServiceClient ..&gt; PExecPlanFragmentResult : reply
+ResultReceiver --&gt; BackendServiceClient : fetchDataAsync
+ResultReceiver ..&gt; PFetchDataRequest
+BackendServiceClient ..&gt; PFetchDataResult : fetch_data reply
+
+@enduml
+</code></pre><p><strong>Deploy procedure.</strong></p><ol><li><strong><code>deliverExecFragments</code></strong> builds a <strong><code>Deployer</code></strong>, then the execution schedule (<strong><code>AllAtOnceExecutionSchedule</code></strong> or phased) groups concurrent fragments.</li><li><strong><code>createFragmentExecStates</code></strong> — for each instance, <strong><code>TFragmentInstanceFactory.create</code></strong> builds a <strong><code>TExecPlanFragmentParams</code></strong> and wraps it in a <strong><code>FragmentInstanceExecState</code></strong>.</li><li>Optional concurrent <strong><code>serializeRequest</code></strong> (Thrift → bytes).</li><li><strong><code>deployAsync</code></strong> — brpc <strong><code>exec_plan_fragment</code></strong> to that worker’s <strong><code>brpc_port</code></strong>.</li><li><strong><code>waitForDeploymentCompletion</code></strong> — each RPC returns <strong><code>PExecPlanFragmentResult</code></strong> (<code>StatusPB</code>); failure cancels remaining instances.</li></ol><p><strong>Wire format (FE → BE deploy).</strong> The RPC is brpc protobuf; the plan payload is Thrift.</p><table><thead><tr><th>Layer</th><th>Type</th><th>Role</th></tr></thead><tbody><tr><td>Transport</td><td>brpc to worker <strong><code>brpc_port</code></strong></td><td><strong><code>PInternalService.exec_plan_fragment</code></strong></td></tr><tr><td>RPC envelope</td><td><strong><code>PExecPlanFragmentRequest</code></strong></td><td><code>attachment_protocol</code> (<code>binary</code> / <code>compact</code> / <code>json</code>); body is attachment bytes</td></tr><tr><td>Attachment</td><td>Thrift <strong><code>TExecPlanFragmentParams</code></strong></td><td>One fragment instance’s full exec request</td></tr><tr><td>Reply</td><td><strong><code>PExecPlanFragmentResult</code></strong></td><td><strong><code>StatusPB</code></strong> (ok or error); not query rows</td></tr></tbody></table><p><strong><code>TExecPlanFragmentParams</code></strong> is the unit of deploy. Shared plan shape vs per-instance binding:</p><table><thead><tr><th>Field</th><th>Content</th></tr></thead><tbody><tr><td><strong><code>fragment</code></strong> (<code>TPlanFragment</code>)</td><td><strong><code>plan</code></strong> (operator tree), <strong><code>output_sink</code></strong> (<code>TDataStreamSink</code> / <code>TResultSink</code> / …), <strong><code>partition</code></strong></td></tr><tr><td><strong><code>desc_tbl</code></strong></td><td>Slot / tuple descriptors</td></tr><tr><td><strong><code>params</code></strong> (<code>TPlanFragmentExecParams</code>)</td><td><strong><code>query_id</code></strong>, <strong><code>fragment_instance_id</code></strong>, <strong><code>per_node_scan_ranges</code></strong> (this worker’s tablets), <strong><code>destinations</code></strong>, <strong><code>per_exch_num_senders</code></strong></td></tr><tr><td><strong><code>coord</code></strong></td><td>FE address for later <strong><code>reportExecStatus</code></strong></td></tr><tr><td><strong><code>query_globals</code> / <code>query_options</code></strong></td><td>Timezone, timeouts, mem limits, pipeline flags</td></tr><tr><td><strong><code>is_pipeline</code> / <code>pipeline_dop</code> / <code>workgroup</code></strong></td><td>Pipeline engine and resource group</td></tr></tbody></table><p><strong><code>params.destinations</code></strong> is the Exchange fan-out for this instance: each <strong><code>TPlanFragmentDestination</code></strong> has the peer <strong><code>fragment_instance_id</code></strong> and <strong><code>brpc_server</code></strong>. The sink’s <strong><code>output_partition</code></strong> (HASH / BROADCAST / UNPARTITIONED) decides how chunks are keyed onto that list. After deploy, producers <strong><code>transmit_chunk</code></strong> directly to those addresses—the FE is off the intermediate data path.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// --- deliverExecFragments: Deployer + schedule ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deliverExecFragments</span>(ScheduleOption option) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    Deployer deployer <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Deployer(connectContext, jobSpec, executionDAG,
+</span></span><span style=display:flex><span>            coordinatorPreprocessor.<span style=color:#a6e22e>getCoordAddress</span>(), <span style=color:#66d9ef>this</span>::handleErrorExecution, option.<span style=color:#a6e22e>doDeploy</span>);
+</span></span><span style=display:flex><span>    scheduler.<span style=color:#a6e22e>prepareSchedule</span>(<span style=color:#66d9ef>this</span>, deployer, executionDAG);
+</span></span><span style=display:flex><span>    scheduler.<span style=color:#a6e22e>schedule</span>(option);  <span style=color:#75715e>// createFragmentExecStates → deployFragments</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- build one TExecPlanFragmentParams per FragmentInstance ---</span>
+</span></span><span style=display:flex><span>TExecPlanFragmentParams <span style=color:#a6e22e>create</span>(FragmentInstance instance, TDescriptorTable descTable, ...) {
+</span></span><span style=display:flex><span>    TExecPlanFragmentParams result <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> TExecPlanFragmentParams();
+</span></span><span style=display:flex><span>    toThriftFromCommonParams(result, instance.<span style=color:#a6e22e>getExecFragment</span>(), descTable, ...);
+</span></span><span style=display:flex><span>    toThriftForUniqueParams(result, instance, ...);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>toThriftFromCommonParams</span>(TExecPlanFragmentParams result, ExecutionFragment execFragment, ...) {
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setProtocol_version</span>(InternalServiceVersion.<span style=color:#a6e22e>V1</span>);
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setFragment</span>(execFragment.<span style=color:#a6e22e>getPlanFragment</span>().<span style=color:#a6e22e>toThrift</span>());  <span style=color:#75715e>// plan + output_sink</span>
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setDesc_tbl</span>(descTable);
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setCoord</span>(coordAddress);
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setQuery_globals</span>(jobSpec.<span style=color:#a6e22e>getQueryGlobals</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setQuery_options</span>(jobSpec.<span style=color:#a6e22e>getQueryOptions</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setIs_pipeline</span>(<span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setParams</span>(<span style=color:#66d9ef>new</span> TPlanFragmentExecParams());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setQuery_id</span>(jobSpec.<span style=color:#a6e22e>getQueryId</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setDestinations</span>(execFragment.<span style=color:#a6e22e>getDestinations</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setPer_exch_num_senders</span>(execFragment.<span style=color:#a6e22e>getNumSendersPerExchange</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setNum_senders</span>(execFragment.<span style=color:#a6e22e>getInstances</span>().<span style=color:#a6e22e>size</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>toThriftForUniqueParams</span>(TExecPlanFragmentParams result, FragmentInstance instance, ...) {
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setBackend_num</span>(instance.<span style=color:#a6e22e>getIndexInJob</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>setPipeline_dop</span>(instance.<span style=color:#a6e22e>getPipelineDop</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setFragment_instance_id</span>(instance.<span style=color:#a6e22e>getInstanceId</span>());
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setPer_node_scan_ranges</span>(instance.<span style=color:#a6e22e>getNode2ScanRanges</span>());  <span style=color:#75715e>// this worker&#39;s tablets</span>
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>params</span>.<span style=color:#a6e22e>setSender_id</span>(instance.<span style=color:#a6e22e>getIndexInFragment</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- brpc deploy ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> Deployer.<span style=color:#a6e22e>deployFragments</span>(DeployState deployState) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (List<span style=color:#f92672>&lt;</span>FragmentInstanceExecState<span style=color:#f92672>&gt;</span> executions : threeStageExecutionsToDeploy) {
+</span></span><span style=display:flex><span>        executions.<span style=color:#a6e22e>forEach</span>(FragmentInstanceExecState::deployAsync);
+</span></span><span style=display:flex><span>        waitForDeploymentCompletion(executions);  <span style=color:#75715e>// PExecPlanFragmentResult.status</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> FragmentInstanceExecState.<span style=color:#a6e22e>deployAsync</span>() {
+</span></span><span style=display:flex><span>    TNetworkAddress brpcAddress <span style=color:#f92672>=</span> worker.<span style=color:#a6e22e>getBrpcAddress</span>();
+</span></span><span style=display:flex><span>    deployFuture <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>execPlanFragmentAsync</span>(brpcAddress, requestToDeploy <span style=color:#75715e>/* or serializedRequest */</span>,
+</span></span><span style=display:flex><span>                    jobSpec.<span style=color:#a6e22e>getPlanProtocol</span>());
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the worker, <strong><code>exec_plan_fragment</code></strong> deserializes the Thrift attachment into <strong><code>TExecPlanFragmentParams</code></strong>, builds the pipeline from <strong><code>fragment.plan</code></strong> / <strong><code>output_sink</code></strong>, opens scan ranges from <strong><code>per_node_scan_ranges</code></strong>, and registers Exchange receivers for <strong><code>destinations</code></strong>.</p><p><strong>Collect results (FE ← root worker).</strong> After deploy, the session thread only talks to the root instance. <strong><code>ResultReceiver</code></strong> (built in <strong><code>prepareResultSink</code></strong>, §3.6) issues brpc <strong><code>fetch_data</code></strong>; <strong><code>StmtExecutor</code></strong> loops until EOS and writes MySQL packets.</p><table><thead><tr><th>Layer</th><th>Type</th><th>Role</th></tr></thead><tbody><tr><td>Transport</td><td>brpc</td><td><strong><code>PInternalService.fetch_data</code></strong></td></tr><tr><td>Request</td><td><strong><code>PFetchDataRequest</code></strong></td><td>root <strong><code>fragment_instance_id</code></strong></td></tr><tr><td>Reply</td><td><strong><code>PFetchDataResult</code></strong></td><td>serialized <strong><code>TResultBatch</code></strong> or EOS</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>do</span> {
 </span></span><span style=display:flex><span>    batch <span style=color:#f92672>=</span> coord.<span style=color:#a6e22e>getNext</span>();           <span style=color:#75715e>// ResultReceiver → fetchDataAsync(root worker)</span>
 </span></span><span style=display:flex><span>    responseRowBatch(..., batch, channel);
 </span></span><span style=display:flex><span>} <span style=color:#66d9ef>while</span> (<span style=color:#f92672>!</span>batch.<span style=color:#a6e22e>isEos</span>());
-</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>PFetchDataRequest request <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PFetchDataRequest(finstId);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>PFetchDataRequest request <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PFetchDataRequest(finstId);
 </span></span><span style=display:flex><span>Future<span style=color:#f92672>&lt;</span>PFetchDataResult<span style=color:#f92672>&gt;</span> future <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>().<span style=color:#a6e22e>fetchDataAsync</span>(address, request);
 </span></span><span style=display:flex><span><span style=color:#75715e>// deserialize TResultBatch from the serialized payload</span>
-</span></span></code></pre></div><h3 id=311-simple-query-scan-filter-project>3.11 Simple query: scan, filter, project</h3><p>MPP still applies when there is no join and no aggregate. Parallelism is the <strong>tablet instances</strong>; the only shuffle is an optional GATHER so the client sees one stream.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span></code></pre></div><h3 id=38-query-examples>3.8 Query examples</h3><p>Two shapes cover the MPP path from fragmentize through deploy and <strong><code>fetch_data</code></strong>: a tablet-parallel scan with GATHER, then a shuffle join with two-phase aggregate.</p><p><strong>Scan, filter, project.</strong> Parallelism is the tablet instances; the only shuffle is an optional GATHER so the client sees one stream.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
 </span></span><span style=display:flex><span>    dt     DATE,
 </span></span><span style=display:flex><span>    id     BIGINT,
 </span></span><span style=display:flex><span>    amount DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
@@ -1483,7 +1913,7 @@ PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
   0:OlapScanNode  TABLE: sales
      PREDICATES: dt = &#39;2024-06-01&#39;
      tablets: T100, T101
-</code></pre><p><strong><code>LocalFragmentAssignmentStrategy</code></strong> places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the <strong><code>ResultReceiver</code></strong> target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **<code>transmit_chunk</code>**s surviving rows to F0. The FE only **<code>fetch_data</code>**s F0.</p><p>If the optimizer can prove a <strong>single tablet</strong> (or short-circuit PK lookup), <strong><code>createOutputFragment()</code></strong> skips the GATHER fragment and hangs <strong><code>ResultSink</code></strong> on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-simple-query.svg alt="Simple query: tablet-parallel scan then GATHER"></p><h3 id=312-complete-query-shuffle-join-and-two-phase-aggregate>3.12 Complete query: shuffle join and two-phase aggregate</h3><p>A join plus <strong><code>GROUP BY</code></strong> is the full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under <strong><code>ResultSink</code></strong>. <strong><code>orders</code></strong> is <strong><code>DISTRIBUTED BY HASH(cust_id)</code></strong>; <strong><code>customers</code></strong> is <strong><code>HASH(id)</code></strong>; they are not colocated.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
+</code></pre><p><strong><code>LocalFragmentAssignmentStrategy</code></strong> places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the <strong><code>ResultReceiver</code></strong> target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **<code>transmit_chunk</code>**s surviving rows to F0. The FE only **<code>fetch_data</code>**s F0.</p><p>If the optimizer can prove a <strong>single tablet</strong> (or short-circuit PK lookup), <strong><code>createOutputFragment()</code></strong> skips the GATHER fragment and hangs <strong><code>ResultSink</code></strong> on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-simple-query.svg alt="Simple query: tablet-parallel scan then GATHER"></p><p><strong>Shuffle join and two-phase aggregate.</strong> The full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under <strong><code>ResultSink</code></strong>. <strong><code>orders</code></strong> is <strong><code>DISTRIBUTED BY HASH(cust_id)</code></strong>; <strong><code>customers</code></strong> is <strong><code>HASH(id)</code></strong>; they are not colocated.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
 </span></span><span style=display:flex><span>    dt      DATE,
 </span></span><span style=display:flex><span>    cust_id BIGINT,
 </span></span><span style=display:flex><span>    amount  DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
