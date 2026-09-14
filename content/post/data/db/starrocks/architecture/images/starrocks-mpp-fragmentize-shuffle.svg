@@ -1,111 +1,124 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" role="img" aria-label="Fragmentize: both join children and the aggregate have PhysicalDistributionOperator SHUFFLE cuts">
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" role="img" aria-label="Fragmentize shuffle: PlanFragments with ResultSink or DataStreamSink and ExchangeNodes">
   <defs>
-    <marker id="sh-big" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto">
+    <marker id="sh-arr" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto">
       <path d="M 0 1 L 11 6 L 0 11 z" fill="#455a64"/>
     </marker>
   </defs>
-  <rect width="1180" height="720" fill="#f7f9fb"/>
-  <text x="590" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Fragmentize: both join sides SHUFFLE_JOIN + SHUFFLE_AGG</text>
-  <text x="590" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">orders JOIN customers GROUP BY region -- three PhysicalDistributionOperator cuts, five PlanFragments</text>
+  <rect width="1180" height="760" fill="#f7f9fb"/>
 
-  <!-- Left: physical tree -->
-  <rect x="24" y="62" width="480" height="634" fill="#ffffff" stroke="#90caf9" stroke-width="1.5" rx="6"/>
-  <text x="264" y="86" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Physical OptExpression</text>
-  <text x="264" y="104" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">orange = PhysicalDistributionOperator</text>
+  <text x="590" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Fragmentize: Shuffle join + SHUFFLE_AGG</text>
 
-  <rect x="154" y="120" width="220" height="34" fill="#ffffff" stroke="#37474f" stroke-width="1.4" rx="3"/>
-  <text x="264" y="142" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#212121">GLOBAL HashAgg</text>
-  <line x1="264" y1="154" x2="264" y2="172" stroke="#37474f" stroke-width="1.4"/>
+  <rect x="36" y="42" width="16" height="12" fill="#e3f2fd" stroke="#1565c0" rx="2"/>
+  <text x="58" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">PhysicalOperator</text>
+  <rect x="190" y="42" width="16" height="12" fill="#ff9800" stroke="#e65100" rx="2"/>
+  <text x="212" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">PhysicalDistributionOperator</text>
+  <rect x="420" y="42" width="16" height="12" fill="none" stroke="#2e7d32" stroke-dasharray="3 2" rx="2"/>
+  <text x="442" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">PlanFragment</text>
+  <rect x="550" y="42" width="16" height="12" fill="#e8f5e9" stroke="#2e7d32" rx="2"/>
+  <text x="572" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">PlanNode</text>
+  <rect x="650" y="42" width="16" height="12" fill="#fff3e0" stroke="#ef6c00" rx="2"/>
+  <text x="672" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">ExchangeNode</text>
+  <rect x="780" y="42" width="16" height="12" fill="#f3e5f5" stroke="#7b1fa2" rx="2"/>
+  <text x="802" y="53" font-family="Consolas, monospace" font-size="10" fill="#37474f">DataSink</text>
 
-  <rect x="128" y="172" width="272" height="44" fill="#ff9800" stroke="#e65100" stroke-width="1.2" rx="3"/>
-  <text x="264" y="190" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">PhysicalDistribution</text>
-  <text x="264" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ffffff">SHUFFLE_AGG(region)</text>
-  <line x1="264" y1="216" x2="264" y2="234" stroke="#37474f" stroke-width="1.4"/>
+  <!-- left outbox -->
+  <rect x="24" y="68" width="500" height="668" fill="#ffffff" stroke="#90caf9" stroke-width="1.5" rx="6"/>
+  <text x="274" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0d47a1">OptExpression</text>
 
-  <rect x="154" y="234" width="220" height="34" fill="#ffffff" stroke="#37474f" stroke-width="1.4" rx="3"/>
-  <text x="264" y="256" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#212121">LOCAL HashAgg</text>
-  <line x1="264" y1="268" x2="264" y2="286" stroke="#37474f" stroke-width="1.4"/>
+  <rect x="149" y="110" width="250" height="34" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="274" y="132" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">PhysicalHashAggregate</text>
+  <line x1="274" y1="144" x2="274" y2="162" stroke="#37474f" stroke-width="1.3"/>
 
-  <rect x="154" y="286" width="220" height="34" fill="#ffffff" stroke="#37474f" stroke-width="1.4" rx="3"/>
-  <text x="264" y="308" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#212121">Physical HashJoin</text>
-  <path d="M 264 320 L 264 338 L 120 338 L 120 356" fill="none" stroke="#37474f" stroke-width="1.4"/>
-  <path d="M 264 338 L 400 338 L 400 356" fill="none" stroke="#37474f" stroke-width="1.4"/>
+  <rect x="124" y="162" width="300" height="40" fill="#ff9800" stroke="#e65100" rx="3"/>
+  <text x="274" y="187" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#ffffff">PhysicalDistribution SHUFFLE_AGG</text>
+  <line x1="274" y1="202" x2="274" y2="220" stroke="#37474f" stroke-width="1.3"/>
 
-  <rect x="48" y="356" width="144" height="48" fill="#ff9800" stroke="#e65100" stroke-width="1.2" rx="3"/>
-  <text x="120" y="376" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">PhysicalDistribution</text>
-  <text x="120" y="392" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">SHUFFLE_JOIN(cust_id)</text>
-  <line x1="120" y1="404" x2="120" y2="422" stroke="#37474f" stroke-width="1.4"/>
-  <rect x="55" y="422" width="130" height="40" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="120" y="440" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#212121">Scan orders</text>
-  <text x="120" y="454" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">LOCAL(cust_id)</text>
+  <rect x="149" y="220" width="250" height="34" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="274" y="242" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">PhysicalHashAggregate</text>
+  <line x1="274" y1="254" x2="274" y2="272" stroke="#37474f" stroke-width="1.3"/>
 
-  <rect x="328" y="356" width="144" height="48" fill="#ff9800" stroke="#e65100" stroke-width="1.2" rx="3"/>
-  <text x="400" y="376" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">PhysicalDistribution</text>
-  <text x="400" y="392" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">SHUFFLE_JOIN(id)</text>
-  <line x1="400" y1="404" x2="400" y2="422" stroke="#37474f" stroke-width="1.4"/>
-  <rect x="335" y="422" width="130" height="40" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="400" y="440" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#212121">Scan customers</text>
-  <text x="400" y="454" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#546e7a">LOCAL(id)</text>
+  <rect x="149" y="272" width="250" height="34" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="274" y="294" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">PhysicalHashJoin</text>
+  <path d="M 274 306 L 274 324 L 124 324 L 124 342" fill="none" stroke="#37474f" stroke-width="1.3"/>
+  <path d="M 274 324 L 404 324 L 404 342" fill="none" stroke="#37474f" stroke-width="1.3"/>
 
-  <text x="264" y="520" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Both join children fail isSatisfy(SHUFFLE_JOIN)</text>
-  <text x="264" y="538" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">LOCAL agg fails isSatisfy(SHUFFLE_AGG(region))</text>
-  <text x="264" y="568" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#e65100">three cuts -- five fragments after GATHER</text>
+  <rect x="44" y="342" width="160" height="44" fill="#ff9800" stroke="#e65100" rx="3"/>
+  <text x="124" y="362" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ffffff">PhysicalDistribution</text>
+  <text x="124" y="376" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ffffff">SHUFFLE_JOIN</text>
+  <line x1="124" y1="386" x2="124" y2="404" stroke="#37474f" stroke-width="1.3"/>
 
-  <!-- Center arrow -->
-  <line x1="520" y1="340" x2="600" y2="340" stroke="#455a64" stroke-width="4" marker-end="url(#sh-big)"/>
-  <text x="560" y="322" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#455a64">fragmentize</text>
+  <rect x="44" y="404" width="160" height="40" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="124" y="429" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">PhysicalOlapScan</text>
 
-  <!-- Right: fragments -->
-  <rect x="620" y="62" width="536" height="634" fill="#ffffff" stroke="#81c784" stroke-width="1.5" rx="6"/>
-  <text x="888" y="86" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">PlanFragment DAG</text>
-  <text x="888" y="104" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">join fragment has two inbound Exchanges</text>
+  <rect x="324" y="342" width="160" height="44" fill="#ff9800" stroke="#e65100" rx="3"/>
+  <text x="404" y="362" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ffffff">PhysicalDistribution</text>
+  <text x="404" y="376" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ffffff">SHUFFLE_JOIN</text>
+  <line x1="404" y1="386" x2="404" y2="404" stroke="#37474f" stroke-width="1.3"/>
 
-  <!-- F0 -->
-  <rect x="760" y="120" width="256" height="64" fill="none" stroke="#90a4ae" stroke-width="1.3" stroke-dasharray="5 3" rx="4"/>
-  <text x="772" y="138" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">Fragment 0</text>
-  <rect x="800" y="146" width="176" height="28" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="888" y="165" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#212121">ResultSink + GATHER</text>
-  <line x1="888" y1="184" x2="888" y2="204" stroke="#37474f" stroke-width="1.4"/>
+  <rect x="324" y="404" width="160" height="40" fill="#e3f2fd" stroke="#1565c0" rx="3"/>
+  <text x="404" y="429" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1565c0">PhysicalOlapScan</text>
 
-  <!-- F1 -->
-  <rect x="720" y="204" width="336" height="88" fill="none" stroke="#90a4ae" stroke-width="1.3" stroke-dasharray="5 3" rx="4"/>
-  <text x="732" y="222" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">Fragment 1</text>
-  <rect x="800" y="230" width="176" height="28" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="888" y="249" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#212121">GLOBAL HashAgg</text>
-  <rect x="812" y="264" width="152" height="22" fill="#ff9800" stroke="#e65100" stroke-width="1.1" rx="2"/>
-  <text x="888" y="279" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#ffffff">Exchange SHUFFLE_AGG</text>
-  <line x1="888" y1="292" x2="888" y2="312" stroke="#37474f" stroke-width="1.4"/>
+  <line x1="540" y1="340" x2="620" y2="340" stroke="#455a64" stroke-width="3.5" marker-end="url(#sh-arr)"/>
+  <text x="580" y="326" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#455a64">fragmentize</text>
 
-  <!-- F2 -->
-  <rect x="680" y="312" width="416" height="140" fill="none" stroke="#90a4ae" stroke-width="1.3" stroke-dasharray="5 3" rx="4"/>
-  <text x="692" y="330" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">Fragment 2</text>
-  <rect x="800" y="340" width="176" height="26" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="888" y="358" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#212121">LOCAL HashAgg + HashJoin</text>
-  <path d="M 888 366 L 888 382 L 760 382 L 760 398" fill="none" stroke="#37474f" stroke-width="1.4"/>
-  <path d="M 888 382 L 1016 382 L 1016 398" fill="none" stroke="#37474f" stroke-width="1.4"/>
-  <rect x="710" y="398" width="100" height="36" fill="#ff9800" stroke="#e65100" stroke-width="1.1" rx="2"/>
-  <text x="760" y="414" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">Exchange</text>
-  <text x="760" y="428" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#ffffff">SHUFFLE_JOIN</text>
-  <rect x="966" y="398" width="100" height="36" fill="#ff9800" stroke="#e65100" stroke-width="1.1" rx="2"/>
-  <text x="1016" y="414" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff">Exchange</text>
-  <text x="1016" y="428" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#ffffff">SHUFFLE_JOIN</text>
+  <!-- right outbox -->
+  <rect x="640" y="68" width="516" height="668" fill="#ffffff" stroke="#81c784" stroke-width="1.5" rx="6"/>
+  <text x="898" y="92" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">ExecPlan.fragments</text>
 
-  <line x1="760" y1="434" x2="760" y2="480" stroke="#37474f" stroke-width="1.4"/>
-  <line x1="1016" y1="434" x2="1016" y2="480" stroke="#37474f" stroke-width="1.4"/>
+  <!-- PlanFragment 0 -->
+  <rect x="760" y="108" width="276" height="88" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5 3" rx="4"/>
+  <text x="772" y="126" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">PlanFragment 0</text>
+  <rect x="788" y="136" width="220" height="24" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+  <text x="898" y="153" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#7b1fa2">ResultSink</text>
+  <rect x="788" y="164" width="220" height="24" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+  <text x="898" y="181" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">ExchangeNode GATHER</text>
+  <line x1="898" y1="196" x2="898" y2="214" stroke="#37474f" stroke-width="1.3"/>
 
-  <!-- F3 -->
-  <rect x="680" y="480" width="160" height="72" fill="none" stroke="#90a4ae" stroke-width="1.3" stroke-dasharray="5 3" rx="4"/>
-  <text x="692" y="498" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">Fragment 3</text>
-  <rect x="710" y="514" width="100" height="28" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="760" y="533" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#212121">orders</text>
+  <!-- PlanFragment 1 -->
+  <rect x="720" y="214" width="356" height="120" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5 3" rx="4"/>
+  <text x="732" y="232" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">PlanFragment 1</text>
+  <rect x="788" y="242" width="220" height="22" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+  <text x="898" y="258" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">DataStreamSink</text>
+  <rect x="788" y="270" width="220" height="24" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="898" y="287" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">AggregationNode</text>
+  <rect x="788" y="300" width="220" height="24" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+  <text x="898" y="317" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">ExchangeNode SHUFFLE_AGG</text>
+  <line x1="898" y1="334" x2="898" y2="352" stroke="#37474f" stroke-width="1.3"/>
 
-  <!-- F4 -->
-  <rect x="936" y="480" width="160" height="72" fill="none" stroke="#90a4ae" stroke-width="1.3" stroke-dasharray="5 3" rx="4"/>
-  <text x="948" y="498" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#c62828">Fragment 4</text>
-  <rect x="966" y="514" width="100" height="28" fill="#ffffff" stroke="#37474f" stroke-width="1.3" rx="3"/>
-  <text x="1016" y="533" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#212121">customers</text>
+  <!-- PlanFragment 2 -->
+  <rect x="660" y="352" width="476" height="200" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5 3" rx="4"/>
+  <text x="672" y="370" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">PlanFragment 2</text>
+  <rect x="788" y="380" width="220" height="22" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+  <text x="898" y="396" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">DataStreamSink</text>
+  <rect x="788" y="408" width="220" height="24" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="898" y="425" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">AggregationNode</text>
+  <line x1="898" y1="432" x2="898" y2="448" stroke="#37474f" stroke-width="1.3"/>
+  <rect x="788" y="448" width="220" height="24" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="898" y="465" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">HashJoinNode</text>
+  <path d="M 898 472 L 898 488 L 760 488 L 760 504" fill="none" stroke="#37474f" stroke-width="1.3"/>
+  <path d="M 898 488 L 1036 488 L 1036 504" fill="none" stroke="#37474f" stroke-width="1.3"/>
+  <rect x="690" y="504" width="140" height="32" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+  <text x="760" y="525" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#e65100">ExchangeNode</text>
+  <rect x="966" y="504" width="140" height="32" fill="#fff3e0" stroke="#ef6c00" rx="3"/>
+  <text x="1036" y="525" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#e65100">ExchangeNode</text>
 
-  <text x="888" y="590" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Neither scan stays in the join fragment</text>
-  <text x="888" y="608" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">(contrast with broadcast / bucket: one side can stay local)</text>
+  <line x1="760" y1="536" x2="760" y2="572" stroke="#37474f" stroke-width="1.3"/>
+  <line x1="1036" y1="536" x2="1036" y2="572" stroke="#37474f" stroke-width="1.3"/>
+
+  <!-- PlanFragment 3 -->
+  <rect x="680" y="572" width="160" height="96" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5 3" rx="4"/>
+  <text x="692" y="590" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">PlanFragment 3</text>
+  <rect x="696" y="598" width="128" height="22" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+  <text x="760" y="614" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">DataStreamSink</text>
+  <rect x="700" y="626" width="120" height="32" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="760" y="647" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">OlapScanNode</text>
+
+  <!-- PlanFragment 4 -->
+  <rect x="956" y="572" width="160" height="96" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5 3" rx="4"/>
+  <text x="968" y="590" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">PlanFragment 4</text>
+  <rect x="972" y="598" width="128" height="22" fill="#f3e5f5" stroke="#7b1fa2" rx="3"/>
+  <text x="1036" y="614" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">DataStreamSink</text>
+  <rect x="976" y="626" width="120" height="32" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="1036" y="647" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">OlapScanNode</text>
 </svg>
