@@ -1809,7 +1809,9 @@ class ExecPlan {
 abstract class TreeNode {
   # children : List
   + getChildren()
+  + getChild()
   + addChild()
+  + addChildren()
 }
 
 class PlanFragment {
@@ -1864,6 +1866,7 @@ PhysicalPlanTranslator --> ExecPlan : context
 ExecPlan o-- PlanFragment : fragments
 
 TreeNode <|-- PlanFragment
+TreeNode <|-- PlanNode
 PlanFragment --> PlanNode : planRoot
 PlanFragment --> DataPartition : dataPartition
 PlanFragment --> DataPartition : outputPartition
@@ -1882,7 +1885,7 @@ OptExpression --> PhysicalDistributionOperator : op
 @enduml
 ```
 
-**`PlanFragment`** extends **`TreeNode`**. That is the plan’s fragment DAG: **`setDestination`** adds the producer fragment as a child of the consumer. Each fragment’s **`planRoot`** is a **`PlanNode`** (join, scan, exchange, …) for the operators that run inside that fragment.
+**`PlanFragment`** and **`PlanNode`** both extend **`TreeNode`** (as **`TreeNode<PlanFragment>`** and **`TreeNode<PlanNode>`**). **`PlanFragment`** uses **`children`** for the fragment DAG: **`setDestination`** adds the producer as a child of the consumer. **`PlanNode`** uses the same **`TreeNode`** API for the in-fragment operator graph—**`getChild` / `addChild`** hold join inputs, agg/project children, and so on—so a **`HashJoinNode`** (or any non-leaf) is a **`PlanNode`** that can have children. Each fragment’s **`planRoot`** is the root of that operator graph (join, scan, exchange, …).
 
 **`ExchangeNode` and `DataSink`** are the two ends of one MPP edge. They are not interchangeable.
 
@@ -2010,7 +2013,23 @@ A shuffle join sets the child’s output to **`TPartitionType.HASH_PARTITIONED`*
 
 ### 3.6 Schedule
 
-After fragmentize, **`ExecPlan`** holds **`fragments`**, **`scanNodes`**, and the descriptor table. Schedule turns that into an **`ExecutionDAG`**: every **`PlanFragment`** becomes an **`ExecutionFragment`** with **`FragmentInstance`**s bound to workers. CBO only named bucket layouts; this step chooses machines and tablet scan ranges.
+After fragmentize, **`ExecPlan`** holds **`fragments`**, **`scanNodes`**, and the descriptor table. Schedule turns that into an **`ExecutionDAG`**: every **`PlanFragment`** becomes an **`ExecutionFragment`** with **`FragmentInstance`**s bound to workers. CBO only named bucket layouts; this step chooses machines, tablet scan ranges, and the exact peer list each producer will shuffle to. Deploy (§3.7) only serializes that binding and ships it—the FE succeeds at distributed execution because **schedule already finished the hard decisions**.
+
+**Mechanism: build a complete execution contract.** A worker can start without calling the FE for topology only if its **`TExecPlanFragmentParams`** already answers four questions: *where do I run*, *what do I scan*, *whom do I send to*, and *when is an Exchange input complete*. Schedule answers them in order.
+
+| Decision | Where it lands | How schedule decides |
+|----------|----------------|----------------------|
+| Worker for each instance | **`FragmentInstance.worker`** | Scan fragments: **`LocalFragmentAssignmentStrategy`** + **`BackendSelector`** (tablet replica / lake shard → BE or CN). Exchange-only fragments: **`RemoteFragmentAssignmentStrategy`** (GATHER → one worker; shuffle/join stages → workers derived from child instances or the compute-node set). |
+| Tablets / files per instance | **`FragmentInstance.node2ScanRanges`** | After range→worker assignment, pack that worker’s **`TScanRangeParams`** onto one instance so each replica is scanned once and locality is preserved. |
+| Producer → consumer peers | **`ExecutionFragment.destinations`** (`TPlanFragmentDestination`: peer **`fragment_instance_id`** + **`brpc_server`**) | **`ExecutionDAG.finalizeDAG()` → `connectFragmentToDestFragments`**: for each non-root fragment, enumerate the dest fragment’s instances (or bucket→instance map for local bucket shuffle) and record brpc addresses. |
+| Exchange completeness | **`numSendersPerExchange`** | Same connect step: dest Exchange id ← sum of producer **`instances.size()`** (multiple upstream fragments may feed one merge Exchange). |
+| FE result pull | **`ResultReceiver`** | **`prepareResultSink`**: root fragment must have a single instance; bind its id and worker brpc address for later **`fetch_data`**. |
+
+**Post-order is required.** **`computeFragmentInstances`** walks **`getFragmentsInPostorder()`** so child (producer) instances exist before a parent (consumer) is assigned. Remote stages can then copy or expand from child worker sets; **`finalizeDAG`** can point each producer at concrete consumer instance ids. Pre-order would leave destinations unresolved.
+
+**Local vs remote assignment.** A fragment whose leftmost node is a scan is *local*: data location drives placement. A fragment whose inputs arrive only through **`ExchangeNode`** is *remote*: placement follows parallelism and child hosts (or preferred CNs), not tablet maps. GATHER collapses to one instance so the FE has a single **`ResultSink`** endpoint.
+
+**Invariants checked before deploy.** **`validateExecutionDAG`** rejects multi-instance roots with **`ResultSink`** (and similar single-sink constraints). After **`finalizeDAG`**, every producer’s **`destinations`** and every consumer’s sender counts are fixed; intermediate **`transmit_chunk`** never needs the FE.
 
 **Overall procedure.** From **`handleQueryStmt(execPlan)`** through assignment (deploy is §3.7):
 
@@ -2019,7 +2038,7 @@ After fragmentize, **`ExecPlan`** holds **`fragments`**, **`scanNodes`**, and th
 3. **Register** — **`QeProcessorImpl.registerQuery`** so status reports can find this **`coord`**.
 4. **Start scheduling** — **`execWithQueryDeployExecutor` → `startScheduling`**: queue wait, then **`prepareExec`**, then deploy.
 5. **`prepareExec`** — **`computeFragmentInstances`** (assign each fragment to workers), **`prepareResultSink`** (root instance → **`ResultReceiver`**).
-6. **Assign instances** — for each **`ExecutionFragment`** in post-order: scan fragments use **`LocalFragmentAssignmentStrategy`** (tablet → replica BE / lake shard → CN); exchange-only fragments use **`RemoteFragmentAssignmentStrategy`**. Then **`executionDAG.finalizeDAG()`** fills Exchange **`destinations`**.
+6. **Assign instances** — for each **`ExecutionFragment`** in post-order: scan fragments use **`LocalFragmentAssignmentStrategy`** (tablet → replica BE / lake shard → CN); exchange-only fragments use **`RemoteFragmentAssignmentStrategy`**. Then **`executionDAG.finalizeDAG()`** fills Exchange **`destinations`** and **`numSendersPerExchange`**.
 
 ```plantuml
 @startuml
@@ -2193,7 +2212,7 @@ void computeFragmentInstances() throws StarRocksException {
                 .create(execFragment, lazyWorkerProvider.get())
                 .assignFragmentToWorker(execFragment);
     }
-    executionDAG.finalizeDAG();  // wire Exchange destinations instance → instance
+    executionDAG.finalizeDAG();  // destinations[] + numSendersPerExchange per Exchange
 }
 
 // LocalFragmentAssignmentStrategy (scan fragments):
@@ -2203,6 +2222,22 @@ void assignFragmentToWorker(ExecutionFragment execFragment) throws StarRocksExce
     }
     assignScanRangesToFragmentInstancePerWorker(execFragment);
     // one FragmentInstance per chosen worker, node2ScanRanges = that worker's tablets
+}
+
+// RemoteFragmentAssignmentStrategy (exchange-only): GATHER → 1 instance;
+// otherwise workers from child instances / compute nodes (parallelism)
+
+// finalizeDAG (normal fragment): producer destinations = every dest instance
+void connectNormalFragmentToDestFragments(ExecutionFragment execFragment) {
+    ExecutionFragment dest = idToFragment.get(fragment.getDestFragment().getFragmentId());
+    dest.getNumSendersPerExchange().compute(exchangeId, (k, n) ->
+            (n == null ? 0 : n) + execFragment.getInstances().size());
+    for (FragmentInstance destInstance : dest.getInstances()) {
+        TPlanFragmentDestination d = new TPlanFragmentDestination();
+        d.setFragment_instance_id(destInstance.getInstanceId());
+        d.setBrpc_server(destInstance.getWorker().getBrpcIpAddress());
+        execFragment.addDestination(d);
+    }
 }
 
 // after instances exist: root ResultReceiver for FE fetch_data
@@ -2215,11 +2250,13 @@ void prepareResultSink() {
 }
 ```
 
-A scan fragment becomes one **`FragmentInstance`** per chosen worker, each carrying that worker’s **`TScanRangeParams`**. The same **`PlanFragment`** therefore runs in parallel without the FE copying rows.
+A scan fragment becomes one **`FragmentInstance`** per chosen worker, each carrying that worker’s **`TScanRangeParams`**. The same **`PlanFragment`** therefore runs in parallel without the FE copying rows. After **`finalizeDAG`**, every shuffle edge is an instance-to-instance address list; deploy only has to deliver that contract to each worker.
 
 ### 3.7 Deploy and collect results
 
-Schedule (§3.6) produced an **`ExecutionDAG`** of **`FragmentInstance`**s. Deploy ships each instance to its worker so the BE/CN can build the pipeline. The FE does **not** send rows on deploy—only the plan, descriptors, scan ranges, and Exchange destinations. Intermediate batches then move worker-to-worker as **`transmit_chunk`**; the FE only **`fetch_data`**s the root. Pipeline internals are in [Backend and Compute Node](../backend/). Workers report progress via Thrift **`FrontendService.reportExecStatus`** → **`DefaultCoordinator.updateFragmentExecStatus()`** (cancel on failure, know when the root finishes).
+Schedule (§3.6) produced an **`ExecutionDAG`** of **`FragmentInstance`**s with workers, scan ranges, Exchange **`destinations`**, and sender counts already fixed. Deploy ships each instance to its worker so the BE/CN can build the pipeline. The FE does **not** send rows on deploy—only the plan, descriptors, scan ranges, and those destinations. Intermediate batches then move worker-to-worker as **`transmit_chunk`**; the FE only **`fetch_data`**s the root. Pipeline internals are in [Backend and Compute Node](../backend/). Workers report progress via Thrift **`FrontendService.reportExecStatus`** → **`DefaultCoordinator.updateFragmentExecStatus()`** (cancel on failure, know when the root finishes).
+
+![Deploy and collect: FE control plane vs BE-to-BE data plane](images/starrocks-mpp-deploy-collect.svg)
 
 ```plantuml
 @startuml

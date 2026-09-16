@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 720" width="100%" height="100%">
+  <defs>
+    <marker id="exarr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#37474f" />
+    </marker>
+  </defs>
+  <rect width="980" height="720" fill="#fcfcfc" rx="8" />
+
+  <text x="490" y="28" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#2c3e50">Example: UPDATE employees SET salary = 75000 WHERE id = 10</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">trx_id = 202; prior Salary = 70000; undo tablespace undo_001</text>
+
+  <!-- SQL / before after -->
+  <rect x="24" y="64" width="932" height="56" fill="#e8eaf6" stroke="#3949ab" rx="4" />
+  <text x="40" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#1a237e">Before: (10, 'Charlie', 70000, DB_TRX_ID=198, DB_ROLL_PTR -&gt; older undo)</text>
+  <text x="40" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#1a237e">After:  (10, 'Charlie', 75000, DB_TRX_ID=202, DB_ROLL_PTR = {upd, rseg=2, page=57, offset=0x7F03})</text>
+
+  <!-- Memory column -->
+  <rect x="24" y="140" width="450" height="560" fill="#ffffff" stroke="#1565c0" stroke-width="2" rx="6" />
+  <rect x="24" y="140" width="450" height="30" fill="#1565c0" rx="6" />
+  <text x="249" y="160" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Memory after assigning update undo</text>
+
+  <rect x="44" y="188" width="410" height="70" fill="#e3f2fd" stroke="#1565c0" rx="4" />
+  <text x="54" y="210" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#0d47a1">trx_t</text>
+  <text x="54" y="230" font-family="Consolas, monospace" font-size="11" fill="#1565c0">id = 202; undo_no = 5</text>
+  <text x="54" y="248" font-family="Consolas, monospace" font-size="11" fill="#1565c0">rsegs.m_redo.update_undo -&gt; U1</text>
+
+  <path d="M 249 258 L 249 278" stroke="#37474f" stroke-width="1.5" marker-end="url(#exarr)" />
+
+  <rect x="44" y="278" width="410" height="150" fill="#fce4ec" stroke="#ad1457" rx="4" />
+  <text x="54" y="300" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#880e4f">trx_undo_t U1 (update)</text>
+  <text x="54" y="322" font-family="Consolas, monospace" font-size="11" fill="#ad1457">space        = undo_001 (id 12)</text>
+  <text x="54" y="340" font-family="Consolas, monospace" font-size="11" fill="#ad1457">hdr_page_no  = 40</text>
+  <text x="54" y="358" font-family="Consolas, monospace" font-size="11" fill="#ad1457">top_page_no  = 57</text>
+  <text x="54" y="376" font-family="Consolas, monospace" font-size="11" fill="#ad1457">top_offset   = 0x7F03   (just written)</text>
+  <text x="54" y="394" font-family="Consolas, monospace" font-size="11" fill="#ad1457">top_undo_no  = 5</text>
+  <text x="54" y="412" font-family="Consolas, monospace" font-size="11" fill="#ad1457">rseg         -&gt; trx_rseg_t #2</text>
+
+  <path d="M 249 428 L 249 448" stroke="#37474f" stroke-width="1.5" marker-end="url(#exarr)" />
+
+  <rect x="44" y="448" width="410" height="100" fill="#e8f5e9" stroke="#2e7d32" rx="4" />
+  <text x="54" y="470" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#1b5e20">trx_rseg_t #2</text>
+  <text x="54" y="492" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">id = 2; space = undo_001; page_no = 5</text>
+  <text x="54" y="510" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">slots[17] = page 40  (this trx undo segment)</text>
+  <text x="54" y="528" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">update_undo_list contains U1</text>
+
+  <rect x="44" y="568" width="410" height="112" fill="#fff3e0" stroke="#ef6c00" rx="4" />
+  <text x="54" y="590" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#e65100">buf_block_t (page 57 in Buffer Pool)</text>
+  <text x="54" y="612" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#ef6c00">16 KiB frame; dirty; also on Flush List</text>
+  <text x="54" y="632" font-family="Consolas, monospace" font-size="11" fill="#f57c00">frame[0x7F03 ..] = undo record below</text>
+  <text x="54" y="652" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#fb8c00">guess_block of U1 points here</text>
+
+  <!-- Physical column -->
+  <rect x="506" y="140" width="450" height="560" fill="#ffffff" stroke="#4e342e" stroke-width="2" rx="6" />
+  <rect x="506" y="140" width="450" height="30" fill="#4e342e" rx="6" />
+  <text x="731" y="160" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Physical content (illustrative)</text>
+
+  <rect x="526" y="188" width="410" height="72" fill="#efebe9" stroke="#5d4037" rx="4" />
+  <text x="536" y="210" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#4e342e">undo_001  page 5  (rseg header)</text>
+  <text x="536" y="230" font-family="Consolas, monospace" font-size="10" fill="#6d4c41">slots[17] = 40</text>
+  <text x="536" y="248" font-family="Consolas, monospace" font-size="10" fill="#6d4c41">history list ... (older committed undos)</text>
+
+  <path d="M 731 260 L 731 280" stroke="#37474f" stroke-width="1.5" marker-end="url(#exarr)" />
+
+  <rect x="526" y="280" width="410" height="72" fill="#fce4ec" stroke="#ad1457" rx="4" />
+  <text x="536" y="302" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#880e4f">page 40  (undo segment first page)</text>
+  <text x="536" y="322" font-family="Consolas, monospace" font-size="10" fill="#ad1457">TRX_UNDO_SEG_HDR state=ACTIVE</text>
+  <text x="536" y="340" font-family="Consolas, monospace" font-size="10" fill="#ad1457">page list: 40 -&gt; 57 (top)</text>
+
+  <path d="M 731 352 L 731 372" stroke="#37474f" stroke-width="1.5" marker-end="url(#exarr)" />
+
+  <rect x="526" y="372" width="410" height="208" fill="#fafafa" stroke="#37474f" rx="4" />
+  <text x="536" y="394" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#263238">page 57  @ offset 0x7F03  (update undo record)</text>
+  <text x="536" y="416" font-family="Consolas, monospace" font-size="10" fill="#455a64">type          = TRX_UNDO_UPD_EXIST_REC</text>
+  <text x="536" y="434" font-family="Consolas, monospace" font-size="10" fill="#455a64">undo_no       = 5</text>
+  <text x="536" y="452" font-family="Consolas, monospace" font-size="10" fill="#455a64">table_id      = employees</text>
+  <text x="536" y="470" font-family="Consolas, monospace" font-size="10" fill="#455a64">info_bits / n_fields_upd = 1</text>
+  <text x="536" y="488" font-family="Consolas, monospace" font-size="10" fill="#455a64">primary key   = ID=10</text>
+  <text x="536" y="506" font-family="Consolas, monospace" font-size="10" fill="#c62828" font-weight="bold">old Salary    = 70000   &lt;-- old value of updated col</text>
+  <text x="536" y="524" font-family="Consolas, monospace" font-size="10" fill="#455a64">old DB_TRX_ID = 198</text>
+  <text x="536" y="542" font-family="Consolas, monospace" font-size="10" fill="#455a64">old DB_ROLL_PTR -&gt; page 57 offset 0x7B01</text>
+  <text x="536" y="564" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">Name not in update vector: not written to undo</text>
+
+  <rect x="526" y="600" width="410" height="80" fill="#e8eaf6" stroke="#3949ab" rx="4" />
+  <text x="536" y="622" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#1a237e">DB_ROLL_PTR on clustered leaf</text>
+  <text x="536" y="642" font-family="Consolas, monospace" font-size="10" fill="#283593">is_insert=0 | rseg_id=2 | page_no=57 | offset=0x7F03</text>
+  <text x="536" y="662" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#5c6bc0">MVCC: overlay old Salary onto current clustered row</text>
+</svg>

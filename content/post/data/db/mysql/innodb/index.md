@@ -122,7 +122,7 @@ InnoDB is a general-purpose transactional storage engine that balances high reli
 To minimize latency caused by slow disk I/O, InnoDB operates a large, highly structured pool of memory:
 
 ### A. The Buffer Pool
-The **Buffer Pool** is the heart of InnoDB. It caches table and index pages (with a default page size of 16KB) directly in memory, allowing read and write operations to happen at RAM speeds. It is managed via three primary linked lists:
+The **Buffer Pool** is the heart of InnoDB. It caches table and index pages (with a default page size of 16KB)—and **undo pages** when they are read or dirtied—directly in memory, allowing read and write operations to happen at RAM speeds. It is managed via three primary linked lists:
 *   **Free List**: Keeps track of unused/empty memory pages ready to be allocated.
 *   **Flush List**: Tracks "dirty pages" (pages modified in-memory whose changes have not yet been written to the physical tablespace files).
 *   **LRU (Least Recently Used) List**: Implements the page eviction policy when the buffer pool becomes full.
@@ -145,6 +145,15 @@ Stores transactional log records (**Redo Logs**) in memory before flushing them 
     *   `0`: Redo log is written and synced to disk once per second. High speed, but up to 1 second of transaction data can be lost in a crash.
     *   `2`: Redo log is written to the OS file cache at commit, but flushed/synced to disk once per second. Safely survives a `mysqld` crash, but data can be lost during an OS/power failure.
 
+### E. Undo (memory objects, not a redo-style buffer)
+Unlike redo, InnoDB does **not** keep a dedicated circular “undo log buffer.” Undo **pages** are ordinary pages: written through the Buffer Pool and persisted in **undo tablespaces**. What lives as first-class RAM objects are:
+
+*   **`trx_t::rsegs`** (`trx_rsegs_t`): durable undo via **`m_redo`**, temp via **`m_noredo`**; each is a **`trx_undo_ptr_t`** holding **`rseg`**, **`insert_undo`**, **`update_undo`**.
+*   **`trx_undo_t`**: one assigned undo log (`hdr_page_no`, `top_page_no`, `top_offset`, `guess_block` into the Buffer Pool).
+*   **`trx_rseg_t`**: rollback-segment mirror with update/insert undo lists and cached reusable undo logs, plus the history list used by purge.
+
+Physical undo layout and how **`DB_ROLL_PTR`** addresses a record are in §4.
+
 ---
 
 ## 2. On-Disk Structures
@@ -156,7 +165,7 @@ Relational data inside InnoDB is organized into logical tablespace structures co
 
 *   **System Tablespace**: Stores the doublewrite buffer pages, change buffer pages, and historical system data.
 *   **File-Per-Table Tablespaces**: If `innodb_file_per_table` is enabled (default), each table and its associated indexes are stored on the file system in an independent `.ibd` file.
-*   **Undo Tablespaces**: Houses Undo logs, which store previous versions of modified records to facilitate rolling back transactions and providing MVCC reads.
+*   **Undo Tablespaces**: Durable home of undo log **pages**—rollback segment headers, undo slots, and undo log segments used for rollback and MVCC. In-memory counterparts are **`trx_rseg_t` / `trx_undo_t`** (§1.E, §4); page frames may also sit in the Buffer Pool when hot.
 *   **Temporary Tablespaces**: Dedicated tablespace files utilized for temporary tables generated during complex aggregations (like `TemptableAggregateIterator` outputs).
 
 ---
@@ -291,11 +300,42 @@ struct trx_t {
   trx_lock_t lock
   isolation_level_t isolation_level
   THD *mysql_thd
+  undo_no_t undo_no
   trx_savept_t last_sql_stat_start
+  trx_rsegs_t rsegs
   trx_mod_tables_t mod_tables
 }
 
+struct trx_rsegs_t {
+  trx_undo_ptr_t m_redo
+  trx_undo_ptr_t m_noredo
+}
 
+struct trx_undo_ptr_t {
+  trx_rseg_t *rseg
+  trx_undo_t *insert_undo
+  trx_undo_t *update_undo
+}
+
+struct trx_undo_t {
+  trx_rseg_t *rseg
+  space_id_t space
+  page_no_t hdr_page_no
+  page_no_t top_page_no
+  ulint top_offset
+  undo_no_t top_undo_no
+  buf_block_t *guess_block
+}
+
+struct trx_rseg_t {
+  size_t id
+  space_id_t space_id
+  page_no_t page_no
+  Undo_list update_undo_list
+  Undo_list insert_undo_list
+  Undo_list update_undo_cached
+  Undo_list insert_undo_cached
+}
 
 class Transaction_ctx {
   SAVEPOINT *m_savepoints
@@ -348,6 +388,14 @@ row_prebuilt_t *-- trx_t
 dict_table_t o- dict_index_t
 Transaction_ctx *-- THD_TRANS
 THD_TRANS *-- Ha_trx_info
+trx_t *-- trx_rsegs_t : rsegs
+trx_rsegs_t *-- trx_undo_ptr_t : m_redo
+trx_rsegs_t *-- trx_undo_ptr_t : m_noredo
+trx_undo_ptr_t o-- trx_rseg_t : rseg
+trx_undo_ptr_t o-- trx_undo_t : insert_undo
+trx_undo_ptr_t o-- trx_undo_t : update_undo
+trx_undo_t o-- trx_rseg_t : rseg
+trx_rseg_t o-- trx_undo_t : undo lists
 
 ```
 
@@ -376,6 +424,66 @@ To implement MVCC, InnoDB appends three hidden metadata fields to every clustere
 1.  **`DB_TRX_ID`** (6 bytes): Tracks the transaction identifier of the last transaction that modified (inserted or updated) this row.
 2.  **`DB_ROLL_PTR`** (7 bytes): The rollback pointer. Points directly to the undo log record containing the previous state of the row.
 3.  **`DB_ROW_ID`** (6 bytes): The row ID used to uniquely organize clustered records if no primary key was specified.
+
+### Undo log: memory and physical layout
+
+The architecture overview shows undo on both sides of the Memory/Disk split for a reason: **control objects** live in process memory; **bytes** live in undo tablespace pages (often cached in the Buffer Pool).
+
+![Undo log memory vs physical layout](images/undo-log-layout.svg)
+
+**Memory.** A read-write **`trx_t`** is assigned undo from a rollback segment:
+
+| Object | Role |
+|--------|------|
+| **`trx_t::rsegs`** | **`m_redo` / `m_noredo`**: assigned rollback segment + undo logs for durable / temp tables |
+| **`trx_undo_ptr_t`** | **`rseg`**, **`insert_undo`**, **`update_undo`** |
+| **`trx_undo_t`** | In-memory description of one undo log: tablespace, header page/offset, current top page/offset, size, optional `guess_block` |
+| **`trx_rseg_t`** | Rollback segment: active and cached insert/update undo lists; history list of committed undo for purge |
+
+There is no redo-like dedicated undo buffer. Appending an undo record dirties an undo page in the Buffer Pool; durability of that page change is covered by **redo**, same as index pages.
+
+**Physical (undo tablespace).** On disk (e.g. `undo_001`):
+
+1. **Rollback segment header page** — history-list metadata and an array of **undo slots** (`page_size / 16` slots; 1024 at the default 16 KiB page). Each non-empty slot points at the first page of an undo log segment.
+2. **Undo log segment first page** — `TRX_UNDO_PAGE_HDR`, then `TRX_UNDO_SEG_HDR` (segment state, last log, page list), then undo log header and early records.
+3. **Continuation undo pages** — page header plus undo records. An **update** record stores old `DB_TRX_ID` / `DB_ROLL_PTR`, the primary key, and **old values of columns in the update vector only** (not a full prior row). An **insert** record stores enough to undo the insert.
+
+**`DB_ROLL_PTR`** packs whether the undo is insert-type, which rollback segment, and the **page number + offset** of the undo record. Following that pointer is how MVCC walks older versions.
+
+**What an update undo record actually stores** (from `trx_undo_page_report_modify` on the clustered index record **before** the in-place change):
+
+1. Type (`TRX_UNDO_UPD_EXIST_REC` / delete-mark variants), `undo_no`, `table_id`
+2. Old record `info_bits`, old **`DB_TRX_ID`**, old **`DB_ROLL_PTR`**
+3. Clustered **unique key** columns (to find the row)
+4. **`n_updated`**, then for each entry in the update vector: field number + **old column value** copied from the still-unmodified record (`/* Save the old value of field */`)
+
+It does **not** store a full previous row image. Unchanged columns (e.g. `Name` when only `Salary` is updated) are omitted. MVCC rebuilds an older version by starting from the current clustered record and overlaying those old column values from the undo chain (`trx_undo_prev_version_build`). INSERT undo is a different record type: enough information to remove the inserted row on rollback.
+
+(LOB columns may additionally record partial binary patches via `trx_undo_report_blob_update`; ordinary in-row columns are whole old values, not byte diffs.)
+
+**Worked example.** Same row as §5 / the version-chain figure: transaction **202** runs
+
+```sql
+UPDATE employees SET salary = 75000 WHERE id = 10;
+```
+
+Before the statement, the clustered leaf holds `(10, 'Charlie', 70000)` with `DB_TRX_ID = 198`. InnoDB appends an **update** undo record with the **old `Salary`**, then rewrites the leaf.
+
+![Undo log example: memory objects and page contents for salary update](images/undo-log-example.svg)
+
+Concrete bindings after the undo append (illustrative addresses):
+
+| Location | Content |
+|----------|---------|
+| **`trx_t`** | `id = 202`, `rsegs.m_redo.update_undo → U1` |
+| **`trx_undo_t U1`** | `space = undo_001`, `hdr_page_no = 40`, `top_page_no = 57`, `top_offset = 0x7F03`, `top_undo_no = 5`, `rseg = #2` |
+| **`trx_rseg_t #2`** | header page 5; `slots[17] = 40`; `U1` on `update_undo_list` |
+| **Buffer Pool / disk page 57** | at `0x7F03`: `TRX_UNDO_UPD_EXIST_REC`, PK `ID=10`, **old `Salary = 70000`**, old `DB_TRX_ID = 198`, old roll pointer; **`Name` not present** |
+| **Clustered leaf** | `Salary = 75000`, `DB_TRX_ID = 202`, `DB_ROLL_PTR = {update, rseg 2, page 57, offset 0x7F03}` |
+
+An INSERT undo for the original row (version-chain figure at `0x6A05`) is a separate **`insert_undo`** log and stores what is needed to undo the insert, not an update-style column vector. Page/slot numbers above are pedagogical; the field set matches the source writer.
+
+### Version chain (logical view)
 
 ![Undo Log Version Chain](images/undo-log.svg)
 
@@ -425,8 +533,21 @@ struct trx_t {
   trx_lock_t lock
   isolation_level_t isolation_level
   THD *mysql_thd
+  undo_no_t undo_no
   trx_savept_t last_sql_stat_start
+  trx_rsegs_t rsegs
   trx_mod_tables_t mod_tables
+}
+
+struct trx_rsegs_t {
+  trx_undo_ptr_t m_redo
+  trx_undo_ptr_t m_noredo
+}
+
+struct trx_undo_ptr_t {
+  trx_rseg_t *rseg
+  trx_undo_t *insert_undo
+  trx_undo_t *update_undo
 }
 
 class ReadView {
@@ -472,6 +593,9 @@ btr_pcur_t *-- btr_cur_t
 
 row_prebuilt_t *-- trx_t
 trx_t *-- ReadView
+trx_t *-- trx_rsegs_t : rsegs
+trx_rsegs_t *-- trx_undo_ptr_t : m_redo
+trx_undo_ptr_t o-- trx_undo_t : update_undo
 trx_sys_t -> trx_t
 
 

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" role="img" aria-label="Deploy and collect: FE-BE control RPCs and BE-BE transmit_chunk data path">
+  <defs>
+    <marker id="arr-blue" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#1565c0"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arr-orange" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arr-purple" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#7b1fa2"/>
+    </marker>
+  </defs>
+  <rect width="1180" height="720" fill="#f7f9fb"/>
+
+  <text x="590" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Deploy and collect: FE control plane vs BE data plane</text>
+
+  <!-- legend -->
+  <line x1="40" y1="50" x2="80" y2="50" stroke="#1565c0" stroke-width="2.5" marker-end="url(#arr-blue)"/>
+  <text x="88" y="54" font-family="Consolas, monospace" font-size="11" fill="#37474f">exec_plan_fragment (brpc + Thrift)</text>
+  <line x1="360" y1="50" x2="400" y2="50" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arr-green)"/>
+  <text x="408" y="54" font-family="Consolas, monospace" font-size="11" fill="#37474f">transmit_chunk (BE to BE)</text>
+  <line x1="620" y1="50" x2="660" y2="50" stroke="#ef6c00" stroke-width="2.5" marker-end="url(#arr-orange)"/>
+  <text x="668" y="54" font-family="Consolas, monospace" font-size="11" fill="#37474f">fetch_data</text>
+  <line x1="760" y1="50" x2="800" y2="50" stroke="#7b1fa2" stroke-width="2.5" marker-end="url(#arr-purple)"/>
+  <text x="808" y="54" font-family="Consolas, monospace" font-size="11" fill="#37474f">reportExecStatus (Thrift)</text>
+
+  <!-- FE box -->
+  <rect x="420" y="72" width="340" height="130" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" rx="8"/>
+  <text x="590" y="98" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Frontend (coordinator)</text>
+  <rect x="440" y="112" width="140" height="40" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="510" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">Deployer</text>
+  <text x="510" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">TExecPlanFragmentParams</text>
+  <rect x="600" y="112" width="140" height="40" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="670" y="130" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">ResultReceiver</text>
+  <text x="670" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">fetch_data loop</text>
+  <rect x="490" y="162" width="180" height="28" fill="#ffffff" stroke="#1565c0" rx="4"/>
+  <text x="580" y="181" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">DefaultCoordinator</text>
+
+  <!-- BE workers -->
+  <rect x="40" y="380" width="340" height="180" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" rx="8"/>
+  <text x="210" y="406" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">BE-1 (scan fragment)</text>
+  <rect x="70" y="422" width="280" height="50" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="210" y="442" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#2e7d32">FragmentInstance F3</text>
+  <text x="210" y="458" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">OlapScan + DataStreamSink</text>
+  <rect x="70" y="486" width="280" height="50" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+  <text x="210" y="506" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">destinations[] = F2 instances</text>
+  <text x="210" y="522" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">brpc_server of join workers</text>
+
+  <rect x="420" y="380" width="340" height="180" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" rx="8"/>
+  <text x="590" y="406" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">BE-2 (join / agg fragment)</text>
+  <rect x="450" y="422" width="280" height="50" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="590" y="442" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#2e7d32">FragmentInstance F2</text>
+  <text x="590" y="458" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">ExchangeNode + HashJoin + Agg</text>
+  <rect x="450" y="486" width="280" height="50" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+  <text x="590" y="506" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#e65100">DataStreamSink / Result path</text>
+  <text x="590" y="522" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">shuffle to F1 or toward root</text>
+
+  <rect x="800" y="380" width="340" height="180" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" rx="8"/>
+  <text x="970" y="406" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1b5e20">BE-3 (root fragment)</text>
+  <rect x="830" y="422" width="280" height="50" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="970" y="442" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#2e7d32">FragmentInstance F0</text>
+  <text x="970" y="458" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">ExchangeNode GATHER + ResultSink</text>
+  <rect x="830" y="486" width="280" height="50" fill="#f3e5f5" stroke="#7b1fa2" rx="4"/>
+  <text x="970" y="506" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#7b1fa2">ResultSink</text>
+  <text x="970" y="522" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">serves FE fetch_data</text>
+
+  <!-- 1 deploy: exit FE sides / center; no shared corridor with report or fetch -->
+  <path d="M 420 160 L 210 160 L 210 380" fill="none" stroke="#1565c0" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="280" y="152" font-family="Consolas, monospace" font-size="10" fill="#1565c0">1 deploy</text>
+
+  <path d="M 590 202 L 590 380" fill="none" stroke="#1565c0" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="600" y="300" font-family="Consolas, monospace" font-size="10" fill="#1565c0">1 deploy</text>
+
+  <path d="M 760 160 L 970 160 L 970 380" fill="none" stroke="#1565c0" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="820" y="152" font-family="Consolas, monospace" font-size="10" fill="#1565c0">1 deploy</text>
+
+  <!-- 3 reportExecStatus: far-left / gap / far-right; enter FE top and bottom edges -->
+  <path d="M 40 450 L 16 450 L 16 120 L 420 120" fill="none" stroke="#7b1fa2" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-purple)"/>
+  <text x="28" y="290" transform="rotate(-90 28 290)" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">3 reportExecStatus</text>
+
+  <path d="M 420 500 L 395 500 L 395 260 L 450 260 L 450 202" fill="none" stroke="#7b1fa2" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-purple)"/>
+  <text x="385" y="380" text-anchor="end" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">3 report</text>
+
+  <path d="M 1140 450 L 1164 450 L 1164 120 L 760 120" fill="none" stroke="#7b1fa2" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-purple)"/>
+  <text x="1152" y="290" transform="rotate(90 1152 290)" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">3 reportExecStatus</text>
+
+  <!-- 4 fetch_data: far-right corridor only (x≈1088 / 1060), clear of deploy at x=970 -->
+  <path d="M 740 132 L 1088 132 L 1088 510 L 1110 510" fill="none" stroke="#ef6c00" stroke-width="2.5" marker-end="url(#arr-orange)"/>
+  <text x="1096" y="320" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">4 fetch_data</text>
+
+  <path d="M 1110 530 L 1060 530 L 1060 152 L 740 152" fill="none" stroke="#ef6c00" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arr-orange)"/>
+  <text x="1050" y="360" text-anchor="end" font-family="Consolas, monospace" font-size="10" fill="#ef6c00">TResultBatch</text>
+
+  <!-- 2 transmit_chunk: between BEs only -->
+  <path d="M 380 447 L 420 447" fill="none" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arr-green)"/>
+  <text x="400" y="438" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">2 transmit_chunk</text>
+
+  <path d="M 760 447 L 800 447" fill="none" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arr-green)"/>
+  <text x="780" y="438" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#2e7d32">2 transmit_chunk</text>
+
+  <!-- bottom note -->
+  <rect x="40" y="590" width="1100" height="100" fill="#ffffff" stroke="#cfd8dc" rx="6"/>
+  <text x="590" y="622" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#37474f">Control plane (FE): deploy plan, receive status, pull root batches. Data plane (BE): Exchange edges carry chunks without the FE.</text>
+  <text x="590" y="648" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">exec_plan_fragment = PExecPlanFragmentRequest + TExecPlanFragmentParams attachment; fetch_data = PFetchDataRequest/Result</text>
+  <text x="590" y="670" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Lanes: deploy (FE sides / center) · report (outer + gap) · fetch (far right) · transmit (BE horizontal)</text>
+</svg>
