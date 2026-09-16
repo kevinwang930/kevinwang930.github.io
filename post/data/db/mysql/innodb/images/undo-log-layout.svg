@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="100%" height="100%">
+  <defs>
+    <marker id="uarr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#37474f" />
+    </marker>
+  </defs>
+  <rect width="960" height="640" fill="#fcfcfc" rx="8" />
+
+  <text x="480" y="28" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#2c3e50">Undo Log: Memory Objects vs Physical Layout</text>
+
+  <!-- LEFT: memory -->
+  <rect x="24" y="48" width="440" height="560" fill="#ffffff" stroke="#1565c0" stroke-width="2" rx="6" />
+  <rect x="24" y="48" width="440" height="32" fill="#1565c0" rx="6" />
+  <text x="244" y="70" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Memory</text>
+
+  <rect x="44" y="96" width="400" height="56" fill="#e3f2fd" stroke="#1565c0" rx="4" />
+  <text x="244" y="118" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#0d47a1">trx_t</text>
+  <text x="244" y="138" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">id, undo_no, read_view, rsegs</text>
+
+  <path d="M 160 152 L 160 176" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+  <path d="M 328 152 L 328 176" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+
+  <rect x="44" y="176" width="180" height="70" fill="#fce4ec" stroke="#ad1457" rx="4" />
+  <text x="134" y="198" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#880e4f">rsegs.m_redo</text>
+  <text x="134" y="216" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ad1457">insert_undo</text>
+  <text x="134" y="234" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#c2185b">INSERT undo log</text>
+
+  <rect x="264" y="176" width="180" height="70" fill="#fce4ec" stroke="#ad1457" rx="4" />
+  <text x="354" y="198" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#880e4f">rsegs.m_redo</text>
+  <text x="354" y="216" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#ad1457">update_undo</text>
+  <text x="354" y="234" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#c2185b">UPDATE / DELETE undo</text>
+
+  <rect x="44" y="266" width="400" height="100" fill="#fff3e0" stroke="#ef6c00" rx="4" />
+  <text x="244" y="288" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#e65100">trx_undo_t (per assigned undo log)</text>
+  <text x="244" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">space, hdr_page_no, hdr_offset, top_page_no, top_offset</text>
+  <text x="244" y="326" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">size, top_undo_no, guess_block (buf_block_t*)</text>
+  <text x="244" y="348" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#f57c00">Tracks where the next undo record is written</text>
+
+  <path d="M 244 366 L 244 390" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+
+  <rect x="44" y="390" width="400" height="100" fill="#e8f5e9" stroke="#2e7d32" rx="4" />
+  <text x="244" y="412" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="bold" fill="#1b5e20">trx_rseg_t (rollback segment)</text>
+  <text x="244" y="432" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">update_undo_list / insert_undo_list</text>
+  <text x="244" y="450" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">update_undo_cached / insert_undo_cached</text>
+  <text x="244" y="472" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#388e3c">History list for committed undo (purge)</text>
+
+  <rect x="44" y="510" width="400" height="78" fill="#e3f2fd" stroke="#1565c0" rx="4" />
+  <text x="244" y="532" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#0d47a1">Buffer Pool</text>
+  <text x="244" y="552" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">Undo page frames (16 KiB) cached like index pages</text>
+  <text x="244" y="570" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">No separate undo log buffer like redo Log Buffer</text>
+
+  <!-- RIGHT: physical -->
+  <rect x="496" y="48" width="440" height="560" fill="#ffffff" stroke="#4e342e" stroke-width="2" rx="6" />
+  <rect x="496" y="48" width="440" height="32" fill="#4e342e" rx="6" />
+  <text x="716" y="70" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Disk (undo tablespace)</text>
+
+  <rect x="516" y="96" width="400" height="48" fill="#efebe9" stroke="#5d4037" rx="4" />
+  <text x="716" y="116" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="bold" fill="#4e342e">undo_001 / undo_002 / ... (.ibu)</text>
+  <text x="716" y="134" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">up to 128 rollback segments per tablespace</text>
+
+  <path d="M 716 144 L 716 168" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+
+  <rect x="516" y="168" width="400" height="88" fill="#fce4ec" stroke="#ad1457" rx="4" />
+  <text x="716" y="190" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#880e4f">Rollback segment header page</text>
+  <text x="716" y="210" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ad1457">History list base + file segment header</text>
+  <text x="716" y="228" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ad1457">Undo slots[] (page_size/16; 1024 at 16 KiB)</text>
+  <text x="716" y="246" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#c2185b">each slot -&gt; first page of an undo log segment</text>
+
+  <path d="M 716 256 L 716 280" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+
+  <rect x="516" y="280" width="400" height="100" fill="#fff8e1" stroke="#f9a825" rx="4" />
+  <text x="716" y="302" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#f57f17">Undo log segment (first page)</text>
+  <text x="716" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">TRX_UNDO_PAGE_HDR (type, start, free)</text>
+  <text x="716" y="340" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">TRX_UNDO_SEG_HDR (state, last log, page list)</text>
+  <text x="716" y="360" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#ef6c00">Undo log header + first undo records</text>
+
+  <path d="M 716 380 L 716 404" stroke="#37474f" stroke-width="1.5" marker-end="url(#uarr)" />
+
+  <rect x="516" y="404" width="400" height="88" fill="#fafafa" stroke="#37474f" rx="4" />
+  <text x="716" y="426" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#263238">Undo page (continuation)</text>
+  <text x="716" y="446" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">PAGE_HDR + chain of undo records</text>
+  <text x="716" y="464" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">UPDATE: old values of updated columns only</text>
+  <text x="716" y="482" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#455a64">INSERT: enough to delete the row on rollback</text>
+
+  <rect x="516" y="510" width="400" height="78" fill="#e8eaf6" stroke="#3949ab" rx="4" />
+  <text x="716" y="532" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="bold" fill="#1a237e">DB_ROLL_PTR (7 bytes)</text>
+  <text x="716" y="552" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="10" fill="#283593">is_insert | rseg_id | page_no | offset</text>
+  <text x="716" y="570" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9" fill="#5c6bc0">Clustered row -&gt; exact undo record for prior version</text>
+</svg>
