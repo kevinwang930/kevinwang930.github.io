@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="580" viewBox="0 0 980 580" role="img" aria-label="Simple query PlanFragment tree sink top exchange bottom">
+  <defs>
+    <marker id="spf-child" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#455a64"/>
+    </marker>
+    <marker id="spf-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#6a1b9a"/>
+    </marker>
+  </defs>
+  <rect width="980" height="580" fill="#f7f9fb"/>
+
+  <text x="490" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Simple query: PlanFragment tree</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#607d8b">Inside each fragment: sink (top) → operators → Exchange / scan (bottom) · data ↑ by exch id</text>
+
+  <g font-family="Consolas, monospace" font-size="10" fill="#37474f">
+    <rect x="60" y="64" width="14" height="12" fill="none" stroke="#2e7d32" stroke-dasharray="3 2" rx="2"/>
+    <text x="80" y="74">PlanFragment</text>
+    <rect x="200" y="64" width="14" height="12" fill="#e8f5e9" stroke="#2e7d32" rx="2"/>
+    <text x="220" y="74">PlanNode</text>
+    <rect x="310" y="64" width="14" height="12" fill="#fff3e0" stroke="#ef6c00" rx="2"/>
+    <text x="330" y="74">ExchangeNode</text>
+    <rect x="450" y="64" width="14" height="12" fill="#f3e5f5" stroke="#7b1fa2" rx="2"/>
+    <text x="470" y="74">DataSink</text>
+    <line x1="560" y1="70" x2="600" y2="70" stroke="#6a1b9a" stroke-width="1.6" stroke-dasharray="4 2" marker-end="url(#spf-data)"/>
+    <text x="610" y="74" fill="#6a1b9a">data (exch id)</text>
+  </g>
+
+  <!-- F00: sink top, exchange bottom -->
+  <rect x="250" y="100" width="480" height="168" fill="#ffffff" stroke="#2e7d32" stroke-dasharray="5 3" stroke-width="1.8" rx="6"/>
+  <text x="490" y="124" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">PlanFragment F00</text>
+  <text x="490" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">dataPartition = UNPARTITIONED</text>
+
+  <rect x="290" y="154" width="400" height="36" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.8" rx="3"/>
+  <text x="490" y="177" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#7b1fa2">sink: ResultSink (to FE)</text>
+
+  <rect x="290" y="206" width="400" height="44" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.8" rx="3"/>
+  <text x="490" y="226" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">ExchangeNode(id=1)  GATHER</text>
+  <text x="490" y="242" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#bf360c">← DataStreamSink(exchNodeId=1)</text>
+
+  <line x1="490" y1="268" x2="490" y2="308" stroke="#455a64" stroke-width="1.6" marker-end="url(#spf-child)"/>
+  <rect x="508" y="278" width="70" height="18" fill="#f7f9fb"/>
+  <text x="514" y="291" font-family="Consolas, monospace" font-size="10" fill="#546e7a">children</text>
+
+  <!-- data #1: from F01 sink (top) up to F00 exchange (bottom) -->
+  <path d="M 220 370 L 180 370 L 180 228 L 290 228" fill="none" stroke="#6a1b9a" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#spf-data)"/>
+  <rect x="96" y="280" width="78" height="36" fill="#f3e5f5" stroke="#6a1b9a" rx="3"/>
+  <text x="135" y="296" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#6a1b9a">exch #1</text>
+  <text x="135" y="310" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#6a1b9a">data ↑</text>
+
+  <!-- F01: sink top, scan bottom -->
+  <rect x="180" y="312" width="620" height="200" fill="#ffffff" stroke="#2e7d32" stroke-dasharray="5 3" stroke-width="1.8" rx="6"/>
+  <text x="490" y="338" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">PlanFragment F01</text>
+  <text x="490" y="356" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">destNode = ExchangeNode(id=1) on F00</text>
+
+  <rect x="240" y="370" width="500" height="48" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.8" rx="3"/>
+  <text x="490" y="392" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#6a1b9a">DataStreamSink(exchNodeId=1, UNPARTITIONED)</text>
+  <text x="490" y="410" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7b1fa2">→ ExchangeNode(id=1) on F00</text>
+
+  <rect x="240" y="436" width="500" height="48" fill="#e8f5e9" stroke="#2e7d32" rx="3"/>
+  <text x="490" y="458" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#2e7d32">planRoot: OlapScanNode(id=0, sales)</text>
+  <text x="490" y="476" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#558b2f">source (bottom) · no inbound Exchange</text>
+
+  <text x="490" y="550" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">Convention: sink at top (outbound) · Exchange / scan at bottom (inbound / source)</text>
+</svg>

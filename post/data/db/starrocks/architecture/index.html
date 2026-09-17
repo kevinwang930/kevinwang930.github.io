@@ -130,7 +130,61 @@ HeartbeatMgr ..&gt; SystemInfoService
 Coordinator ..&gt; SystemInfoService
 
 @enduml
-</code></pre><p>On <strong>shared-data</strong> clusters the FE also starts <strong><code>StarMgrServer</code></strong> (StarOS metadata) alongside the BDB JE journal.</p><h3 id=22-fe--worker-protocols-query-path>2.2 FE ↔ worker protocols (query path)</h3><table><thead><tr><th>Direction</th><th>Protocol</th><th>Typical use</th></tr></thead><tbody><tr><td>Client → FE</td><td>MySQL</td><td>Interactive SQL, auth, result sets</td></tr><tr><td>BE/CN → FE leader</td><td>Thrift <strong><code>HeartbeatService</code></strong></td><td>Registration, master info, run mode</td></tr><tr><td>BE → FE leader</td><td>Thrift <strong><code>FrontendService</code></strong></td><td><code>reportExecStatus</code>, task finish, load txn</td></tr><tr><td>FE leader → BE/CN</td><td>brpc <strong><code>PInternalService</code></strong></td><td><strong><code>exec_plan_fragment</code></strong>, <strong><code>transmit_chunk</code></strong>, runtime filters, tablet writer</td></tr><tr><td>FE leader → BE/CN</td><td>Thrift <strong><code>BackendService</code></strong></td><td>Agent tasks, legacy sync APIs</td></tr><tr><td>BE ↔ BE</td><td>brpc</td><td>Shuffle exchange, broadcast filters</td></tr></tbody></table><p>The hot query path is <strong>brpc/protobuf</strong> on each node&rsquo;s <strong><code>brpc_port</code></strong>. Thrift remains for heartbeat, reporting, and tablet maintenance agents.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-query-path.svg alt="StarRocks query path"></p><hr><h2 id=3-mpp-the-olap-execution-model>3. MPP: the OLAP execution model</h2><p><strong>MPP (Massively Parallel Processing)</strong> is the fundamental character of OLAP, not an optional accelerator. An analytical statement is a large <strong>computation</strong> over data that is already sharded into tablets. The only way to finish that computation at interactive latency is to run the same operators on <strong>many machines at once</strong> and move intermediate batches by <strong>shuffle</strong>—not to walk one operator tree in one process. StarRocks is built around that model: the FE plans and coordinates; BE/CN workers execute.</p><p>A stage is a <strong><code>PlanFragment</code></strong>: a <strong><code>PlanNode</code></strong> subtree that can run without an in-process call to another machine, plus a <strong><code>DataSink</code></strong>. An <strong>edge</strong> is the <strong>Exchange</strong> that connects two stages—the producer’s sink and the consumer’s <strong><code>ExchangeNode</code></strong>, carrying <strong><code>transmit_chunk</code></strong>. The <strong>DAG</strong> is those stages and edges: <strong><code>ExecPlan.fragments</code></strong> after <strong><code>visitPhysicalDistribution</code></strong> cuts the physical tree at every <strong><code>PhysicalDistributionOperator</code></strong>. The FE never joins those batches in its own heap.</p><p>That is the opposite of classic OLTP, where the cost is the <strong>SQL transaction</strong> (one node’s log and locks) and a distributed shuffle would make every small write a distributed commit.</p><table><thead><tr><th></th><th>OLTP</th><th>StarRocks MPP (OLAP)</th></tr></thead><tbody><tr><td>What the statement <em>is</em></td><td>A transaction</td><td>A computation</td></tr><tr><td>Bottleneck</td><td>Commit, isolation, locks</td><td>Scan / join / agg CPU and IO</td></tr><tr><td>Plan shape</td><td>One local operator tree</td><td><strong><code>PlanFragment</code></strong> DAG + **<code>FragmentInstance</code>**s</td></tr><tr><td>SQL endpoint</td><td>Executes</td><td>Plans, deploys, pulls the root</td></tr></tbody></table><p>A typical analytical plan is two-phase: scan stages, a join stage (often with a local aggregate), a merge-aggregate stage, and a root GATHER into <strong><code>ResultSink</code></strong>. Data flows along edges toward the root (fragment 0 in <strong><code>EXPLAIN</code></strong>). Each Exchange is not drawn by hand: <strong><code>QueryOptimizer</code></strong> CBO picks a <strong>join distribution</strong> (shuffle / broadcast / colocate) and an <strong>aggregate distribution</strong> (local then global), then <strong><code>EnforceAndCostTask</code></strong> inserts a <strong><code>PhysicalDistributionOperator</code></strong>. <strong><code>visitPhysicalDistribution</code></strong> cuts the fragment DAG at those operators.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragment-dag.svg alt="Fragment DAG: planning PlanFragments, then scheduling FragmentInstances"></p><p>The left half of the figure is <strong>planning</strong>: <strong><code>ExecPlan.fragments</code></strong>, one <strong><code>PlanFragment</code></strong> per stage, Exchange edges from <strong><code>PhysicalDistributionOperator</code></strong>. The right half is <strong>scheduling</strong>: <strong><code>ExecutionDAG</code></strong> unfolds each stage into **<code>FragmentInstance</code>**s (tablet replicas on the scan side, hash buckets on join/agg). The same edge becomes a many-to-many <strong><code>transmit_chunk</code></strong>.</p><table><thead><tr><th>DAG piece</th><th>Planning (<code>ExecPlan</code>)</th><th>Scheduling (<code>ExecutionDAG</code>)</th></tr></thead><tbody><tr><td><strong>Stage</strong></td><td>one <strong><code>PlanFragment</code></strong> (<code>planRoot</code>, <code>dataPartition</code>, <code>sink</code>)</td><td>N **<code>FragmentInstance</code>**s on BE/CN</td></tr><tr><td><strong>Edge</strong></td><td>producer <strong><code>DataSink</code></strong> → dest <strong><code>ExchangeNode</code></strong></td><td>instance × instance <strong><code>transmit_chunk</code></strong></td></tr><tr><td><strong>DAG</strong></td><td>fragment list after <strong><code>visitPhysicalDistribution</code></strong></td><td>instances after <strong><code>computeFragmentInstances</code></strong></td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><p>On <strong>shared-data</strong> clusters the FE also starts <strong><code>StarMgrServer</code></strong> (StarOS metadata) alongside the BDB JE journal.</p><h3 id=22-metadata-hierarchy-catalog-database-table>2.2 Metadata hierarchy: catalog, database, table</h3><p><strong>StarRocks</strong> names the product and the cluster. <strong><code>Database</code></strong> is not that product: it is a <strong>catalog namespace</strong> inside the cluster—the same idea as MySQL’s <code>CREATE DATABASE</code>—owned by the FE metastore and journaled through BDB JE.</p><p>The internal catalog (<code>default_catalog</code> / <strong><code>InternalCatalog</code></strong>) holds the objects load and query planning resolve:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>cluster
+</span></span><span style=display:flex><span>  └── catalog (InternalCatalog; optional external catalogs via CatalogMgr)
+</span></span><span style=display:flex><span>        └── database          -- Database, keyed by dbId / fullName
+</span></span><span style=display:flex><span>              └── table       -- OlapTable, …
+</span></span><span style=display:flex><span>                    └── partition
+</span></span><span style=display:flex><span>                          └── tablet → replica (shared-nothing) or LakeTablet shard (shared-data)
+</span></span></code></pre></div><p><strong><code>LocalMetastore</code></strong> keeps <strong><code>fullNameToDb</code></strong>: database name → <strong><code>Database</code></strong>. Each <strong><code>Database</code></strong> holds <strong><code>idToTable</code> / <code>nameToTable</code></strong>. Partitions and tablets hang under the table; <strong><code>TabletInvertedIndex</code></strong> indexes tablet → replica placement for scheduling. DDL that creates or drops any of these objects is a metadata write on the <strong>leader FE</strong>.</p><p>That hierarchy is what “database” means in the rest of the FE: <strong><code>DatabaseTransactionMgr</code></strong> is one map entry per catalog <strong><code>dbId</code></strong>, not one manager for the whole cluster. Concurrent load on different catalog databases only shares the global txn-id generator; label checks and the running-txn limit (<strong><code>max_running_txn_num_per_db</code></strong>, see §4) stay per <strong><code>Database</code></strong>. Session SQL resolves names as <code>catalog.database.table</code> (default catalog omitted when unqualified). The catalog database is a <strong>metadata and load-admin</strong> boundary, not a join performance domain: tablets still sit on the same BEs/CNs.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class CatalogMgr {
+  catalogs : Map
+}
+
+class InternalCatalog
+
+class LocalMetastore {
+  fullNameToDb : Map&lt;String, Database&gt;
+}
+
+class Database {
+  id : long
+  fullQualifiedName : String
+  idToTable : Map&lt;Long, Table&gt;
+  nameToTable : Map&lt;String, Table&gt;
+}
+
+abstract class Table
+
+class OlapTable {
+  partitions
+  indexIdToMeta
+}
+
+class PhysicalPartition {
+  tablets
+}
+
+class LocalTablet {
+  replicas : List&lt;Replica&gt;
+}
+
+class LakeTablet {
+  shardId
+}
+
+CatalogMgr o-- InternalCatalog
+CatalogMgr ..&gt; LocalMetastore
+LocalMetastore *-- &#34;N&#34; Database : fullNameToDb
+Database *-- &#34;N&#34; Table : idToTable
+Table &lt;|-- OlapTable
+OlapTable *-- &#34;N&#34; PhysicalPartition : partitions
+PhysicalPartition o-- LocalTablet
+PhysicalPartition o-- LakeTablet
+
+@enduml
+</code></pre><h3 id=23-fe--worker-protocols-query-path>2.3 FE ↔ worker protocols (query path)</h3><table><thead><tr><th>Direction</th><th>Protocol</th><th>Typical use</th></tr></thead><tbody><tr><td>Client → FE</td><td>MySQL</td><td>Interactive SQL, auth, result sets</td></tr><tr><td>BE/CN → FE leader</td><td>Thrift <strong><code>HeartbeatService</code></strong></td><td>Registration, master info, run mode</td></tr><tr><td>BE → FE leader</td><td>Thrift <strong><code>FrontendService</code></strong></td><td><code>reportExecStatus</code>, task finish, load txn</td></tr><tr><td>FE leader → BE/CN</td><td>brpc <strong><code>PInternalService</code></strong></td><td><strong><code>exec_plan_fragment</code></strong>, <strong><code>transmit_chunk</code></strong>, runtime filters, tablet writer</td></tr><tr><td>FE leader → BE/CN</td><td>Thrift <strong><code>BackendService</code></strong></td><td>Agent tasks, legacy sync APIs</td></tr><tr><td>BE ↔ BE</td><td>brpc</td><td>Shuffle exchange, broadcast filters</td></tr></tbody></table><p>The hot query path is <strong>brpc/protobuf</strong> on each node&rsquo;s <strong><code>brpc_port</code></strong>. Thrift remains for heartbeat, reporting, and tablet maintenance agents.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-query-path.svg alt="StarRocks query path"></p><hr><h2 id=3-mpp-the-olap-execution-model>3. MPP: the OLAP execution model</h2><p><strong>MPP (Massively Parallel Processing)</strong> is the fundamental character of OLAP, not an optional accelerator. An analytical statement is a large <strong>computation</strong> over data that is already sharded into tablets. The only way to finish that computation at interactive latency is to run the same operators on <strong>many machines at once</strong> and move intermediate batches by <strong>shuffle</strong>—not to walk one operator tree in one process. StarRocks is built around that model: the FE plans and coordinates; BE/CN workers execute.</p><p>A stage is a <strong><code>PlanFragment</code></strong>: a <strong><code>PlanNode</code></strong> subtree that can run without an in-process call to another machine, plus a <strong><code>DataSink</code></strong>. An <strong>edge</strong> is the <strong>Exchange</strong> that connects two stages—the producer’s sink and the consumer’s <strong><code>ExchangeNode</code></strong>, carrying <strong><code>transmit_chunk</code></strong>. The <strong>DAG</strong> is those stages and edges: <strong><code>ExecPlan.fragments</code></strong> after <strong><code>visitPhysicalDistribution</code></strong> cuts the physical tree at every <strong><code>PhysicalDistributionOperator</code></strong>. The FE never joins those batches in its own heap.</p><p>That is the opposite of classic OLTP, where the cost is the <strong>SQL transaction</strong> (one node’s log and locks) and a distributed shuffle would make every small write a distributed commit.</p><table><thead><tr><th></th><th>OLTP</th><th>StarRocks MPP (OLAP)</th></tr></thead><tbody><tr><td>What the statement <em>is</em></td><td>A transaction</td><td>A computation</td></tr><tr><td>Bottleneck</td><td>Commit, isolation, locks</td><td>Scan / join / agg CPU and IO</td></tr><tr><td>Plan shape</td><td>One local operator tree</td><td><strong><code>PlanFragment</code></strong> DAG + **<code>FragmentInstance</code>**s</td></tr><tr><td>SQL endpoint</td><td>Executes</td><td>Plans, deploys, pulls the root</td></tr></tbody></table><p>A typical analytical plan is two-phase: scan stages, a join stage (often with a local aggregate), a merge-aggregate stage, and a root GATHER into <strong><code>ResultSink</code></strong>. Data flows along edges toward the root (fragment 0 in <strong><code>EXPLAIN</code></strong>). Each Exchange is not drawn by hand: <strong><code>QueryOptimizer</code></strong> CBO picks a <strong>join distribution</strong> (shuffle / broadcast / colocate) and an <strong>aggregate distribution</strong> (local then global), then <strong><code>EnforceAndCostTask</code></strong> inserts a <strong><code>PhysicalDistributionOperator</code></strong>. <strong><code>visitPhysicalDistribution</code></strong> cuts the fragment DAG at those operators.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-fragment-dag.svg alt="Fragment DAG: planning PlanFragments, then scheduling FragmentInstances"></p><p>The left half of the figure is <strong>planning</strong>: <strong><code>ExecPlan.fragments</code></strong>, one <strong><code>PlanFragment</code></strong> per stage, Exchange edges from <strong><code>PhysicalDistributionOperator</code></strong>. The right half is <strong>scheduling</strong>: <strong><code>ExecutionDAG</code></strong> unfolds each stage into **<code>FragmentInstance</code>**s (tablet replicas on the scan side, hash buckets on join/agg). The same edge becomes a many-to-many <strong><code>transmit_chunk</code></strong>.</p><table><thead><tr><th>DAG piece</th><th>Planning (<code>ExecPlan</code>)</th><th>Scheduling (<code>ExecutionDAG</code>)</th></tr></thead><tbody><tr><td><strong>Stage</strong></td><td>one <strong><code>PlanFragment</code></strong> (<code>planRoot</code>, <code>dataPartition</code>, <code>sink</code>)</td><td>N **<code>FragmentInstance</code>**s on BE/CN</td></tr><tr><td><strong>Edge</strong></td><td>producer <strong><code>DataSink</code></strong> → dest <strong><code>ExchangeNode</code></strong></td><td>instance × instance <strong><code>transmit_chunk</code></strong></td></tr><tr><td><strong>DAG</strong></td><td>fragment list after <strong><code>visitPhysicalDistribution</code></strong></td><td>instances after <strong><code>computeFragmentInstances</code></strong></td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class ConnectContext {
   queryId : UUID
@@ -1908,7 +1962,7 @@ BackendServiceClient ..&gt; PFetchDataResult : fetch_data reply
 </span></span><span style=display:flex><span>PFetchDataRequest request <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> PFetchDataRequest(finstId);
 </span></span><span style=display:flex><span>Future<span style=color:#f92672>&lt;</span>PFetchDataResult<span style=color:#f92672>&gt;</span> future <span style=color:#f92672>=</span> BackendServiceClient.<span style=color:#a6e22e>getInstance</span>().<span style=color:#a6e22e>fetchDataAsync</span>(address, request);
 </span></span><span style=display:flex><span><span style=color:#75715e>// deserialize TResultBatch from the serialized payload</span>
-</span></span></code></pre></div><h3 id=38-query-examples>3.8 Query examples</h3><p>Two shapes cover the MPP path from fragmentize through deploy and <strong><code>fetch_data</code></strong>: a tablet-parallel scan with GATHER, then a shuffle join with two-phase aggregate.</p><p><strong>Scan, filter, project.</strong> Parallelism is the tablet instances; the only shuffle is an optional GATHER so the client sees one stream.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span></code></pre></div><h3 id=38-query-examples>3.8 Query examples</h3><h4 id=381-simple-query>3.8.1 Simple query</h4><p>Partition <strong><code>p2024</code></strong> has two tablets (<strong><code>BUCKETS 2</code></strong>): tablet <strong>100</strong> (replicas on BE 10001 / 10002) and tablet <strong>101</strong> (replicas on BE 10002 / 10003).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
 </span></span><span style=display:flex><span>    dt     DATE,
 </span></span><span style=display:flex><span>    id     BIGINT,
 </span></span><span style=display:flex><span>    amount DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
@@ -1922,17 +1976,58 @@ BackendServiceClient ..&gt; PFetchDataResult : fetch_data reply
 </span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> id, amount
 </span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> sales
 </span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> dt <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;2024-06-01&#39;</span>;
-</span></span></code></pre></div><p>Partition <strong><code>p2024</code></strong> has two tablets (<strong><code>BUCKETS 2</code></strong>): <strong>T100</strong> (replicas on BE-1, BE-2) and <strong>T101</strong> (replicas on BE-2, BE-3). After CBO the physical tree is <strong><code>OlapScan</code></strong> (predicate pushed to the scan) + project. <strong><code>createOutputFragment()</code></strong> sees two tablets, so it does <strong>not</strong> pin <strong><code>ResultSink</code></strong> on the scan fragment; it adds a GATHER exchange.</p><pre tabindex=0><code>PLAN FRAGMENT 0                    -- root, UNPARTITIONED
-  RESULT SINK
-  1:EXCHANGE                       -- GATHER
+</span></span></code></pre></div><p><strong>PlanFragment shape</strong> (after fragmentize / finalize)</p><pre tabindex=0><code>PlanFragment F00
+  fragmentId: F00
+  dataPartition: UNPARTITIONED
+  outputPartition: UNPARTITIONED
+  planRoot: ExchangeNode(id=1)              -- GATHER
+  destNode: null
+  sink: ResultSink
+  children: [ F01 ]                         -- TreeNode: producer fragments
+  outputExprs: [ id, amount ]
 
-PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
-  STREAM DATA SINK
-    EXCHANGE ID: 01  UNPARTITIONED
-  0:OlapScanNode  TABLE: sales
-     PREDICATES: dt = &#39;2024-06-01&#39;
-     tablets: T100, T101
-</code></pre><p><strong><code>LocalFragmentAssignmentStrategy</code></strong> places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the <strong><code>ResultReceiver</code></strong> target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **<code>transmit_chunk</code>**s surviving rows to F0. The FE only **<code>fetch_data</code>**s F0.</p><p>If the optimizer can prove a <strong>single tablet</strong> (or short-circuit PK lookup), <strong><code>createOutputFragment()</code></strong> skips the GATHER fragment and hangs <strong><code>ResultSink</code></strong> on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-simple-query.svg alt="Simple query: tablet-parallel scan then GATHER"></p><p><strong>Shuffle join and two-phase aggregate.</strong> The full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under <strong><code>ResultSink</code></strong>. <strong><code>orders</code></strong> is <strong><code>DISTRIBUTED BY HASH(cust_id)</code></strong>; <strong><code>customers</code></strong> is <strong><code>HASH(id)</code></strong>; they are not colocated.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
+PlanFragment F01
+  fragmentId: F01
+  dataPartition: RANDOM
+  outputPartition: UNPARTITIONED            -- STREAM DATA SINK / EXCHANGE 01
+  planRoot: OlapScanNode(id=0, table=sales)
+    predicates: dt = &#39;2024-06-01&#39;
+  destNode: ExchangeNode(id=1) on F00
+  sink: DataStreamSink(exchNodeId=1, UNPARTITIONED)
+  children: []
+</code></pre><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-ex-simple-planfragment.svg alt="Simple query PlanFragment tree"></p><p><strong>ExecutionFragment shape</strong> (3 BEs: 10001, 10002, 10003)</p><pre tabindex=0><code>ExecutionFragment
+  fragmentIndex: 0
+  planFragment: F00
+  destinations: []
+  numSendersPerExchange: { 1 -&gt; 2 }
+  instances:
+    FragmentInstance
+      indexInJob: 0
+      indexInFragment: 0
+      worker: ComputeNode(id=10003)
+      node2ScanRanges: {}
+
+ExecutionFragment
+  fragmentIndex: 1
+  planFragment: F01
+  scanRangeAssignment:
+    10001 -&gt; { 0 -&gt; [ tablet 100 ] }
+    10002 -&gt; { 0 -&gt; [ tablet 101 ] }
+  destinations:
+    - fragment_instance_id: (0, F00#0)
+      brpc_server: 10.0.0.3:8060
+  instances:
+    FragmentInstance
+      indexInJob: 1
+      indexInFragment: 0
+      worker: ComputeNode(id=10001)
+      node2ScanRanges: { 0 -&gt; [ tablet 100 ] }
+    FragmentInstance
+      indexInJob: 2
+      indexInFragment: 1
+      worker: ComputeNode(id=10002)
+      node2ScanRanges: { 0 -&gt; [ tablet 101 ] }
+</code></pre><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-ex-simple-execution.svg alt="Simple query ExecutionFragment: storage + compute per BE"></p><h4 id=382-complete-join-and-aggregate>3.8.2 Complete join and aggregate</h4><p>Tables are not colocated on the join key; CBO uses <strong><code>HASH_PARTITIONED</code></strong> on <strong><code>cust_id</code> / <code>id</code></strong>, local then merge aggregate on <strong><code>region</code></strong>, then GATHER.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> orders (
 </span></span><span style=display:flex><span>    dt      DATE,
 </span></span><span style=display:flex><span>    cust_id BIGINT,
 </span></span><span style=display:flex><span>    amount  DECIMAL(<span style=color:#ae81ff>12</span>, <span style=color:#ae81ff>2</span>)
@@ -1955,40 +2050,265 @@ PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>JOIN</span> customers <span style=color:#66d9ef>c</span> <span style=color:#66d9ef>ON</span> o.cust_id <span style=color:#f92672>=</span> <span style=color:#66d9ef>c</span>.id
 </span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> o.dt <span style=color:#66d9ef>BETWEEN</span> <span style=color:#e6db74>&#39;2024-01-01&#39;</span> <span style=color:#66d9ef>AND</span> <span style=color:#e6db74>&#39;2024-06-30&#39;</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>GROUP</span> <span style=color:#66d9ef>BY</span> <span style=color:#66d9ef>c</span>.region;
-</span></span></code></pre></div><p>When the tables are <strong>not</strong> colocated on the join key, CBO requires <strong><code>HASH_PARTITIONED</code></strong> on <strong><code>o.cust_id</code> / <code>c.id</code></strong>. <strong><code>visitPhysicalDistribution</code></strong> therefore cuts a fragment per scan and a fragment for the join (that fragment’s <strong><code>DataPartition</code></strong> is the join key, not <strong><code>region</code></strong>). The aggregate is split: local <strong><code>AGGREGATE (update serialize) STREAMING</code></strong> stays with the join; <strong><code>AGGREGATE (merge finalize)</code></strong> runs after a second hash shuffle on <strong><code>c.region</code></strong>. <strong><code>createOutputFragment()</code></strong> then GATHERs the still-partitioned merge output into <strong><code>ResultSink</code></strong>.</p><pre tabindex=0><code>PLAN FRAGMENT 0                    -- UNPARTITIONED
-  RESULT SINK
-  9:EXCHANGE                       -- GATHER
+</span></span></code></pre></div><p><strong>PlanFragment shape</strong> (after fragmentize / finalize)</p><pre tabindex=0><code>PlanFragment F00
+  fragmentId: F00
+  dataPartition: UNPARTITIONED
+  outputPartition: UNPARTITIONED
+  planRoot: ExchangeNode(id=9)              -- GATHER
+  destNode: null
+  sink: ResultSink
+  children: [ F01 ]
+  outputExprs: [ region, sum ]
 
-PLAN FRAGMENT 1                    -- HASH_PARTITIONED: region
-  8:AGGREGATE (merge finalize)
-  7:EXCHANGE                       -- HASH_PARTITIONED: region
+PlanFragment F01
+  fragmentId: F01
+  dataPartition: HASH_PARTITIONED(region)
+  outputPartition: UNPARTITIONED
+  planRoot: AggregationNode(id=8, merge finalize)
+    child: ExchangeNode(id=7)               -- HASH region
+  destNode: ExchangeNode(id=9) on F00
+  sink: DataStreamSink(exchNodeId=9, UNPARTITIONED)
+  children: [ F02 ]
 
-PLAN FRAGMENT 2                    -- HASH_PARTITIONED: cust_id
-  STREAM DATA SINK
-    EXCHANGE ID: 07  HASH_PARTITIONED: region
-  6:AGGREGATE (update serialize)
-     STREAMING
-  5:Project
-  4:HASH JOIN
-     2:EXCHANGE                    -- HASH_PARTITIONED: o.cust_id
-     3:EXCHANGE                    -- HASH_PARTITIONED: c.id
+PlanFragment F02
+  fragmentId: F02
+  dataPartition: HASH_PARTITIONED(cust_id)
+  outputPartition: HASH_PARTITIONED(region)
+  planRoot: AggregationNode(id=6, update serialize STREAMING)
+    child: ProjectNode(id=5)
+      child: HashJoinNode(id=4)
+        left:  ExchangeNode(id=2)           -- HASH o.cust_id
+        right: ExchangeNode(id=3)           -- HASH c.id
+  destNode: ExchangeNode(id=7) on F01
+  sink: DataStreamSink(exchNodeId=7, HASH_PARTITIONED(region))
+  children: [ F03, F04 ]
 
-PLAN FRAGMENT 3                    -- RANDOM
-  STREAM DATA SINK
-    EXCHANGE ID: 02  HASH_PARTITIONED: cust_id
-  1:OlapScanNode  TABLE: orders
-     PREDICATES: dt BETWEEN ...
+PlanFragment F03
+  fragmentId: F03
+  dataPartition: RANDOM
+  outputPartition: HASH_PARTITIONED(cust_id)
+  planRoot: OlapScanNode(id=1, table=orders)
+    predicates: dt BETWEEN ...
+  destNode: ExchangeNode(id=2) on F02
+  sink: DataStreamSink(exchNodeId=2, HASH_PARTITIONED(cust_id))
+  children: []
 
-PLAN FRAGMENT 4                    -- RANDOM
-  STREAM DATA SINK
-    EXCHANGE ID: 03  HASH_PARTITIONED: id
-  0:OlapScanNode  TABLE: customers
-</code></pre><p>Execution, not a single tree:</p><ol><li><strong>F3 / F4 instances</strong> start on the BEs that hold the chosen <strong><code>orders</code></strong> / <strong><code>customers</code></strong> tablet replicas. Scans run in parallel; each instance hashes outgoing chunks on the join key and **<code>transmit_chunk</code>**s to the F2 workers that own those hash buckets.</li><li><strong>F2 instances</strong> run the <strong><code>HASH JOIN</code></strong>, then the local aggregate. Partial <strong><code>(region, sum)</code></strong> groups are hashed on <strong><code>region</code></strong> and shuffled to F1.</li><li><strong>F1 instances</strong> merge partials for their <strong><code>region</code></strong> buckets. F0 GATHERs finalized rows and serves <strong><code>fetch_data</code></strong>. The FE session thread only entered the picture at this sink.</li></ol><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-complete-query.svg alt="Complete query: shuffle join and two-phase aggregate"></p><p>CBO may replace the join shuffle with <strong>broadcast</strong> (small <strong><code>customers</code></strong>) or <strong>colocate / local bucket shuffle</strong> (same tablet mapping on the join key). Those plans drop one or both join-side Exchange fragments; they are still MPP—scan instances remain parallel—but they avoid a full network repartition. The two-phase aggregate remains whenever group keys are not already aligned with the fragment partition.</p><p><strong><code>EXPLAIN</code></strong> prints this fragment DAG; <strong><code>EXPLAIN SCHEDULER</code></strong> prints the <strong><code>FragmentInstance</code></strong> → worker assignment that <strong><code>computeFragmentInstances()</code></strong> produced. That pair is the MPP plan the cluster actually runs.</p><hr><h2 id=4-load-transaction>4. Load transaction</h2><p>A StarRocks <strong>transaction</strong> is not a client SQL transaction. There is no <code>BEGIN</code> / <code>COMMIT</code> that isolates several statements the way InnoDB does. <strong><code>DmlStmt.txnId</code></strong> is a <strong>load transaction</strong>: a ticket for <strong>one</strong> INSERT, UPDATE, DELETE, MERGE, or stream load so that write becomes visible as a single tablet-version change.</p><p>OLAP visibility is <strong>tablet version</strong>, not a mixed-statement WAL. <strong><code>StatementPlanner.plan()</code></strong> calls <strong><code>beginTransaction()</code></strong> for DML. <strong><code>GlobalTransactionMgr.beginTransaction</code></strong> creates a <strong><code>TransactionState</code></strong> (<code>label</code>, source usually <strong><code>INSERT_STREAMING</code></strong>) and stores the id on the statement. BE writers produce new rowsets under that id. <strong>Commit</strong> then <strong>publish version</strong> moves every replica of the affected tablets to the same new version, so readers either see the whole write or none of it. <strong>Abort</strong> discards unpublished deltas.</p><p>A <strong><code>SELECT</code></strong> never begins this path. <strong><code>EXPLAIN</code></strong> (except <strong><code>EXPLAIN ANALYZE</code></strong>), <strong><code>INSERT INTO FILES</code></strong>, and the old non-PK delete skip <strong><code>beginTransaction()</code></strong>. If <strong><code>session.getTxnId() != 0</code></strong>, the statement reuses that id (grouped inserts), still not a general SQL txn.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>txnId <span style=color:#f92672>=</span> transactionMgr.<span style=color:#a6e22e>beginTransaction</span>(
+PlanFragment F04
+  fragmentId: F04
+  dataPartition: RANDOM
+  outputPartition: HASH_PARTITIONED(id)
+  planRoot: OlapScanNode(id=0, table=customers)
+  destNode: ExchangeNode(id=3) on F02
+  sink: DataStreamSink(exchNodeId=3, HASH_PARTITIONED(id))
+  children: []
+</code></pre><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-ex-complete-planfragment.svg alt="Complete query PlanFragment tree"></p><p><strong>ExecutionFragment shape</strong> (3 BEs; reduced instance counts)</p><pre tabindex=0><code>ExecutionFragment
+  fragmentIndex: 0
+  planFragment: F00
+  destinations: []
+  numSendersPerExchange: { 9 -&gt; 2 }
+  instances:
+    FragmentInstance { indexInJob: 0, indexInFragment: 0, worker: 10001 }
+
+ExecutionFragment
+  fragmentIndex: 1
+  planFragment: F01
+  destinations:
+    - { fragment_instance_id: F00#0, brpc_server: 10.0.0.1:8060 }
+  numSendersPerExchange: { 7 -&gt; 2 }
+  instances:
+    FragmentInstance { indexInJob: 1, indexInFragment: 0, worker: 10001 }
+    FragmentInstance { indexInJob: 2, indexInFragment: 1, worker: 10002 }
+
+ExecutionFragment
+  fragmentIndex: 2
+  planFragment: F02
+  destinations:
+    - { fragment_instance_id: F01#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F01#1, brpc_server: 10.0.0.2:8060 }
+  numSendersPerExchange: { 2 -&gt; 2, 3 -&gt; 2 }
+  instances:
+    FragmentInstance { indexInJob: 3, indexInFragment: 0, worker: 10001 }
+    FragmentInstance { indexInJob: 4, indexInFragment: 1, worker: 10002 }
+
+ExecutionFragment
+  fragmentIndex: 3
+  planFragment: F03
+  scanRangeAssignment:
+    10001 -&gt; { 1 -&gt; [ tablet 201, 202 ] }
+    10003 -&gt; { 1 -&gt; [ tablet 203, 204 ] }
+  destinations:
+    - { fragment_instance_id: F02#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F02#1, brpc_server: 10.0.0.2:8060 }
+  instances:
+    FragmentInstance
+      indexInJob: 5
+      indexInFragment: 0
+      worker: 10001
+      node2ScanRanges: { 1 -&gt; [ tablet 201, 202 ] }
+    FragmentInstance
+      indexInJob: 6
+      indexInFragment: 1
+      worker: 10003
+      node2ScanRanges: { 1 -&gt; [ tablet 203, 204 ] }
+
+ExecutionFragment
+  fragmentIndex: 4
+  planFragment: F04
+  scanRangeAssignment:
+    10002 -&gt; { 0 -&gt; [ tablet 301, 302 ] }
+    10003 -&gt; { 0 -&gt; [ tablet 303, 304 ] }
+  destinations:
+    - { fragment_instance_id: F02#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F02#1, brpc_server: 10.0.0.2:8060 }
+  instances:
+    FragmentInstance
+      indexInJob: 7
+      indexInFragment: 0
+      worker: 10002
+      node2ScanRanges: { 0 -&gt; [ tablet 301, 302 ] }
+    FragmentInstance
+      indexInJob: 8
+      indexInFragment: 1
+      worker: 10003
+      node2ScanRanges: { 0 -&gt; [ tablet 303, 304 ] }
+</code></pre><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/architecture/images/starrocks-mpp-ex-complete-execution.svg alt="Complete query ExecutionFragment: storage + compute per BE"></p><p>CBO may use <strong>broadcast</strong> or <strong>colocate / local bucket shuffle</strong> instead of both-side join shuffle; scan <strong><code>ExecutionFragment</code></strong> instances remain, while join-side <strong><code>destinations</code></strong> change.</p><h2 id=4-load-transaction>4. Load transaction</h2><p>A StarRocks <strong>transaction</strong> is not a client SQL <code>BEGIN</code>/<code>COMMIT</code>. <strong><code>DmlStmt.txnId</code></strong> is a <strong>load transaction</strong>: one INSERT, UPDATE, DELETE, MERGE, or stream load. The id is <strong>globally unique</strong> (<code>TransactionIdGenerator</code>) so FE and BEs can name one in-flight write; it is <strong>not</strong> the visibility watermark. Readers see data by <strong>tablet / partition version</strong>. On commit, FE assigns each touched partition a new <strong><code>PartitionCommitInfo.version</code></strong> (usually <strong><code>partition.getNextVersion()</code></strong>, i.e. visible + 1)—independent of the txn id. <strong>Publish</strong> then tells BEs: install the unpublished rowsets tagged with that <strong><code>txnId</code></strong> as version <strong>V</strong>. After publish, scans use <strong>V</strong>; the txn id is only the staging key. <strong><code>StatementPlanner</code></strong> calls <strong><code>beginTransaction()</code></strong> for DML; <strong><code>GlobalTransactionMgr</code></strong> creates a <strong><code>TransactionState</code></strong> (label; source usually <strong><code>INSERT_STREAMING</code></strong>). BE writers attach rowsets to that id. <strong>Abort</strong> drops unpublished deltas. <strong><code>SELECT</code></strong>, <strong><code>EXPLAIN</code></strong> (except <strong><code>EXPLAIN ANALYZE</code></strong>), <strong><code>INSERT INTO FILES</code></strong>, and old non-PK delete skip begin. Non-zero <strong><code>session.getTxnId()</code></strong> reuses the id (grouped inserts).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class GlobalTransactionMgr {
+  - dbIdToDatabaseTransactionMgrs : Map&lt;Long, DatabaseTransactionMgr&gt;
+  - idGenerator : TransactionIdGenerator
+  - explicitTxnStateMap : Map&lt;Long, ExplicitTxnState&gt;
+}
+
+class DatabaseTransactionMgr {
+  - dbId : long
+  - idToRunningTransactionState : Map&lt;Long, TransactionState&gt;
+  - idToFinalStatusTransactionState : Map&lt;Long, TransactionState&gt;
+  - labelToTxnIds : Map&lt;String, Set&lt;Long&gt;&gt;
+}
+
+class TransactionIdGenerator {
+  - nextId : long
+}
+
+class TransactionState {
+  - transactionId : long
+  - dbId : long
+  - tableIdList : List&lt;Long&gt;
+  - label : String
+  - transactionStatus : TransactionStatus
+  - sourceType : LoadJobSourceType
+  - txnCoordinator : TxnCoordinator
+  - idToTableCommitInfos : Map&lt;Long, TableCommitInfo&gt;
+  - tabletCommitInfos : Set&lt;TabletCommitInfo&gt;
+  - timeoutMs : long
+}
+
+enum TransactionStatus {
+  PREPARE
+  PREPARED
+  COMMITTED
+  VISIBLE
+  ABORTED
+}
+
+enum LoadJobSourceType {
+  INSERT_STREAMING
+  BACKEND_STREAMING
+  FRONTEND_STREAMING
+  ROUTINE_LOAD_TASK
+  BATCH_LOAD_JOB
+  ...
+}
+
+class TxnCoordinator {
+  - sourceType : TxnSourceType
+  - ip : String
+  - backendId : long
+}
+
+enum TxnSourceType {
+  FE
+  BE
+}
+
+class TableCommitInfo {
+  - tableId : long
+  - idToPartitionCommitInfo : Map&lt;Long, PartitionCommitInfo&gt;
+}
+
+class PartitionCommitInfo {
+  - physicalPartitionId : long
+  - version : long
+}
+
+class TabletCommitInfo {
+  - tabletId : long
+  - backendId : long
+}
+
+abstract class DmlStmt {
+  - txnId : long
+}
+
+GlobalTransactionMgr *-- &#34;1&#34; TransactionIdGenerator : idGenerator
+GlobalTransactionMgr *-- &#34;N&#34; DatabaseTransactionMgr : dbIdToDatabaseTransactionMgrs
+DatabaseTransactionMgr o-- &#34;N&#34; TransactionState : idToRunningTransactionState
+TransactionState *-- &#34;1&#34; TransactionStatus : transactionStatus
+TransactionState *-- &#34;1&#34; LoadJobSourceType : sourceType
+TransactionState *-- &#34;1&#34; TxnCoordinator : txnCoordinator
+TxnCoordinator *-- &#34;1&#34; TxnSourceType : sourceType
+TransactionState *-- &#34;N&#34; TableCommitInfo : idToTableCommitInfos
+TableCommitInfo *-- &#34;N&#34; PartitionCommitInfo : idToPartitionCommitInfo
+TransactionState o-- &#34;N&#34; TabletCommitInfo : tabletCommitInfos
+DmlStmt ..&gt; TransactionState : txnId
+
+@enduml
+</code></pre><p><strong>Running-txn limit.</strong> <strong><code>max_running_txn_num_per_db</code></strong> (default <strong>1000</strong>) caps non-final load txns per catalog database. <strong><code>runningTxnNums</code></strong> counts <strong><code>PREPARE</code> / <code>PREPARED</code> / <code>COMMITTED</code></strong>. Begin increments; visible or abort decrements. Checked only in <strong><code>checkRunningTxnExceedLimit</code></strong> at begin. Counts in-flight loads, not tables. <strong><code>ROUTINE_LOAD_TASK</code></strong> and <strong><code>LAKE_COMPACTION</code></strong> are excluded (routine load: <strong><code>max_routine_load_task_num_per_be</code></strong>). Over limit → <strong><code>RunningTxnExceedException</code></strong>. Raise the FE config for more concurrency; splitting databases isolates counters, not join cost.</p><p><strong>Steps</strong> — status <strong><code>PREPARE</code> → <code>COMMITTED</code> → <code>VISIBLE</code></strong> (or <strong><code>ABORTED</code></strong>).</p><p><strong>1. Begin</strong> — open txn; set <strong><code>DmlStmt.txnId</code></strong>. Skip if <strong><code>session.getTxnId() != 0</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StatementPlanner.beginTransaction</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (session.<span style=color:#a6e22e>getTxnId</span>() <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>    stmt.<span style=color:#a6e22e>setTxnId</span>(session.<span style=color:#a6e22e>getTxnId</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>txnId <span style=color:#f92672>=</span> transactionMgr.<span style=color:#a6e22e>beginTransaction</span>(
 </span></span><span style=display:flex><span>        dbId, Lists.<span style=color:#a6e22e>newArrayList</span>(targetTable.<span style=color:#a6e22e>getId</span>()), label,
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> TransactionState.<span style=color:#a6e22e>TxnCoordinator</span>(FE, localHost),
 </span></span><span style=display:flex><span>        TransactionState.<span style=color:#a6e22e>LoadJobSourceType</span>.<span style=color:#a6e22e>INSERT_STREAMING</span>,
 </span></span><span style=display:flex><span>        session.<span style=color:#a6e22e>getExecTimeout</span>(), session.<span style=color:#a6e22e>getCurrentComputeResource</span>());
 </span></span><span style=display:flex><span>stmt.<span style=color:#a6e22e>setTxnId</span>(txnId);
+</span></span></code></pre></div><p><strong>2. Id, label, limit</strong> — allocate global id; under <strong><code>DatabaseTransactionMgr</code></strong> write lock: label check, <strong><code>checkRunningTxnExceedLimit</code></strong>, upsert <strong><code>PREPARE</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DatabaseTransactionMgr.beginTransaction</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>long</span> tid <span style=color:#f92672>=</span> globalStateMgr.<span style=color:#a6e22e>getGlobalTransactionMgr</span>()
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>getTransactionIDGenerator</span>().<span style=color:#a6e22e>getNextTransactionId</span>();
+</span></span><span style=display:flex><span>TransactionState transactionState <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> TransactionState(
+</span></span><span style=display:flex><span>        dbId, tableIdList, tid, label, requestId, sourceType,
+</span></span><span style=display:flex><span>        coordinator, callbackId, timeoutSecond <span style=color:#f92672>*</span> 1000);
+</span></span><span style=display:flex><span>writeLock();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// label → LabelAlreadyUsedException / DuplicatedRequestException</span>
+</span></span><span style=display:flex><span>    checkRunningTxnExceedLimit(sourceType);
+</span></span><span style=display:flex><span>    persistTxnStateInTxnLevelLock(transactionState, wal <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>        unprotectUpsertTransactionState(transactionState);
+</span></span><span style=display:flex><span>    });
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>    writeUnlock();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> tid;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DatabaseTransactionMgr.checkRunningTxnExceedLimit</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>switch</span> (sourceType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> ROUTINE_LOAD_TASK:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> LAKE_COMPACTION:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>default</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (runningTxnNums <span style=color:#f92672>&gt;=</span> Config.<span style=color:#a6e22e>max_running_txn_num_per_db</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> RunningTxnExceedException(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;current running txns on db &#34;</span> <span style=color:#f92672>+</span> dbId <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34; is &#34;</span> <span style=color:#f92672>+</span> runningTxnNums
+</span></span><span style=display:flex><span>                    <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;, larger than limit &#34;</span> <span style=color:#f92672>+</span> Config.<span style=color:#a6e22e>max_running_txn_num_per_db</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>3. Write</strong> — deploy load fragments; BE rowsets under <strong><code>txnId</code></strong>.</p><p><strong>4. Commit and publish</strong> — <strong><code>TabletCommitInfo</code></strong> → <strong><code>COMMITTED</code></strong> → publish <strong><code>version</code></strong> → <strong><code>VISIBLE</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// GlobalTransactionMgr</span>
+</span></span><span style=display:flex><span>VisibleStateWaiter waiter <span style=color:#f92672>=</span> retryCommitOnRateLimitExceeded(
+</span></span><span style=display:flex><span>        db, transactionId, tabletCommitInfos, tabletFailInfos,
+</span></span><span style=display:flex><span>        txnCommitAttachment, timeoutMillis);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> awaitVisibleAfterCommitUntil(transactionId, waiter, dueTime);
+</span></span></code></pre></div><p><strong>5. Abort</strong> — on failure: drop unpublished deltas; free the running-txn slot.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>transactionMgr.<span style=color:#a6e22e>abortTransaction</span>(db.<span style=color:#a6e22e>getId</span>(), txnId, errMsg);
 </span></span></code></pre></div><h2 id=5-references>5. References</h2><ol><li>K. Kang, “StarRocks Query Optimizer,” CMU Database Group Seminar, 31 March 2025. <a href=https://kangkaisen.com/post/cmu-starrocks-query-optimizer>Notes</a>.</li><li>G. Graefe, “The Cascades Framework for Query Optimization,” <em>IEEE Data Engineering Bulletin</em>, vol. 18, no. 3, pp. 19–29, 1995. <a href=https://15721.courses.cs.cmu.edu/spring2016/papers/graefe-ieee1995.pdf>PDF</a>.</li><li>Y. Xu, “Efficiency in the Columbia Database Query Optimizer,” M.S. thesis, Portland State University, 1998. <a href=https://15721.courses.cs.cmu.edu/spring2019/papers/22-optimizer1/xu-columbia-thesis1998.pdf>PDF</a>.</li></ol></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/db/>db</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/starrocks/>starrocks</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
