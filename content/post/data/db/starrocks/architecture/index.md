@@ -210,7 +210,77 @@ Coordinator ..> SystemInfoService
 
 On **shared-data** clusters the FE also starts **`StarMgrServer`** (StarOS metadata) alongside the BDB JE journal.
 
-### 2.2 FE ↔ worker protocols (query path)
+### 2.2 Metadata hierarchy: catalog, database, table
+
+**StarRocks** names the product and the cluster. **`Database`** is not that product: it is a **catalog namespace** inside the cluster—the same idea as MySQL’s `CREATE DATABASE`—owned by the FE metastore and journaled through BDB JE.
+
+The internal catalog (`default_catalog` / **`InternalCatalog`**) holds the objects load and query planning resolve:
+
+```text
+cluster
+  └── catalog (InternalCatalog; optional external catalogs via CatalogMgr)
+        └── database          -- Database, keyed by dbId / fullName
+              └── table       -- OlapTable, …
+                    └── partition
+                          └── tablet → replica (shared-nothing) or LakeTablet shard (shared-data)
+```
+
+**`LocalMetastore`** keeps **`fullNameToDb`**: database name → **`Database`**. Each **`Database`** holds **`idToTable` / `nameToTable`**. Partitions and tablets hang under the table; **`TabletInvertedIndex`** indexes tablet → replica placement for scheduling. DDL that creates or drops any of these objects is a metadata write on the **leader FE**.
+
+That hierarchy is what “database” means in the rest of the FE: **`DatabaseTransactionMgr`** is one map entry per catalog **`dbId`**, not one manager for the whole cluster. Concurrent load on different catalog databases only shares the global txn-id generator; label checks and the running-txn limit (**`max_running_txn_num_per_db`**, see §4) stay per **`Database`**. Session SQL resolves names as `catalog.database.table` (default catalog omitted when unqualified). The catalog database is a **metadata and load-admin** boundary, not a join performance domain: tablets still sit on the same BEs/CNs.
+
+```plantuml
+@startuml
+
+class CatalogMgr {
+  catalogs : Map
+}
+
+class InternalCatalog
+
+class LocalMetastore {
+  fullNameToDb : Map<String, Database>
+}
+
+class Database {
+  id : long
+  fullQualifiedName : String
+  idToTable : Map<Long, Table>
+  nameToTable : Map<String, Table>
+}
+
+abstract class Table
+
+class OlapTable {
+  partitions
+  indexIdToMeta
+}
+
+class PhysicalPartition {
+  tablets
+}
+
+class LocalTablet {
+  replicas : List<Replica>
+}
+
+class LakeTablet {
+  shardId
+}
+
+CatalogMgr o-- InternalCatalog
+CatalogMgr ..> LocalMetastore
+LocalMetastore *-- "N" Database : fullNameToDb
+Database *-- "N" Table : idToTable
+Table <|-- OlapTable
+OlapTable *-- "N" PhysicalPartition : partitions
+PhysicalPartition o-- LocalTablet
+PhysicalPartition o-- LakeTablet
+
+@enduml
+```
+
+### 2.3 FE ↔ worker protocols (query path)
 
 | Direction | Protocol | Typical use |
 |-----------|----------|-------------|
@@ -2500,9 +2570,10 @@ Future<PFetchDataResult> future = BackendServiceClient.getInstance().fetchDataAs
 
 ### 3.8 Query examples
 
-Two shapes cover the MPP path from fragmentize through deploy and **`fetch_data`**: a tablet-parallel scan with GATHER, then a shuffle join with two-phase aggregate.
 
-**Scan, filter, project.** Parallelism is the tablet instances; the only shuffle is an optional GATHER so the client sees one stream.
+#### 3.8.1 Simple query
+
+Partition **`p2024`** has two tablets (**`BUCKETS 2`**): tablet **100** (replicas on BE 10001 / 10002) and tablet **101** (replicas on BE 10002 / 10003).
 
 ```sql
 CREATE TABLE sales (
@@ -2521,28 +2592,74 @@ FROM sales
 WHERE dt = '2024-06-01';
 ```
 
-Partition **`p2024`** has two tablets (**`BUCKETS 2`**): **T100** (replicas on BE-1, BE-2) and **T101** (replicas on BE-2, BE-3). After CBO the physical tree is **`OlapScan`** (predicate pushed to the scan) + project. **`createOutputFragment()`** sees two tablets, so it does **not** pin **`ResultSink`** on the scan fragment; it adds a GATHER exchange.
+**PlanFragment shape** (after fragmentize / finalize)
 
 ```
-PLAN FRAGMENT 0                    -- root, UNPARTITIONED
-  RESULT SINK
-  1:EXCHANGE                       -- GATHER
+PlanFragment F00
+  fragmentId: F00
+  dataPartition: UNPARTITIONED
+  outputPartition: UNPARTITIONED
+  planRoot: ExchangeNode(id=1)              -- GATHER
+  destNode: null
+  sink: ResultSink
+  children: [ F01 ]                         -- TreeNode: producer fragments
+  outputExprs: [ id, amount ]
 
-PLAN FRAGMENT 1                    -- RANDOM (tablet-parallel)
-  STREAM DATA SINK
-    EXCHANGE ID: 01  UNPARTITIONED
-  0:OlapScanNode  TABLE: sales
-     PREDICATES: dt = '2024-06-01'
-     tablets: T100, T101
+PlanFragment F01
+  fragmentId: F01
+  dataPartition: RANDOM
+  outputPartition: UNPARTITIONED            -- STREAM DATA SINK / EXCHANGE 01
+  planRoot: OlapScanNode(id=0, table=sales)
+    predicates: dt = '2024-06-01'
+  destNode: ExchangeNode(id=1) on F00
+  sink: DataStreamSink(exchNodeId=1, UNPARTITIONED)
+  children: []
 ```
 
-**`LocalFragmentAssignmentStrategy`** places one F1 instance on a live replica of each tablet (for example BE-1 for T100, BE-2 for T101). F0 has a single instance on one of those workers (or another BE); that instance is the **`ResultReceiver`** target. Each F1 instance scans its local segments, evaluates the predicate in the scan, and **`transmit_chunk`**s surviving rows to F0. The FE only **`fetch_data`**s F0.
+![Simple query PlanFragment tree](images/starrocks-mpp-ex-simple-planfragment.svg)
 
-If the optimizer can prove a **single tablet** (or short-circuit PK lookup), **`createOutputFragment()`** skips the GATHER fragment and hangs **`ResultSink`** on the scan fragment—one instance, still a deployed worker plan, not an FE-local tree.
+**ExecutionFragment shape** (3 BEs: 10001, 10002, 10003)
 
-![Simple query: tablet-parallel scan then GATHER](images/starrocks-mpp-simple-query.svg)
+```
+ExecutionFragment
+  fragmentIndex: 0
+  planFragment: F00
+  destinations: []
+  numSendersPerExchange: { 1 -> 2 }
+  instances:
+    FragmentInstance
+      indexInJob: 0
+      indexInFragment: 0
+      worker: ComputeNode(id=10003)
+      node2ScanRanges: {}
 
-**Shuffle join and two-phase aggregate.** The full MPP shape: two scan stages, a hash-partitioned join, a local (update serialize) aggregate, a second shuffle on the group key, and a merge (merge finalize) aggregate under **`ResultSink`**. **`orders`** is **`DISTRIBUTED BY HASH(cust_id)`**; **`customers`** is **`HASH(id)`**; they are not colocated.
+ExecutionFragment
+  fragmentIndex: 1
+  planFragment: F01
+  scanRangeAssignment:
+    10001 -> { 0 -> [ tablet 100 ] }
+    10002 -> { 0 -> [ tablet 101 ] }
+  destinations:
+    - fragment_instance_id: (0, F00#0)
+      brpc_server: 10.0.0.3:8060
+  instances:
+    FragmentInstance
+      indexInJob: 1
+      indexInFragment: 0
+      worker: ComputeNode(id=10001)
+      node2ScanRanges: { 0 -> [ tablet 100 ] }
+    FragmentInstance
+      indexInJob: 2
+      indexInFragment: 1
+      worker: ComputeNode(id=10002)
+      node2ScanRanges: { 0 -> [ tablet 101 ] }
+```
+
+![Simple query ExecutionFragment: storage + compute per BE](images/starrocks-mpp-ex-simple-execution.svg)
+
+#### 3.8.2 Complete join and aggregate
+
+Tables are not colocated on the join key; CBO uses **`HASH_PARTITIONED`** on **`cust_id` / `id`**, local then merge aggregate on **`region`**, then GATHER.
 
 ```sql
 CREATE TABLE orders (
@@ -2570,69 +2687,316 @@ WHERE o.dt BETWEEN '2024-01-01' AND '2024-06-30'
 GROUP BY c.region;
 ```
 
-When the tables are **not** colocated on the join key, CBO requires **`HASH_PARTITIONED`** on **`o.cust_id` / `c.id`**. **`visitPhysicalDistribution`** therefore cuts a fragment per scan and a fragment for the join (that fragment’s **`DataPartition`** is the join key, not **`region`**). The aggregate is split: local **`AGGREGATE (update serialize) STREAMING`** stays with the join; **`AGGREGATE (merge finalize)`** runs after a second hash shuffle on **`c.region`**. **`createOutputFragment()`** then GATHERs the still-partitioned merge output into **`ResultSink`**.
+**PlanFragment shape** (after fragmentize / finalize)
 
 ```
-PLAN FRAGMENT 0                    -- UNPARTITIONED
-  RESULT SINK
-  9:EXCHANGE                       -- GATHER
+PlanFragment F00
+  fragmentId: F00
+  dataPartition: UNPARTITIONED
+  outputPartition: UNPARTITIONED
+  planRoot: ExchangeNode(id=9)              -- GATHER
+  destNode: null
+  sink: ResultSink
+  children: [ F01 ]
+  outputExprs: [ region, sum ]
 
-PLAN FRAGMENT 1                    -- HASH_PARTITIONED: region
-  8:AGGREGATE (merge finalize)
-  7:EXCHANGE                       -- HASH_PARTITIONED: region
+PlanFragment F01
+  fragmentId: F01
+  dataPartition: HASH_PARTITIONED(region)
+  outputPartition: UNPARTITIONED
+  planRoot: AggregationNode(id=8, merge finalize)
+    child: ExchangeNode(id=7)               -- HASH region
+  destNode: ExchangeNode(id=9) on F00
+  sink: DataStreamSink(exchNodeId=9, UNPARTITIONED)
+  children: [ F02 ]
 
-PLAN FRAGMENT 2                    -- HASH_PARTITIONED: cust_id
-  STREAM DATA SINK
-    EXCHANGE ID: 07  HASH_PARTITIONED: region
-  6:AGGREGATE (update serialize)
-     STREAMING
-  5:Project
-  4:HASH JOIN
-     2:EXCHANGE                    -- HASH_PARTITIONED: o.cust_id
-     3:EXCHANGE                    -- HASH_PARTITIONED: c.id
+PlanFragment F02
+  fragmentId: F02
+  dataPartition: HASH_PARTITIONED(cust_id)
+  outputPartition: HASH_PARTITIONED(region)
+  planRoot: AggregationNode(id=6, update serialize STREAMING)
+    child: ProjectNode(id=5)
+      child: HashJoinNode(id=4)
+        left:  ExchangeNode(id=2)           -- HASH o.cust_id
+        right: ExchangeNode(id=3)           -- HASH c.id
+  destNode: ExchangeNode(id=7) on F01
+  sink: DataStreamSink(exchNodeId=7, HASH_PARTITIONED(region))
+  children: [ F03, F04 ]
 
-PLAN FRAGMENT 3                    -- RANDOM
-  STREAM DATA SINK
-    EXCHANGE ID: 02  HASH_PARTITIONED: cust_id
-  1:OlapScanNode  TABLE: orders
-     PREDICATES: dt BETWEEN ...
+PlanFragment F03
+  fragmentId: F03
+  dataPartition: RANDOM
+  outputPartition: HASH_PARTITIONED(cust_id)
+  planRoot: OlapScanNode(id=1, table=orders)
+    predicates: dt BETWEEN ...
+  destNode: ExchangeNode(id=2) on F02
+  sink: DataStreamSink(exchNodeId=2, HASH_PARTITIONED(cust_id))
+  children: []
 
-PLAN FRAGMENT 4                    -- RANDOM
-  STREAM DATA SINK
-    EXCHANGE ID: 03  HASH_PARTITIONED: id
-  0:OlapScanNode  TABLE: customers
+PlanFragment F04
+  fragmentId: F04
+  dataPartition: RANDOM
+  outputPartition: HASH_PARTITIONED(id)
+  planRoot: OlapScanNode(id=0, table=customers)
+  destNode: ExchangeNode(id=3) on F02
+  sink: DataStreamSink(exchNodeId=3, HASH_PARTITIONED(id))
+  children: []
 ```
 
-Execution, not a single tree:
+![Complete query PlanFragment tree](images/starrocks-mpp-ex-complete-planfragment.svg)
 
-1. **F3 / F4 instances** start on the BEs that hold the chosen **`orders`** / **`customers`** tablet replicas. Scans run in parallel; each instance hashes outgoing chunks on the join key and **`transmit_chunk`**s to the F2 workers that own those hash buckets.
-2. **F2 instances** run the **`HASH JOIN`**, then the local aggregate. Partial **`(region, sum)`** groups are hashed on **`region`** and shuffled to F1.
-3. **F1 instances** merge partials for their **`region`** buckets. F0 GATHERs finalized rows and serves **`fetch_data`**. The FE session thread only entered the picture at this sink.
+**ExecutionFragment shape** (3 BEs; reduced instance counts)
 
-![Complete query: shuffle join and two-phase aggregate](images/starrocks-mpp-complete-query.svg)
+```
+ExecutionFragment
+  fragmentIndex: 0
+  planFragment: F00
+  destinations: []
+  numSendersPerExchange: { 9 -> 2 }
+  instances:
+    FragmentInstance { indexInJob: 0, indexInFragment: 0, worker: 10001 }
 
-CBO may replace the join shuffle with **broadcast** (small **`customers`**) or **colocate / local bucket shuffle** (same tablet mapping on the join key). Those plans drop one or both join-side Exchange fragments; they are still MPP—scan instances remain parallel—but they avoid a full network repartition. The two-phase aggregate remains whenever group keys are not already aligned with the fragment partition.
+ExecutionFragment
+  fragmentIndex: 1
+  planFragment: F01
+  destinations:
+    - { fragment_instance_id: F00#0, brpc_server: 10.0.0.1:8060 }
+  numSendersPerExchange: { 7 -> 2 }
+  instances:
+    FragmentInstance { indexInJob: 1, indexInFragment: 0, worker: 10001 }
+    FragmentInstance { indexInJob: 2, indexInFragment: 1, worker: 10002 }
 
-**`EXPLAIN`** prints this fragment DAG; **`EXPLAIN SCHEDULER`** prints the **`FragmentInstance`** → worker assignment that **`computeFragmentInstances()`** produced. That pair is the MPP plan the cluster actually runs.
+ExecutionFragment
+  fragmentIndex: 2
+  planFragment: F02
+  destinations:
+    - { fragment_instance_id: F01#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F01#1, brpc_server: 10.0.0.2:8060 }
+  numSendersPerExchange: { 2 -> 2, 3 -> 2 }
+  instances:
+    FragmentInstance { indexInJob: 3, indexInFragment: 0, worker: 10001 }
+    FragmentInstance { indexInJob: 4, indexInFragment: 1, worker: 10002 }
 
+ExecutionFragment
+  fragmentIndex: 3
+  planFragment: F03
+  scanRangeAssignment:
+    10001 -> { 1 -> [ tablet 201, 202 ] }
+    10003 -> { 1 -> [ tablet 203, 204 ] }
+  destinations:
+    - { fragment_instance_id: F02#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F02#1, brpc_server: 10.0.0.2:8060 }
+  instances:
+    FragmentInstance
+      indexInJob: 5
+      indexInFragment: 0
+      worker: 10001
+      node2ScanRanges: { 1 -> [ tablet 201, 202 ] }
+    FragmentInstance
+      indexInJob: 6
+      indexInFragment: 1
+      worker: 10003
+      node2ScanRanges: { 1 -> [ tablet 203, 204 ] }
 
----
+ExecutionFragment
+  fragmentIndex: 4
+  planFragment: F04
+  scanRangeAssignment:
+    10002 -> { 0 -> [ tablet 301, 302 ] }
+    10003 -> { 0 -> [ tablet 303, 304 ] }
+  destinations:
+    - { fragment_instance_id: F02#0, brpc_server: 10.0.0.1:8060 }
+    - { fragment_instance_id: F02#1, brpc_server: 10.0.0.2:8060 }
+  instances:
+    FragmentInstance
+      indexInJob: 7
+      indexInFragment: 0
+      worker: 10002
+      node2ScanRanges: { 0 -> [ tablet 301, 302 ] }
+    FragmentInstance
+      indexInJob: 8
+      indexInFragment: 1
+      worker: 10003
+      node2ScanRanges: { 0 -> [ tablet 303, 304 ] }
+```
+
+![Complete query ExecutionFragment: storage + compute per BE](images/starrocks-mpp-ex-complete-execution.svg)
+
+CBO may use **broadcast** or **colocate / local bucket shuffle** instead of both-side join shuffle; scan **`ExecutionFragment`** instances remain, while join-side **`destinations`** change.
+
 
 ## 4. Load transaction
 
-A StarRocks **transaction** is not a client SQL transaction. There is no `BEGIN` / `COMMIT` that isolates several statements the way InnoDB does. **`DmlStmt.txnId`** is a **load transaction**: a ticket for **one** INSERT, UPDATE, DELETE, MERGE, or stream load so that write becomes visible as a single tablet-version change.
+A StarRocks **transaction** is not a client SQL `BEGIN`/`COMMIT`. **`DmlStmt.txnId`** is a **load transaction**: one INSERT, UPDATE, DELETE, MERGE, or stream load. The id is **globally unique** (`TransactionIdGenerator`) so FE and BEs can name one in-flight write; it is **not** the visibility watermark. Readers see data by **tablet / partition version**. On commit, FE assigns each touched partition a new **`PartitionCommitInfo.version`** (usually **`partition.getNextVersion()`**, i.e. visible + 1)—independent of the txn id. **Publish** then tells BEs: install the unpublished rowsets tagged with that **`txnId`** as version **V**. After publish, scans use **V**; the txn id is only the staging key. **`StatementPlanner`** calls **`beginTransaction()`** for DML; **`GlobalTransactionMgr`** creates a **`TransactionState`** (label; source usually **`INSERT_STREAMING`**). BE writers attach rowsets to that id. **Abort** drops unpublished deltas. **`SELECT`**, **`EXPLAIN`** (except **`EXPLAIN ANALYZE`**), **`INSERT INTO FILES`**, and old non-PK delete skip begin. Non-zero **`session.getTxnId()`** reuses the id (grouped inserts).
 
-OLAP visibility is **tablet version**, not a mixed-statement WAL. **`StatementPlanner.plan()`** calls **`beginTransaction()`** for DML. **`GlobalTransactionMgr.beginTransaction`** creates a **`TransactionState`** (`label`, source usually **`INSERT_STREAMING`**) and stores the id on the statement. BE writers produce new rowsets under that id. **Commit** then **publish version** moves every replica of the affected tablets to the same new version, so readers either see the whole write or none of it. **Abort** discards unpublished deltas.
+```plantuml
+@startuml
 
-A **`SELECT`** never begins this path. **`EXPLAIN`** (except **`EXPLAIN ANALYZE`**), **`INSERT INTO FILES`**, and the old non-PK delete skip **`beginTransaction()`**. If **`session.getTxnId() != 0`**, the statement reuses that id (grouped inserts), still not a general SQL txn.
+class GlobalTransactionMgr {
+  - dbIdToDatabaseTransactionMgrs : Map<Long, DatabaseTransactionMgr>
+  - idGenerator : TransactionIdGenerator
+  - explicitTxnStateMap : Map<Long, ExplicitTxnState>
+}
+
+class DatabaseTransactionMgr {
+  - dbId : long
+  - idToRunningTransactionState : Map<Long, TransactionState>
+  - idToFinalStatusTransactionState : Map<Long, TransactionState>
+  - labelToTxnIds : Map<String, Set<Long>>
+}
+
+class TransactionIdGenerator {
+  - nextId : long
+}
+
+class TransactionState {
+  - transactionId : long
+  - dbId : long
+  - tableIdList : List<Long>
+  - label : String
+  - transactionStatus : TransactionStatus
+  - sourceType : LoadJobSourceType
+  - txnCoordinator : TxnCoordinator
+  - idToTableCommitInfos : Map<Long, TableCommitInfo>
+  - tabletCommitInfos : Set<TabletCommitInfo>
+  - timeoutMs : long
+}
+
+enum TransactionStatus {
+  PREPARE
+  PREPARED
+  COMMITTED
+  VISIBLE
+  ABORTED
+}
+
+enum LoadJobSourceType {
+  INSERT_STREAMING
+  BACKEND_STREAMING
+  FRONTEND_STREAMING
+  ROUTINE_LOAD_TASK
+  BATCH_LOAD_JOB
+  ...
+}
+
+class TxnCoordinator {
+  - sourceType : TxnSourceType
+  - ip : String
+  - backendId : long
+}
+
+enum TxnSourceType {
+  FE
+  BE
+}
+
+class TableCommitInfo {
+  - tableId : long
+  - idToPartitionCommitInfo : Map<Long, PartitionCommitInfo>
+}
+
+class PartitionCommitInfo {
+  - physicalPartitionId : long
+  - version : long
+}
+
+class TabletCommitInfo {
+  - tabletId : long
+  - backendId : long
+}
+
+abstract class DmlStmt {
+  - txnId : long
+}
+
+GlobalTransactionMgr *-- "1" TransactionIdGenerator : idGenerator
+GlobalTransactionMgr *-- "N" DatabaseTransactionMgr : dbIdToDatabaseTransactionMgrs
+DatabaseTransactionMgr o-- "N" TransactionState : idToRunningTransactionState
+TransactionState *-- "1" TransactionStatus : transactionStatus
+TransactionState *-- "1" LoadJobSourceType : sourceType
+TransactionState *-- "1" TxnCoordinator : txnCoordinator
+TxnCoordinator *-- "1" TxnSourceType : sourceType
+TransactionState *-- "N" TableCommitInfo : idToTableCommitInfos
+TableCommitInfo *-- "N" PartitionCommitInfo : idToPartitionCommitInfo
+TransactionState o-- "N" TabletCommitInfo : tabletCommitInfos
+DmlStmt ..> TransactionState : txnId
+
+@enduml
+```
+
+**Running-txn limit.** **`max_running_txn_num_per_db`** (default **1000**) caps non-final load txns per catalog database. **`runningTxnNums`** counts **`PREPARE` / `PREPARED` / `COMMITTED`**. Begin increments; visible or abort decrements. Checked only in **`checkRunningTxnExceedLimit`** at begin. Counts in-flight loads, not tables. **`ROUTINE_LOAD_TASK`** and **`LAKE_COMPACTION`** are excluded (routine load: **`max_routine_load_task_num_per_be`**). Over limit → **`RunningTxnExceedException`**. Raise the FE config for more concurrency; splitting databases isolates counters, not join cost.
+
+**Steps** — status **`PREPARE` → `COMMITTED` → `VISIBLE`** (or **`ABORTED`**).
+
+**1. Begin** — open txn; set **`DmlStmt.txnId`**. Skip if **`session.getTxnId() != 0`**.
 
 ```java
+// StatementPlanner.beginTransaction
+if (session.getTxnId() != 0) {
+    stmt.setTxnId(session.getTxnId());
+    return;
+}
 txnId = transactionMgr.beginTransaction(
         dbId, Lists.newArrayList(targetTable.getId()), label,
         new TransactionState.TxnCoordinator(FE, localHost),
         TransactionState.LoadJobSourceType.INSERT_STREAMING,
         session.getExecTimeout(), session.getCurrentComputeResource());
 stmt.setTxnId(txnId);
+```
+
+**2. Id, label, limit** — allocate global id; under **`DatabaseTransactionMgr`** write lock: label check, **`checkRunningTxnExceedLimit`**, upsert **`PREPARE`**.
+
+```java
+// DatabaseTransactionMgr.beginTransaction
+long tid = globalStateMgr.getGlobalTransactionMgr()
+        .getTransactionIDGenerator().getNextTransactionId();
+TransactionState transactionState = new TransactionState(
+        dbId, tableIdList, tid, label, requestId, sourceType,
+        coordinator, callbackId, timeoutSecond * 1000);
+writeLock();
+try {
+    // label → LabelAlreadyUsedException / DuplicatedRequestException
+    checkRunningTxnExceedLimit(sourceType);
+    persistTxnStateInTxnLevelLock(transactionState, wal -> {
+        unprotectUpsertTransactionState(transactionState);
+    });
+} finally {
+    writeUnlock();
+}
+return tid;
+```
+
+```java
+// DatabaseTransactionMgr.checkRunningTxnExceedLimit
+switch (sourceType) {
+    case ROUTINE_LOAD_TASK:
+    case LAKE_COMPACTION:
+        break;
+    default:
+        if (runningTxnNums >= Config.max_running_txn_num_per_db) {
+            throw new RunningTxnExceedException(
+                    "current running txns on db " + dbId + " is " + runningTxnNums
+                    + ", larger than limit " + Config.max_running_txn_num_per_db);
+        }
+}
+```
+
+**3. Write** — deploy load fragments; BE rowsets under **`txnId`**.
+
+**4. Commit and publish** — **`TabletCommitInfo`** → **`COMMITTED`** → publish **`version`** → **`VISIBLE`**.
+
+```java
+// GlobalTransactionMgr
+VisibleStateWaiter waiter = retryCommitOnRateLimitExceeded(
+        db, transactionId, tabletCommitInfos, tabletFailInfos,
+        txnCommitAttachment, timeoutMillis);
+return awaitVisibleAfterCommitUntil(transactionId, waiter, dueTime);
+```
+
+**5. Abort** — on failure: drop unpublished deltas; free the running-txn slot.
+
+```java
+transactionMgr.abortTransaction(db.getId(), txnId, errMsg);
 ```
 
 ## 5. References
