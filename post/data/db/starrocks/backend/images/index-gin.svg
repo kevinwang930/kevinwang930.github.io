@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="100%" role="img" aria-label="GIN inverted index .ivt directory beside segment">
+  <rect width="960" height="420" fill="#f7f9fb"/>
+  <text x="480" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Inverted (GIN): sidecar .ivt/ next to Segment</text>
+  <text x="480" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">INDEX gin_body (body) USING GIN - concrete files under schema_hash path</text>
+
+  <rect x="40" y="68" width="440" height="310" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+  <rect x="40" y="68" width="440" height="28" fill="#2e7d32" rx="5"/>
+  <text x="260" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">On disk</text>
+  <text x="56" y="120" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">data/1/100/1420156061/</text>
+  <text x="56" y="148" font-family="Consolas, monospace" font-size="11" fill="#37474f">rs020a_0.dat</text>
+  <text x="56" y="168" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">segment rows (id, body, ...)</text>
+  <rect x="56" y="188" width="400" height="160" fill="#e8f5e9" stroke="#43a047" rx="3"/>
+  <text x="72" y="212" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">rs020a_0_1001.ivt/</text>
+  <text x="72" y="236" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">  (CLucene / built-in files)</text>
+  <text x="72" y="264" font-family="Consolas, monospace" font-size="11" fill="#37474f">term "starrocks" -&gt; postings</text>
+  <text x="72" y="284" font-family="Consolas, monospace" font-size="11" fill="#37474f">term "database"  -&gt; postings</text>
+  <text x="72" y="304" font-family="Consolas, monospace" font-size="11" fill="#37474f">term "data"      -&gt; postings</text>
+  <text x="72" y="332" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">index_id 1001 from CREATE INDEX</text>
+
+  <rect x="520" y="68" width="400" height="310" fill="#ffffff" stroke="#6a1b9a" stroke-width="1.5" rx="5"/>
+  <rect x="520" y="68" width="400" height="28" fill="#6a1b9a" rx="5"/>
+  <text x="720" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Concrete postings</text>
+  <text x="540" y="140" font-family="Consolas, monospace" font-size="11" fill="#4a148c">body MATCH 'starrocks'</text>
+  <text x="540" y="180" font-family="Consolas, monospace" font-size="12" fill="#37474f">"starrocks" -&gt; {row 4, 17, 22}</text>
+  <text x="540" y="212" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">intersect into _scan_range</text>
+  <text x="540" y="248" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">may erase MATCH from residual</text>
+  <text x="540" y="300" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">sidecar beside .dat, not inside footer</text>
+</svg>

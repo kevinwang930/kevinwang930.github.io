@@ -1,0 +1,1130 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e\u003cstrong\u003eBackend (BE)\u003c\/strong\u003e and \u003cstrong\u003eCompute Node (CN)\u003c\/strong\u003e are the C\u002b\u002b workers that execute StarRocks **\u003ccode\u003eFragmentInstance\u003c\/code\u003e**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data).\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/db\/starrocks\/backend\/","keywords":"[starrocks]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.166.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="starrocks"><meta name=description content="Backend (BE) and Compute Node (CN) are the C++ workers that execute StarRocks **FragmentInstance**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data)."><meta property="og:description" content="Backend (BE) and Compute Node (CN) are the C++ workers that execute StarRocks **FragmentInstance**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data)."><meta property="og:type" content="article"><meta property="og:title" content="StarRocks: Backend and Compute Node"><meta name=twitter:title content="StarRocks: Backend and Compute Node"><meta property="og:url" content="https://kevinwang930.github.io/post/data/db/starrocks/backend/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/db/starrocks/backend/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="Backend (BE) and Compute Node (CN) are the C++ workers that execute StarRocks **FragmentInstance**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data)."><meta name=twitter:description content="Backend (BE) and Compute Node (CN) are the C++ workers that execute StarRocks **FragmentInstance**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data)."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-08-22T16:00:00"><meta property="article:modified_time" content="2026-08-22T16:00:00"><meta property="article:section" content="data"><meta property="article:section" content="db"><meta property="article:section" content="starrocks"><meta property="article:tag" content="data"><meta property="article:tag" content="db"><meta property="article:tag" content="starrocks"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>StarRocks: Backend and Compute Node</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/db/starrocks/backend/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>StarRocks: Backend and Compute Node</h1><div class="postShorten-meta post-meta"><time datetime=2026-08-22T16:00:00+02:00>August 22, 2026
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/db>db</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/starrocks>starrocks</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p><strong>Backend (BE)</strong> and <strong>Compute Node (CN)</strong> are the C++ workers that execute StarRocks **<code>FragmentInstance</code>**s. They share one binary; BE hosts local tablet data (shared-nothing), CN runs compute and cache against object storage (shared-data).</p><p>Related: <a href=../architecture/>FE query planning and the MPP path</a>.</p><hr><h2 id=1-overview>1. Overview</h2><p>The FE plans SQL into a <strong><code>PlanFragment</code></strong> DAG, schedules **<code>FragmentInstance</code>**s onto workers, and deploys each instance over brpc. The process that <strong>runs</strong> an instance is a BE or CN. Clients never open interactive SQL sessions to workers; workers speak Thrift/brpc to the FE and to each other for shuffle.</p><table><thead><tr><th>Mode</th><th>Process</th><th>Durable user data</th></tr></thead><tbody><tr><td><strong><code>shared_nothing</code></strong></td><td><strong>Backend</strong></td><td>Local disks: <strong><code>Tablet</code></strong> directories (rowsets / segments) + RocksDB meta</td></tr><tr><td><strong><code>shared_data</code></strong></td><td><strong>Compute Node</strong> (<code>--cn</code>)</td><td>Object storage via Starlet; <strong><code>lake::Tablet</code></strong> metadata / shard cache</td></tr></tbody></table><p>Both roles report to the FE leader through Thrift <strong><code>HeartbeatService</code></strong>, expose Thrift <strong><code>BackendService</code></strong> (agent / tablet control) and brpc <strong><code>PInternalService</code></strong> (fragment deploy, result pull, <strong><code>transmit_chunk</code></strong>). This post is what happens <strong>after</strong> a worker receives <strong><code>exec_plan_fragment</code></strong>.</p><p>BE and CN share one C++ entry (<code>starrocks_main.cpp</code>). Passing <strong><code>--cn</code></strong> selects compute-node mode and typically <strong><code>cn.conf</code></strong> instead of <strong><code>be.conf</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// starrocks_main.cpp (abbreviated)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> as_cn <span style=color:#f92672>=</span> false;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (argc <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>1</span> <span style=color:#f92672>&amp;&amp;</span> strcmp(argv[<span style=color:#ae81ff>1</span>], <span style=color:#e6db74>&#34;--cn&#34;</span>) <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>    as_cn <span style=color:#f92672>=</span> true;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the FE membership model, <strong><code>Backend</code></strong> extends <strong><code>ComputeNode</code></strong>. A backend sets <strong><code>isSetStoragePath = true</code></strong> and reports <strong><code>DiskInfo</code></strong>; it hosts tablet data directories. A CN is a <strong><code>ComputeNode</code></strong> without local data paths—it executes plans and caches hot data while lake tablet files live in object storage.</p><p>Startup (conceptually):</p><ol><li>Daemon / flags / config</li><li>Storage engine (local **<code>DataDir</code>**s on BE; Starlet / lake IO on CN)</li><li><strong><code>ExecEnv</code></strong> — fragment executor, memory tracker, pipeline thread pools</li><li><strong><code>AgentServer</code></strong> — tablet create/delete, clone, publish-version tasks from FE</li><li>Thrift <strong><code>BackendService</code></strong> + brpc <strong><code>PInternalService</code></strong></li><li>Heartbeat loop back to FE leader</li></ol><table><thead><tr><th>Component</th><th>Role</th></tr></thead><tbody><tr><td><strong><code>ExecEnv</code></strong></td><td>Global execution environment: query contexts, mem, driver executors</td></tr><tr><td><strong><code>HeartbeatService</code></strong> (Thrift)</td><td>Alive report to FE leader</td></tr><tr><td><strong><code>BackendService</code></strong> (Thrift)</td><td>Agent tasks, tablet stats, routine load, export snapshot, external scanners</td></tr><tr><td><strong><code>AgentServer</code></strong></td><td>Applies FE agent tasks (create tablet, clone, drop, publish) from <strong><code>BackendService</code></strong></td></tr><tr><td><strong><code>PInternalService</code></strong> (brpc)</td><td>Query plane: <strong><code>exec_plan_fragment</code></strong>, <strong><code>fetch_data</code></strong>, <strong><code>transmit_chunk</code></strong>, runtime filters</td></tr><tr><td>Pipeline engine</td><td>Vectorized **<code>Operator</code>**s; one <strong><code>FragmentInstance</code></strong> → pipelines → **<code>PipelineDriver</code>**s</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+struct starrocks_main {
+  as_cn : bool
+  main()
+}
+
+struct ExecEnv {
+  queryContextMgr
+  memTracker
+  driverExecutor
+}
+
+struct HeartbeatService {
+  heartbeat()
+}
+
+struct BackendService {
+  submit_tasks()
+  get_tablet_stat()
+  submit_routine_load_task()
+}
+
+struct AgentServer {
+  createTablet()
+  cloneTablet()
+  publishVersion()
+}
+
+struct PInternalService {
+  exec_plan_fragment()
+  fetch_data()
+  transmit_chunk()
+}
+
+struct FragmentExecutor {
+  prepare()
+  execute()
+}
+
+struct FragmentContext {
+  pipelines
+  drivers
+}
+
+struct PipelineDriver {
+  operators
+  morselQueue
+}
+
+starrocks_main ..&gt; ExecEnv
+starrocks_main ..&gt; HeartbeatService
+starrocks_main ..&gt; BackendService
+starrocks_main ..&gt; PInternalService
+BackendService ..&gt; AgentServer : submit_tasks
+PInternalService ..&gt; FragmentExecutor : exec_plan_fragment
+FragmentExecutor ..&gt; FragmentContext
+FragmentContext *-- PipelineDriver
+FragmentExecutor ..&gt; ExecEnv
+
+@enduml
+</code></pre><p>On a timer the worker sends Thrift heartbeat to the FE leader: ports, disks (BE), run mode, alive status. Failed heartbeat leads the FE to mark the node dead and to reschedule tablets / avoid that worker for new fragments.</p><p>A FE <strong><code>FragmentInstance</code></strong> is one scheduled run of a <strong><code>PlanFragment</code></strong> on one BE/CN. The worker materializes it as a <strong><code>pipeline::FragmentContext</code></strong>: pipelines, drivers, and scan <strong>morsels</strong>. The full architecture, types, and call path are in <strong>§3</strong>.</p><p>On the FE catalog a tablet is one <strong>bucket</strong> of one <strong>partition</strong> (<strong><code>LocalTablet</code></strong> + <strong><code>Replica</code></strong>). On the BE it is <strong><code>starrocks::Tablet</code></strong>: versioned <strong>rowsets</strong> of columnar <strong>segments</strong> under a <strong><code>DataDir</code></strong>, with RocksDB holding metadata only. Placement, storage stack, layout, insert, scan, and indexes are in <strong>§2</strong>. Shared-data uses <strong><code>lake::Tablet</code></strong> and object storage instead of a local replica tree.</p><hr><h2 id=2-tablet-storage-and-access>2. Tablet storage and access</h2><p>OLAP data reaches a BE in two steps: the FE decides <strong>which tablet</strong> owns a row, then that tablet’s replica stores the row in <strong>versioned columnar files</strong>.</p><p><strong>Placement (FE catalog).</strong> A table is split first by partition, then by bucket; each bucket is a tablet.</p><ul><li><strong>Partition</strong> — from <strong><code>PARTITION BY</code></strong> (often a date/value range). Rows land in one partition by partition-key value. No <code>PARTITION BY</code> means a single default partition. Same schema in every partition.</li><li><strong>Bucket / tablet</strong> — inside one partition, <strong><code>DISTRIBUTED BY HASH(...) BUCKETS N</code></strong> maps the distribution key to one of <strong>N</strong> buckets. Each bucket is an FE <strong><code>LocalTablet</code></strong> with replicas on BEs. This is the FE hash bucket, not BE <code>DataDir</code> <code>shard_id</code> (local <code>data/{shard}/</code> fan-out only).</li></ul><p><strong>Storage (one BE replica).</strong> The replica is <strong><code>starrocks::Tablet</code></strong>. On disk it is a stack of immutable files under <code>data/{shard}/{tablet_id}/{schema_hash}/</code>; RocksDB under <code>meta/</code> holds tablet/rowset/txn metadata, not user rows.</p><ul><li><strong>Tablet</strong> — one replica of one bucket: identity in <strong><code>TabletMeta</code></strong>, and a version map of visible <strong>rowsets</strong>.</li><li><strong>Rowset</strong> — one publish (or compaction/clone) over a <strong>version range</strong> (<code>start_version</code> … <code>end_version</code>). Successive loads add new rowsets; they do not rewrite older ones. A rowset holds the <strong>full table schema</strong> for its rows—it does not assign different columns to different rowsets.</li><li><strong>Segment</strong> — one <code>.dat</code> file inside a rowset (<code>{rowset_id}_{seg_id}.dat</code>). Multiple segments in the same rowset split <strong>rows</strong> (e.g. several memtable flushes), not columns.</li></ul><p><strong>Columnar</strong> layout is <strong>inside each segment</strong>: <code>SegmentWriter</code> writes one page stream per column into that <code>.dat</code>; the footer stores short-key / zone-map / … indexes. Scans open the chosen segments and read only needed column pages.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span><span style=display:flex><span>  dt DATE,
+</span></span><span style=display:flex><span>  region VARCHAR(<span style=color:#ae81ff>32</span>),
+</span></span><span style=display:flex><span>  amount BIGINT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, region)
+</span></span><span style=display:flex><span>PARTITION <span style=color:#66d9ef>BY</span> RANGE(dt) (
+</span></span><span style=display:flex><span>  PARTITION p202603 <span style=color:#66d9ef>VALUES</span> [(<span style=color:#e6db74>&#34;2026-03-01&#34;</span>), (<span style=color:#e6db74>&#34;2026-04-01&#34;</span>))
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(region) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- dt -&gt; partition p202603; HASH(region) -&gt; one of 2 tablets in that partition
+</span></span></span><span style=display:flex><span><span style=color:#75715e>-- load A -&gt; new Rowset rs020a (version 3-3) on those replicas (full schema)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> sales <span style=color:#66d9ef>VALUES</span>
+</span></span><span style=display:flex><span>  (<span style=color:#e6db74>&#39;2026-03-01&#39;</span>, <span style=color:#e6db74>&#39;east&#39;</span>, <span style=color:#ae81ff>100</span>),
+</span></span><span style=display:flex><span>  (<span style=color:#e6db74>&#39;2026-03-01&#39;</span>, <span style=color:#e6db74>&#39;west&#39;</span>, <span style=color:#ae81ff>200</span>),
+</span></span><span style=display:flex><span>  (<span style=color:#e6db74>&#39;2026-03-02&#39;</span>, <span style=color:#e6db74>&#39;east&#39;</span>, <span style=color:#ae81ff>150</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- load B -&gt; new Rowset rs031b (version 4-4); does not rewrite rs020a or split its columns
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>INSERT</span> <span style=color:#66d9ef>INTO</span> sales <span style=color:#66d9ef>VALUES</span>
+</span></span><span style=display:flex><span>  (<span style=color:#e6db74>&#39;2026-03-03&#39;</span>, <span style=color:#e6db74>&#39;east&#39;</span>, <span style=color:#ae81ff>80</span>),
+</span></span><span style=display:flex><span>  (<span style=color:#e6db74>&#39;2026-03-03&#39;</span>, <span style=color:#e6db74>&#39;west&#39;</span>, <span style=color:#ae81ff>90</span>);
+</span></span></code></pre></div><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/tablet-structure.svg alt="From SQL loads on sales to Tablet / Rowset / Segment on one BE replica"></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+skinparam packageStyle rectangle
+
+class DataDir {
+  _path : storage_root
+  _kv_store : KVStore*
+  _current_shard
+  MAX_SHARD_NUM = 1024
+  data/ meta/ persistent/ trash/ ...
+  +get_meta() : KVStore*
+  +get_shard()
+}
+
+class KVStore {
+  path : &#34;{root}/meta&#34;
+  tablet / rowset / txn / delvec keys
+}
+
+class TabletManager {
+  +create_tablet()
+  +get_tablet(tablet_id)
+}
+
+class BaseTablet {
+  _tablet_meta : TabletMetaSharedPtr
+  _data_dir : DataDir*
+  _tablet_path : &#34;{root}/data/{shard}/{tablet_id}/{schema_hash}&#34;
+  +schema_hash_path()
+  +tablet_id()
+}
+
+class Tablet {
+  _rs_version_map : Version → Rowset
+  _inc_rs_version_map
+  _updates : TabletUpdates*
+  +capture_consistent_rowsets(version)
+  +add_inc_rowset(rowset, version)
+  +rowset_commit(version, rowset)
+}
+
+class TabletMeta {
+  _tablet_id
+  _schema_hash
+  _shard_id
+  tablet_uid
+  tablet_state
+  _schema : TabletSchema
+  _rs_metas
+  _inc_rs_metas
+}
+
+class TabletUpdates {
+  apply / publish
+  delvec
+  +rowset_commit()
+}
+
+class PrimaryIndex {
+  encoded PK → (rssid, rowid)
+  +upsert() / erase() / get()
+}
+
+class PersistentIndex {
+  files : index.l0.* on schema_hash_path
+}
+
+class Rowset {
+  _rowset_path : schema_hash_path
+  _rowset_meta : RowsetMetaSharedPtr
+  _segments : Segment[]
+  +rowset_id()
+  +start_version() / end_version()
+  +num_segments()
+  +segment_file_path() : &#34;{id}_{seg}.dat&#34;
+}
+
+class RowsetMeta {
+  rowset_id
+  tablet_id
+  start_version, end_version
+  num_segments
+}
+
+class Segment {
+  _segment_id
+  _num_rows
+  short_key / zone_map / bitmap / bloom
+  sidecars : .del .upt .cols .ivt/ .vi
+  +new_iterator()
+}
+
+class ShortKeyIndexDecoder {
+  sparse key → rowid range
+}
+
+class SegmentIterator {
+  +_init_scan_range_and_context()
+}
+
+class DeltaWriter {
+  _opt : tablet_id, txn_id, load_id, ...
+  _tablet : TabletSharedPtr
+  _mem_table : MemTable*
+  _rowset_writer : RowsetWriter*
+  _flush_token : FlushToken*
+  _cur_rowset : RowsetSharedPtr
+  _state : Uninitialized…Committed
+  +open() / write(chunk) / close() / commit()
+}
+
+class MemTable {
+  _chunk / _result_chunk
+  +insert() / finalize() / flush()
+}
+
+class FlushToken {
+  +submit(mem_table) / wait()
+}
+
+class RowsetWriter {
+  +flush_chunk()
+  +build() : Rowset
+}
+
+class SegmentWriter {
+  column pages + indexes → .dat
+  +append_chunk() / finalize()
+}
+
+class TxnManager {
+  _txn_tablet_maps
+  +prepare_txn()
+  +commit_txn()
+  +publish_txn()
+}
+
+class OlapChunkSource {
+  _tablet
+  _version
+  _reader : TabletReader*
+  morsel : tablet + version + rowsets
+}
+
+class TabletReader {
+  _tablet
+  _version : Version(from, to)
+  _rowsets : Rowset[]
+  +prepare() / open(params)
+}
+
+&#39; ---- one connected graph ----
+DataDir --&gt; KVStore : _kv_store
+TabletManager --&gt; Tablet
+Tablet --|&gt; BaseTablet
+BaseTablet --&gt; DataDir : _data_dir
+BaseTablet --&gt; TabletMeta : _tablet_meta
+Tablet o-- TabletUpdates : _updates PRIMARY_KEYS
+TabletUpdates --&gt; PrimaryIndex
+PrimaryIndex o-- PersistentIndex
+Tablet &#34;1&#34; *-- &#34;n&#34; Rowset : _rs_version_map
+Rowset --&gt; RowsetMeta : _rowset_meta
+Rowset &#34;1&#34; *-- &#34;n&#34; Segment : _segments
+Segment o-- ShortKeyIndexDecoder
+Segment --&gt; SegmentIterator : new_iterator()
+
+DeltaWriter --&gt; Tablet : _tablet
+DeltaWriter --&gt; MemTable : _mem_table
+DeltaWriter --&gt; FlushToken : _flush_token
+DeltaWriter --&gt; RowsetWriter : _rowset_writer
+RowsetWriter --&gt; SegmentWriter
+RowsetWriter ..&gt; Rowset : build()
+SegmentWriter ..&gt; Segment : write .dat
+DeltaWriter --&gt; TxnManager
+TxnManager --&gt; Tablet : publish_txn / add_inc_rowset
+
+OlapChunkSource --&gt; Tablet : _tablet
+OlapChunkSource --&gt; TabletReader : _reader
+TabletReader --&gt; Rowset : _rowsets
+TabletReader --&gt; SegmentIterator
+
+@enduml
+</code></pre><h3 id=21-on-disk-layout>2.1 On-disk layout</h3><p>Path construction joins <strong><code>DATA_PREFIX</code> (<code>/data</code>)</strong>, shard id, tablet id, and <strong><code>schema_hash</code></strong> (historical leaf; multi-schema-hash era; still the directory shape today). There is no separate <code>segment/</code> directory: a <strong><code>Segment</code></strong> is one columnar file <strong><code>{rowset_id}_{seg_id}.dat</code></strong> (plus optional sidecars with the same prefix). A <strong><code>Rowset</code></strong> is the versioned unit that owns one or more such segments; RocksDB under <strong><code>meta/</code></strong> records which rowsets belong to the tablet.</p><p><strong>Shard.</strong> Under one <strong><code>DataDir</code></strong>, user data is spread across <strong><code>data/{shard_id}/…</code></strong> with <strong><code>shard_id ∈ [0, 1024)</code></strong> (<code>DataDir::MAX_SHARD_NUM</code>). This is a <strong>local directory fan-out</strong> so a single disk root does not put every tablet in one flat folder—it is <strong>not</strong> the FE hash bucket, not a lake/StarOS shard, and not chosen by SQL <code>DISTRIBUTED BY</code>. On create-tablet, the BE picks the next id with <strong><code>DataDir::get_shard</code></strong>: round-robin <strong><code>_current_shard = (_current_shard + 1) % 1024</code></strong>, creates <strong><code>{root}/data/{shard}/</code></strong> if missing, stores that id in <strong><code>TabletMeta::shard_id</code></strong>, and builds <strong><code>data/{shard}/{tablet_id}/{schema_hash}/</code></strong>. The shard stays with the tablet for its life on that disk (clone / load reuse the meta path).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>{storage_root}/
+</span></span><span style=display:flex><span>├── meta/                              # RocksDB (KVStore): tablet / rowset / txn meta
+</span></span><span style=display:flex><span>├── persistent/                        # DataDir helper for persistent index
+</span></span><span style=display:flex><span>├── trash/  snapshot/  clone/  ...
+</span></span><span style=display:flex><span>└── data/
+</span></span><span style=display:flex><span>    └── {shard}/                       # e.g. 1
+</span></span><span style=display:flex><span>        └── {tablet_id}/               # e.g. 100
+</span></span><span style=display:flex><span>            └── {schema_hash}/         # BaseTablet::schema_hash_path
+</span></span><span style=display:flex><span>                ├── rs020a_0.dat       # Segment 0 of rowset rs020a
+</span></span><span style=display:flex><span>                ├── rs020a_1.dat       # Segment 1 (same rowset, if multi-segment)
+</span></span><span style=display:flex><span>                ├── rs031b_0.dat       # Segment 0 of a later published rowset
+</span></span><span style=display:flex><span>                ├── rs020a_0.del       # PK delete bitmap (when present)
+</span></span><span style=display:flex><span>                ├── rs020a_0.upt
+</span></span><span style=display:flex><span>                ├── rs020a_0_{ver}_{i}.cols
+</span></span><span style=display:flex><span>                ├── rs020a_0_{index_id}.ivt/
+</span></span><span style=display:flex><span>                ├── rs020a_0_{index_id}.vi
+</span></span><span style=display:flex><span>                └── index.l0.*         # PersistentIndex (PRIMARY_KEYS only)
+</span></span></code></pre></div><table><thead><tr><th>Artifact</th><th>Naming</th><th>Role</th></tr></thead><tbody><tr><td><strong>Segment</strong></td><td><strong><code>{rowset_id}_{seg}.dat</code></strong></td><td>One immutable columnar file: data pages + footer (short-key, zone maps, bitmap/bloom often <strong>inside</strong>)</td></tr><tr><td>Delete / upt / cols</td><td><strong><code>{rowset_id}_{seg}.del</code> / <code>.upt</code> / <code>.cols</code></strong></td><td>PK deletes, partial update, delta column group for that segment</td></tr><tr><td>Inverted / vector</td><td><strong><code>{rowset_id}_{seg}_{index_id}.ivt/</code> / <code>.vi</code></strong></td><td>Standalone GIN / ANN sidecars next to that segment</td></tr><tr><td>PK persistent index</td><td><strong><code>index.l0.*</code></strong></td><td>Local persistent primary index under the schema-hash path (tablet-level, not per segment)</td></tr><tr><td>Meta</td><td><strong><code>{root}/meta</code></strong></td><td>Tablet / rowset / txn keys — separate from segment bytes</td></tr></tbody></table><p><strong><code>TabletManager</code></strong> loads tablets from RocksDB when a <strong><code>DataDir</code></strong> starts; create-tablet agent tasks create the directory tree and initial meta.</p><p>Example: a two-bucket <code>sales</code> table becomes two FE tablets; one replica of tablet <strong>100</strong> on BE-1 looks like this on disk.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span><span style=display:flex><span>  dt DATE,
+</span></span><span style=display:flex><span>  region VARCHAR(<span style=color:#ae81ff>32</span>),
+</span></span><span style=display:flex><span>  amount BIGINT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, region)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(region) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span></code></pre></div><p><strong>Columnar layout.</strong> Inside one <code>.dat</code>, each table column is stored as its own sequence of data pages (plus small index pages for that column). The file ends with a footer that points at those pages and holds the short-key index. A query can read only the columns it needs. Sidecars such as <code>.del</code> / <code>.ivt</code> sit next to the <code>.dat</code>, not inside the column pages.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>rs020a_0.dat
+</span></span><span style=display:flex><span>├── column dt      → data pages …
+</span></span><span style=display:flex><span>├── column region  → data pages …
+</span></span><span style=display:flex><span>├── column amount  → data pages …
+</span></span><span style=display:flex><span>└── footer         → page pointers, short-key index, num_rows
+</span></span></code></pre></div><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/segment-columnar-layout.svg alt="Inside one Segment .dat: per-column data pages and footer"></p><h3 id=22-insert>2.2 Insert</h3><p>Load / stream load / insert on a local tablet goes through <strong><code>DeltaWriter</code></strong>:</p><ol><li><strong><code>open</code></strong> — <strong><code>TxnManager::prepare_txn</code></strong>; create <strong><code>RowsetWriter</code></strong> under <strong><code>tablet->schema_hash_path()</code></strong>.</li><li><strong><code>write</code></strong> — append into <strong><code>MemTable</code></strong>; on full or memory pressure, async flush (<strong><code>MemTableFlushExecutor</code></strong>).</li><li><strong>Flush</strong> — sort / aggregate → <strong><code>RowsetWriter</code></strong> / <strong><code>SegmentWriter</code></strong> → <code>.dat</code> (+ indexes built with the segment).</li><li><strong><code>close</code> / <code>commit</code></strong> — wait flushes, <strong><code>RowsetWriter::build()</code></strong>, <strong><code>TxnManager::commit_txn</code></strong> (committed rowset, <strong>not</strong> scannable).</li><li><strong>Publish</strong> — agent <strong><code>PUBLISH_VERSION</code></strong> → <strong><code>TxnManager::publish_txn</code></strong>:<ul><li>DUP / UNIQUE / AGG: <strong><code>Tablet::add_inc_rowset(rowset, version)</code></strong></li><li>PRIMARY_KEYS: <strong><code>Tablet::rowset_commit</code></strong> → <strong><code>TabletUpdates</code></strong> apply (delvec + PK index upsert)</li></ul></li></ol><p>The opening §2 diagram already shows <strong><code>DeltaWriter</code></strong>, <strong><code>MemTable</code></strong>, <strong><code>FlushToken</code></strong>, <strong><code>RowsetWriter</code></strong>, <strong><code>SegmentWriter</code></strong>, and <strong><code>TxnManager</code></strong>. The insert path also uses the types below: the flush executor and task, the memtable sink, factory / horizontal writer, and per-column writers inside a segment.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+skinparam packageStyle rectangle
+
+class DeltaWriter {
+  _mem_table
+  _mem_table_sink
+  _rowset_writer
+  _flush_token
+  _cur_rowset
+  +open() / write() / close() / commit()
+}
+
+class MemTable {
+  +insert() / finalize() / flush()
+}
+
+class MemTableSink &lt;&lt;interface&gt;&gt; {
+  +flush_chunk()
+}
+
+class MemTableRowsetWriterSink {
+  _rowset_writer
+  +flush_chunk()
+}
+
+class MemTableFlushExecutor {
+  +create_flush_token()
+}
+
+class FlushToken {
+  +submit(mem_table) / wait()
+}
+
+class MemtableFlushTask {
+  +run()
+}
+
+class RowsetFactory {
+  +create_rowset_writer(context)
+}
+
+class RowsetWriterContext {
+  rowset_path_prefix
+  rowset_id / tablet_id / txn_id
+  rowset_state = PREPARED
+}
+
+class RowsetWriter {
+  +flush_chunk()
+  +build() : Rowset
+}
+
+class HorizontalRowsetWriter {
+  +flush_chunk()
+  +_create_segment_writer()
+  +_flush_segment_writer()
+}
+
+class SegmentWriter {
+  _column_writers
+  +append_chunk() / finalize()
+}
+
+class ColumnWriter {
+  +append() / write_data()
+  +write_ordinal_index() / write_zone_map()
+}
+
+class TxnManager {
+  +prepare_txn() / commit_txn() / publish_txn()
+}
+
+class Tablet {
+  +add_inc_rowset() / rowset_commit()
+}
+
+class Rowset
+class Segment
+
+DeltaWriter --&gt; MemTable
+DeltaWriter --&gt; MemTableSink : _mem_table_sink
+MemTableRowsetWriterSink --|&gt; MemTableSink
+DeltaWriter --&gt; MemTableRowsetWriterSink
+MemTableRowsetWriterSink --&gt; RowsetWriter
+DeltaWriter --&gt; FlushToken
+MemTableFlushExecutor --&gt; FlushToken : create
+FlushToken --&gt; MemtableFlushTask : submit
+MemtableFlushTask --&gt; MemTable : flush
+MemTable --&gt; MemTableSink
+
+RowsetFactory ..&gt; RowsetWriterContext
+RowsetFactory ..&gt; RowsetWriter : create
+HorizontalRowsetWriter --|&gt; RowsetWriter
+DeltaWriter --&gt; RowsetWriter
+HorizontalRowsetWriter --&gt; SegmentWriter : _create_segment_writer
+SegmentWriter *-- ColumnWriter : _column_writers
+SegmentWriter ..&gt; Segment : .dat
+RowsetWriter ..&gt; Rowset : build()
+
+DeltaWriter --&gt; TxnManager
+TxnManager --&gt; Tablet
+
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// Abbreviated; omitted branches marked &#34;// ...&#34;.
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 1. open ----
+</span></span></span><span style=display:flex><span>StatusOr<span style=color:#f92672>&lt;</span>std<span style=color:#f92672>::</span>unique_ptr<span style=color:#f92672>&lt;</span>DeltaWriter<span style=color:#f92672>&gt;&gt;</span> DeltaWriter<span style=color:#f92672>::</span>open(<span style=color:#66d9ef>const</span> DeltaWriterOptions<span style=color:#f92672>&amp;</span> opt,
+</span></span><span style=display:flex><span>                                                         MemTracker<span style=color:#f92672>*</span> mem_tracker) {
+</span></span><span style=display:flex><span>    std<span style=color:#f92672>::</span>unique_ptr<span style=color:#f92672>&lt;</span>DeltaWriter<span style=color:#f92672>&gt;</span> writer(<span style=color:#66d9ef>new</span> DeltaWriter(opt, mem_tracker, StorageEngine<span style=color:#f92672>::</span>instance()));
+</span></span><span style=display:flex><span>    SCOPED_THREAD_LOCAL_MEM_SETTER(mem_tracker, false);
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(writer<span style=color:#f92672>-&gt;</span>_init());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> std<span style=color:#f92672>::</span>move(writer);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>_init() {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>    TabletManager<span style=color:#f92672>*</span> tablet_mgr <span style=color:#f92672>=</span> _storage_engine<span style=color:#f92672>-&gt;</span>tablet_manager();
+</span></span><span style=display:flex><span>    _tablet <span style=color:#f92672>=</span> tablet_mgr<span style=color:#f92672>-&gt;</span>get_tablet(_opt.tablet_id, false);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... null / PK mem / version-count checks ...
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    std<span style=color:#f92672>::</span>lock_guard push_lock(_tablet<span style=color:#f92672>-&gt;</span>get_push_lock());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>auto</span> st <span style=color:#f92672>=</span> _storage_engine<span style=color:#f92672>-&gt;</span>txn_manager()<span style=color:#f92672>-&gt;</span>prepare_txn(_opt.partition_id, _tablet, _opt.txn_id, _opt.load_id);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>st.ok()) {
+</span></span><span style=display:flex><span>        _set_state(kAborted, st);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    RowsetWriterContext writer_context;
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... schema / partial-update fields ...
+</span></span></span><span style=display:flex><span>    writer_context.rowset_id <span style=color:#f92672>=</span> _storage_engine<span style=color:#f92672>-&gt;</span>next_rowset_id();
+</span></span><span style=display:flex><span>    writer_context.tablet_id <span style=color:#f92672>=</span> _opt.tablet_id;
+</span></span><span style=display:flex><span>    writer_context.txn_id <span style=color:#f92672>=</span> _opt.txn_id;
+</span></span><span style=display:flex><span>    writer_context.rowset_path_prefix <span style=color:#f92672>=</span> _tablet<span style=color:#f92672>-&gt;</span>schema_hash_path();
+</span></span><span style=display:flex><span>    writer_context.rowset_state <span style=color:#f92672>=</span> PREPARED;
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    st <span style=color:#f92672>=</span> RowsetFactory<span style=color:#f92672>::</span>create_rowset_writer(writer_context, <span style=color:#f92672>&amp;</span>_rowset_writer);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>st.ok()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>auto</span> msg <span style=color:#f92672>=</span> strings<span style=color:#f92672>::</span>Substitute(<span style=color:#e6db74>&#34;Fail to create rowset writer. tablet_id: $0, error: $1&#34;</span>, _opt.tablet_id,
+</span></span><span style=display:flex><span>                                       st.to_string());
+</span></span><span style=display:flex><span>        st <span style=color:#f92672>=</span> Status<span style=color:#f92672>::</span>InternalError(msg);
+</span></span><span style=display:flex><span>        _set_state(kAborted, st);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    _mem_table_sink <span style=color:#f92672>=</span> std<span style=color:#f92672>::</span>make_unique<span style=color:#f92672>&lt;</span>MemTableRowsetWriterSink<span style=color:#f92672>&gt;</span>(_rowset_writer.get());
+</span></span><span style=display:flex><span>    _flush_token <span style=color:#f92672>=</span> _storage_engine<span style=color:#f92672>-&gt;</span>memtable_flush_executor()<span style=color:#f92672>-&gt;</span>create_flush_token();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... Primary replicate_token / Secondary segment_flush_token ...
+</span></span></span><span style=display:flex><span>    _set_state(kWriting, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 2. write (repeated) ----
+</span></span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>write(<span style=color:#66d9ef>const</span> Chunk<span style=color:#f92672>&amp;</span> chunk, <span style=color:#66d9ef>const</span> <span style=color:#66d9ef>uint32_t</span><span style=color:#f92672>*</span> indexes, <span style=color:#66d9ef>uint32_t</span> from, <span style=color:#66d9ef>uint32_t</span> size) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_mem_table <span style=color:#f92672>==</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_reset_mem_table());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... state / Secondary / PK partial-update checks ...
+</span></span></span><span style=display:flex><span>    Status st;
+</span></span><span style=display:flex><span>    ASSIGN_OR_RETURN(<span style=color:#66d9ef>auto</span> full, _mem_table<span style=color:#f92672>-&gt;</span>insert(chunk, indexes, from, size));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_mem_tracker<span style=color:#f92672>-&gt;</span>limit_exceeded()) {
+</span></span><span style=display:flex><span>        st <span style=color:#f92672>=</span> _flush_memtable();
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_reset_mem_table());
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#a6e22e>if</span> (_mem_tracker<span style=color:#f92672>-&gt;</span>parent() <span style=color:#f92672>&amp;&amp;</span> _mem_tracker<span style=color:#f92672>-&gt;</span>parent()<span style=color:#f92672>-&gt;</span>limit_exceeded()) {
+</span></span><span style=display:flex><span>        st <span style=color:#f92672>=</span> _flush_memtable();
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_reset_mem_table());
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#a6e22e>if</span> (full) {
+</span></span><span style=display:flex><span>        st <span style=color:#f92672>=</span> flush_memtable_async();
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_reset_mem_table());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>st.ok()) {
+</span></span><span style=display:flex><span>        _set_state(kAborted, st);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// MemTable::insert appends rows into _chunk; returns suggest_flush (true when is_full()).
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 3. flush ----
+</span></span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>flush_memtable_async(<span style=color:#66d9ef>bool</span> eos) {
+</span></span><span style=display:flex><span>    DeferOp <span style=color:#a6e22e>defer</span>([<span style=color:#66d9ef>this</span>] { _mem_table.reset(); });
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_mem_table <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_mem_table<span style=color:#f92672>-&gt;</span>finalize());   <span style=color:#75715e>// sort / agg → _result_chunk
+</span></span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... auto-increment fill when needed ...
+</span></span></span><span style=display:flex><span>    <span style=color:#75715e>// Peer (and Primary without replicate_token): submit when result chunk non-null
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_mem_table <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span> <span style=color:#f92672>&amp;&amp;</span> _mem_table<span style=color:#f92672>-&gt;</span>get_result_chunk() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> _flush_token<span style=color:#f92672>-&gt;</span>submit(std<span style=color:#f92672>::</span>move(_mem_table), eos, [<span style=color:#66d9ef>this</span>](SegmentPBPtr seg, <span style=color:#66d9ef>bool</span>, <span style=color:#66d9ef>int64_t</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (seg) {
+</span></span><span style=display:flex><span>                _tablet<span style=color:#f92672>-&gt;</span>add_in_writing_data_size(_opt.txn_id, seg<span style=color:#f92672>-&gt;</span>data_size());
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// ... immutable tablet size check ...
+</span></span></span><span style=display:flex><span>        });
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... Primary+replicate_token / Secondary paths ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>_flush_memtable() {
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(flush_memtable_async());
+</span></span><span style=display:flex><span>    Status st <span style=color:#f92672>=</span> _flush_token<span style=color:#f92672>-&gt;</span>wait();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... stats ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status FlushToken<span style=color:#f92672>::</span>submit(std<span style=color:#f92672>::</span>unique_ptr<span style=color:#f92672>&lt;</span>MemTable<span style=color:#f92672>&gt;</span> mem_table, <span style=color:#66d9ef>bool</span> eos,
+</span></span><span style=display:flex><span>                          std<span style=color:#f92672>::</span>function<span style=color:#f92672>&lt;</span><span style=color:#66d9ef>void</span>(SegmentPBPtr, <span style=color:#66d9ef>bool</span>, <span style=color:#66d9ef>int64_t</span>)<span style=color:#f92672>&gt;</span> cb) {
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(status());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>auto</span> task <span style=color:#f92672>=</span> std<span style=color:#f92672>::</span>make_shared<span style=color:#f92672>&lt;</span>MemtableFlushTask<span style=color:#f92672>&gt;</span>(<span style=color:#66d9ef>this</span>, std<span style=color:#f92672>::</span>move(mem_table), eos, std<span style=color:#f92672>::</span>move(cb), _slot_idx);
+</span></span><span style=display:flex><span>    _slot_idx<span style=color:#f92672>++</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> _flush_token<span style=color:#f92672>-&gt;</span>submit(std<span style=color:#f92672>::</span>move(task));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// MemtableFlushTask::run → FlushToken::_flush_memtable → MemTable::flush
+</span></span></span><span style=display:flex><span>Status MemTable<span style=color:#f92672>::</span>flush(SegmentPB<span style=color:#f92672>*</span> seg_info, <span style=color:#66d9ef>bool</span> eos, <span style=color:#66d9ef>int64_t</span><span style=color:#f92672>*</span> flush_data_size, <span style=color:#66d9ef>int64_t</span> slot_idx) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (UNLIKELY(_result_chunk <span style=color:#f92672>==</span> <span style=color:#66d9ef>nullptr</span>)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_deletes) {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_sink<span style=color:#f92672>-&gt;</span>flush_chunk_with_deletes(<span style=color:#f92672>*</span>_result_chunk, <span style=color:#f92672>*</span>_deletes, seg_info, eos, flush_data_size,
+</span></span><span style=display:flex><span>                                                        slot_idx));
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#a6e22e>if</span> (_has_op_slot <span style=color:#f92672>&amp;&amp;</span> _sink<span style=color:#f92672>-&gt;</span>keep_op_column()) {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_sink<span style=color:#f92672>-&gt;</span>flush_chunk_with_op(<span style=color:#f92672>*</span>_result_chunk, seg_info, eos, flush_data_size, slot_idx));
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_sink<span style=color:#f92672>-&gt;</span>flush_chunk(<span style=color:#f92672>*</span>_result_chunk, seg_info, eos, flush_data_size, slot_idx));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status MemTableRowsetWriterSink<span style=color:#f92672>::</span>flush_chunk(<span style=color:#66d9ef>const</span> Chunk<span style=color:#f92672>&amp;</span> chunk, SegmentPB<span style=color:#f92672>*</span> seg_info, <span style=color:#66d9ef>bool</span> eos,
+</span></span><span style=display:flex><span>                                             <span style=color:#66d9ef>int64_t</span><span style=color:#f92672>*</span> flush_data_size, <span style=color:#66d9ef>int64_t</span> slot_idx) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> _rowset_writer<span style=color:#f92672>-&gt;</span>flush_chunk(chunk, seg_info);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status HorizontalRowsetWriter<span style=color:#f92672>::</span>flush_chunk(<span style=color:#66d9ef>const</span> Chunk<span style=color:#f92672>&amp;</span> chunk, SegmentPB<span style=color:#f92672>*</span> seg_info) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... _flush_chunk_state UPSERT / MIXED ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#a6e22e>_flush_chunk</span>(chunk, seg_info);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status HorizontalRowsetWriter<span style=color:#f92672>::</span>_flush_chunk(<span style=color:#66d9ef>const</span> Chunk<span style=color:#f92672>&amp;</span> chunk, SegmentPB<span style=color:#f92672>*</span> seg_info) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>auto</span> segment_writer <span style=color:#f92672>=</span> _create_segment_writer();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>segment_writer.ok()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> segment_writer.status();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR((<span style=color:#f92672>*</span>segment_writer)<span style=color:#f92672>-&gt;</span>append_chunk(chunk));
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... update _num_rows_written / seg_info row counts ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#a6e22e>_flush_segment_writer</span>(<span style=color:#f92672>&amp;</span>segment_writer.value(), seg_info);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status HorizontalRowsetWriter<span style=color:#f92672>::</span>_flush_segment_writer(std<span style=color:#f92672>::</span>unique_ptr<span style=color:#f92672>&lt;</span>SegmentWriter<span style=color:#f92672>&gt;*</span> segment_writer,
+</span></span><span style=display:flex><span>                                                     SegmentPB<span style=color:#f92672>*</span> seg_info) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>uint64_t</span> segment_size <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>uint64_t</span> index_size <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>uint64_t</span> footer_position <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR((<span style=color:#f92672>*</span>segment_writer)<span style=color:#f92672>-&gt;</span>finalize(<span style=color:#f92672>&amp;</span>segment_size, <span style=color:#f92672>&amp;</span>index_size, <span style=color:#f92672>&amp;</span>footer_position));
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... sizes / partial footers / seg_info (path, index sidecars) ...
+</span></span></span><span style=display:flex><span>    (<span style=color:#f92672>*</span>segment_writer).reset();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 4. close / commit ----
+</span></span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>close() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>auto</span> state <span style=color:#f92672>=</span> get_state();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>switch</span> (state) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... kUninitialized / kAborted / kCommitted / kClosed ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> kWriting: {
+</span></span><span style=display:flex><span>        Status st <span style=color:#f92672>=</span> flush_memtable_async(true);
+</span></span><span style=display:flex><span>        _set_state(st.ok() <span style=color:#f92672>?</span> kClosed : kAborted, st);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>commit() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>auto</span> state <span style=color:#f92672>=</span> get_state();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>switch</span> (state) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... kUninitialized / kAborted / kWriting → error; kCommitted → OK ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> kClosed:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    std<span style=color:#f92672>::</span>call_once(_commit_once, [<span style=color:#66d9ef>this</span>] { _commit_result <span style=color:#f92672>=</span> _do_commit_body(); });
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> _commit_result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status DeltaWriter<span style=color:#f92672>::</span>_do_commit_body() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>auto</span> st <span style=color:#f92672>=</span> _flush_token<span style=color:#f92672>-&gt;</span>wait(); UNLIKELY(<span style=color:#f92672>!</span>st.ok())) {
+</span></span><span style=display:flex><span>        _set_state(kAborted, st);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>auto</span> res <span style=color:#f92672>=</span> _rowset_writer<span style=color:#f92672>-&gt;</span>build(); res.ok()) {
+</span></span><span style=display:flex><span>        _cur_rowset <span style=color:#f92672>=</span> std<span style=color:#f92672>::</span>move(res).value();
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        _set_state(kAborted, res.status());
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> res.status();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_replicate_token <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>auto</span> st <span style=color:#f92672>=</span> _replicate_token<span style=color:#f92672>-&gt;</span>wait(); UNLIKELY(<span style=color:#f92672>!</span>st.ok())) {
+</span></span><span style=display:flex><span>            _set_state(kAborted, st);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Status res;
+</span></span><span style=display:flex><span>    FAIL_POINT_TRIGGER_ASSIGN_STATUS_OR_DEFAULT(
+</span></span><span style=display:flex><span>            load_commit_txn, res, COMMIT_TXN_FP_ACTION(_opt.txn_id, _opt.tablet_id),
+</span></span><span style=display:flex><span>            _storage_engine<span style=color:#f92672>-&gt;</span>txn_manager()<span style=color:#f92672>-&gt;</span>commit_txn(_opt.partition_id, _tablet, _opt.txn_id, _opt.load_id,
+</span></span><span style=display:flex><span>                                                       _cur_rowset, false, _is_shadow));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>res.ok()) {
+</span></span><span style=display:flex><span>        _storage_engine<span style=color:#f92672>-&gt;</span>update_manager()<span style=color:#f92672>-&gt;</span>on_rowset_cancel(_tablet.get(), _cur_rowset.get());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>res.ok() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>res.is_already_exist()) {
+</span></span><span style=display:flex><span>        _set_state(kAborted, res);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> res;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    {
+</span></span><span style=display:flex><span>        std<span style=color:#f92672>::</span>lock_guard l(_state_lock);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (_state <span style=color:#f92672>==</span> kClosed) {
+</span></span><span style=display:flex><span>            _state <span style=color:#f92672>=</span> kCommitted;
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>InternalError(
+</span></span><span style=display:flex><span>                    fmt<span style=color:#f92672>::</span>format(<span style=color:#e6db74>&#34;Delta writer has been aborted. tablet_id: {}, state: {}&#34;</span>, _opt.tablet_id,
+</span></span><span style=display:flex><span>                                state_name(_state)));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 5. publish (FE PUBLISH_VERSION → agent) ----
+</span></span></span><span style=display:flex><span>Status TxnManager<span style=color:#f92672>::</span>publish_txn(TPartitionId partition_id, <span style=color:#66d9ef>const</span> TabletSharedPtr<span style=color:#f92672>&amp;</span> tablet, TTransactionId transaction_id,
+</span></span><span style=display:flex><span>                               <span style=color:#66d9ef>int64_t</span> version, <span style=color:#66d9ef>const</span> RowsetSharedPtr<span style=color:#f92672>&amp;</span> rowset, <span style=color:#66d9ef>uint32_t</span> wait_time,
+</span></span><span style=display:flex><span>                               <span style=color:#66d9ef>bool</span> is_double_write) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tablet<span style=color:#f92672>-&gt;</span>updates() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>auto</span> st <span style=color:#f92672>=</span> tablet<span style=color:#f92672>-&gt;</span>rowset_commit(version, rowset, wait_time, false, is_double_write);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>st.ok()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>auto</span> st <span style=color:#f92672>=</span> tablet<span style=color:#f92672>-&gt;</span>add_inc_rowset(rowset, version);
+</span></span><span style=display:flex><span>        tablet<span style=color:#f92672>-&gt;</span>remove_in_writing_data_size(transaction_id);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>st.ok() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>st.is_already_exist()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> st;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    tablet<span style=color:#f92672>-&gt;</span>erase_committed_rowset(rowset);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... erase txn_tablet_map entry ...
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Secondary replicas may receive prebuilt segments (<strong><code>write_segment</code></strong>) and skip local MemTable encoding; publish still decides visibility.</p><h3 id=23-query>2.3 Query</h3><p>Pipeline OLAP scan binds FE <strong><code>TInternalScanRange</code></strong> (tablet id, version, key ranges) to IO:</p><ol><li><strong><code>OlapScanOperator</code></strong> / <strong><code>OlapScanContext</code></strong> resolve the tablet and capture consistent rowsets at the scan version.</li><li><strong>Morsels</strong> split work: physical (rowid) or logical (short-key) <strong><code>SplitMorselQueue</code></strong>; each morsel carries tablet + rowset list + version bounds.</li><li><strong><code>OlapChunkSource</code></strong> builds <strong><code>TabletReader</code></strong> with those rowsets and <strong><code>TabletReaderParams</code></strong> (predicates, key ranges, short-key options).</li><li><strong><code>TabletReader::open</code></strong> → per-segment <strong><code>Segment::new_iterator</code></strong> → <strong><code>SegmentIterator</code></strong> (index prune in <strong>§2.4</strong>) → union / merge / aggregate collectors as needed.</li><li>Drivers pull chunks; residual conjuncts may remain above the iterator.</li></ol><p>Lake / connector scans use <strong><code>ConnectorScanOperator</code></strong> and lake readers against object storage; morsel and chunk pull shape stay analogous.</p><p>The opening §2 diagram already shows <strong><code>OlapChunkSource</code></strong>, <strong><code>TabletReader</code></strong>, <strong><code>Tablet</code></strong>, <strong><code>Rowset</code></strong>, and <strong><code>SegmentIterator</code></strong>. The query path also uses the pipeline scan types below.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+skinparam packageStyle rectangle
+
+class OlapScanOperator {
+  +create_chunk_source(morsel)
+}
+
+class OlapScanContext {
+  key_ranges
+  not_push_down_conjuncts
+}
+
+class ScanMorsel {
+  from_version / version
+  rowsets
+  TInternalScanRange
+}
+
+class SplitMorselQueue {
+  PhysicalSplit / LogicalSplit
+  +try_get() : ScanMorsel
+}
+
+class OlapChunkSource {
+  _scan_range : TInternalScanRange*
+  _morsel
+  _tablet
+  _reader : TabletReader*
+  _params : TabletReaderParams
+  _prj_iter
+  +prepare()
+  +_init_olap_reader()
+  +_read_chunk()
+}
+
+class TabletReaderParams {
+  predicates / key ranges
+  short_key options
+  chunk_size
+}
+
+class Tablet {
+  +capture_consistent_rowsets(version)
+}
+
+class TabletReader {
+  _tablet
+  _version
+  _rowsets
+  +prepare() / open(params)
+  +get_segment_iterators()
+}
+
+class Rowset {
+  +get_segment_iterators()
+  +load()
+}
+
+class Segment {
+  +new_iterator()
+}
+
+class SegmentIterator {
+  +_init_scan_range_and_context()
+  +get_next(chunk)
+}
+
+class ChunkIterator &lt;&lt;interface&gt;&gt; {
+  +get_next(chunk)
+}
+
+OlapScanOperator --&gt; OlapScanContext
+OlapScanOperator --&gt; SplitMorselQueue
+SplitMorselQueue --&gt; ScanMorsel : try_get
+OlapScanOperator --&gt; OlapChunkSource : create
+OlapChunkSource --&gt; ScanMorsel : _morsel
+OlapChunkSource --&gt; OlapScanContext : _scan_ctx
+OlapChunkSource --&gt; Tablet : _get_tablet
+OlapChunkSource --&gt; TabletReaderParams : _params
+OlapChunkSource --&gt; TabletReader : _reader
+TabletReader --&gt; Tablet
+TabletReader --&gt; Rowset : _rowsets
+TabletReader --&gt; ChunkIterator : _collect_iter
+TabletReader ..&gt; SegmentIterator : get_segment_iterators
+Rowset --&gt; Segment
+Segment --&gt; SegmentIterator : new_iterator
+SegmentIterator --|&gt; ChunkIterator
+OlapChunkSource --&gt; ChunkIterator : _prj_iter
+
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// Abbreviated; omitted branches marked &#34;// ...&#34;.
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 1–3. OlapChunkSource::_init_olap_reader ----
+</span></span></span><span style=display:flex><span>Status OlapChunkSource<span style=color:#f92672>::</span>_init_olap_reader(RuntimeState<span style=color:#f92672>*</span> runtime_state) {
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_tablet(_scan_range));
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... schema / dict / scanner columns ...
+</span></span></span><span style=display:flex><span>    RETURN_IF_ERROR(_init_reader_params(_scan_ctx<span style=color:#f92672>-&gt;</span>key_ranges()));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    std<span style=color:#f92672>::</span>vector<span style=color:#f92672>&lt;</span>RowsetSharedPtr<span style=color:#f92672>&gt;</span> rowsets;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>auto</span><span style=color:#f92672>&amp;</span> rowset : _morsel<span style=color:#f92672>-&gt;</span>rowsets()) {
+</span></span><span style=display:flex><span>        rowsets.emplace_back(std<span style=color:#f92672>::</span>dynamic_pointer_cast<span style=color:#f92672>&lt;</span>Rowset<span style=color:#f92672>&gt;</span>(rowset));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    _reader <span style=color:#f92672>=</span> std<span style=color:#f92672>::</span>make_shared<span style=color:#f92672>&lt;</span>TabletReader<span style=color:#f92672>&gt;</span>(
+</span></span><span style=display:flex><span>            _tablet, Version(_morsel<span style=color:#f92672>-&gt;</span>from_version(), _version),
+</span></span><span style=display:flex><span>            std<span style=color:#f92672>::</span>move(child_schema), std<span style=color:#f92672>::</span>move(rowsets), <span style=color:#f92672>&amp;</span>_tablet_schema);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... optional projection iterator → _prj_iter ...
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_reader<span style=color:#f92672>-&gt;</span>prepare());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_reader<span style=color:#f92672>-&gt;</span>open(_params));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 4. TabletReader::prepare / open ----
+</span></span></span><span style=display:flex><span>Status TabletReader<span style=color:#f92672>::</span>prepare() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_rowsets.empty() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>_use_gtid) {
+</span></span><span style=display:flex><span>        std<span style=color:#f92672>::</span>shared_lock l(_tablet<span style=color:#f92672>-&gt;</span>get_header_lock());
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(_tablet<span style=color:#f92672>-&gt;</span>capture_consistent_rowsets(_version, <span style=color:#f92672>&amp;</span>_rowsets));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Rowset<span style=color:#f92672>::</span>acquire_readers(_rowsets);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>const</span> <span style=color:#66d9ef>auto</span><span style=color:#f92672>&amp;</span> rowset : _rowsets) {
+</span></span><span style=display:flex><span>        RETURN_IF_ERROR(rowset<span style=color:#f92672>-&gt;</span>load());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status TabletReader<span style=color:#f92672>::</span>open(<span style=color:#66d9ef>const</span> TabletReaderParams<span style=color:#f92672>&amp;</span> read_params) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (read_params.use_pk_index) {
+</span></span><span style=display:flex><span>        _reader_params <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span>read_params;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();  <span style=color:#75715e>// PK path deferred
+</span></span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#a6e22e>_init_collector</span>(read_params);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Status TabletReader<span style=color:#f92672>::</span>_init_collector(<span style=color:#66d9ef>const</span> TabletReaderParams<span style=color:#f92672>&amp;</span> params) {
+</span></span><span style=display:flex><span>    std<span style=color:#f92672>::</span>vector<span style=color:#f92672>&lt;</span>ChunkIteratorPtr<span style=color:#f92672>&gt;</span> seg_iters;
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(get_segment_iterators(params, <span style=color:#f92672>&amp;</span>seg_iters));
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … union / heap-merge / aggregate collectors by KeysType …
+</span></span></span><span style=display:flex><span>    <span style=color:#75715e>// get_segment_iterators → Rowset::get_segment_iterators → Segment::new_iterator
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// SegmentIterator prune order (details in §2.4)
+</span></span></span><span style=display:flex><span>Status SegmentIterator<span style=color:#f92672>::</span>_init_scan_range_and_context() {
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_row_ranges_by_rowid_range());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_row_ranges_by_keys());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_apply_bitmap_index());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_row_ranges_by_zone_map());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_row_ranges_by_bloom_filter());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_apply_inverted_index());
+</span></span><span style=display:flex><span>    RETURN_IF_ERROR(_get_row_ranges_by_vector_index());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 5. pull chunks ----
+</span></span></span><span style=display:flex><span>Status OlapChunkSource<span style=color:#f92672>::</span>_read_chunk_from_storage(RuntimeState<span style=color:#f92672>*</span> state, Chunk<span style=color:#f92672>*</span> chunk) {
+</span></span><span style=display:flex><span>    Status status <span style=color:#f92672>=</span> _prj_iter<span style=color:#f92672>-&gt;</span>get_next(chunk);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// … residual conjuncts / expr filter above storage …
+</span></span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> status;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h3 id=24-indexes>2.4 Indexes</h3><p>Most structures that prune OLAP scans live <strong>in the segment</strong> (footer / index pages). Sidecars (<strong>.ivt</strong> / <strong>.vi</strong>) and the tablet-level <strong>primary-key</strong> index are the exceptions. At open time <strong><code>SegmentIterator::_init_scan_range_and_context</code></strong> narrows a candidate <strong><code>_scan_range</code></strong> (rowid sparse range); stages typically intersect that range in order short key → bitmap → zone map → bloom → inverted → vector (delvec early or late by config). The subsections below cover each index type.</p><h4 id=short-key>Short key</h4><p>The <strong>short-key</strong> (prefix) index is the segment’s sparse index on the table’s sort / key columns. It exists for every OLAP segment that has a key prefix—no <code>CREATE INDEX</code> is required—and is the first structure used to turn key-range predicates into rowid intervals.</p><p><strong>Physical layout.</strong> A sparse short-key page inside the segment: one encoded key prefix about every <code>num_rows_per_block</code> rows (default ~1024), pointing at the first rowid of that block. Built from the table’s sort / key columns when the segment is written.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-short-key.svg alt="Short key index inside rs020a_0.dat with concrete key entries"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span><span style=display:flex><span>  dt DATE,
+</span></span><span style=display:flex><span>  region VARCHAR(<span style=color:#ae81ff>32</span>),
+</span></span><span style=display:flex><span>  amount BIGINT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, region)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(region) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- prefix on dt uses the short-key index
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> region, <span style=color:#66d9ef>SUM</span>(amount)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> sales
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> dt <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;2026-03-01&#39;</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>GROUP</span> <span style=color:#66d9ef>BY</span> region;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_get_row_ranges_by_keys (abbreviated)
+</span></span></span><span style=display:flex><span>SparseRange<span style=color:#f92672>&lt;&gt;</span> scan_range_by_keys;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>_opts.short_key_ranges.empty()) {
+</span></span><span style=display:flex><span>    ASSIGN_OR_RETURN(scan_range_by_keys, _get_row_ranges_by_short_key_ranges());
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    ASSIGN_OR_RETURN(scan_range_by_keys, _get_row_ranges_by_key_ranges());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>_scan_range <span style=color:#f92672>&amp;=</span> scan_range_by_keys;
+</span></span></code></pre></div><h4 id=zone-map>Zone map</h4><p>A <strong>zone map</strong> records min / max / null statistics for a column so predicates can skip data that cannot match. StarRocks keeps <strong>both</strong> a segment-wide map and per–data-page maps for the same column inside the segment’s zone-map index. No <code>CREATE INDEX</code> is required; <strong><code>SegmentWriter</code></strong> sets <code>need_zone_map</code> when any of the following holds:</p><ul><li>the column is a <strong>key</strong> or <strong>sort-key</strong>;</li><li>table is <strong>DUP_KEYS</strong> and the type passes <strong><code>is_zone_map_key_type</code></strong> (numeric / date / decimal, …);</li><li>table is <strong>PRIMARY_KEYS</strong>, <strong><code>enable_pk_value_column_zonemap</code></strong> is on (default), and the type passes <strong><code>is_zone_map_key_type</code></strong>;</li><li><strong><code>enable_string_prefix_zonemap</code></strong> is on (default) and the column is a <strong>string</strong> type (non-key strings are often truncated).</li></ul><p><strong><code>is_zone_map_key_type</code></strong> excludes <strong><code>CHAR</code> / <code>VARCHAR</code> / <code>JSON</code> / <code>VARBINARY</code> / <code>OBJECT</code> / <code>HLL</code> / <code>PERCENTILE</code></strong> (strings use the string-prefix path above). <strong><code>ARRAY</code></strong> never gets a zone map; map/struct nested writers also disable it on children.</p><p><strong>Physical layout.</strong> Both levels are stored in the segment’s zone-map index meta (<code>ZoneMapIndexPB</code> inside <code>.dat</code>), not a sidecar:</p><table><thead><tr><th>Level</th><th>Proto / storage</th><th>Role</th></tr></thead><tbody><tr><td><strong>Segment</strong></td><td><strong><code>ZoneMapIndexPB.segment_zone_map</code></strong> (<code>ZoneMapPB</code>)</td><td>One min/max/null for the whole column in this segment; kept in column-reader meta</td></tr><tr><td><strong>Page</strong></td><td><strong><code>ZoneMapIndexPB.page_zone_maps</code></strong> (IndexedColumn of serialized <strong><code>ZoneMapPB</code></strong>, one per data page)</td><td>Finer prune inside the segment</td></tr></tbody></table><p>On write, <strong><code>ZoneMapIndexWriter::flush</code></strong> finalizes each page’s map and merges it into the running segment map; <strong><code>finish</code></strong> writes both into index meta (<code>zone_map_index.h</code>: page maps in an IndexedColumn, segment map in meta so the reader can prune without loading pages).</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-zone-map.svg alt="Segment-level and page-level zone maps inside the segment"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> sales (
+</span></span><span style=display:flex><span>  dt DATE,
+</span></span><span style=display:flex><span>  region VARCHAR(<span style=color:#ae81ff>32</span>),
+</span></span><span style=display:flex><span>  amount BIGINT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(dt, region)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(region) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- pages whose max(amount) &lt; 1000 are skipped
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> sales
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> amount <span style=color:#f92672>&gt;=</span> <span style=color:#ae81ff>1000</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// Segment::_new_iterator — segment-level prune before opening the iterator
+</span></span></span><span style=display:flex><span>RETURN_IF_ERROR(_prune_by_segment_zone_map(read_options));
+</span></span><span style=display:flex><span><span style=color:#75715e>// if SegmentZoneMapPruner says impossible → Status::EndOfFile (skip .dat)
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_get_row_ranges_by_zone_map — page-level
+</span></span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>config<span style=color:#f92672>::</span>enable_index_page_level_zonemap_filter, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>ASSIGN_OR_RETURN(<span style=color:#66d9ef>auto</span> hit_row_ranges,
+</span></span><span style=display:flex><span>                 _opts.pred_tree_for_zone_map.visit(ZoneMapFilterEvaluator{...}));
+</span></span><span style=display:flex><span>_scan_range <span style=color:#f92672>=</span> _scan_range.intersection(zm_range);
+</span></span></code></pre></div><h4 id=bitmap>Bitmap</h4><p>A <strong>bitmap index</strong> maps each distinct column value to a roaring bitmap of rowids. It is created explicitly (<code>CREATE INDEX … USING BITMAP</code>) and suits low-to-moderate cardinality columns with selective equality / IN filters.</p><p><strong>Physical layout.</strong> Usually embedded in the segment footer / index pages for columns with a <strong><code>USING BITMAP</code></strong> index. On shared-data, an ADD INDEX path may attach a standalone <strong><code>.idx</code></strong> via IDG.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-bitmap.svg alt="Bitmap index value to roaring rowids inside the segment"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> lineorder (
+</span></span><span style=display:flex><span>  lo_orderkey INT,
+</span></span><span style=display:flex><span>  lo_shipmode VARCHAR(<span style=color:#ae81ff>16</span>),
+</span></span><span style=display:flex><span>  lo_revenue INT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(lo_orderkey)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(lo_orderkey) BUCKETS <span style=color:#ae81ff>4</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>INDEX</span> idx_shipmode <span style=color:#66d9ef>ON</span> lineorder (lo_shipmode) <span style=color:#66d9ef>USING</span> BITMAP;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#66d9ef>SUM</span>(lo_revenue)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> lineorder
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> lo_shipmode <span style=color:#f92672>=</span> <span style=color:#e6db74>&#39;MAIL&#39;</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_apply_bitmap_index (abbreviated)
+</span></span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>config<span style=color:#f92672>::</span>enable_index_bitmap_filter, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_bitmap_index_evaluator.init(<span style=color:#75715e>/* new_bitmap_index_iterator per cid */</span>));
+</span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>_bitmap_index_evaluator.has_bitmap_index(), Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_bitmap_index_evaluator.evaluate(_scan_range, _opts.pred_tree));
+</span></span><span style=display:flex><span><span style=color:#75715e>// evaluate intersects matching roaring rowids into _scan_range
+</span></span></span></code></pre></div><h4 id=bloom--ngram>Bloom / ngram</h4><p>A <strong>bloom filter</strong> is a compact probabilistic set of values present in a column (or page). It answers “definitely not here” cheaply; false positives are possible. N-gram blooms (<code>USING NGRAMBF</code>) extend the same idea to tokenized substrings for <code>LIKE</code>-style patterns. Configured via table <strong><code>bloom_filter_columns</code></strong> or an n-gram index—not part of the default key path.</p><p><strong>Physical layout.</strong> Column bloom filters (and n-gram blooms when created with <strong><code>USING NGRAMBF</code></strong> or table <strong><code>bloom_filter_columns</code></strong>) live with the segment’s column index data—not a separate tablet-level file.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-bloom.svg alt="Bloom bitset stored with column index pages in the segment"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> events (
+</span></span><span style=display:flex><span>  event_id BIGINT,
+</span></span><span style=display:flex><span>  user_id BIGINT,
+</span></span><span style=display:flex><span>  ts DATETIME
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(event_id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(event_id) BUCKETS <span style=color:#ae81ff>4</span>
+</span></span><span style=display:flex><span>PROPERTIES (<span style=color:#e6db74>&#34;bloom_filter_columns&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;user_id&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> events
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> user_id <span style=color:#f92672>=</span> <span style=color:#ae81ff>9876543210</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_get_row_ranges_by_bloom_filter (abbreviated)
+</span></span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>config<span style=color:#f92672>::</span>enable_index_bloom_filter, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> <span style=color:#66d9ef>bool</span> support <span style=color:#f92672>=</span> _opts.pred_tree.visit(BloomFilterSupportChecker{...});
+</span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>support, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(
+</span></span><span style=display:flex><span>    _opts.pred_tree.visit(BloomFilterEvaluator{...}, _scan_range));
+</span></span><span style=display:flex><span><span style=color:#75715e>// absent → drop rowids from _scan_range; maybe → keep
+</span></span></span></code></pre></div><h4 id=inverted-gin>Inverted (GIN)</h4><p>A <strong>full-text inverted (GIN)</strong> index maps terms to posting lists of rowids. It is created with <strong><code>CREATE INDEX … USING GIN</code></strong> (optional parser) and accelerates tokenized text predicates (<code>MATCH</code> / <code>MATCH_ANY</code> / <code>MATCH_ALL</code>), unlike short-key or bitmap equality.</p><p><strong>Physical layout.</strong> Standalone directory <strong><code>{rowset_id}_{seg}_{index_id}.ivt/</code></strong> beside the segment under the schema-hash path (CLucene-based or built-in inverted, depending on version / config).</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-gin.svg alt="GIN .ivt sidecar with term postings beside the segment"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> docs (
+</span></span><span style=display:flex><span>  id BIGINT,
+</span></span><span style=display:flex><span>  body VARCHAR(<span style=color:#ae81ff>1024</span>),
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>INDEX</span> gin_body (body) <span style=color:#66d9ef>USING</span> GIN(<span style=color:#e6db74>&#34;parser&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;english&#34;</span>)
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> id, body
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> docs
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> body <span style=color:#66d9ef>MATCH</span> <span style=color:#e6db74>&#39;starrocks&#39;</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_apply_inverted_index (abbreviated)
+</span></span></span><span style=display:flex><span>RETURN_IF(<span style=color:#f92672>!</span>_opts.enable_gin_filter, Status<span style=color:#f92672>::</span>OK());
+</span></span><span style=display:flex><span>roaring<span style=color:#f92672>::</span>Roaring row_bitmap <span style=color:#f92672>=</span> range2roaring(_scan_range);
+</span></span><span style=display:flex><span><span style=color:#75715e>// pred-&gt;seek_inverted_index(..., &amp;row_bitmap) for MATCH / expr preds
+</span></span></span><span style=display:flex><span>_scan_range <span style=color:#f92672>=</span> roaring2range(row_bitmap);
+</span></span><span style=display:flex><span>erase_column_pred_from_pred_tree(_opts.pred_tree, erased_preds);
+</span></span></code></pre></div><h4 id=vector-ann>Vector (ANN)</h4><p>A <strong>vector (ANN)</strong> index stores an approximate nearest-neighbor structure (HNSW / IVFPQ via TenANN) over embedding columns. It is created with <strong><code>CREATE INDEX … USING VECTOR</code></strong> and serves top-k / range similarity search, not ordinary scalar predicates.</p><p><strong>Physical layout.</strong> Standalone <strong><code>{rowset_id}_{seg}_{index_id}.vi</code></strong> beside the segment (TenANN HNSW / IVFPQ, etc., from <strong><code>USING VECTOR</code></strong>).</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-vector.svg alt="Vector .vi ANN graph file beside the segment"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> items (
+</span></span><span style=display:flex><span>  id BIGINT,
+</span></span><span style=display:flex><span>  embedding ARRAY<span style=color:#f92672>&lt;</span>FLOAT<span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>NOT</span> <span style=color:#66d9ef>NULL</span>,
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>INDEX</span> idx_emb (embedding) <span style=color:#66d9ef>USING</span> VECTOR (
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;index_type&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;hnsw&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;dim&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;3&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;metric_type&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;l2_distance&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;M&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;16&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;efconstruction&#34;</span> <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;40&#34;</span>
+</span></span><span style=display:flex><span>  )
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>DUPLICATE <span style=color:#66d9ef>KEY</span>(id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> id
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> items
+</span></span><span style=display:flex><span><span style=color:#66d9ef>ORDER</span> <span style=color:#66d9ef>BY</span> approx_l2_distance(embedding, [<span style=color:#ae81ff>0</span>.<span style=color:#ae81ff>1</span>, <span style=color:#ae81ff>0</span>.<span style=color:#ae81ff>2</span>, <span style=color:#ae81ff>0</span>.<span style=color:#ae81ff>3</span>])
+</span></span><span style=display:flex><span><span style=color:#66d9ef>LIMIT</span> <span style=color:#ae81ff>10</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// SegmentIterator::_get_row_ranges_by_vector_index (abbreviated)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>_vector_index_ctx <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>_vector_index_ctx<span style=color:#f92672>-&gt;</span>use_vector_index) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();  <span style=color:#75715e>// non-ANN query
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#75715e>// optional: narrow by residual predicates, then ANN search in .vi
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// intersect hits into _scan_range; fill id2distance_map for the read path
+</span></span></span></code></pre></div><h4 id=primary-key>Primary key</h4><p>The <strong>primary-key index</strong> belongs to <strong><code>PRIMARY KEY</code></strong> tables: it maps an encoded PK to <strong><code>(rssid, rowid)</code></strong> so publish can upsert / delete correctly. <strong><code>rssid</code></strong> (rowset-segment id) is a tablet-local <strong><code>uint32</code></strong>: the rowset’s base <strong><code>rowset_seg_id</code></strong> plus the segment index inside that rowset (<code>rssid = rowset_seg_id + seg_idx</code>). Together with <strong><code>rowid</code></strong> (offset within that segment) it names an exact physical row. Unlike the prune indexes above, the PK index is tablet-scoped (optional <strong><code>PersistentIndex</code></strong> on disk) and is not the default OLAP <code>_scan_range</code> filter chain.</p><p><strong>Physical layout.</strong> Tablet-level <strong><code>PrimaryIndex</code></strong>, optionally backed by <strong><code>PersistentIndex</code></strong> files <strong><code>index.l0.*</code></strong> under the schema-hash path (lake: <strong><code>lake::LakePrimaryIndex</code></strong>). Delete vectors for PK tables are tracked in meta / <strong><code>.del</code></strong> sidecars as rowsets publish.</p><p><img src=https://kevinwang930.github.io/post/data/db/starrocks/backend/images/index-primary-key.svg alt="Primary key PersistentIndex index.l0 files on the tablet path"></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-sql data-lang=sql><span style=display:flex><span><span style=color:#66d9ef>CREATE</span> <span style=color:#66d9ef>TABLE</span> users (
+</span></span><span style=display:flex><span>  id BIGINT,
+</span></span><span style=display:flex><span>  name VARCHAR(<span style=color:#ae81ff>64</span>),
+</span></span><span style=display:flex><span>  balance BIGINT
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>PRIMARY</span> <span style=color:#66d9ef>KEY</span>(id)
+</span></span><span style=display:flex><span>DISTRIBUTED <span style=color:#66d9ef>BY</span> HASH(id) BUCKETS <span style=color:#ae81ff>2</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- publish updates PrimaryIndex; point get may use it
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>SELECT</span> <span style=color:#f92672>*</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>FROM</span> users
+</span></span><span style=display:flex><span><span style=color:#66d9ef>WHERE</span> id <span style=color:#f92672>=</span> <span style=color:#ae81ff>42</span>;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// publish / apply — PrimaryIndex::upsert(rssid, rowid_start, pks, &amp;deletes)
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// point lookup API — PrimaryIndex::get(pks, &amp;rowids)
+</span></span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// TabletReader::open — optional PK-index scan path
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (read_params.use_pk_index) {
+</span></span><span style=display:flex><span>    _reader_params <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span>read_params;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Status<span style=color:#f92672>::</span>OK();  <span style=color:#75715e>// collector deferred; uses PK index
+</span></span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#75715e>// otherwise normal segment iterators + _apply_del_vector
+</span></span></span></code></pre></div><h3 id=25-implementation-snippets>2.5 Implementation snippets</h3><p><strong>Path and segment names.</strong></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// BaseTablet::_gen_tablet_path
+</span></span></span><span style=display:flex><span>std<span style=color:#f92672>::</span>string path <span style=color:#f92672>=</span> _data_dir<span style=color:#f92672>-&gt;</span>path() <span style=color:#f92672>+</span> DATA_PREFIX;  <span style=color:#75715e>// &#34;/data&#34;
+</span></span></span><span style=display:flex><span>path <span style=color:#f92672>=</span> path_util<span style=color:#f92672>::</span>join_path_segments(path, std<span style=color:#f92672>::</span>to_string(_tablet_meta<span style=color:#f92672>-&gt;</span>shard_id()));
+</span></span><span style=display:flex><span>path <span style=color:#f92672>=</span> path_util<span style=color:#f92672>::</span>join_path_segments(path, std<span style=color:#f92672>::</span>to_string(_tablet_meta<span style=color:#f92672>-&gt;</span>tablet_id()));
+</span></span><span style=display:flex><span>path <span style=color:#f92672>=</span> path_util<span style=color:#f92672>::</span>join_path_segments(path, std<span style=color:#f92672>::</span>to_string(_tablet_meta<span style=color:#f92672>-&gt;</span>schema_hash()));
+</span></span><span style=display:flex><span>_tablet_path <span style=color:#f92672>=</span> path;
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// Rowset path helpers (abbreviated)
+</span></span></span><span style=display:flex><span>segment_file_path(dir, id, seg)     <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;$dir/$id_$seg.dat&#34;</span>
+</span></span><span style=display:flex><span>segment_del_file_path(...)          <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;... .del&#34;</span>
+</span></span><span style=display:flex><span>segment_upt_file_path(...)          <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;... .upt&#34;</span>
+</span></span><span style=display:flex><span>delta_column_group_path(...)        <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;... .cols&#34;</span>
+</span></span></code></pre></div><hr><h2 id=3-fragmentinstance-execution>3. FragmentInstance execution</h2><p>This section is the worker-side execution of one FE <strong><code>FragmentInstance</code></strong>: how brpc deploy becomes pipelines and drivers, which types own that state, and the concrete call path.</p><h3 id=31-framework>3.1 Framework</h3><p>The worker’s <strong>execution framework</strong> is the pipeline engine: an FE <strong><code>FragmentInstance</code></strong> arrives as Thrift on <strong><code>PInternalService</code></strong>, <strong><code>FragmentExecutor</code></strong> turns it into runnable state, and workgroup <strong><code>DriverExecutor</code></strong> threads pull <strong><code>PipelineDriver</code><strong>s until EOS or cancel. Scope is nested—</strong><code>QueryContext</code></strong> for the whole query on this BE, <strong><code>FragmentContext</code></strong> for one instance, <strong><code>Pipeline</code></strong> / <strong><code>Operator</code></strong> factories expanded × DOP into drivers, with scan **<code>Morsel</code>**s binding FE tablet ranges to <strong><code>OlapScanOperator</code></strong>. Since StarRocks 3.2 the normal path is <strong>pipeline only</strong>; non-pipeline <strong><code>FragmentMgr</code></strong> remains only for rare sinks such as SchemaTableSink.</p><p><strong>Contract.</strong> The FE ships <strong><code>TExecPlanFragmentParams</code></strong> (plan tree, descriptor table, scan ranges, destinations, DOP hints). The BE builds that runnable instance, moves chunks among instances with <strong><code>transmit_chunk</code></strong>, and reports status with <strong><code>reportExecStatus</code></strong>.</p><p><strong>Layers.</strong></p><table><thead><tr><th>Layer</th><th>Responsibility</th></tr></thead><tbody><tr><td><strong>RPC</strong></td><td><strong><code>PInternalService</code></strong>: deserialize attachment → <strong><code>FragmentExecutor</code></strong></td></tr><tr><td><strong>Orchestration</strong></td><td><strong><code>FragmentExecutor</code></strong>: <strong><code>prepare</code></strong> then <strong><code>execute</code></strong></td></tr><tr><td><strong>Query scope</strong></td><td><strong><code>QueryContext</code></strong>: all fragment instances of one query on this BE</td></tr><tr><td><strong>Instance scope</strong></td><td><strong><code>FragmentContext</code></strong>: plan, morsel factories, pipelines, drivers, runtime state</td></tr><tr><td><strong>Pipeline</strong></td><td><strong><code>Pipeline</code></strong> + <strong><code>Operator</code></strong> factories; DOP copies → <strong><code>PipelineDriver</code></strong></td></tr><tr><td><strong>Scheduling</strong></td><td>Workgroup <strong><code>DriverExecutor</code></strong> / <strong><code>DriverQueue</code></strong>; <strong><code>PipelineDriver::process</code></strong></td></tr><tr><td><strong>IO binding</strong></td><td>FE <strong><code>TInternalScanRange</code></strong> → <strong><code>Morsel</code></strong> → <strong><code>OlapScanOperator</code></strong> / <strong><code>OlapChunkSource</code></strong></td></tr></tbody></table><p><strong>Prepare then execute.</strong></p><ol><li><strong><code>QueryContext</code></strong> — get or register by <code>query_id</code>.</li><li><strong><code>FragmentContext</code></strong> — one per <code>fragment_instance_id</code>.</li><li>Workgroup + <strong><code>RuntimeState</code></strong> + global dicts.</li><li><strong><code>_prepare_exec_plan</code></strong> — <strong><code>ExecFactory::create_tree</code></strong>; scan ranges → <strong><code>MorselQueueFactory</code></strong>.</li><li><strong><code>_prepare_pipeline_driver</code></strong> — <strong><code>decompose_to_pipeline</code></strong> → <strong><code>PipelineBuilder::build</code></strong> → instantiate **<code>PipelineDriver</code>**s (× DOP); bind morsel queues.</li><li>Register the fragment on <strong><code>QueryContext::fragment_mgr()</code></strong>.</li><li><strong><code>execute</code></strong>: acquire runtime filters → <strong><code>prepare_active_drivers</code></strong> → <strong><code>submit_active_drivers(DriverExecutor*)</code></strong>.</li></ol><p><strong>Data planes while drivers run.</strong></p><table><thead><tr><th>Kind</th><th>Mechanism</th></tr></thead><tbody><tr><td><strong>Scan</strong></td><td>Capture <strong><code>Tablet</code></strong> + rowsets at scan <strong><code>version</code></strong>; read segments (<strong>§2.3</strong>)</td></tr><tr><td><strong>Shuffle</strong></td><td><strong><code>ExchangeSinkOperator</code></strong> → <strong><code>transmit_chunk</code></strong> → <strong><code>DataStreamRecvr</code></strong> / <strong><code>ExchangeSourceOperator</code></strong></td></tr><tr><td><strong>Result</strong></td><td>Root <strong><code>ResultSinkOperator</code></strong>; FE pulls with <strong><code>fetch_data</code></strong></td></tr><tr><td><strong>Status</strong></td><td><strong><code>ExecStateReporter</code></strong> → Thrift <strong><code>reportExecStatus</code></strong></td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class PInternalServiceImplBase {
+  +exec_plan_fragment()
+  -_exec_plan_fragment()
+  -_exec_plan_fragment_by_pipeline()
+}
+
+class FragmentExecutor {
+  -_query_ctx : QueryContext*
+  -_fragment_ctx : FragmentContextPtr
+  -_wg : WorkGroupPtr
+  +prepare(ExecEnv*, common, unique)
+  +execute(ExecEnv*)
+  +append_incremental_scan_ranges()
+  -_prepare_query_ctx()
+  -_prepare_fragment_ctx()
+  -_prepare_exec_plan()
+  -_prepare_pipeline_driver()
+}
+
+class QueryContext {
+  -_query_id : TUniqueId
+  -_fragment_mgr : FragmentContextManager
+  -_total_fragments : size_t
+  +fragment_mgr()
+  +count_down_fragment()
+}
+
+class FragmentContextManager {
+  +register_ctx(instance_id, ctx)
+  +get(instance_id)
+  +unregister(instance_id)
+}
+
+class FragmentContext {
+  -_query_id : TUniqueId
+  -_plan : ExecNode*
+  -_morsel_queue_factories : MorselQueueFactoryMap
+  -_runtime_state : RuntimeState
+  +plan()
+  +morsel_queue_factories()
+  +set_pipelines()
+  +prepare_active_drivers()
+  +submit_active_drivers(DriverExecutor*)
+  +acquire_runtime_filters()
+}
+
+class UnifiedExecPlanFragmentParams {
+  common : TExecPlanFragmentParams
+  unique : TExecPlanFragmentParams
+}
+
+class ExecNode {
+  +decompose_to_pipeline(PipelineBuilderContext*)
+}
+
+class PipelineBuilder {
+  +build()
+}
+
+class Pipeline {
+  operators : OperatorFactories
+  +instantiate drivers (x DOP)
+}
+
+class PipelineDriver {
+  -_operators
+  -_morsel_queue : MorselQueue*
+  +set_morsel_queue()
+  +process(RuntimeState*, worker_id)
+}
+
+class MorselQueueFactory {
+  +create(driver_seq) : MorselQueue*
+}
+
+class DriverExecutor {
+  +submit / take drivers
+}
+
+class WorkGroup {
+  +executors()-&gt;driver_executor()
+}
+
+PInternalServiceImplBase ..&gt; FragmentExecutor : prepare/execute
+FragmentExecutor o-- QueryContext
+FragmentExecutor o-- FragmentContext
+FragmentExecutor ..&gt; UnifiedExecPlanFragmentParams
+QueryContext *-- FragmentContextManager
+FragmentContextManager o-- FragmentContext
+FragmentContext o-- ExecNode : plan
+FragmentContext o-- MorselQueueFactory : morsel_queue_factories
+FragmentContext *-- Pipeline
+Pipeline *-- PipelineDriver
+PipelineDriver o-- MorselQueueFactory : morsel queue
+FragmentContext ..&gt; DriverExecutor : submit_active_drivers
+WorkGroup ..&gt; DriverExecutor
+FragmentExecutor ..&gt; WorkGroup
+ExecNode ..&gt; PipelineBuilder : decompose_to_pipeline
+
+@enduml
+</code></pre><h3 id=32-implementation-call-path-and-snippets>3.2 Implementation: call path and snippets</h3><p><strong>RPC entry.</strong> The brpc handler queues work on the query RPC pool, deserializes the Thrift body, and requires <strong><code>is_pipeline</code></strong>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// PInternalServiceImplBase::exec_plan_fragment
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>auto</span> task <span style=color:#f92672>=</span> [<span style=color:#f92672>=</span>]() { <span style=color:#66d9ef>this</span><span style=color:#f92672>-&gt;</span>_exec_plan_fragment(cntl_base, request, response, done); };
+</span></span><span style=display:flex><span>_exec_env<span style=color:#f92672>-&gt;</span>execution_services().query_rpc_pool<span style=color:#f92672>-&gt;</span>try_offer(std<span style=color:#f92672>::</span>move(task));
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// PInternalServiceImplBase::_exec_plan_fragment (abbreviated)
+</span></span></span><span style=display:flex><span>TExecPlanFragmentParams t_request;
+</span></span><span style=display:flex><span>deserialize_thrift_msg(<span style=color:#75715e>/* attachment */</span>, ..., <span style=color:#f92672>&amp;</span>t_request);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> is_pipeline <span style=color:#f92672>=</span> t_request.__isset.is_pipeline <span style=color:#f92672>&amp;&amp;</span> t_request.is_pipeline;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (is_pipeline) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#a6e22e>_exec_plan_fragment_by_pipeline</span>(t_request, t_request);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#75715e>// non-pipeline rejected since 3.2 (SchemaTableSink exception omitted)
+</span></span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// PInternalServiceImplBase::_exec_plan_fragment_by_pipeline
+</span></span></span><span style=display:flex><span>orchestration<span style=color:#f92672>::</span>FragmentExecutor fragment_executor(_batch_write_mgr);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>auto</span> status <span style=color:#f92672>=</span> fragment_executor.prepare(_exec_env, t_common_param, t_unique_request);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (status.ok()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> fragment_executor.execute(_exec_env);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Prepare.</strong> Ordered stages match the class diagram: query ctx → fragment ctx → plan/morsels → pipelines/drivers → register.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// FragmentExecutor::prepare (control flow)
+</span></span></span><span style=display:flex><span>UnifiedExecPlanFragmentParams <span style=color:#a6e22e>request</span>(common_request, unique_request);
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_query_ctx(exec_env, request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_fragment_ctx(request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_workgroup(request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_runtime_state(exec_env, request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_global_dict(request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_exec_plan(exec_env, request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_prepare_pipeline_driver(exec_env, request));
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_query_ctx<span style=color:#f92672>-&gt;</span>fragment_mgr()<span style=color:#f92672>-&gt;</span>register_ctx(
+</span></span><span style=display:flex><span>        request.fragment_instance_id(), _fragment_ctx));
+</span></span><span style=display:flex><span>_query_ctx<span style=color:#f92672>-&gt;</span>mark_prepared();
+</span></span></code></pre></div><p><strong>Plan → pipelines.</strong> DOP comes from fragment params; the <strong><code>ExecNode</code></strong> tree decomposes into operator factories, then drivers are instantiated per DOP and bound to morsel queues (scan side).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// FragmentExecutor::_prepare_pipeline_driver (abbreviated)
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>const</span> <span style=color:#66d9ef>auto</span> degree_of_parallelism <span style=color:#f92672>=</span> _calc_dop(exec_env, request);
+</span></span><span style=display:flex><span>ExecNode<span style=color:#f92672>*</span> plan <span style=color:#f92672>=</span> _fragment_ctx<span style=color:#f92672>-&gt;</span>plan();
+</span></span><span style=display:flex><span>PipelineBuilderContext <span style=color:#a6e22e>context</span>(_fragment_ctx.get(), degree_of_parallelism, sink_dop);
+</span></span><span style=display:flex><span>PipelineBuilder <span style=color:#a6e22e>builder</span>(context);
+</span></span><span style=display:flex><span>ASSIGN_OR_RETURN(<span style=color:#66d9ef>auto</span> exec_ops, plan<span style=color:#f92672>-&gt;</span>decompose_to_pipeline(<span style=color:#f92672>&amp;</span>context));
+</span></span><span style=display:flex><span><span style=color:#75715e>// DataSink::create_data_sink + decompose_data_sink_to_pipeline when output_sink set
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// PipelineBuilder::build → FragmentContext::set_pipelines
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// instantiate PipelineDriver × DOP; driver-&gt;set_morsel_queue(...)
+</span></span></span></code></pre></div><p><strong>Execute.</strong> Drivers are prepared then handed to the workgroup executor; the RPC returns once submission succeeds—the instance runs asynchronously on driver threads.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// FragmentExecutor::execute
+</span></span></span><span style=display:flex><span>_fragment_ctx<span style=color:#f92672>-&gt;</span>acquire_runtime_filters();
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_fragment_ctx<span style=color:#f92672>-&gt;</span>prepare_active_drivers());
+</span></span><span style=display:flex><span><span style=color:#66d9ef>auto</span><span style=color:#f92672>*</span> executor <span style=color:#f92672>=</span> _wg<span style=color:#f92672>-&gt;</span>executors()<span style=color:#f92672>-&gt;</span>driver_executor();
+</span></span><span style=display:flex><span>RETURN_IF_ERROR(_fragment_ctx<span style=color:#f92672>-&gt;</span>submit_active_drivers(executor));
+</span></span></code></pre></div><p><strong>Incremental ranges.</strong> A later <strong><code>exec_plan_fragment</code></strong> without a <code>fragment</code> body appends scan ranges to a live instance via <strong><code>FragmentExecutor::append_incremental_scan_ranges</code></strong> (morsels only; no full rebuild).</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/db/>db</a>
+<a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/starrocks/>starrocks</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/starrocks/architecture/ data-tooltip="StarRocks: FE query planning and the MPP path" aria-label="PREVIOUS: StarRocks: FE query planning and the MPP path"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/data/db/starrocks/backend/",this.page.identifier="/post/data/db/starrocks/backend/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/db/starrocks/architecture/ data-tooltip="StarRocks: FE query planning and the MPP path" aria-label="PREVIOUS: StarRocks: FE query planning and the MPP path"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/data/db/starrocks/backend/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Fbackend%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Fbackend%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fdata%2Fdb%2Fstarrocks%2Fbackend%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+    MathJax.Hub.Config({
+      CommonHTML: { linebreaks: { automatic: true } },
+      tex2jax: {
+        inlineMath: [ ['$', '$'], ['\\(', '\\)'] ],
+        displayMath: [ ['$$', '$$'], ['\\[', '\\]'] ],
+        processEscapes: true,
+        processEnvironments: true,
+        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      },
+      messageStyle: 'none'
+    });
+  </script><script type=text/javascript async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_CHTML-full" integrity="sha256-GhM+5JHb6QUzOQPXSJLEWP7R73CbkisjzK5Eyij4U9w=" crossorigin=anonymous></script></body></html>

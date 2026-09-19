@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="100%" role="img" aria-label="Primary key PersistentIndex on tablet path">
+  <rect width="960" height="420" fill="#f7f9fb"/>
+  <text x="480" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Primary key: tablet-level PersistentIndex (not per Segment)</text>
+  <text x="480" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">PRIMARY KEY(id) users tablet - index.l0.* under schema_hash path</text>
+
+  <rect x="40" y="68" width="440" height="310" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+  <rect x="40" y="68" width="440" height="28" fill="#2e7d32" rx="5"/>
+  <text x="260" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">On disk</text>
+  <text x="56" y="120" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">data/1/200/998877665/</text>
+  <text x="56" y="148" font-family="Consolas, monospace" font-size="11" fill="#37474f">rs010_0.dat     Segment (rows)</text>
+  <text x="56" y="168" font-family="Consolas, monospace" font-size="11" fill="#37474f">rs010_0.del     delete bitmap file</text>
+  <rect x="56" y="188" width="400" height="120" fill="#fff8e1" stroke="#f9a825" rx="3"/>
+  <text x="72" y="216" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">index.l0.0.1</text>
+  <text x="72" y="240" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">index.l0.0.2   (PersistentIndex L0)</text>
+  <text x="72" y="268" font-family="Consolas, monospace" font-size="11" fill="#37474f">PK bytes -&gt; (rssid, rowid)</text>
+  <text x="72" y="292" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">also meta/ RocksDB delvec keys</text>
+  <text x="56" y="340" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">tablet-level: shared by all rowsets of this tablet</text>
+  <text x="56" y="360" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">DataDir may also use persistent/ helper path</text>
+
+  <rect x="520" y="68" width="400" height="310" fill="#ffffff" stroke="#6a1b9a" stroke-width="1.5" rx="5"/>
+  <rect x="520" y="68" width="400" height="28" fill="#6a1b9a" rx="5"/>
+  <text x="720" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Concrete map + use</text>
+  <text x="540" y="140" font-family="Consolas, monospace" font-size="11" fill="#37474f">encode(id=42) -&gt; (rssid=3, row=7)</text>
+  <text x="540" y="164" font-family="Consolas, monospace" font-size="11" fill="#37474f">encode(id=7)  -&gt; (rssid=3, row=0)</text>
+  <text x="540" y="188" font-family="Consolas, monospace" font-size="11" fill="#c62828">encode(id=9)  -&gt; deleted (delvec)</text>
+  <text x="540" y="228" font-family="Consolas, monospace" font-size="11" fill="#4a148c">SELECT * FROM users WHERE id=42</text>
+  <text x="540" y="260" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">optional PK-index point get</text>
+  <text x="540" y="288" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">else segment scan + delvec</text>
+  <text x="540" y="324" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">main writer path: publish/apply upsert</text>
+</svg>
