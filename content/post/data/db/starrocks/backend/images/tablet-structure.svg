@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 640" width="100%" role="img" aria-label="SQL sales table loads become Tablet Rowsets and Segment files">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#455a64"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="640" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">From SQL loads to Tablet / Rowset / Segment</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Example: sales bucket maps to LocalTablet 100 on one BE</text>
+
+  <!-- SQL panel -->
+  <rect x="24" y="68" width="360" height="520" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="6"/>
+  <rect x="24" y="68" width="360" height="28" fill="#1565c0" rx="6"/>
+  <text x="204" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">1. SQL</text>
+
+  <text x="40" y="118" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">CREATE TABLE sales (</text>
+  <text x="40" y="136" font-family="Consolas, monospace" font-size="11" fill="#37474f">  dt DATE,</text>
+  <text x="40" y="154" font-family="Consolas, monospace" font-size="11" fill="#37474f">  region VARCHAR(32),</text>
+  <text x="40" y="172" font-family="Consolas, monospace" font-size="11" fill="#37474f">  amount BIGINT</text>
+  <text x="40" y="190" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">)</text>
+  <text x="40" y="208" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">DUPLICATE KEY(dt, region)</text>
+  <text x="40" y="226" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">PARTITION BY RANGE(dt) (...)</text>
+  <text x="40" y="244" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">DISTRIBUTED BY HASH(region)</text>
+  <text x="40" y="262" font-family="Consolas, monospace" font-size="11" fill="#0d47a1">BUCKETS 2;</text>
+
+  <rect x="40" y="280" width="328" height="112" fill="#e3f2fd" stroke="#1976d2" rx="4"/>
+  <text x="52" y="302" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">-- load A -&gt; Rowset rs020a</text>
+  <text x="52" y="322" font-family="Consolas, monospace" font-size="11" fill="#37474f">INSERT INTO sales VALUES</text>
+  <text x="52" y="340" font-family="Consolas, monospace" font-size="11" fill="#37474f">  ('2026-03-01','east',100),</text>
+  <text x="52" y="358" font-family="Consolas, monospace" font-size="11" fill="#37474f">  ('2026-03-01','west',200),</text>
+  <text x="52" y="376" font-family="Consolas, monospace" font-size="11" fill="#37474f">  ('2026-03-02','east',150);</text>
+
+  <rect x="40" y="408" width="328" height="100" fill="#f3e5f5" stroke="#7b1fa2" rx="4"/>
+  <text x="52" y="430" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#4a148c">-- load B -&gt; Rowset rs031b</text>
+  <text x="52" y="452" font-family="Consolas, monospace" font-size="11" fill="#37474f">INSERT INTO sales VALUES</text>
+  <text x="52" y="470" font-family="Consolas, monospace" font-size="11" fill="#37474f">  ('2026-03-03','east',80),</text>
+  <text x="52" y="488" font-family="Consolas, monospace" font-size="11" fill="#37474f">  ('2026-03-03','west',90);</text>
+
+  <text x="40" y="532" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">PARTITION BY -&gt; partition; HASH BUCKETS 2</text>
+  <text x="40" y="548" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">-&gt; 2 tablets per partition</text>
+  <text x="40" y="568" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">Right: one replica of tablet 100</text>
+
+  <!-- arrow -->
+  <path d="M 384 300 L 424 300" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="404" y="288" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">publish</text>
+
+  <!-- Tablet panel -->
+  <rect x="440" y="68" width="636" height="520" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="6"/>
+  <rect x="440" y="68" width="636" height="28" fill="#2e7d32" rx="6"/>
+  <text x="758" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">2. BE Tablet 100 structure</text>
+
+  <text x="460" y="118" font-family="Consolas, monospace" font-size="12" fill="#1b5e20">TabletMeta: tablet_id=100  shard_id=1</text>
+  <text x="460" y="138" font-family="Consolas, monospace" font-size="11" fill="#546e7a">data/1/100/{schema_hash}/</text>
+  <text x="460" y="158" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">_rs_version_map: v3 -&gt; rs020a , v4 -&gt; rs031b</text>
+
+  <!-- Rowset A -->
+  <rect x="460" y="176" width="596" height="180" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.5" rx="6"/>
+  <rect x="460" y="176" width="596" height="28" fill="#1976d2" rx="6"/>
+  <text x="758" y="195" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Rowset rs020a  version 3-3 (load A, full schema)</text>
+  <text x="476" y="222" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">version range of rows -- not a column subset</text>
+
+  <rect x="476" y="236" width="272" height="96" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="492" y="256" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">Segment 0  rs020a_0.dat</text>
+  <text x="492" y="276" font-family="Consolas, monospace" font-size="10" fill="#37474f">rows: (03-01 east 100), (03-01 west 200)</text>
+  <text x="492" y="294" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">column pages: dt | region | amount</text>
+  <text x="492" y="312" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">+ footer indexes</text>
+
+  <rect x="764" y="236" width="272" height="96" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="780" y="256" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">Segment 1  rs020a_1.dat</text>
+  <text x="780" y="276" font-family="Consolas, monospace" font-size="10" fill="#37474f">rows: (03-02 east 150)</text>
+  <text x="780" y="294" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">column pages: dt | region | amount</text>
+  <text x="780" y="312" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">horizontal split of same load</text>
+
+  <!-- Rowset B -->
+  <rect x="460" y="372" width="596" height="160" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5" rx="6"/>
+  <rect x="460" y="372" width="596" height="28" fill="#7b1fa2" rx="6"/>
+  <text x="758" y="391" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Rowset rs031b  version 4-4 (load B, full schema)</text>
+
+  <rect x="476" y="416" width="560" height="96" fill="#ffffff" stroke="#2e7d32" rx="4"/>
+  <text x="492" y="438" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">Segment 0  rs031b_0.dat</text>
+  <text x="492" y="458" font-family="Consolas, monospace" font-size="10" fill="#37474f">rows: (03-03 east 80), (03-03 west 90)</text>
+  <text x="492" y="476" font-family="Consolas, monospace" font-size="9" fill="#2e7d32">column pages: dt | region | amount</text>
+  <text x="492" y="494" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">new version range; does not split columns of rs020a</text>
+
+  <text x="758" y="560" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Rowset = version range of full-schema rows; columns live as pages inside each Segment</text>
+  <text x="758" y="578" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">SELECT at version 4 reads both rowsets (capture_consistent_rowsets)</text>
+</svg>

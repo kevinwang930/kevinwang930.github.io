@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="100%" role="img" aria-label="Zone map: segment-level and page-level inside .dat">
+  <rect width="960" height="480" fill="#f7f9fb"/>
+  <text x="480" y="24" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Zone map: both segment-level and page-level (inside .dat)</text>
+  <text x="480" y="44" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">ZoneMapIndexPB in rs020a_0.dat for column amount - no sidecar file</text>
+
+  <rect x="40" y="60" width="880" height="36" fill="#e8f5e9" stroke="#2e7d32" rx="4"/>
+  <text x="56" y="84" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">data/1/100/1420156061/rs020a_0.dat  -- ZoneMapIndexPB</text>
+
+  <rect x="40" y="112" width="420" height="150" fill="#ffffff" stroke="#e65100" stroke-width="1.5" rx="5"/>
+  <rect x="40" y="112" width="420" height="28" fill="#e65100" rx="5"/>
+  <text x="250" y="131" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">1. Segment-level (required in meta)</text>
+  <text x="56" y="164" font-family="Consolas, monospace" font-size="11" fill="#e65100">ZoneMapIndexPB.segment_zone_map</text>
+  <text x="56" y="192" font-family="Consolas, monospace" font-size="12" fill="#37474f">min=12  max=9000  has_null=0</text>
+  <text x="56" y="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">one ZoneMapPB for entire column in segment</text>
+  <text x="56" y="244" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">Segment::_prune_by_segment_zone_map can skip whole .dat</text>
+
+  <rect x="500" y="112" width="420" height="150" fill="#ffffff" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+  <rect x="500" y="112" width="420" height="28" fill="#1565c0" rx="5"/>
+  <text x="710" y="131" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">2. Page-level (IndexedColumn)</text>
+  <text x="516" y="164" font-family="Consolas, monospace" font-size="11" fill="#1565c0">ZoneMapIndexPB.page_zone_maps</text>
+  <text x="516" y="192" font-family="Consolas, monospace" font-size="11" fill="#37474f">one serialized ZoneMapPB per data page</text>
+  <text x="516" y="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">loaded by ZoneMapIndexReader::page_zone_maps()</text>
+  <text x="516" y="244" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#0d47a1">SegmentIterator::_get_row_ranges_by_zone_map</text>
+
+  <rect x="40" y="282" width="200" height="140" fill="#ffffff" stroke="#c62828" stroke-width="1.5" rx="4"/>
+  <rect x="40" y="282" width="200" height="24" fill="#c62828" rx="4"/>
+  <text x="140" y="299" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">page 0</text>
+  <text x="56" y="328" font-family="Consolas, monospace" font-size="11" fill="#37474f">rows 0-8191</text>
+  <text x="56" y="350" font-family="Consolas, monospace" font-size="11" fill="#c62828">min=12 max=890</text>
+  <text x="56" y="380" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#c62828">DROP if amount&gt;=1000</text>
+  <text x="56" y="404" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">page ZoneMapPB</text>
+
+  <rect x="260" y="282" width="200" height="140" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+  <rect x="260" y="282" width="200" height="24" fill="#2e7d32" rx="4"/>
+  <text x="360" y="299" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">page 1</text>
+  <text x="276" y="328" font-family="Consolas, monospace" font-size="11" fill="#37474f">rows 8192-16383</text>
+  <text x="276" y="350" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">min=50 max=5200</text>
+  <text x="276" y="380" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">KEEP (overlap)</text>
+  <text x="276" y="404" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">page ZoneMapPB</text>
+
+  <rect x="480" y="282" width="200" height="140" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+  <rect x="480" y="282" width="200" height="24" fill="#2e7d32" rx="4"/>
+  <text x="580" y="299" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">page 2</text>
+  <text x="496" y="328" font-family="Consolas, monospace" font-size="11" fill="#37474f">rows 16384-24575</text>
+  <text x="496" y="350" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">min=1100 max=9000</text>
+  <text x="496" y="380" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#2e7d32">KEEP</text>
+  <text x="496" y="404" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#607d8b">page ZoneMapPB</text>
+
+  <rect x="700" y="282" width="220" height="140" fill="#ffffff" stroke="#6a1b9a" stroke-width="1.5" rx="4"/>
+  <rect x="700" y="282" width="220" height="24" fill="#6a1b9a" rx="4"/>
+  <text x="810" y="299" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">Query amount&gt;=1000</text>
+  <text x="716" y="336" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">1) segment map: keep .dat</text>
+  <text x="716" y="360" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">2) page maps: drop page0</text>
+  <text x="716" y="384" font-family="Consolas, monospace" font-size="10" fill="#4a148c">_scan_range &amp;= page1 U page2</text>
+  <text x="716" y="408" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#546e7a">page filter if config enabled</text>
+</svg>

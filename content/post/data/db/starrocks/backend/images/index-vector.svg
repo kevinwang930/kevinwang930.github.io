@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="100%" role="img" aria-label="Vector ANN .vi file beside segment">
+  <rect width="960" height="400" fill="#f7f9fb"/>
+  <text x="480" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Vector (ANN): sidecar .vi next to Segment</text>
+  <text x="480" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">INDEX USING VECTOR - TenANN graph stored as .vi file</text>
+
+  <rect x="40" y="68" width="440" height="290" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="5"/>
+  <rect x="40" y="68" width="440" height="28" fill="#2e7d32" rx="5"/>
+  <text x="260" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">On disk</text>
+  <text x="56" y="124" font-family="Consolas, monospace" font-size="11" fill="#1b5e20">data/1/100/1420156061/</text>
+  <text x="56" y="152" font-family="Consolas, monospace" font-size="11" fill="#37474f">rs020a_0.dat</text>
+  <text x="56" y="172" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">rows: id + embedding ARRAY&lt;FLOAT&gt;</text>
+  <rect x="56" y="192" width="400" height="130" fill="#e8f5e9" stroke="#43a047" rx="3"/>
+  <text x="72" y="220" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">rs020a_0_2002.vi</text>
+  <text x="72" y="248" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">HNSW / IVFPQ graph bytes</text>
+  <text x="72" y="272" font-family="Consolas, monospace" font-size="11" fill="#37474f">node -&gt; neighbor ids + vectors</text>
+  <text x="72" y="296" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">index_id 2002 from CREATE INDEX</text>
+
+  <rect x="520" y="68" width="400" height="290" fill="#ffffff" stroke="#6a1b9a" stroke-width="1.5" rx="5"/>
+  <rect x="520" y="68" width="400" height="28" fill="#6a1b9a" rx="5"/>
+  <text x="720" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Query</text>
+  <text x="540" y="140" font-family="Consolas, monospace" font-size="11" fill="#4a148c">ORDER BY approx_l2_distance(</text>
+  <text x="540" y="160" font-family="Consolas, monospace" font-size="11" fill="#4a148c">  embedding, [0.1,0.2,...])</text>
+  <text x="540" y="180" font-family="Consolas, monospace" font-size="11" fill="#4a148c">LIMIT 10</text>
+  <text x="540" y="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">ANN search in .vi</text>
+  <text x="540" y="248" font-family="Consolas, monospace" font-size="11" fill="#37474f">hits: (row 17, d=0.02), ...</text>
+  <text x="540" y="280" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#7b1fa2">_scan_range &amp;= top-k rowids</text>
+  <text x="540" y="312" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#546e7a">id2distance_map for read path</text>
+</svg>
