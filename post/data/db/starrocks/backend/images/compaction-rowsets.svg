@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 520" width="100%" role="img" aria-label="Compaction rewrites many small rowsets into one wider version range">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#455a64"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="520" fill="#f7f9fb"/>
+  <text x="550" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Compaction: many rowsets to one</text>
+  <text x="550" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#607d8b">Same tablet: read inputs, write new columnar segments, replace in meta</text>
+
+  <!-- Before panel -->
+  <rect x="24" y="68" width="420" height="400" fill="#ffffff" stroke="#c62828" stroke-width="1.5" rx="6"/>
+  <rect x="24" y="68" width="420" height="28" fill="#c62828" rx="6"/>
+  <text x="234" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">1. Before (after many publishes)</text>
+
+  <text x="40" y="118" font-family="Consolas, monospace" font-size="11" fill="#37474f">Tablet _rs_version_map</text>
+
+  <rect x="40" y="132" width="388" height="52" fill="#ffebee" stroke="#e53935" rx="4"/>
+  <text x="52" y="152" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#b71c1c">rs_a  version 10-10</text>
+  <text x="52" y="170" font-family="Consolas, monospace" font-size="10" fill="#546e7a">rs_a_0.dat  (small segment)</text>
+
+  <rect x="40" y="196" width="388" height="52" fill="#ffebee" stroke="#e53935" rx="4"/>
+  <text x="52" y="216" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#b71c1c">rs_b  version 11-11</text>
+  <text x="52" y="234" font-family="Consolas, monospace" font-size="10" fill="#546e7a">rs_b_0.dat</text>
+
+  <rect x="40" y="260" width="388" height="52" fill="#ffebee" stroke="#e53935" rx="4"/>
+  <text x="52" y="280" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#b71c1c">rs_c  version 12-12</text>
+  <text x="52" y="298" font-family="Consolas, monospace" font-size="10" fill="#546e7a">rs_c_0.dat</text>
+
+  <rect x="40" y="324" width="388" height="52" fill="#ffebee" stroke="#e53935" rx="4"/>
+  <text x="52" y="344" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#b71c1c">rs_d  version 13-13</text>
+  <text x="52" y="362" font-family="Consolas, monospace" font-size="10" fill="#546e7a">rs_d_0.dat</text>
+
+  <text x="40" y="408" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Scan at v13 opens all four rowsets</text>
+  <text x="40" y="428" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">version_count grows with each publish</text>
+  <text x="40" y="448" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#607d8b">Inputs marked is_compacting during task</text>
+
+  <!-- Arrow + label -->
+  <path d="M 460 268 L 520 268" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="470" y="200" width="100" height="56" fill="#fff3e0" stroke="#ef6c00" rx="4"/>
+  <text x="520" y="222" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#e65100">CompactionTask</text>
+  <text x="520" y="240" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6d4c41">read + rewrite</text>
+  <text x="520" y="294" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#455a64">modify_rowsets</text>
+
+  <!-- After panel -->
+  <rect x="580" y="68" width="496" height="400" fill="#ffffff" stroke="#2e7d32" stroke-width="1.5" rx="6"/>
+  <rect x="580" y="68" width="496" height="28" fill="#2e7d32" rx="6"/>
+  <text x="828" y="87" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">2. After commit</text>
+
+  <text x="596" y="118" font-family="Consolas, monospace" font-size="11" fill="#37474f">Tablet _rs_version_map</text>
+
+  <rect x="596" y="140" width="464" height="120" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5" rx="4"/>
+  <text x="612" y="168" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">rs_out  version 10-13</text>
+  <text x="612" y="190" font-family="Consolas, monospace" font-size="11" fill="#37474f">rs_out_0.dat  (merged columnar pages)</text>
+  <text x="612" y="210" font-family="Consolas, monospace" font-size="11" fill="#37474f">+ rebuilt short-key / zone-map / ...</text>
+  <text x="612" y="236" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#558b2f">one rowset spans the folded version range</text>
+
+  <rect x="596" y="284" width="464" height="100" fill="#eceff1" stroke="#78909c" stroke-dasharray="4 3" rx="4"/>
+  <text x="612" y="312" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#546e7a">Inputs removed from visible map</text>
+  <text x="612" y="334" font-family="Consolas, monospace" font-size="10" fill="#78909c">rs_a .. rs_d  -&gt; unused / GC</text>
+  <text x="612" y="356" font-family="Consolas, monospace" font-size="10" fill="#78909c">save_meta persists TabletMetaPB</text>
+
+  <text x="596" y="420" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">Scan at v13 opens one rowset</text>
+  <text x="596" y="440" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#546e7a">version_count drops; room for new loads</text>
+</svg>
