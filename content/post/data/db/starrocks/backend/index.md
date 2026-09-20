@@ -398,7 +398,7 @@ Path construction joins **`DATA_PREFIX` (`/data`)**, shard id, tablet id, and **
 | PK persistent index | **`index.l0.*`** | Local persistent primary index under the schema-hash path (tablet-level, not per segment) |
 | Meta | **`{root}/meta`** | Tablet / rowset / txn keys — separate from segment bytes |
 
-**`TabletManager`** loads tablets from RocksDB when a **`DataDir`** starts; create-tablet agent tasks create the directory tree and initial meta.
+Create-tablet agent tasks create the directory tree and initial meta; **`DataDir::load`** rebuilds in-memory tablets from RocksDB (details below).
 
 Example: a two-bucket `sales` table becomes two FE tablets; one replica of tablet **100** on BE-1 looks like this on disk.
 
@@ -424,7 +424,135 @@ rs020a_0.dat
 
 ![Inside one Segment .dat: per-column data pages and footer](images/segment-columnar-layout.svg)
 
-### 2.2 Insert
+### 2.2 Metadata
+
+User rows live under `data/…` as segment files; **which** tablets and rowsets exist, their versions, and PK apply state live in RocksDB under **`{DataDir}/meta`**. That store is the durability point for create / publish / drop and for reconstructing in-memory **`Tablet`** objects after restart. Shared-data lake tablets use versioned metadata objects in object storage instead; this section is the shared-nothing **`KVStore`** path.
+
+**Layers.**
+
+| Layer | Role |
+|-------|------|
+| **`KVStore`** | RocksDB at `{root}/meta`; tablet/rowset keys in the **`meta`** column family |
+| **`TabletMetaManager`** | Encode / CRUD for tablet header and PK side keys |
+| **`RowsetMetaManager`** | Separate **`rst_`** keys for committed (and some visible) rowset metas |
+| **`TabletManager`** | In-memory tablet map; create, load-from-meta, drop / trash |
+| **`Tablet` / `TabletMeta`** | Runtime replica + serializable header (`TabletMetaPB`) |
+| **`TabletUpdates`** | PRIMARY_KEYS commit log, apply, delvec / persistent-index meta |
+
+**Key space (META CF).** Prefixes are fixed strings in **`TabletMetaManager`** / **`RowsetMetaManager`**.
+
+| Prefix | Key shape | Value |
+|--------|-----------|--------|
+| **`tabletmeta_`** | `tabletmeta_{tablet_id}_{schema_hash}` | **`TabletMetaPB`** (header) |
+| **`rst_`** | `rst_{tablet_uid}_{rowset_id}` | **`RowsetMetaPB`** (txn / non-PK rowsets) |
+| **`trs_`** | `trs_` + tablet_id + rowset_seg_id | Applied PK rowset meta |
+| **`tpr_`** | `tpr_` + tablet_id + version | Pending / out-of-order PK rowset |
+| **`tlg_`** | `tlg_` + tablet_id + logid | **`TabletMetaLogPB`** (PK edit log) |
+| **`dlv_`** | `dlv_` + tablet_id + segment_id + rev(version) | Delete vector |
+| **`tpi_`** | `tpi_` + tablet_id | **`PersistentIndexMetaPB`** |
+| **`dcg_`** | `dcg_` + tablet_id … | Delta column group |
+
+Non-PK tables keep visible / incremental rowset lists **inside** the tablet header and also use **`rst_`** around commit; on publish the header is rewritten with **`TabletMeta::save_meta`**. PRIMARY_KEYS headers carry a small **`TabletUpdatesPB`**; applied rowsets, logs, pending commits, delvecs, and persistent-index meta are **separate keys**, updated atomically on commit / apply.
+
+**Lifecycle.**
+
+1. **Create** — agent create-tablet builds `data/{shard}/…/schema_hash/`, writes initial **`tabletmeta_`**, registers the tablet in **`TabletManager`**.
+2. **Publish** — non-PK: **`add_inc_rowset`** then **`save_meta`**; PK: **`rowset_commit`** → **`tlg_` / `trs_` / `tpr_`** then async apply (delvec, optional **`tpi_`**).
+3. **Startup** — **`DataDir::load`**: walk **`tabletmeta_*`** → **`load_tablet_from_meta`**; traverse **`rst_`** for COMMITTED (txn maps) / VISIBLE (non-PK rowsets). PK rebuilds from header + **`trs_` / `tlg_` / …**.
+4. **Drop** — mark SHUTDOWN + **`save_meta`**, then clear RocksDB keys and move or delete the data directory.
+
+```plantuml
+@startuml
+
+skinparam packageStyle rectangle
+
+class DataDir {
+  _kv_store : KVStore*
+  +get_meta()
+  +load()
+}
+
+class KVStore {
+  path : "{root}/meta"
+  +get() / put() / write_batch()
+  +iterate(prefix)
+}
+
+class TabletMetaManager <<static>> {
+  +save(DataDir*, TabletMetaPB)
+  +remove(...)
+  +walk / walk_with_compact_on_timeout()
+  +rowset_commit() / apply_rowset_commit()
+}
+
+class RowsetMetaManager <<static>> {
+  +save(meta, tablet_uid, RowsetMetaPB)
+  +traverse_rowset_metas()
+}
+
+class TabletManager {
+  +create_tablet()
+  +load_tablet_from_meta()
+  +get_tablet()
+  +drop_tablet()
+}
+
+class TabletMeta {
+  _tablet_id
+  _schema_hash
+  _shard_id
+  _rs_metas / _inc_rs_metas
+  _updatesPB
+  +save_meta(DataDir*)
+  +to_meta_pb()
+}
+
+class Tablet {
+  _tablet_meta
+  _updates : TabletUpdates*
+  +init()
+  +add_inc_rowset()
+  +rowset_commit()
+}
+
+class TabletUpdates {
+  +rowset_commit()
+  +clear_meta()
+}
+
+DataDir *-- KVStore : _kv_store
+TabletManager ..> DataDir : load / create
+TabletManager o-- Tablet
+Tablet --> TabletMeta
+Tablet o-- TabletUpdates : PRIMARY_KEYS
+TabletMeta ..> TabletMetaManager : save_meta
+TabletMetaManager ..> KVStore
+RowsetMetaManager ..> KVStore
+TabletUpdates ..> TabletMetaManager : commit / apply
+DataDir ..> TabletMetaManager : walk on load
+DataDir ..> RowsetMetaManager : traverse rst_
+
+@enduml
+```
+
+```cpp
+// TabletMeta::_save_meta (abbreviated)
+TabletMetaPB tablet_meta_pb;
+to_meta_pb(&tablet_meta_pb, skip_tablet_schema);
+return TabletMetaManager::save(data_dir, tablet_meta_pb);
+// key: tabletmeta_{tablet_id}_{schema_hash}
+```
+
+```cpp
+// DataDir::load (abbreviated)
+TabletMetaManager::walk_with_compact_on_timeout(_kv_store, [&](tablet_id, schema_hash, value) {
+    _tablet_manager->load_tablet_from_meta(this, tablet_id, schema_hash, value, ...);
+    return true;
+}, ...);
+RowsetMetaManager::traverse_rowset_metas(_kv_store, /* COMMITTED → TxnManager; VISIBLE → non-PK load_rowset */);
+```
+
+### 2.3 Insert
 
 Load / stream load / insert on a local tablet goes through **`DeltaWriter`**:
 
@@ -432,8 +560,8 @@ Load / stream load / insert on a local tablet goes through **`DeltaWriter`**:
 2. **`write`** — append into **`MemTable`**; on full or memory pressure, async flush (**`MemTableFlushExecutor`**).
 3. **Flush** — sort / aggregate → **`RowsetWriter`** / **`SegmentWriter`** → `.dat` (+ indexes built with the segment).
 4. **`close` / `commit`** — wait flushes, **`RowsetWriter::build()`**, **`TxnManager::commit_txn`** (committed rowset, **not** scannable).
-5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`**:
-   - DUP / UNIQUE / AGG: **`Tablet::add_inc_rowset(rowset, version)`**
+5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`** (persists meta as in **§2.2**):
+   - DUP / UNIQUE / AGG: **`Tablet::add_inc_rowset(rowset, version)`** then **`save_meta`**
    - PRIMARY_KEYS: **`Tablet::rowset_commit`** → **`TabletUpdates`** apply (delvec + PK index upsert)
 
 The opening §2 diagram already shows **`DeltaWriter`**, **`MemTable`**, **`FlushToken`**, **`RowsetWriter`**, **`SegmentWriter`**, and **`TxnManager`**. The insert path also uses the types below: the flush executor and task, the memtable sink, factory / horizontal writer, and per-column writers inside a segment.
@@ -795,14 +923,65 @@ Status TxnManager::publish_txn(TPartitionId partition_id, const TabletSharedPtr&
 
 Secondary replicas may receive prebuilt segments (**`write_segment`**) and skip local MemTable encoding; publish still decides visibility.
 
-### 2.3 Query
+#### Compaction
+
+Publish only **appends** immutable rowsets; it does not rewrite older `.dat` files. **Compaction** is the background path that **rewrites** many small columnar segments into fewer larger ones and folds version ranges so scans stop opening a long rowset list. That rewrite is heavier than LSM SST merge for tiny key puts: each input is a full-schema columnar file with indexes, so a storm of concurrent micro-publishes on one tablet is the hostile shape—compaction becomes the bottleneck, then the gate.
+
+| Effect | Why it hurts |
+|--------|----------------|
+| **Version / rowset count** | One publish → one (or a few) new rowsets; scans merge them until compaction catches up |
+| **Compaction tax** | Rewriting columnar pages + indexes for many micro-rowsets costs far more than merging small KV blocks |
+| **PK apply backlog** | PRIMARY_KEYS also pay delvec / index apply per commit; pending versions pile up under load |
+| **Hard reject** | When compaction cannot keep **`version_count`** down, **`DeltaWriter::_init`** refuses loads if **`tablet->version_count() > config::tablet_max_versions`** (default **1000**) |
+
+```text
+Hostile (many concurrent micro-publishes on one tablet)
+  load₁ → rs_v101   load₂ → rs_v102   …   load_N → rs_v1000+
+  scan must union many tiny .dat files; compaction rewrites them in bulk
+  → version_count hits tablet_max_versions → new DeltaWriter open fails
+
+Preferred (batched / fewer publishes)
+  one load → one larger rowset (or few segments from MemTable flushes)
+  compaction merges occasionally; scan stays short
+```
+
+```mermaid
+flowchart LR
+  subgraph bad [Many tiny publishes]
+    W1[write] --> P1[publish]
+    W2[write] --> P2[publish]
+    W3[write] --> P3[publish]
+    P1 --> R1[rowset]
+    P2 --> R2[rowset]
+    P3 --> R3[rowset]
+    R1 --> T[Tablet versions]
+    R2 --> T
+    R3 --> T
+    T --> C[columnar compaction]
+    T --> X{version_count > tablet_max_versions?}
+    X -->|yes| Rej[DeltaWriter reject]
+  end
+```
+
+```cpp
+// DeltaWriter::_init (abbreviated)
+if (_tablet->version_count() > config::tablet_max_versions) {
+    // optionally kick event-based compaction
+    return Status::ServiceUnavailable(
+        /* too many versions; reduce load concurrency or increase batch size */);
+}
+```
+
+Mitigations follow the same mechanism: **batch** rows into fewer publishes (stream load / routine-load batch size and consume window), lower per-tablet write concurrency, or wait for compaction to reduce **`version_count`**. Raising **`tablet_max_versions`** only delays the reject; it does not remove the scan and compaction cost of micro-rowsets.
+
+### 2.4 Query
 
 Pipeline OLAP scan binds FE **`TInternalScanRange`** (tablet id, version, key ranges) to IO:
 
 1. **`OlapScanOperator`** / **`OlapScanContext`** resolve the tablet and capture consistent rowsets at the scan version.
 2. **Morsels** split work: physical (rowid) or logical (short-key) **`SplitMorselQueue`**; each morsel carries tablet + rowset list + version bounds.
 3. **`OlapChunkSource`** builds **`TabletReader`** with those rowsets and **`TabletReaderParams`** (predicates, key ranges, short-key options).
-4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§2.4**) → union / merge / aggregate collectors as needed.
+4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§2.5**) → union / merge / aggregate collectors as needed.
 5. Drivers pull chunks; residual conjuncts may remain above the iterator.
 
 Lake / connector scans use **`ConnectorScanOperator`** and lake readers against object storage; morsel and chunk pull shape stay analogous.
@@ -955,7 +1134,7 @@ Status TabletReader::_init_collector(const TabletReaderParams& params) {
     return Status::OK();
 }
 
-// SegmentIterator prune order (details in §2.4)
+// SegmentIterator prune order (details in §2.5)
 Status SegmentIterator::_init_scan_range_and_context() {
     RETURN_IF_ERROR(_get_row_ranges_by_rowid_range());
     RETURN_IF_ERROR(_get_row_ranges_by_keys());
@@ -975,7 +1154,7 @@ Status OlapChunkSource::_read_chunk_from_storage(RuntimeState* state, Chunk* chu
 }
 ```
 
-### 2.4 Indexes
+### 2.5 Indexes
 
 Most structures that prune OLAP scans live **in the segment** (footer / index pages). Sidecars (**.ivt** / **.vi**) and the tablet-level **primary-key** index are the exceptions. At open time **`SegmentIterator::_init_scan_range_and_context`** narrows a candidate **`_scan_range`** (rowid sparse range); stages typically intersect that range in order short key → bitmap → zone map → bloom → inverted → vector (delvec early or late by config). The subsections below cover each index type.
 
@@ -1233,7 +1412,7 @@ if (read_params.use_pk_index) {
 // otherwise normal segment iterators + _apply_del_vector
 ```
 
-### 2.5 Implementation snippets
+### 2.6 Implementation snippets
 
 **Path and segment names.**
 
@@ -1292,7 +1471,7 @@ The worker’s **execution framework** is the pipeline engine: an FE **`Fragment
 
 | Kind | Mechanism |
 |------|-----------|
-| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§2.3**) |
+| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§2.4**) |
 | **Shuffle** | **`ExchangeSinkOperator`** → **`transmit_chunk`** → **`DataStreamRecvr`** / **`ExchangeSourceOperator`** |
 | **Result** | Root **`ResultSinkOperator`**; FE pulls with **`fetch_data`** |
 | **Status** | **`ExecStateReporter`** → Thrift **`reportExecStatus`** |
