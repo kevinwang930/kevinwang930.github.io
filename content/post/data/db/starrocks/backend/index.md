@@ -560,7 +560,7 @@ Load / stream load / insert on a local tablet goes through **`DeltaWriter`**:
 2. **`write`** — append into **`MemTable`**; on full or memory pressure, async flush (**`MemTableFlushExecutor`**).
 3. **Flush** — sort / aggregate → **`RowsetWriter`** / **`SegmentWriter`** → `.dat` (+ indexes built with the segment).
 4. **`close` / `commit`** — wait flushes, **`RowsetWriter::build()`**, **`TxnManager::commit_txn`** (committed rowset, **not** scannable).
-5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`** (persists meta as in **§2.2**):
+5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`** (persists meta as in **§2.2**; many small publishes drive compaction in **§2.4**):
    - DUP / UNIQUE / AGG: **`Tablet::add_inc_rowset(rowset, version)`** then **`save_meta`**
    - PRIMARY_KEYS: **`Tablet::rowset_commit`** → **`TabletUpdates`** apply (delvec + PK index upsert)
 
@@ -923,9 +923,11 @@ Status TxnManager::publish_txn(TPartitionId partition_id, const TabletSharedPtr&
 
 Secondary replicas may receive prebuilt segments (**`write_segment`**) and skip local MemTable encoding; publish still decides visibility.
 
-#### Compaction
+### 2.4 Compaction
 
 Publish only **appends** immutable rowsets; it does not rewrite older `.dat` files. **Compaction** is the background path that **rewrites** many small columnar segments into fewer larger ones and folds version ranges so scans stop opening a long rowset list. That rewrite is heavier than LSM SST merge for tiny key puts: each input is a full-schema columnar file with indexes, so a storm of concurrent micro-publishes on one tablet is the hostile shape—compaction becomes the bottleneck, then the gate.
+
+![Compaction merges several small rowsets into one wider version range](images/compaction-rowsets.svg)
 
 | Effect | Why it hurts |
 |--------|----------------|
@@ -972,16 +974,159 @@ if (_tablet->version_count() > config::tablet_max_versions) {
 }
 ```
 
+**Mechanism (event-based, default).** With **`enable_event_based_compaction_framework`**, publish / rowset change calls **`CompactionManager::update_tablet_async`**. A dispatch worker refreshes the tablet’s **`CompactionPolicy`** score; the manager picks the highest **`CompactionCandidate`**, **`Tablet::create_compaction_task`** builds a horizontal or vertical **`CompactionTask`**, and **`run`** merges inputs into one output rowset then **`modify_rowsets_without_lock`** + **`save_meta`**. Default policy is **`SizeTieredCompactionPolicy`** when **`enable_size_tiered_compaction_strategy`** is on. With the framework off, dedicated threads still run classic **`CumulativeCompaction`** / **`BaseCompaction`** to the same merge/publish idea.
+
+```plantuml
+@startuml
+
+skinparam packageStyle rectangle
+
+class CompactionManager {
+  _compaction_candidates
+  +update_tablet_async(tablet)
+  +update_tablet(tablet)
+  +pick_candidate()
+  +submit_compaction_task()
+}
+
+class CompactionCandidate {
+  tablet
+  type
+  score
+}
+
+class Tablet {
+  _compaction_context
+  +need_compaction()
+  +compaction_score() / compaction_type()
+  +create_compaction_task()
+  +modify_rowsets_without_lock()
+}
+
+class CompactionContext {
+  score
+  type
+  policy : CompactionPolicy*
+}
+
+interface CompactionPolicy {
+  +need_compaction(score*, type*)
+  +create_compaction(tablet) : CompactionTask
+}
+
+class SizeTieredCompactionPolicy {
+  _rowsets
+  +create_compaction()
+}
+
+class CompactionTaskFactory {
+  +create_compaction_task()
+}
+
+abstract class CompactionTask {
+  _input_rowsets
+  _output_rowset
+  _tablet
+  +run() / run_impl()
+  +_commit_compaction()
+}
+
+class HorizontalCompactionTask {
+  +run_impl()
+  +_horizontal_compact_data()
+}
+
+class VerticalCompactionTask {
+  +run_impl()
+}
+
+class CompactionUtils <<static>> {
+  +choose_compaction_algorithm()
+  +construct_output_rowset_writer()
+}
+
+class RowsetWriter
+class Rowset
+
+CompactionManager o-- CompactionCandidate
+CompactionManager ..> Tablet : update / create task
+Tablet *-- CompactionContext
+CompactionContext o-- CompactionPolicy
+SizeTieredCompactionPolicy --|> CompactionPolicy
+CompactionPolicy ..> CompactionTaskFactory : create_compaction
+CompactionTaskFactory ..> CompactionUtils
+CompactionTaskFactory ..> HorizontalCompactionTask
+CompactionTaskFactory ..> VerticalCompactionTask
+HorizontalCompactionTask --|> CompactionTask
+VerticalCompactionTask --|> CompactionTask
+CompactionTask --> Tablet
+CompactionTask o-- Rowset : inputs / output
+HorizontalCompactionTask ..> RowsetWriter : compact data
+CompactionTask ..> Tablet : modify_rowsets_without_lock
+
+@enduml
+```
+
+```cpp
+// CompactionManager::update_tablet_async / update_tablet (abbreviated)
+void CompactionManager::update_tablet_async(const TabletSharedPtr& tablet) {
+    std::lock_guard lock(_dispatch_mutex);
+    // coalesce by tablet_id into _dispatch_map; dispatch worker calls update_tablet
+    _dispatch_map.emplace(/* or refresh */ tablet->tablet_id(), std::make_pair(tablet, 0));
+}
+
+void CompactionManager::update_tablet(const TabletSharedPtr& tablet) {
+    if (tablet->need_compaction()) {
+        CompactionCandidate candidate;
+        candidate.tablet = tablet;
+        candidate.score = tablet->compaction_score();
+        candidate.type = tablet->compaction_type();
+        update_candidates({candidate});
+    }
+}
+```
+
+```cpp
+// SizeTieredCompactionPolicy::create_compaction (abbreviated)
+Version output_version{first_input->start_version(), last_input->end_version()};
+for (const auto& rowset : _rowsets) {
+    rowset->set_is_compacting(true);
+}
+CompactionTaskFactory factory(output_version, tablet, std::move(_rowsets), _score, _compaction_type);
+return factory.create_compaction_task();  // Horizontal or Vertical via CompactionUtils
+```
+
+```cpp
+// HorizontalCompactionTask::run_impl + CompactionTask::_commit_compaction (abbreviated)
+Status HorizontalCompactionTask::run_impl() {
+    RETURN_IF_ERROR(_shortcut_compact(&statistics));
+    RETURN_IF_ERROR(_horizontal_compact_data(&statistics));  // TabletReader → RowsetWriter → build
+    RETURN_IF_ERROR(_validate_compaction(statistics));
+    RETURN_IF_ERROR(_commit_compaction());
+    return Status::OK();
+}
+
+Status CompactionTask::_commit_compaction() {
+    std::unique_lock wrlock(_tablet->get_header_lock());
+    // ensure each input version still present
+    _tablet->modify_rowsets_without_lock({_output_rowset}, _input_rowsets, &to_replace);
+    _tablet->save_meta(/* skip_schema_in_rowset_meta */);
+    Rowset::close_rowsets(_input_rowsets);
+    // unused inputs → GC
+    return Status::OK();
+}
+```
+
 Mitigations follow the same mechanism: **batch** rows into fewer publishes (stream load / routine-load batch size and consume window), lower per-tablet write concurrency, or wait for compaction to reduce **`version_count`**. Raising **`tablet_max_versions`** only delays the reject; it does not remove the scan and compaction cost of micro-rowsets.
 
-### 2.4 Query
+### 2.5 Query
 
 Pipeline OLAP scan binds FE **`TInternalScanRange`** (tablet id, version, key ranges) to IO:
 
 1. **`OlapScanOperator`** / **`OlapScanContext`** resolve the tablet and capture consistent rowsets at the scan version.
 2. **Morsels** split work: physical (rowid) or logical (short-key) **`SplitMorselQueue`**; each morsel carries tablet + rowset list + version bounds.
 3. **`OlapChunkSource`** builds **`TabletReader`** with those rowsets and **`TabletReaderParams`** (predicates, key ranges, short-key options).
-4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§2.5**) → union / merge / aggregate collectors as needed.
+4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§2.6**) → union / merge / aggregate collectors as needed.
 5. Drivers pull chunks; residual conjuncts may remain above the iterator.
 
 Lake / connector scans use **`ConnectorScanOperator`** and lake readers against object storage; morsel and chunk pull shape stay analogous.
@@ -1134,7 +1279,7 @@ Status TabletReader::_init_collector(const TabletReaderParams& params) {
     return Status::OK();
 }
 
-// SegmentIterator prune order (details in §2.5)
+// SegmentIterator prune order (details in §2.6)
 Status SegmentIterator::_init_scan_range_and_context() {
     RETURN_IF_ERROR(_get_row_ranges_by_rowid_range());
     RETURN_IF_ERROR(_get_row_ranges_by_keys());
@@ -1154,7 +1299,7 @@ Status OlapChunkSource::_read_chunk_from_storage(RuntimeState* state, Chunk* chu
 }
 ```
 
-### 2.5 Indexes
+### 2.6 Indexes
 
 Most structures that prune OLAP scans live **in the segment** (footer / index pages). Sidecars (**.ivt** / **.vi**) and the tablet-level **primary-key** index are the exceptions. At open time **`SegmentIterator::_init_scan_range_and_context`** narrows a candidate **`_scan_range`** (rowid sparse range); stages typically intersect that range in order short key → bitmap → zone map → bloom → inverted → vector (delvec early or late by config). The subsections below cover each index type.
 
@@ -1412,27 +1557,6 @@ if (read_params.use_pk_index) {
 // otherwise normal segment iterators + _apply_del_vector
 ```
 
-### 2.6 Implementation snippets
-
-**Path and segment names.**
-
-```cpp
-// BaseTablet::_gen_tablet_path
-std::string path = _data_dir->path() + DATA_PREFIX;  // "/data"
-path = path_util::join_path_segments(path, std::to_string(_tablet_meta->shard_id()));
-path = path_util::join_path_segments(path, std::to_string(_tablet_meta->tablet_id()));
-path = path_util::join_path_segments(path, std::to_string(_tablet_meta->schema_hash()));
-_tablet_path = path;
-```
-
-```cpp
-// Rowset path helpers (abbreviated)
-segment_file_path(dir, id, seg)     -> "$dir/$id_$seg.dat"
-segment_del_file_path(...)          -> "... .del"
-segment_upt_file_path(...)          -> "... .upt"
-delta_column_group_path(...)        -> "... .cols"
-```
-
 ---
 
 ## 3. FragmentInstance execution
@@ -1471,7 +1595,7 @@ The worker’s **execution framework** is the pipeline engine: an FE **`Fragment
 
 | Kind | Mechanism |
 |------|-----------|
-| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§2.4**) |
+| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§2.5**) |
 | **Shuffle** | **`ExchangeSinkOperator`** → **`transmit_chunk`** → **`DataStreamRecvr`** / **`ExchangeSourceOperator`** |
 | **Result** | Root **`ResultSinkOperator`**; FE pulls with **`fetch_data`** |
 | **Status** | **`ExecStateReporter`** → Thrift **`reportExecStatus`** |
