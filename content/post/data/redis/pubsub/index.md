@@ -34,8 +34,10 @@ Related: [Network / command path](../architecture/), [Data types and encodings](
 | Durability | None — offline or late subscribers miss the message |
 | Patterns | `PSUBSCRIBE` uses `stringmatchlen` against every pattern on each `PUBLISH` |
 | Shard channels | `SSUBSCRIBE` / `SPUBLISH` use a slot-scoped twin of the channel index |
+| Membership | **Per node.** Each process keeps only the clients connected to **it** in its own `pubsub_channels` / `pubsub_patterns` (and shard maps). Nodes do not sync or share subscriber lists. |
+| Multi-node publish | `PUBLISH` propagates the **message** (channel + payload) on the cluster bus or REPL; every receiving node runs local fan-out against **its** client list only |
 
-A client in Pub/Sub mode (RESP2) may only run subscription control commands plus `PING` / `QUIT` / `RESET` until it unsubscribes from everything.
+A client in Pub/Sub mode (RESP2) may only run subscription control commands plus `PING` / `QUIT` / `RESET` until it unsubscribes from everything. In a cluster, a subscriber is visible solely on the node that accepted its connection; other nodes learn nothing about that client until a published payload arrives and they deliver to whoever is subscribed locally.
 
 ```mermaid
 flowchart LR
@@ -50,18 +52,9 @@ flowchart LR
 
 ---
 
-## 2. Data structures
+## 2. Server implementation
 
-Pub/Sub does not store messages. It stores **who is listening**. Two directions are kept in sync:
-
-| Direction | Purpose |
-|-----------|---------|
-| Server → clients | Fast fan-out on `PUBLISH` / `SPUBLISH` |
-| Client → channels/patterns | Fast cleanup on `UNSUBSCRIBE` / disconnect; subscription counts in acks |
-
-Each “set of subscribers” is a Redis `dict` whose **keys** are `client*` pointers and whose values are unused (`NULL`) — a hash set, not a message queue.
-
-### 2.1 Server-wide state
+Pub/Sub does not store messages. The server keeps **who is listening** in forward indexes on `redisServer` (channel or pattern → set of `client*`), installs those edges on subscribe, and on `PUBLISH` / `SPUBLISH` walks the matching sets to `addReply*` into each subscriber’s output buffer. Global and shard paths share `pubsubtype`; after local fan-out, cluster or replication may propagate the **payload** so peer processes run the same local publish against their own indexes.
 
 ```c
 /* server.h — redisServer */
@@ -70,116 +63,6 @@ dict *pubsub_patterns;          /* pattern → dict of client* */
 kvstore *pubsubshard_channels;  /* per-slot channel → dict of client* */
 unsigned int pubsub_clients;    /* clients with CLIENT_PUBSUB */
 ```
-
-| Field | Container | Entry shape | Used by |
-|-------|-----------|-------------|---------|
-| `pubsub_channels` | `kvstore` (one dict when not sharding) | key: channel `robj*`; value: `dict*` of subscribers | `SUBSCRIBE` / `PUBLISH` |
-| `pubsub_patterns` | `dict` | key: pattern `robj*`; value: `dict*` of subscribers | `PSUBSCRIBE` / `PUBLISH` |
-| `pubsubshard_channels` | `kvstore` (dict per hash slot in cluster) | same as channels, slot-scoped | `SSUBSCRIBE` / `SPUBLISH` |
-| `pubsub_clients` | counter | number of clients with `CLIENT_PUBSUB` | stats / accounting |
-
-`pubsub_channels` is a `kvstore` so global and shard Pub/Sub share the same `pubsubtype` helpers (`server.c` init comment).
-
-### 2.2 Per-client state
-
-```c
-/* server.h — client */
-dict *pubsub_channels;       /* set of channel robj* this client subscribed to */
-dict *pubsub_patterns;       /* set of pattern robj* this client psubscribed to */
-dict *pubsubshard_channels;  /* set of shard channel robj* */
-```
-
-| Field | Entry shape | Updated by |
-|-------|-------------|------------|
-| `c->pubsub_channels` | key: channel `robj*`; value unused | `SUBSCRIBE` / `UNSUBSCRIBE` |
-| `c->pubsub_patterns` | key: pattern `robj*`; value unused | `PSUBSCRIBE` / `PUNSUBSCRIBE` |
-| `c->pubsubshard_channels` | key: shard channel `robj*` | `SSUBSCRIBE` / `SUNSUBSCRIBE` |
-| `CLIENT_PUBSUB` | flag on `c->flags` | set when first subscription is added; cleared when total count hits 0 |
-
-Subscription count reported in subscribe acks is `dictSize(c->pubsub_channels) + dictSize(c->pubsub_patterns)` (plus shard dict for shard commands).
-
-### 2.3 Worked example
-
-Three clients and a mix of channel and pattern subscriptions:
-
-```text
-Client A:  SUBSCRIBE news
-Client B:  SUBSCRIBE news
-           SUBSCRIBE sports
-Client C:  PSUBSCRIBE news*
-```
-
-After these commands succeed, memory looks like this (pointers abbreviated):
-
-```text
-server.pubsub_channels  (kvstore / dict)
-┌─────────────┬──────────────────────────────────────┐
-│ key         │ value = dict of subscribers          │
-├─────────────┼──────────────────────────────────────┤
-│ "news"      │ { A, B }                             │
-│ "sports"    │ { B }                                │
-└─────────────┴──────────────────────────────────────┘
-
-server.pubsub_patterns  (dict)
-┌─────────────┬──────────────────────────────────────┐
-│ key         │ value = dict of subscribers          │
-├─────────────┼──────────────────────────────────────┤
-│ "news*"     │ { C }                                │
-└─────────────┴──────────────────────────────────────┘
-
-client A                    client B                    client C
-pubsub_channels:            pubsub_channels:            pubsub_channels: (empty)
-  { "news" }                  { "news", "sports" }      pubsub_patterns:
-pubsub_patterns: (empty)    pubsub_patterns: (empty)      { "news*" }
-flags: CLIENT_PUBSUB        flags: CLIENT_PUBSUB        flags: CLIENT_PUBSUB
-
-server.pubsub_clients == 3
-```
-
-The same channel `robj` (or an equivalent shared key object after `incrRefCount`) appears in both the server map and each member’s client map. Subscribe installs **both** edges; unsubscribe removes **both**.
-
-#### What `PUBLISH news hello` walks
-
-```text
-1) Exact channel
-   find server.pubsub_channels["news"]  →  { A, B }
-   addReplyPubsubMessage(A, "news", "hello")
-   addReplyPubsubMessage(B, "news", "hello")
-
-2) Patterns (global PUBLISH only)
-   for each pattern in server.pubsub_patterns:
-     "news*" matches "news"  →  { C }
-     addReplyPubsubPatMessage(C, "news*", "news", "hello")
-
-Receivers returned to publisher = 3  (A + B + C)
-```
-
-`PUBLISH sports goal` delivers only to **B** (exact). Pattern `news*` does not match `sports`, so **C** is skipped.
-
-`PUBLISH weather rain` finds no channel entry and no matching pattern → receivers `0`; nothing is buffered anywhere.
-
-#### After `UNSUBSCRIBE news` from B
-
-```text
-server.pubsub_channels["news"]   →  { A }     # B removed from set
-server.pubsub_channels["sports"] →  { B }     # unchanged
-client B.pubsub_channels         →  { "sports" }
-```
-
-If **A** then also unsubscribes from `news`, the subscriber dict becomes empty and the `"news"` entry is **deleted** from `server.pubsub_channels` (avoids unbounded empty channel names).
-
-#### Why both indexes
-
-| Operation | Uses |
-|-----------|------|
-| `PUBLISH ch` | Server forward index only (`O(subscribers)` on that channel + pattern scan) |
-| `UNSUBSCRIBE ch` for one client | Client reverse index to know membership; then delete that client from the channel’s set |
-| Client disconnect | Iterate `c->pubsub_channels` / `pubsub_patterns` and remove the client from every server-side set |
-| Subscribe ack count | `dictSize` of the client’s own dicts |
-
-Without the reverse index, disconnect would require scanning every channel in the server.
-
-### 2.4 Structure diagram
 
 ```plantuml
 @startuml
@@ -238,13 +121,122 @@ flowchart TB
   PP --> C
 ```
 
-### 2.5 Shard channels (brief)
+```c
+/* pubsub.c — pubsubSubscribeChannel (sketch) */
+/* 1) client.pubsub_channels[channel] = present */
+/* 2) server.pubsub_channels[channel] → dictAdd(clients, c) */
+/* 3) addReplyPubsubSubscribed(c, channel, type) */
+markClientAsPubSub(c);
+```
 
-`SSUBSCRIBE` / `SPUBLISH` use `server.pubsubshard_channels` and `c->pubsubshard_channels` with the same dual-index shape. In cluster mode the `kvstore` picks a **slot** from the channel name so subscriptions are partitioned like keys. Shard publish does **not** consult `pubsub_patterns`.
+```c
+/* Complete PUBLISH path (sharded=0). SPUBLISH: skip patterns; shard bus peers only. */
 
-### 2.6 `pubsubtype` — shared global vs shard logic
+/* ---- publisher node ---- */
 
-Global and shard channel paths share one implementation parameterized by `pubsubtype`:
+/* 1. Command entry */
+void publishCommand(client *c) {
+    int receivers = pubsubPublishMessageAndPropagateToCluster(
+                        c->argv[1], c->argv[2], /* sharded */ 0);
+    /* 11. Standalone / primary→replica (no cluster): replicate the command */
+    if (!server.cluster_enabled)
+        forceCommandPropagation(c, PROPAGATE_REPL);
+    /* 12. Reply: local receivers only */
+    addReplyLongLong(c, receivers);
+}
+
+/* 2. Local first, then cluster bus */
+int pubsubPublishMessageAndPropagateToCluster(robj *channel, robj *message,
+                                              int sharded) {
+    int receivers = pubsubPublishMessage(channel, message, sharded);
+    /* → pubsubPublishMessageInternal(..., pubSubType | pubSubShardType) */
+    if (server.cluster_enabled)
+        clusterPropagatePublish(channel, message, sharded);  /* step 6+ */
+    return receivers;
+}
+
+/* 3–5. Local fan-out into subscriber output buffers */
+int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) {
+    int receivers = 0;
+    unsigned int slot = 0;
+    if (server.cluster_enabled && type.shard)
+        slot = keyHashSlot(channel->ptr, sdslen(channel->ptr));
+
+    /* 3. Exact: kvstoreDictFind → for each client* addReplyPubsubMessage */
+    dictEntry *de = kvstoreDictFind(*type.serverPubSubChannels, slot, channel);
+    if (de) { /* iterate dictGetVal(de); receivers++ */ }
+
+    /* 4. SPUBLISH: return here (no patterns) */
+    if (type.shard) return receivers;
+
+    /* 5. PUBLISH patterns: for each server.pubsub_patterns entry,
+     *    stringmatchlen; addReplyPubsubPatMessage; receivers++ */
+    return receivers;
+}
+
+/* 6. Build bus message (channel_len + message_len + bulk bytes) */
+clusterMsgSendBlock *clusterCreatePublishMsgBlock(robj *channel, robj *message,
+                                                  uint16_t type) {
+    /* type = CLUSTERMSG_TYPE_PUBLISH or CLUSTERMSG_TYPE_PUBLISHSHARD
+     * memcpy channel then message into hdr->data.publish.msg.bulk_data */
+    return /* msgblock */;
+}
+
+/* 7. Choose who gets the bus packet */
+void clusterPropagatePublish(robj *channel, robj *message, int sharded) {
+    clusterMsgSendBlock *msgblock;
+    if (!sharded) {
+        msgblock = clusterCreatePublishMsgBlock(channel, message,
+                                                CLUSTERMSG_TYPE_PUBLISH);
+        clusterBroadcastMessage(msgblock);           /* step 8 */
+        clusterMsgSendBlockDecrRefCount(msgblock);
+        return;
+    }
+    /* SPUBLISH */
+    msgblock = clusterCreatePublishMsgBlock(channel, message,
+                                            CLUSTERMSG_TYPE_PUBLISHSHARD);
+    /* for each node in clusterGetNodesInMyShard (except MYSELF|HANDSHAKE):
+     *     clusterSendMessage(node->link, msgblock);     step 9 */
+    clusterMsgSendBlockDecrRefCount(msgblock);
+}
+
+/* 8. PUBLISH: every known cluster node except self */
+void clusterBroadcastMessage(clusterMsgSendBlock *msgblock) {
+    dictIterator di;
+    dictEntry *de;
+    dictInitSafeIterator(&di, server.cluster->nodes);
+    while ((de = dictNext(&di)) != NULL) {
+        clusterNode *node = dictGetVal(de);
+        if (node->flags & (CLUSTER_NODE_MYSELF|CLUSTER_NODE_HANDSHAKE))
+            continue;
+        clusterSendMessage(node->link, msgblock);    /* step 9 */
+    }
+    dictResetIterator(&di);
+}
+
+/* 9. Write msgblock onto that node’s cluster bus link (async send buffer) */
+void clusterSendMessage(clusterLink *link, clusterMsgSendBlock *msgblock);
+
+/* ---- peer node (bus receive) ---- */
+
+/* 10. Handler for CLUSTERMSG_TYPE_PUBLISH / PUBLISHSHARD */
+void clusterHandlePublish(/* hdr */) {
+    if (!sender) return;
+    /* Skip object alloc if this node has zero Pub/Sub subscribers. */
+    if ((type == CLUSTERMSG_TYPE_PUBLISH
+         && serverPubsubSubscriptionCount() > 0)
+     || (type == CLUSTERMSG_TYPE_PUBLISHSHARD
+         && serverPubsubShardSubscriptionCount() > 0)) {
+        /* rebuild channel, message from hdr->data.publish.msg.bulk_data */
+        pubsubPublishMessage(channel, message,
+                             type == CLUSTERMSG_TYPE_PUBLISHSHARD);
+        /* → steps 3–5 again on THIS node’s indexes only */
+    }
+}
+
+/* 13. Later on each node: event loop / I/O threads write(2) flush
+ *     of subscriber reply buffers (not inside publishCommand). */
+```
 
 ```c
 /* pubsub.c */
@@ -262,36 +254,102 @@ pubsubtype pubSubType = { /* SUBSCRIBE / PUBLISH ... */ };
 pubsubtype pubSubShardType = { /* SSUBSCRIBE / SPUBLISH ... */ };
 ```
 
-`pubsubSubscribeChannel` / `pubsubPublishMessageInternal` take a `pubsubtype` and read/write whichever maps that type points at.
+```text
+Two cluster nodes. Membership is local; nodes do not sync client lists.
+
+  Node N1 (clients A, B)              Node N2 (client C)
+  A: SUBSCRIBE news                   C: PSUBSCRIBE news*
+  B: SUBSCRIBE news
+     SUBSCRIBE sports
+
+N1.pubsub_channels                    N2.pubsub_channels
+┌─────────┬──────────┐                (empty for these channels)
+│ "news"  │ { A, B } │
+│ "sports"│ { B }    │
+└─────────┴──────────┘
+N1.pubsub_patterns (empty)            N2.pubsub_patterns
+                                      ┌─────────┬──────┐
+                                      │ "news*" │ { C }│
+                                      └─────────┴──────┘
+N1 does not know C.  N2 does not know A or B.
+```
+
+```text
+Publisher on N1:  PUBLISH news hello
+
+N1 (command target) — pubsubPublishMessage on N1 only
+  1) Exact: N1.pubsub_channels["news"] → { A, B }
+       addReply* → A, B
+  2) Patterns: N1.pubsub_patterns empty → no one
+  receivers returned to publisher = 2   (local only; not C)
+  3) clusterPropagatePublish → bus carries channel+payload to N2
+     (not "A,B are subscribed"; only the message)
+
+N2 (bus receive) — pubsubPublishMessage on N2 only
+  1) Exact: N2.pubsub_channels["news"] missing → skip
+  2) Patterns: "news*" matches "news" → { C }
+       addReply* → C
+  N2 never touches A or B
+
+Per-client delivery:  A←N1,  B←N1,  C←N2
+```
+
+```text
+Publisher on N2:  PUBLISH sports goal
+
+N2 local: no "sports" channel, no matching pattern → receivers 0
+          still propagates payload to N1
+N1 local: N1.pubsub_channels["sports"] → { B } → addReply* → B only
+          N1 patterns do not match "sports"
+```
+
+```text
+UNSUBSCRIBE news from B (still on N1)
+  → only N1.pubsub_channels["news"] becomes { A }
+  → N2 unchanged
+```
 
 ---
 
-## 3. Subscribe path
+## 3. Client implementation
 
-### 3.1 Exact channel (`SUBSCRIBE`)
+Each connected `client` carries the reverse membership needed for fast unsubscribe, disconnect cleanup, and subscribe-ack counts. The wire replies a subscriber consumes are produced by the server into that client’s output buffer; the client (or library) must parse them and, after faults, re-establish membership.
 
-```c
-/* pubsub.c — pubsubSubscribeChannel (sketch) */
-/* 1) client.pubsub_channels[channel] = present */
-/* 2) server.pubsub_channels[channel] → dictAdd(clients, c) */
-/* 3) addReplyPubsubSubscribed(c, channel, type) */
-markClientAsPubSub(c);
-```
-
-If the channel entry already exists, the existing `robj` key is reused (`incrRefCount`). An empty subscriber dict is deleted on last unsubscribe so abandoned channel names do not grow without bound.
-
-### 3.2 Pattern (`PSUBSCRIBE`)
+### 3.1 Per-client state
 
 ```c
-/* pubsub.c — pubsubSubscribePattern */
-dictAdd(c->pubsub_patterns, pattern, NULL);
-/* server.pubsub_patterns[pattern] → dict of clients */
-addReplyPubsubPatSubscribed(c, pattern);
+/* server.h — client */
+dict *pubsub_channels;       /* set of channel robj* this client subscribed to */
+dict *pubsub_patterns;       /* set of pattern robj* this client psubscribed to */
+dict *pubsubshard_channels;  /* set of shard channel robj* */
 ```
 
-Patterns are stored as `robj` keys; matching uses Redis glob rules via `stringmatchlen` at publish time (not a trie).
+| Field | Entry shape | Updated by |
+|-------|-------------|------------|
+| `c->pubsub_channels` | key: channel `robj*`; value unused | `SUBSCRIBE` / `UNSUBSCRIBE` |
+| `c->pubsub_patterns` | key: pattern `robj*`; value unused | `PSUBSCRIBE` / `PUNSUBSCRIBE` |
+| `c->pubsubshard_channels` | key: shard channel `robj*` | `SSUBSCRIBE` / `SUNSUBSCRIBE` |
+| `CLIENT_PUBSUB` | flag on `c->flags` | set when first subscription is added; cleared when total count hits 0 |
 
-### 3.3 Client mode restriction
+Subscription count reported in subscribe acks is `dictSize(c->pubsub_channels) + dictSize(c->pubsub_patterns)` (plus shard dict for shard commands). The same channel `robj` (or an equivalent shared key after `incrRefCount`) appears in both the server map and each member’s client map.
+
+For the two-node example in §2 (A, B on N1; C on N2):
+
+```text
+client A (on N1)            client B (on N1)            client C (on N2)
+pubsub_channels:            pubsub_channels:            pubsub_channels: (empty)
+  { "news" }                  { "news", "sports" }      pubsub_patterns:
+pubsub_patterns: (empty)    pubsub_patterns: (empty)      { "news*" }
+flags: CLIENT_PUBSUB        flags: CLIENT_PUBSUB        flags: CLIENT_PUBSUB
+```
+
+| Operation | Client reverse index uses |
+|-----------|---------------------------|
+| `UNSUBSCRIBE ch` for one client | Know membership; then delete that client from the channel’s server set |
+| Client disconnect | Iterate `c->pubsub_channels` / `pubsub_patterns` / shard dict and remove the client from every server-side set |
+| Subscribe ack count | `dictSize` of the client’s own dicts |
+
+### 3.2 Client mode restriction
 
 ```c
 /* server.c — processCommand */
@@ -304,48 +362,7 @@ if ((c->flags & CLIENT_PUBSUB && c->resp == 2) &&
 
 RESP3 connections can use push messages while still issuing other commands more freely; RESP2 Pub/Sub mode is the classic restricted session.
 
----
-
-## 4. Publish path
-
-### 4.1 Exact channel + patterns
-
-```c
-/* pubsub.c — pubsubPublishMessageInternal */
-/* Exact: kvstoreDictFind(serverPubSubChannels, slot, channel)
- *        → for each client: addReplyPubsubMessage(...)
- * Patterns (global only): for each pattern in server.pubsub_patterns
- *        if stringmatchlen(pattern, channel)
- *           → addReplyPubsubPatMessage(...)
- */
-```
-
-| Step | Cost driver |
-|------|-------------|
-| Channel lookup | Hash lookup in `kvstore` / dict |
-| Channel fan-out | Number of clients on that channel |
-| Pattern fan-out | Number of **patterns** × match work, then subscribers per matching pattern |
-
-There is no message queue: `addReply*` appends to each subscriber’s output buffer; the event loop later writes sockets (possibly via I/O threads — see [architecture](../architecture/)).
-
-### 4.2 Commands and replication / cluster
-
-```c
-/* PUBLISH */
-receivers = pubsubPublishMessageAndPropagateToCluster(channel, message, 0);
-/* cluster: clusterPropagatePublish; else forceCommandPropagation REPL */
-addReplyLongLong(c, receivers);
-```
-
-| Command | Index | Cluster note |
-|---------|-------|--------------|
-| `PUBLISH` | `pubsub_channels` + `pubsub_patterns` | Propagates; replicas re-publish locally |
-| `SPUBLISH` | `pubsubshard_channels` | Slot-local; `clusterPropagatePublish` with `sharded` |
-| `PUBSUB CHANNELS` / `NUMSUB` / … | introspection | Does not subscribe |
-
-Return value is the count of **local** deliveries (channel + pattern hits), not a cluster-wide subscriber total.
-
-### 4.3 Message wire shape
+### 3.3 Message wire shape
 
 | Kind | RESP2 shape (conceptual) |
 |------|---------------------------|
@@ -353,15 +370,33 @@ Return value is the count of **local** deliveries (channel + pattern hits), not 
 | Pattern message | `*4` / `pmessage` / pattern / channel / payload |
 | Subscribe ack | `*3` / `subscribe` / channel / count |
 
-RESP3 uses push-style framing (`addReplyPushLen`) with the same logical fields.
+RESP3 uses push-style framing (`addReplyPushLen`) with the same logical fields. These are pushed into the subscriber’s buffer asynchronously relative to the publisher’s command; the subscriber’s client must read them as unsolicited (or push) traffic, not as replies to its own last command (aside from subscribe/unsubscribe acks and `PING`).
+
+### 3.4 Reconnect, re-subscribe, and client heartbeats
+
+There is **no** server-side reconnect or resubscribe. Membership does not survive the connection. After disconnect:
+
+1. Detect socket death (TCP error, library event).  
+2. Reconnect.  
+3. Issue `SUBSCRIBE` / `PSUBSCRIBE` / `SSUBSCRIBE` again for the same names.  
+4. Accept gap loss, or use another primitive (e.g. Streams) if loss is unacceptable.
+
+Libraries such as **Redisson** (`RTopic` / `RPatternTopic` / `RShardedTopic`) perform reconnect and **re-subscribe listeners automatically**, but still document that messages published during absence are lost. Redisson’s reliable topic APIs use a different design when gap delivery matters.
+
+`PING` while subscribed is allowed in RESP2 Pub/Sub mode; the server replies with a Pub/Sub-shaped `PONG`. That is useful as an **application heartbeat** because the server idle `timeout` does not cull `CLIENT_PUBSUB` clients (see §4.3). Client libraries often ping or rely on connection events and re-subscribe after reconnect.
+
+```text
+Server:  no Pub/Sub idle timeout; tcp-keepalive + I/O failure + buffer limits
+Client:  must detect socket death; may PING; must re-SUBSCRIBE after reconnect
+```
 
 ---
 
-## 5. Message delivery and security
+## 4. Message delivery and security
 
 Pub/Sub indexes only track **who is subscribed**. They do not protect messages in transit or after a fault. Delivery is best-effort; access can be restricted with ACL.
 
-### 5.1 What `PUBLISH` actually guarantees
+### 4.1 What `PUBLISH` actually guarantees
 
 ```text
 PUBLISH
@@ -379,7 +414,7 @@ PUBLISH
 
 TCP may retransmit packets while a connection remains up. That is not Redis Pub/Sub retry. Once the client connection is closed, its subscription entries are removed and any unflushed buffer is discarded.
 
-### 5.2 Temporary network drop
+### 4.2 Temporary network drop
 
 | Event | Server state | Message fate |
 |-------|--------------|--------------|
@@ -387,17 +422,6 @@ TCP may retransmit packets while a connection remains up. That is not Redis Pub/
 | Connection reset / timeout / client free | `client*` removed from channel/pattern dicts; `CLIENT_PUBSUB` cleared if empty | Messages already only in that buffer are lost; later `PUBLISH` will not include this client |
 | Client reconnects without `SUBSCRIBE` | No membership | Sees nothing until it subscribes again |
 | Client reconnects and `SUBSCRIBE` again | New edges in both indexes | Still misses everything published during the gap |
-
-There is **no** server-side reconnect or resubscribe. The subscription does not survive the connection.
-
-Application clients must implement:
-
-1. Detect disconnect  
-2. Reconnect  
-3. Issue `SUBSCRIBE` / `PSUBSCRIBE` / `SSUBSCRIBE` again for the same names  
-4. Accept gap loss, or use another primitive (e.g. Streams) if loss is unacceptable  
-
-Libraries such as **Redisson** (`RTopic` / `RPatternTopic` / `RShardedTopic`) perform reconnect and **re-subscribe listeners automatically**, but still document that messages published during absence are lost. Redisson’s reliable topic APIs use a different design when gap delivery matters.
 
 ```mermaid
 sequenceDiagram
@@ -416,7 +440,7 @@ sequenceDiagram
   R-->>S: m3
 ```
 
-### 5.3 Availability detection (client and server)
+### 4.3 Availability detection (client and server)
 
 Pub/Sub has **no dedicated heartbeat protocol** (no server-driven ping of subscribers, no per-message ACK). Liveness is inferred from the TCP connection and from a few Redis/client mechanisms that are not Pub/Sub-specific.
 
@@ -427,7 +451,7 @@ Pub/Sub has **no dedicated heartbeat protocol** (no server-driven ping of subscr
 | Idle `timeout` (`server.maxidletime`) | **Not applied.** `clientsCronHandleTimeout` explicitly skips `CLIENT_PUBSUB`, so a quiet subscriber is not closed merely for idle time. |
 | `tcp-keepalive` (default **300** seconds in `redis.conf`) | On accept, `connKeepAlive` / `anetKeepAlive` enables `SO_KEEPALIVE` and sets **per-socket** `TCP_KEEPIDLE = 300`, `TCP_KEEPINTVL ≈ 100`, `TCP_KEEPCNT = 3`. This **overrides** the Linux system default idle of **7200** s (`net.ipv4.tcp_keepalive_time`) for Redis client fds only. Dead-peer detection is then on the order of minutes, not two hours. |
 | Write / read errors | Failed socket I/O → `freeClient` / `freeClientAsync`; subscription indexes are cleared with the client. |
-| Output buffer limits | Soft/hard limits may disconnect a slow subscriber (see §5.4). |
+| Output buffer limits | Soft/hard limits may disconnect a slow subscriber (see §4.5). |
 
 ```c
 /* timeout.c — clientsCronHandleTimeout */
@@ -446,20 +470,9 @@ Implication: a half-open TCP session can leave a subscriber in `pubsub_channels`
 
 #### Client side
 
-| Mechanism | Role |
-|-----------|------|
-| TCP errors on read/write | Primary signal that the session is dead; library should reconnect and re-subscribe |
-| `PING` while subscribed | Allowed in RESP2 Pub/Sub mode (with `(P\|S)SUBSCRIBE` / unsubscribe / `QUIT` / `RESET`); server replies with a Pub/Sub-shaped `PONG`. Useful as an **application heartbeat** because idle `timeout` will not cull the server-side client. |
-| Library timers (e.g. Redisson) | Often ping or rely on connection events; re-subscribe after reconnect |
+See §3.4: TCP errors, optional `PING`, and library reconnect/re-subscribe. There is no mutual “are you still interested in channel X?” exchange beyond the existence of the TCP session and optional client `PING`.
 
-```text
-Server:  no Pub/Sub idle timeout; tcp-keepalive + I/O failure + buffer limits
-Client:  must detect socket death; may PING; must re-SUBSCRIBE after reconnect
-```
-
-There is no mutual “are you still interested in channel X?” exchange beyond the existence of the TCP session and optional client `PING`.
-
-### 5.4 Transient path loss, TCP recovery, and when Redis frees the client
+### 4.4 Transient path loss, TCP recovery, and when Redis frees the client
 
 `PUBLISH` does not wait for subscriber acknowledgement. It enqueues with `addReply*` and returns `receivers`; the socket flush runs asynchronously (`handleClientsWithPendingWrites` / `AE_WRITABLE` → `writeToClient`). The server removes the client from Pub/Sub indexes only when the connection is reclaimed (`freeClient` / `freeClientAsync`), typically after a failed write or TCP abort—not during `publishCommand` itself.
 
@@ -522,17 +535,17 @@ Session aborted (RST, retries/keepalive exhausted, process death)
 
 Until reclamation, the client may still appear in `pubsub_channels` and contribute to subsequent `receivers` counts. After reclamation, further publishes omit that client until it subscribes again.
 
-### 5.5 Buffer and slow consumers
+### 4.5 Buffer and slow consumers
 
 Even without a full disconnect, a subscriber can lose Pub/Sub traffic if its **output buffer** hits configured soft/hard limits: Redis may disconnect the client, which again drops membership and pending bytes. Fast publishers plus slow readers are a common failure mode for “I was subscribed but missed messages.”
 
-### 5.6 Access control (who may pub/sub)
+### 4.6 Access control (who may pub/sub)
 
 Delivery reliability is separate from **authorization**. Redis ACL can restrict which channels a user may publish to or subscribe to (`resetchannels` / channel patterns on the ACL selector; `acl-pubsub-default` controls the default). Revoking channel permissions can force affected Pub/Sub clients to disconnect. That limits who participates; it does not add persistence or retry.
 
 Payload confidentiality (encryption) is likewise outside Pub/Sub: use TLS on the connection and/or encrypt at the application layer. Channel names and messages are otherwise plaintext RESP on the wire (or inside TLS).
 
-### 5.7 Choosing a primitive
+### 4.7 Choosing a primitive
 
 | Need | Fit |
 |------|-----|
@@ -544,24 +557,13 @@ Payload confidentiality (encryption) is likewise outside Pub/Sub: use TLS on the
 
 ---
 
-## 6. Key files
-
-| File | Role |
-|------|------|
-| `src/pubsub.c` | Subscribe/unsubscribe/publish, reply helpers, `PUBSUB` command |
-| `src/server.h` | `redisServer` / `client` Pub/Sub fields; API declarations |
-| `src/server.c` | Init of `pubsub_*`; `CLIENT_PUBSUB` command filter |
-| `src/notify.c` | Keyspace events published as Pub/Sub messages |
-| `src/cluster*.c` | `clusterPropagatePublish` for cross-node delivery |
-| `src/acl.c` | Channel permissions for Pub/Sub users |
-
----
-
 | Topic | Summary |
 |-------|---------|
-| Indexes | Dual maps: channel/pattern → clients, and client → membership |
-| Publish | Main-thread fan-out into reply buffers; patterns scanned linearly |
-| Shard | Parallel `kvstore` keyed by slot; no pattern matching |
+| Server indexes | Channel/pattern → clients; fan-out and cluster/REPL payload propagate |
+| Client state | Reverse membership, `CLIENT_PUBSUB`, wire push parse, re-subscribe after drop |
+| Membership sync | None — each node knows only its connected subscribers |
+| Publish | Local fan-out, then propagate **payload**; peers/replicas run local `pubsubPublishMessage` again |
+| Shard | Parallel `kvstore` keyed by slot; `SPUBLISH` only to same-slot shard |
 | Persistence | None for Pub/Sub messages |
 | Delivery | Fire-and-forget; reconnect must re-`SUBSCRIBE`; gap messages lost |
 | Liveness | No Pub/Sub idle timeout; `tcp-keepalive` (default 300s) + I/O errors; client may `PING` |

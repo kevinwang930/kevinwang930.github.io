@@ -127,13 +127,455 @@ FragmentExecutor ..> ExecEnv
 
 On a timer the worker sends Thrift heartbeat to the FE leader: ports, disks (BE), run mode, alive status. Failed heartbeat leads the FE to mark the node dead and to reschedule tablets / avoid that worker for new fragments.
 
-A FE **`FragmentInstance`** is one scheduled run of a **`PlanFragment`** on one BE/CN. The worker materializes it as a **`pipeline::FragmentContext`**: pipelines, drivers, and scan **morsels**. The full architecture, types, and call path are in **§3**.
+A FE **`FragmentInstance`** is one scheduled run of a **`PlanFragment`** on one BE/CN. The worker materializes it as a **`pipeline::FragmentContext`**: pipelines, drivers, and scan **morsels**. RPC listen / dispatch / serde are in **§2**; tablet storage is in **§3**; fragment prepare/execute is in **§4**.
 
-On the FE catalog a tablet is one **bucket** of one **partition** (**`LocalTablet`** + **`Replica`**). On the BE it is **`starrocks::Tablet`**: versioned **rowsets** of columnar **segments** under a **`DataDir`**, with RocksDB holding metadata only. Placement, storage stack, layout, insert, scan, and indexes are in **§2**. Shared-data uses **`lake::Tablet`** and object storage instead of a local replica tree.
+On the FE catalog a tablet is one **bucket** of one **partition** (**`LocalTablet`** + **`Replica`**). On the BE it is **`starrocks::Tablet`**: versioned **rowsets** of columnar **segments** under a **`DataDir`**, with RocksDB holding metadata only. Placement, storage stack, layout, insert, scan, and indexes are in **§3**. Shared-data uses **`lake::Tablet`** and object storage instead of a local replica tree.
 
 ---
 
-## 2. Tablet storage and access
+## 2. RPC communication
+
+The worker listens on **three** ports and demultiplexes by protocol. Query control and shuffle use **brpc**; FE agent tasks and heartbeats use **Thrift**. The path below is the same shape on both planes: **bind → accept → dispatch → deserialize → handler → serialize response**.
+
+| Port (config) | Stack | Service | Typical callers |
+|---------------|-------|---------|-----------------|
+| **`be_port`** | Thrift | **`BackendService`** | FE agent tasks (create tablet, publish, clone, …) |
+| **`heartbeat_service_port`** | Thrift | **`HeartbeatService`** | FE leader liveness / registration |
+| **`brpc_port`** | brpc + protobuf | **`PInternalService`** (`BackendInternalServiceImpl`) | FE fragment deploy; BE↔BE **`transmit_chunk`**; **`fetch_data`**; RF / cancel |
+
+```text
+listen (TCP)
+  -> accept connection
+  -> protocol decode (Thrift frame | brpc + protobuf)
+  -> service method stub
+  -> [often] offer to query_rpc_pool / thrift worker threads
+  -> deserialize payload (Thrift struct | protobuf + attachment)
+  -> business handler (AgentServer / FragmentExecutor / DataStreamRecvr / ...)
+  -> serialize Status / result
+  -> write response
+```
+
+**Listen and register.** Startup creates the Thrift **`BackendService`** server on **`be_port`**, the heartbeat Thrift server on **`heartbeat_service_port`**, then a **`brpc::Server`** that **`AddService`**s **`BackendInternalServiceImpl<PInternalService>`** (and **`LakeService`** on shared-data) and **`Start`**s on **`brpc_port`**.
+
+**Dispatch.** brpc IO threads should not run heavy work: **`exec_plan_fragment`** (and most query RPCs) **`try_offer`** a lambda onto **`query_rpc_pool`**. Thrift **`BackendService`** runs on **`be_service_threads`** worker threads inside **`ThriftServer`**.
+
+**Serde (brpc control path).** FE/coord builds protobuf **`PExecPlanFragmentRequest`** (includes **`attachment_protocol`**) and puts serialized Thrift **`TExecPlanFragmentParams`** in **`cntl.request_attachment()`**. The BE reads the attachment bytes and **`deserialize_thrift_msg`** into **`TExecPlanFragmentParams`** (binary / compact / json per protocol string), then **`FragmentExecutor::prepare` / `execute`** (**§4**). The protobuf response carries a Status; the Thrift plan never lives in protobuf fields.
+
+**Serde (brpc data path).** **`PTransmitChunkParams`** stays in protobuf (fragment ids, eos, per-chunk **`data_size`**). Chunk payloads are appended only to the attachment (`construct_brpc_attachment` clears protobuf `data`). The receiver slices the attachment by **`data_size`** into **`DataStreamRecvr`**. Oversized bodies use **`transmit_chunk_via_http`** with a framed `[params_size][params][attachment_size][chunks]` blob.
+
+**Serde (Thrift plane).** Classic Apache Thrift: the generated **`BackendServiceIf`** / **`HeartbeatServiceIf`** stubs decode the framed Thrift message into **`T*`** structs on the worker thread; handlers such as **`submit_tasks`** call **`AgentServer`** with those structs. No brpc attachment is involved.
+
+**Clients (BE→BE).** **`BrpcStubCache::get_stub(host, brpc_port)`** returns a **`PInternalService_RecoverableStub`**; **`SinkBuffer`** / **`DataStreamSender::Channel`** fill protobuf + attachment and call **`transmit_chunk`** with an async closure.
+
+```plantuml
+@startuml
+scale 1.4
+skinparam shadowing false
+skinparam defaultFontSize 13
+skinparam RectangleFontSize 14
+skinparam ArrowColor #455a64
+skinparam RectangleBorderColor #455a64
+
+title RPC path: listen to serde (be/src)
+
+rectangle "**1. Listen (TCP ports)**" as L #E3F2FD {
+  card "**be_port** Thrift BackendService\n----\nservice/service_be/starrocks_be.cpp\nBackendService::create()\nservice/service_be/backend_service.cpp" as BP
+  card "**heartbeat_service_port**\n----\ncreate_heartbeat_server()\nagent/heartbeat_server.cpp\nstarrocks_be.cpp" as HP
+  card "**brpc_port** PInternalService\n----\nbrpc::Server::AddService/Start\nservice/service_be/starrocks_be.cpp\nBackendInternalServiceImpl" as RP
+}
+
+rectangle "**2a. Thrift control path**" as T #FFF3E0 {
+  card "**accept / workers**\n----\nThriftServer::start()\ncommon/util/thrift_server.cpp\nTNonblockingServer + ThreadManager" as T1
+  card "**Thrift decode**\n----\ngenerated BackendService.cpp\nTBinaryProtocol / TProcessor" as T2
+  card "**service method**\n----\nBackendServiceIf / BackendServiceBase\nservice/backend_base.cpp\nservice/service_be/backend_service.cpp" as T3
+  card "**handler**\n----\nAgentServer / HeartbeatService\nagent/agent_server.cpp\nagent/heartbeat_server.cpp" as T4
+  card "**serialize response**\n----\nStatus::to_thrift / generated write\n(same Thrift stack)" as T5
+  T1 -down-> T2
+  T2 -down-> T3
+  T3 -down-> T4
+  T4 -down-> T5
+}
+
+rectangle "**2b. brpc query path**" as B #E8F5E9 {
+  card "**accept (brpc IO)**\n----\nbrpc library + registered service\nservice/internal_service.cpp\n(PInternalServiceImplBase)" as B1
+  card "**try_offer query_rpc_pool**\n----\nexec_plan_fragment / transmit_chunk\nservice/internal_service.cpp\nExecutionEnv::query_rpc_pool\n(runtime / exec_env.cpp)" as B2
+  card "**protobuf args**\n----\nPExecPlanFragmentRequest\nPTransmitChunkParams\ngensrc/proto/internal_service.proto" as B3
+  card "**request_attachment**\n----\nbrpc::Controller attachment\nThrift bytes or chunk IOBuf" as B4
+  card "**serde**\n----\ndeserialize_thrift_msg()\ncommon/util/thrift_util.h\nor _transmit_chunk slice by data_size\nservice/internal_service.cpp" as B5
+  card "**handler**\n----\nFragmentExecutor\norchestration/fragment_executor.cpp\nDataStreamMgr / DataStreamRecvr\ncompute_env/data_stream/" as B6
+  card "**serialize response**\n----\nStatus::to_protobuf\nPExecPlanFragmentResult /\nPTransmitChunkResult\nservice/internal_service.cpp" as B7
+  B1 -down-> B2
+  B2 -down-> B3
+  B3 -down-> B4
+  B4 -down-> B5
+  B5 -down-> B6
+  B6 -down-> B7
+}
+
+BP -down-> T
+HP -down-> T
+RP -down-> B
+
+note bottom of B
+  **BE→BE client (shuffle):** SinkBuffer::_send_rpc
+  exec/pipeline/exchange/sink_buffer.cpp
+  BrpcStubCache::get_stub — common/brpc/brpc_stub_cache.cpp
+  PInternalService_RecoverableStub — common/brpc/internal_service_recoverable_stub.*
+end note
+
+@enduml
+```
+
+```plantuml
+@startuml
+
+skinparam packageStyle rectangle
+
+class ThriftServer {
+  _name : string
+  _port : int
+  _num_worker_threads : int
+  _processor : TProcessor
+  +start()
+  +port()
+}
+
+class BackendServiceBase {
+  _exec_env : ExecEnv*
+  _orchestration_env : OrchestrationEnv*
+  +submit_tasks()
+  +get_tablet_stat()
+  +submit_routine_load_task()
+}
+
+class BackendService {
+  +create(exec_env, orch, metrics, be_port) : ThriftServer
+}
+
+class HeartbeatService {
+  +heartbeat()
+}
+
+class ExecutionEnv {
+  query_rpc_pool : PriorityThreadPool*
+  load_rpc_pool
+  datacache_rpc_pool
+}
+
+class ExecEnv {
+  _execution_services : ExecutionEnv
+  +execution_services()
+}
+
+class brpc_Server {
+  +AddService()
+  +Start(brpc_port)
+}
+
+class PInternalServiceImplBase {
+  _exec_env : ExecEnv*
+  _orchestration_env : OrchestrationEnv*
+  _batch_write_mgr : BatchWriteMgr*
+  +exec_plan_fragment()
+  +transmit_chunk()
+  +transmit_chunk_via_http()
+  +fetch_data()
+  +cancel_plan_fragment()
+  +transmit_runtime_filter()
+  -_exec_plan_fragment()
+  -_exec_plan_fragment_by_pipeline()
+}
+
+class BackendInternalServiceImpl {
+}
+
+class PExecPlanFragmentRequest {
+  attachment_protocol : string
+}
+
+class PTransmitChunkParams {
+  finst_id : PUniqueId
+  node_id : int32
+  sender_id : int32
+  be_number : int32
+  eos : bool
+  sequence : int64
+  chunks : ChunkPB[]
+  use_pass_through : bool
+  is_pipeline_level_shuffle : bool
+  driver_sequences : int32[]
+}
+
+class BrpcStubCache {
+  _stub_map : EndPoint → StubPool
+  _timer : BthreadTimer*
+  _stopping : bool
+  +get_stub(host, port)
+  +get_stub(TNetworkAddress)
+}
+
+class StubPool {
+  _stubs : RecoverableStub[]
+  _idx : int64
+  _cleanup_task
+}
+
+class PInternalService_RecoverableStub {
+  _endpoint : butil::EndPoint
+  _stub : PInternalService_Stub
+  _connection_group : atomic
+  _protocol : string
+  +transmit_chunk()
+  +reset_channel()
+}
+
+class TransmitChunkInfo {
+  fragment_instance_id : TUniqueId
+  brpc_stub : RecoverableStub
+  params : PTransmitChunkParamsPtr
+  attachment : butil::IOBuf
+  request_byte_size : size_t
+  brpc_addr : TNetworkAddress
+}
+
+class SinkBuffer {
+  _fragment_ctx : FragmentContext*
+  _brpc_timeout_ms : int32
+  _is_dest_merge : bool
+  _bytes_sent
+  +add_request(TransmitChunkInfo)
+  -_send_rpc()
+  -_try_to_send_rpc()
+}
+
+class SinkContext {
+  finst_id : PUniqueId
+  request_seq : int64
+  max_continuous_acked_seqs : int64
+  buffer : queue<TransmitChunkInfo>
+  num_in_flight_rpcs
+  in_flight_rpc_cids
+}
+
+class FragmentExecutor {
+  +prepare() / execute()
+}
+
+class DataStreamRecvr {
+  +add_chunk()
+}
+
+class AgentServer {
+  +createTablet() / publishVersion()
+}
+
+ThriftServer o-- BackendService
+BackendService --|> BackendServiceBase
+ThriftServer o-- HeartbeatService
+BackendServiceBase ..> AgentServer
+BackendServiceBase --> ExecEnv : _exec_env
+ExecEnv *-- ExecutionEnv : _execution_services
+
+brpc_Server o-- BackendInternalServiceImpl
+BackendInternalServiceImpl --|> PInternalServiceImplBase
+PInternalServiceImplBase --> ExecEnv : _exec_env
+PInternalServiceImplBase ..> ExecutionEnv : query_rpc_pool
+PInternalServiceImplBase ..> PExecPlanFragmentRequest
+PInternalServiceImplBase ..> PTransmitChunkParams
+PInternalServiceImplBase ..> FragmentExecutor : exec_plan_fragment
+PInternalServiceImplBase ..> DataStreamRecvr : transmit_chunk
+
+BrpcStubCache *-- StubPool : _stub_map
+StubPool o-- PInternalService_RecoverableStub : _stubs
+SinkBuffer *-- SinkContext
+SinkBuffer ..> TransmitChunkInfo : add_request
+TransmitChunkInfo --> PInternalService_RecoverableStub : brpc_stub
+TransmitChunkInfo --> PTransmitChunkParams : params
+SinkBuffer ..> BrpcStubCache
+PInternalService_RecoverableStub ..> BackendInternalServiceImpl : brpc
+
+@enduml
+```
+
+```cpp
+// Abbreviated; omitted branches marked "// ...".
+// Names are the functions that actually run, in order.
+
+// ---- 1. Process entry ----
+// starrocks::main  (service/starrocks_main.cpp)
+int main(int argc, char** argv) {
+    bool as_cn = (argc > 1 && strcmp(argv[1], "--cn") == 0);
+    // ... flags, store paths ...
+    starrocks::start_be(paths, as_cn);
+}
+
+// ---- 2. Listen: Thrift BackendService on be_port ----
+// starrocks::start_be
+void start_be(const std::vector<StorePath>& paths, bool as_cn) {
+    int thrift_port = config::be_port;
+    auto thrift_server = BackendService::create(
+            exec_env, orchestration_env.get(),
+            process_metrics_registry->root_registry(), thrift_port);
+    thrift_server->start();
+    // ...
+}
+
+// starrocks::BackendService::create
+std::unique_ptr<ThriftServer> BackendService::create(
+        ExecEnv* exec_env, orchestration::OrchestrationEnv* orchestration_env,
+        MetricRegistry* metrics, int port) {
+    auto handler = std::make_shared<BackendService>(exec_env, orchestration_env);
+    auto processor = std::make_shared<BackendServiceProcessor>(handler);
+    return std::make_unique<ThriftServer>(
+            "BackendService", processor, port, metrics, config::be_service_threads);
+}
+
+// starrocks::ThriftServer::start  — bind + worker pool + binary protocol
+Status ThriftServer::start() {
+    auto protocol_factory = std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>();
+    protocol_factory->setStrict(config::thrift_rpc_strict_mode, true);
+    auto thread_mgr = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_num_worker_threads);
+    thread_mgr->start();
+    auto port = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
+    _server = std::make_unique<apache::thrift::server::TNonblockingServer>(
+            _processor, /*in/out transport*/ transport_factory, transport_factory,
+            protocol_factory, protocol_factory, port, thread_mgr);
+    _server->setServerEventHandler(event_processor);
+    return event_processor->start_and_wait_for_server();
+    // accept → TBinaryProtocol decode → BackendServiceProcessor
+    //        → BackendService::submit_tasks / get_tablet_stat / ...
+}
+
+// ---- 3. Listen: Thrift HeartbeatService ----
+// starrocks::create_heartbeat_server
+StatusOr<std::unique_ptr<ThriftServer>> create_heartbeat_server(
+        MetricRegistry* metrics, uint32_t server_port, uint32_t worker_thread_num) {
+    auto handler = std::shared_ptr<HeartbeatServer>(new HeartbeatServer());
+    handler->init_cluster_id_or_die();
+    auto processor = std::shared_ptr<TProcessor>(new HeartbeatServiceProcessor(handler));
+    return std::make_unique<ThriftServer>(
+            "heartbeat", processor, server_port, metrics, worker_thread_num);
+}
+// start_be then calls heartbeat_server->start()  → ThriftServer::start
+// accept → HeartbeatServiceProcessor → HeartbeatServer::heartbeat
+
+// ---- 4. Listen: brpc PInternalService on brpc_port ----
+// still inside starrocks::start_be
+void start_be(...) {
+    auto brpc_server = std::make_unique<brpc::Server>();
+    BackendInternalServiceImpl<PInternalService> internal_service(
+            exec_env, orchestration_env.get(), load_channel_mgr, batch_write_mgr);
+    brpc_server->AddService(&internal_service, brpc::SERVER_DOESNT_OWN_SERVICE);
+    // LakeServiceImpl also AddService on shared-data builds
+    butil::EndPoint point;
+    butil::str2endpoint(BackendOptions::get_service_bind_address(), config::brpc_port, &point);
+    brpc_server->Start(point, &options);
+    // brpc accept → protobuf method stub → PInternalServiceImplBase::*
+}
+
+// ---- 5. Receive control RPC: queue, then deserialize attachment ----
+// starrocks::PInternalServiceImplBase<T>::exec_plan_fragment
+void PInternalServiceImplBase<T>::exec_plan_fragment(
+        google::protobuf::RpcController* cntl_base,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response,
+        google::protobuf::Closure* done) {
+    auto task = [=]() { this->_exec_plan_fragment(cntl_base, request, response, done); };
+    if (!_exec_env->execution_services().query_rpc_pool->try_offer(std::move(task))) {
+        ClosureGuard closure_guard(done);
+        Status::ServiceUnavailable("submit exec_plan_fragment task failed")
+                .to_protobuf(response->mutable_status());
+    }
+}
+
+// starrocks::PInternalServiceImplBase<T>::_exec_plan_fragment  (pool worker)
+void PInternalServiceImplBase<T>::_exec_plan_fragment(
+        google::protobuf::RpcController* cntl_base,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response,
+        google::protobuf::Closure* done) {
+    ClosureGuard closure_guard(done);
+    auto* cntl = static_cast<brpc::Controller*>(cntl_base);
+    auto st = _exec_plan_fragment(cntl, request, response);
+    st.to_protobuf(response->mutable_status());
+}
+
+// starrocks::PInternalServiceImplBase<T>::_exec_plan_fragment  (serde)
+Status PInternalServiceImplBase<T>::_exec_plan_fragment(
+        brpc::Controller* cntl,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response) {
+    auto ser_request = cntl->request_attachment().to_string();
+    TExecPlanFragmentParams t_request;
+    const auto* buf = (const uint8_t*)ser_request.data();
+    uint32_t len = ser_request.size();
+    RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, request->attachment_protocol(), &t_request));
+    if (!t_request.__isset.fragment) {
+        return orchestration::FragmentExecutor::append_incremental_scan_ranges(
+                _exec_env, t_request, &t_result);
+    }
+    return _exec_plan_fragment_by_pipeline(t_request, t_request);
+}
+
+// starrocks::deserialize_thrift_msg  (string protocol → typed overload)
+template <class T>
+Status deserialize_thrift_msg(const uint8_t* buf, uint32_t* len,
+                              const std::string& protocol, T* deserialized_msg) {
+    if (protocol == "json") {
+        return deserialize_thrift_msg<T>(buf, len, TProtocolType::JSON, deserialized_msg);
+    } else if (protocol == "compact") {
+        return deserialize_thrift_msg<T>(buf, len, TProtocolType::COMPACT, deserialized_msg);
+    } else {
+        return deserialize_thrift_msg<T>(buf, len, TProtocolType::BINARY, deserialized_msg);
+    }
+}
+
+template <class T>
+Status deserialize_thrift_msg(const uint8_t* buf, uint32_t* len,
+                              TProtocolType type, T* deserialized_msg) {
+    auto tmem_transport = std::make_shared<apache::thrift::transport::TMemoryBuffer>(
+            const_cast<uint8_t*>(buf), *len, TMemoryBuffer::MemoryPolicy::OBSERVE,
+            create_thrift_configuration());
+    auto tproto = create_deserialize_protocol(tmem_transport, type);
+    deserialized_msg->read(tproto.get());   // TExecPlanFragmentParams::read
+    return Status::OK();
+}
+
+// ---- 6. Receive data RPC: protobuf already decoded; slice chunk attachment ----
+// starrocks::PInternalServiceImplBase<T>::transmit_chunk
+void PInternalServiceImplBase<T>::transmit_chunk(
+        google::protobuf::RpcController* cntl_base,
+        const PTransmitChunkParams* request,
+        PTransmitChunkResult* response,
+        google::protobuf::Closure* done) {
+    auto task = [=]() { this->_transmit_chunk(cntl_base, request, response, done); };
+    _exec_env->execution_services().query_rpc_pool->try_offer(std::move(task));
+}
+
+// starrocks::PInternalServiceImplBase<T>::_transmit_chunk
+void PInternalServiceImplBase<T>::_transmit_chunk(
+        google::protobuf::RpcController* cntl_base,
+        const PTransmitChunkParams* request,
+        PTransmitChunkResult* response,
+        google::protobuf::Closure* done) {
+    auto* cntl = static_cast<brpc::Controller*>(cntl_base);
+    auto* req = const_cast<PTransmitChunkParams*>(request);
+    if (cntl->request_attachment().size() > 0) {
+        butil::IOBuf& io_buf = cntl->request_attachment();
+        for (size_t i = 0; i < req->chunks().size(); ++i) {
+            auto* chunk = req->mutable_chunks(i);
+            io_buf.cutn(chunk->mutable_data(), chunk->data_size());
+        }
+    }
+    _exec_env->stream_mgr()->transmit_chunk(*request, &wrapped_done);
+    // DataStreamMgr::transmit_chunk → DataStreamRecvr
+}
+```
+
+
+---
+
+## 3. Tablet storage and access
 
 OLAP data reaches a BE in two steps: the FE decides **which tablet** owns a row, then that tablet’s replica stores the row in **versioned columnar files**.
 
@@ -364,7 +806,7 @@ TabletReader --> SegmentIterator
 @enduml
 ```
 
-### 2.1 On-disk layout
+### 3.1 On-disk layout
 
 Path construction joins **`DATA_PREFIX` (`/data`)**, shard id, tablet id, and **`schema_hash`** (historical leaf; multi-schema-hash era; still the directory shape today). There is no separate `segment/` directory: a **`Segment`** is one columnar file **`{rowset_id}_{seg_id}.dat`** (plus optional sidecars with the same prefix). A **`Rowset`** is the versioned unit that owns one or more such segments; RocksDB under **`meta/`** records which rowsets belong to the tablet.
 
@@ -424,7 +866,7 @@ rs020a_0.dat
 
 ![Inside one Segment .dat: per-column data pages and footer](images/segment-columnar-layout.svg)
 
-### 2.2 Metadata
+### 3.2 Metadata
 
 User rows live under `data/…` as segment files; **which** tablets and rowsets exist, their versions, and PK apply state live in RocksDB under **`{DataDir}/meta`**. That store is the durability point for create / publish / drop and for reconstructing in-memory **`Tablet`** objects after restart. Shared-data lake tablets use versioned metadata objects in object storage instead; this section is the shared-nothing **`KVStore`** path.
 
@@ -552,7 +994,7 @@ TabletMetaManager::walk_with_compact_on_timeout(_kv_store, [&](tablet_id, schema
 RowsetMetaManager::traverse_rowset_metas(_kv_store, /* COMMITTED → TxnManager; VISIBLE → non-PK load_rowset */);
 ```
 
-### 2.3 Insert
+### 3.3 Insert
 
 Load / stream load / insert on a local tablet goes through **`DeltaWriter`**:
 
@@ -560,11 +1002,11 @@ Load / stream load / insert on a local tablet goes through **`DeltaWriter`**:
 2. **`write`** — append into **`MemTable`**; on full or memory pressure, async flush (**`MemTableFlushExecutor`**).
 3. **Flush** — sort / aggregate → **`RowsetWriter`** / **`SegmentWriter`** → `.dat` (+ indexes built with the segment).
 4. **`close` / `commit`** — wait flushes, **`RowsetWriter::build()`**, **`TxnManager::commit_txn`** (committed rowset, **not** scannable).
-5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`** (persists meta as in **§2.2**; many small publishes drive compaction in **§2.4**):
+5. **Publish** — agent **`PUBLISH_VERSION`** → **`TxnManager::publish_txn`** (persists meta as in **§3.2**; many small publishes drive compaction in **§3.4**):
    - DUP / UNIQUE / AGG: **`Tablet::add_inc_rowset(rowset, version)`** then **`save_meta`**
    - PRIMARY_KEYS: **`Tablet::rowset_commit`** → **`TabletUpdates`** apply (delvec + PK index upsert)
 
-The opening §2 diagram already shows **`DeltaWriter`**, **`MemTable`**, **`FlushToken`**, **`RowsetWriter`**, **`SegmentWriter`**, and **`TxnManager`**. The insert path also uses the types below: the flush executor and task, the memtable sink, factory / horizontal writer, and per-column writers inside a segment.
+The opening §3 diagram already shows **`DeltaWriter`**, **`MemTable`**, **`FlushToken`**, **`RowsetWriter`**, **`SegmentWriter`**, and **`TxnManager`**. The insert path also uses the types below: the flush executor and task, the memtable sink, factory / horizontal writer, and per-column writers inside a segment.
 
 ```plantuml
 @startuml
@@ -923,7 +1365,7 @@ Status TxnManager::publish_txn(TPartitionId partition_id, const TabletSharedPtr&
 
 Secondary replicas may receive prebuilt segments (**`write_segment`**) and skip local MemTable encoding; publish still decides visibility.
 
-### 2.4 Compaction
+### 3.4 Compaction
 
 Publish only **appends** immutable rowsets; it does not rewrite older `.dat` files. **Compaction** is the background path that **rewrites** many small columnar segments into fewer larger ones and folds version ranges so scans stop opening a long rowset list. That rewrite is heavier than LSM SST merge for tiny key puts: each input is a full-schema columnar file with indexes, so a storm of concurrent micro-publishes on one tablet is the hostile shape—compaction becomes the bottleneck, then the gate.
 
@@ -1119,19 +1561,19 @@ Status CompactionTask::_commit_compaction() {
 
 Mitigations follow the same mechanism: **batch** rows into fewer publishes (stream load / routine-load batch size and consume window), lower per-tablet write concurrency, or wait for compaction to reduce **`version_count`**. Raising **`tablet_max_versions`** only delays the reject; it does not remove the scan and compaction cost of micro-rowsets.
 
-### 2.5 Query
+### 3.5 Query
 
 Pipeline OLAP scan binds FE **`TInternalScanRange`** (tablet id, version, key ranges) to IO:
 
 1. **`OlapScanOperator`** / **`OlapScanContext`** resolve the tablet and capture consistent rowsets at the scan version.
 2. **Morsels** split work: physical (rowid) or logical (short-key) **`SplitMorselQueue`**; each morsel carries tablet + rowset list + version bounds.
 3. **`OlapChunkSource`** builds **`TabletReader`** with those rowsets and **`TabletReaderParams`** (predicates, key ranges, short-key options).
-4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§2.6**) → union / merge / aggregate collectors as needed.
+4. **`TabletReader::open`** → per-segment **`Segment::new_iterator`** → **`SegmentIterator`** (index prune in **§3.6**) → union / merge / aggregate collectors as needed.
 5. Drivers pull chunks; residual conjuncts may remain above the iterator.
 
 Lake / connector scans use **`ConnectorScanOperator`** and lake readers against object storage; morsel and chunk pull shape stay analogous.
 
-The opening §2 diagram already shows **`OlapChunkSource`**, **`TabletReader`**, **`Tablet`**, **`Rowset`**, and **`SegmentIterator`**. The query path also uses the pipeline scan types below.
+The opening §3 diagram already shows **`OlapChunkSource`**, **`TabletReader`**, **`Tablet`**, **`Rowset`**, and **`SegmentIterator`**. The query path also uses the pipeline scan types below.
 
 ```plantuml
 @startuml
@@ -1279,7 +1721,7 @@ Status TabletReader::_init_collector(const TabletReaderParams& params) {
     return Status::OK();
 }
 
-// SegmentIterator prune order (details in §2.6)
+// SegmentIterator prune order (details in §3.6)
 Status SegmentIterator::_init_scan_range_and_context() {
     RETURN_IF_ERROR(_get_row_ranges_by_rowid_range());
     RETURN_IF_ERROR(_get_row_ranges_by_keys());
@@ -1299,7 +1741,7 @@ Status OlapChunkSource::_read_chunk_from_storage(RuntimeState* state, Chunk* chu
 }
 ```
 
-### 2.6 Indexes
+### 3.6 Indexes
 
 Most structures that prune OLAP scans live **in the segment** (footer / index pages). Sidecars (**.ivt** / **.vi**) and the tablet-level **primary-key** index are the exceptions. At open time **`SegmentIterator::_init_scan_range_and_context`** narrows a candidate **`_scan_range`** (rowid sparse range); stages typically intersect that range in order short key → bitmap → zone map → bloom → inverted → vector (delvec early or late by config). The subsections below cover each index type.
 
@@ -1559,11 +2001,11 @@ if (read_params.use_pk_index) {
 
 ---
 
-## 3. FragmentInstance execution
+## 4. FragmentInstance execution
 
-This section is the worker-side execution of one FE **`FragmentInstance`**: how brpc deploy becomes pipelines and drivers, which types own that state, and the concrete call path.
+This section is the worker-side execution of one FE **`FragmentInstance`**: how an RPC **`exec_plan_fragment`** (**§2**) becomes pipelines and drivers, which types own that state, and the concrete call path.
 
-### 3.1 Framework
+### 4.1 Framework
 
 The worker’s **execution framework** is the pipeline engine: an FE **`FragmentInstance`** arrives as Thrift on **`PInternalService`**, **`FragmentExecutor`** turns it into runnable state, and workgroup **`DriverExecutor`** threads pull **`PipelineDriver`**s until EOS or cancel. Scope is nested—**`QueryContext`** for the whole query on this BE, **`FragmentContext`** for one instance, **`Pipeline`** / **`Operator`** factories expanded × DOP into drivers, with scan **`Morsel`**s binding FE tablet ranges to **`OlapScanOperator`**. Since StarRocks 3.2 the normal path is **pipeline only**; non-pipeline **`FragmentMgr`** remains only for rare sinks such as SchemaTableSink.
 
@@ -1587,7 +2029,7 @@ The worker’s **execution framework** is the pipeline engine: an FE **`Fragment
 2. **`FragmentContext`** — one per `fragment_instance_id`.
 3. Workgroup + **`RuntimeState`** + global dicts.
 4. **`_prepare_exec_plan`** — **`ExecFactory::create_tree`**; scan ranges → **`MorselQueueFactory`**.
-5. **`_prepare_pipeline_driver`** — **`decompose_to_pipeline`** → **`PipelineBuilder::build`** → instantiate **`PipelineDriver`**s (× DOP); bind morsel queues.
+5. **`_prepare_pipeline_driver`** — **`decompose_to_pipeline`** → **`PipelineBuilder::build`** → instantiate **`PipelineDriver`**s (× DOP); bind morsel queues; optional stream-load pipe.
 6. Register the fragment on **`QueryContext::fragment_mgr()`**.
 7. **`execute`**: acquire runtime filters → **`prepare_active_drivers`** → **`submit_active_drivers(DriverExecutor*)`**.
 
@@ -1595,7 +2037,7 @@ The worker’s **execution framework** is the pipeline engine: an FE **`Fragment
 
 | Kind | Mechanism |
 |------|-----------|
-| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§2.5**) |
+| **Scan** | Capture **`Tablet`** + rowsets at scan **`version`**; read segments (**§3.5**) |
 | **Shuffle** | **`ExchangeSinkOperator`** → **`transmit_chunk`** → **`DataStreamRecvr`** / **`ExchangeSourceOperator`** |
 | **Result** | Root **`ResultSinkOperator`**; FE pulls with **`fetch_data`** |
 | **Status** | **`ExecStateReporter`** → Thrift **`reportExecStatus`** |
@@ -1705,76 +2147,308 @@ ExecNode ..> PipelineBuilder : decompose_to_pipeline
 @enduml
 ```
 
-### 3.2 Implementation: call path and snippets
+### 4.2 Implementation: call path and snippets
 
-**RPC entry.** The brpc handler queues work on the query RPC pool, deserializes the Thrift body, and requires **`is_pipeline`**.
-
-```cpp
-// PInternalServiceImplBase::exec_plan_fragment
-auto task = [=]() { this->_exec_plan_fragment(cntl_base, request, response, done); };
-_exec_env->execution_services().query_rpc_pool->try_offer(std::move(task));
-```
+End-to-end path from brpc **`exec_plan_fragment`** through prepare, driver submit, and optional incremental scan ranges. Bodies below keep the control flow; long option branches are marked `// ...`.
 
 ```cpp
-// PInternalServiceImplBase::_exec_plan_fragment (abbreviated)
-TExecPlanFragmentParams t_request;
-deserialize_thrift_msg(/* attachment */, ..., &t_request);
+// Abbreviated; omitted branches marked "// ...".
 
-bool is_pipeline = t_request.__isset.is_pipeline && t_request.is_pipeline;
-if (is_pipeline) {
-    return _exec_plan_fragment_by_pipeline(t_request, t_request);
+// ---- 1. RPC entry: queue on query_rpc_pool ----
+void PInternalServiceImplBase::exec_plan_fragment(
+        google::protobuf::RpcController* cntl_base,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response,
+        google::protobuf::Closure* done) {
+    auto task = [=]() { this->_exec_plan_fragment(cntl_base, request, response, done); };
+    if (!_exec_env->execution_services().query_rpc_pool->try_offer(std::move(task))) {
+        ClosureGuard closure_guard(done);
+        Status::ServiceUnavailable("submit exec_plan_fragment task failed")
+                .to_protobuf(response->mutable_status());
+    }
 }
-// non-pipeline rejected since 3.2 (SchemaTableSink exception omitted)
-```
 
-```cpp
-// PInternalServiceImplBase::_exec_plan_fragment_by_pipeline
-orchestration::FragmentExecutor fragment_executor(_batch_write_mgr);
-auto status = fragment_executor.prepare(_exec_env, t_common_param, t_unique_request);
-if (status.ok()) {
-    return fragment_executor.execute(_exec_env);
+// ---- 2. Pool worker: ClosureGuard + Status to protobuf ----
+void PInternalServiceImplBase::_exec_plan_fragment(
+        google::protobuf::RpcController* cntl_base,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response,
+        google::protobuf::Closure* done) {
+    ClosureGuard closure_guard(done);
+    auto* cntl = static_cast<brpc::Controller*>(cntl_base);
+    if (process_exit_in_progress()) {
+        cntl->SetFailed(brpc::EINTERNAL, "BE is shutting down");
+        return;
+    }
+    auto st = _exec_plan_fragment(cntl, request, response);
+    st.to_protobuf(response->mutable_status());
+}
+
+// ---- 3. Deserialize Thrift; incremental vs full deploy ----
+Status PInternalServiceImplBase::_exec_plan_fragment(
+        brpc::Controller* cntl,
+        const PExecPlanFragmentRequest* request,
+        PExecPlanFragmentResult* response) {
+    auto ser_request = cntl->request_attachment().to_string();
+    TExecPlanFragmentParams t_request;
+    {
+        const auto* buf = (const uint8_t*)ser_request.data();
+        uint32_t len = ser_request.size();
+        RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, request->attachment_protocol(), &t_request));
+    }
+    // No fragment body → append scan ranges to a live instance (step 12)
+    if (!t_request.__isset.fragment) {
+        TExecPlanFragmentResult t_result;
+        Status code = orchestration::FragmentExecutor::append_incremental_scan_ranges(
+                _exec_env, t_request, &t_result);
+        copy_result_from_thrift_to_protobuf(t_result, response);
+        return code;
+    }
+
+    bool is_pipeline = t_request.__isset.is_pipeline && t_request.is_pipeline;
+    if (is_pipeline) {
+        return _exec_plan_fragment_by_pipeline(t_request, t_request);
+    }
+    // SchemaTableSink may still use non-pipeline; otherwise rejected since 3.2
+    return Status::InvalidArgument(
+            "non-pipeline engine is no longer supported since 3.2, ...");
+}
+
+// ---- 4. Pipeline path: prepare then execute ----
+Status PInternalServiceImplBase::_exec_plan_fragment_by_pipeline(
+        const TExecPlanFragmentParams& t_common_param,
+        const TExecPlanFragmentParams& t_unique_request) {
+    orchestration::FragmentExecutor fragment_executor(_batch_write_mgr);
+    auto status = fragment_executor.prepare(_exec_env, t_common_param, t_unique_request);
+    if (status.ok()) {
+        return fragment_executor.execute(_exec_env);
+    }
+    return status.is_duplicate_rpc_invocation() ? Status::OK() : status;
+}
+
+// ---- 5. prepare: ordered stages ----
+Status FragmentExecutor::prepare(ExecEnv* exec_env,
+                                 const TExecPlanFragmentParams& common_request,
+                                 const TExecPlanFragmentParams& unique_request) {
+    UnifiedExecPlanFragmentParams request(common_request, unique_request);
+    // DeferOp: profile on success / _fail_cleanup on failure
+    RETURN_IF_ERROR(
+            RuntimeEnv::GetInstance()->query_pool_mem_tracker()->check_mem_limit(
+                    "Start execute plan fragment."));
+    RETURN_IF_ERROR(_prepare_query_ctx(exec_env, request));
+    RETURN_IF_ERROR(_prepare_fragment_ctx(request));
+    RETURN_IF_ERROR(_prepare_workgroup(request));
+    RETURN_IF_ERROR(_prepare_runtime_state(exec_env, request));
+    {
+        auto mem_tracker = _fragment_ctx->runtime_state()->instance_mem_tracker();
+        SCOPED_THREAD_LOCAL_MEM_TRACKER_SETTER(mem_tracker);
+        RETURN_IF_ERROR(_prepare_global_dict(request));
+        RETURN_IF_ERROR(_prepare_exec_plan(exec_env, request));
+    }
+    {
+        auto mem_tracker = _fragment_ctx->runtime_state()->instance_mem_tracker();
+        SCOPED_THREAD_LOCAL_MEM_TRACKER_SETTER(mem_tracker);
+        RETURN_IF_ERROR(_prepare_pipeline_driver(exec_env, request));
+        RETURN_IF_ERROR(_prepare_stream_load_pipe(exec_env, request));  // no-op unless stream-load sink
+    }
+    RETURN_IF_ERROR(_query_ctx->fragment_mgr()->register_ctx(
+            request.fragment_instance_id(), _fragment_ctx));
+    _query_ctx->mark_prepared();
+    return Status::OK();
+}
+
+// ---- 5a. QueryContext ----
+Status FragmentExecutor::_prepare_query_ctx(ExecEnv* exec_env,
+                                            const UnifiedExecPlanFragmentParams& request) {
+    const auto& query_id = request.common().params.query_id;
+    const auto& fragment_instance_id = request.fragment_instance_id();
+    _query_ctx_mgr = exec_env->query_context_mgr();
+
+    if (auto existing = _query_ctx_mgr->get(query_id)) {
+        if (existing->fragment_mgr()->get(fragment_instance_id)) {
+            return Status::DuplicateRpcInvocation("Duplicate invocations of exec_plan_fragment");
+        }
+    }
+    ASSIGN_OR_RETURN(_query_ctx, _query_ctx_mgr->get_or_register(query_id, /*should_exist*/));
+    _query_ctx_hold = _query_ctx->get_shared_ptr();
+    if (request.common().params.__isset.instances_number) {
+        _query_ctx->set_total_fragments(request.common().params.instances_number);
+    }
+    // delivery / query expire, profile flags, ...
+    return Status::OK();
+}
+
+// ---- 5b. FragmentContext shell ----
+Status FragmentExecutor::_prepare_fragment_ctx(const UnifiedExecPlanFragmentParams& request) {
+    _fragment_ctx = std::make_shared<FragmentContext>();
+    _fragment_ctx->set_query_id(request.common().params.query_id);
+    _fragment_ctx->set_fragment_instance_id(request.fragment_instance_id());
+    _fragment_ctx->set_fe_addr(request.common().coord);
+    // adaptive DOP / pred_tree_params when present
+    return Status::OK();
+}
+
+// ---- 5c. WorkGroup ----
+Status FragmentExecutor::_prepare_workgroup(const UnifiedExecPlanFragmentParams& request) {
+    WorkGroupPtr wg;
+    if (!request.common().__isset.workgroup ||
+        request.common().workgroup.id == WorkGroup::DEFAULT_WG_ID) {
+        wg = ExecEnv::GetInstance()->workgroup_manager()->get_default_workgroup();
+    } else {
+        wg = std::make_shared<WorkGroup>(request.common().workgroup);
+        wg = ExecEnv::GetInstance()->workgroup_manager()->add_workgroup(wg);
+    }
+    RETURN_IF_ERROR(_query_ctx->init_query_once(wg.get(), /*enable_group_level_query_queue*/));
+    _fragment_ctx->set_workgroup(wg);
+    _wg = wg;
+    return Status::OK();
+}
+
+// ---- 5d. RuntimeState + DescriptorTbl + mem ----
+Status FragmentExecutor::_prepare_runtime_state(ExecEnv* exec_env,
+                                                const UnifiedExecPlanFragmentParams& request) {
+    _fragment_ctx->set_runtime_state(std::make_unique<RuntimeState>(
+            query_id, fragment_instance_id, query_options, query_globals,
+            &exec_env->query_execution_services(), exec_env));
+    auto* runtime_state = _fragment_ctx->runtime_state();
+    runtime_state->init_fragment_mem_pool();
+    runtime_state->set_enable_pipeline_engine(true);
+    _fragment_ctx->attach_to_runtime_state(runtime_state);
+    _query_ctx->attach_to_runtime_state(runtime_state);
+    RuntimeStateHelper::init_runtime_filter_port(runtime_state);
+
+    _query_ctx->init_mem_tracker(/* query / big_query / spill limits ... */);
+    runtime_state->init_mem_trackers(_query_ctx->mem_tracker());
+    // open RuntimeFilterWorker when coordinator params present
+    _fragment_ctx->prepare_pass_through_chunk_buffer();
+    // DescriptorTbl: reuse cached on query_ctx or create into pool
+    runtime_state->set_desc_tbl(desc_tbl);
+    if (query_options.__isset.enable_spill && query_options.enable_spill) {
+        RETURN_IF_ERROR(_query_ctx->init_spill_manager(query_options));
+    }
+    return Status::OK();
+}
+
+// ---- 5e. Global dicts ----
+Status FragmentExecutor::_prepare_global_dict(const UnifiedExecPlanFragmentParams& request) {
+    auto* fragment_dict_state = _fragment_ctx->runtime_state()->fragment_dict_state();
+    const auto& fragment = request.common().fragment;
+    if (fragment.__isset.query_global_dicts) {
+        RETURN_IF_ERROR(fragment_dict_state->init_query_global_dict(
+                runtime_state, fragment.query_global_dicts));
+    }
+    if (fragment.__isset.load_global_dicts) {
+        RETURN_IF_ERROR(fragment_dict_state->init_load_global_dict(
+                runtime_state, fragment.load_global_dicts));
+    }
+    return Status::OK();
+}
+
+// ---- 5f. ExecNode tree + morsel factories ----
+Status FragmentExecutor::_prepare_exec_plan(ExecEnv* exec_env,
+                                            const UnifiedExecPlanFragmentParams& request) {
+    auto* runtime_state = _fragment_ctx->runtime_state();
+    const auto pipeline_dop = _calc_dop(exec_env, request);
+
+    _fragment_ctx->move_tplan(*const_cast<TPlan*>(&request.common().fragment.plan));
+    RETURN_IF_ERROR(ExecFactory::create_tree(
+            runtime_state, runtime_state->obj_pool(), _fragment_ctx->tplan(),
+            runtime_state->desc_tbl(), &_fragment_ctx->plan()));
+    ExecNode* plan = _fragment_ctx->plan();
+    plan->push_down_tuple_slot_mappings(runtime_state, empty_mappings);
+    // set ExchangeNode senders / LookUpNode fetchers from params
+
+    for (auto* scan_node : scan_nodes) {
+        // scan_ranges (+ optional per_driver_seq) from FE
+        RETURN_IF_ERROR(add_scan_ranges_partition_values(runtime_state, scan_ranges));
+        ASSIGN_OR_RETURN(auto morsel_queue_factory,
+                         scan_node->convert_scan_range_to_morsel_queue_factory(/*...*/));
+        morsel_queue_factory->set_has_more_scan_ranges(has_more_morsel);
+        morsel_queue_factories.emplace(scan_node->id(), std::move(morsel_queue_factory));
+    }
+    return Status::OK();
+}
+
+// ---- 5g. Pipelines + drivers ----
+Status FragmentExecutor::_prepare_pipeline_driver(ExecEnv* exec_env,
+                                                  const UnifiedExecPlanFragmentParams& request) {
+    const auto degree_of_parallelism = _calc_dop(exec_env, request);
+    size_t sink_dop = _calc_sink_dop(ExecEnv::GetInstance(), request);
+    ExecNode* plan = _fragment_ctx->plan();
+
+    PipelineBuilderContext context(_fragment_ctx.get(), degree_of_parallelism, sink_dop);
+    context.init_colocate_groups(std::move(_colocate_exec_groups));
+    PipelineBuilder builder(context);
+    ASSIGN_OR_RETURN(auto exec_ops, plan->decompose_to_pipeline(&context));
+    exec_ops = maybe_interpolate_grouped_exchange(&context, plan->id(), exec_ops);
+
+    std::unique_ptr<DataSink> datasink;
+    if (request.isset_output_sink()) {
+        RETURN_IF_ERROR(DataSink::create_data_sink(/*...*/, &datasink));
+        RETURN_IF_ERROR(datasink->decompose_data_sink_to_pipeline(
+                &context, runtime_state, std::move(exec_ops), request, tsink, output_exprs));
+    }
+    _fragment_ctx->set_data_sink(std::move(datasink));
+    auto [exec_groups, pipelines] = builder.build();
+    _fragment_ctx->set_pipelines(std::move(exec_groups), std::move(pipelines));
+
+    RETURN_IF_ERROR(_fragment_ctx->prepare_all_pipelines());
+    // bind morsel_queue_factory onto scan sources; instantiate drivers x DOP
+    ASSIGN_OR_RETURN(auto driver_token,
+                     exec_env->compute_env()->driver_limiter()->try_acquire(
+                             _fragment_ctx->total_dop()));
+    _fragment_ctx->set_driver_token(std::move(driver_token));
+    return Status::OK();
+}
+
+// ---- 6. execute: prepare drivers, submit to workgroup ----
+Status FragmentExecutor::execute(ExecEnv* exec_env) {
+    bool prepare_success = false;
+    DeferOp defer([this, &prepare_success]() {
+        if (!prepare_success) {
+            _fail_cleanup(true);
+        }
+    });
+    _fragment_ctx->acquire_runtime_filters();
+    RETURN_IF_ERROR(_fragment_ctx->prepare_active_drivers());
+    prepare_success = true;
+
+    auto* executor = _wg->executors()->driver_executor();
+    RETURN_IF_ERROR(_fragment_ctx->submit_active_drivers(executor));
+    _fragment_ctx->runtime_state()->set_fragment_prepared(true);
+    return Status::OK();  // RPC returns; drivers run asynchronously
+}
+
+Status FragmentContext::prepare_active_drivers() {
+    for (auto& group : _execution_groups) {
+        RETURN_IF_ERROR(group->prepare_drivers(_runtime_state.get()));
+    }
+    // sequential or parallel prepare via pipeline_prepare_pool
+    for (auto& group : _execution_groups) {
+        RETURN_IF_ERROR(group->prepare_active_drivers_sequentially(_runtime_state.get()));
+        // or prepare_active_drivers_parallel(...)
+    }
+    return Status::OK();
+}
+
+Status FragmentContext::submit_active_drivers(DriverExecutor* executor) {
+    for (auto& group : _execution_groups) {
+        group->attach_driver_executor(executor);
+        group->submit_active_drivers();
+    }
+    return Status::OK();
+}
+
+// ---- 7. Incremental scan ranges (no fragment body) ----
+Status FragmentExecutor::append_incremental_scan_ranges(ExecEnv* exec_env,
+                                                        const TExecPlanFragmentParams& request,
+                                                        TExecPlanFragmentResult* response) {
+    // lookup QueryContext + FragmentContext by query_id / fragment_instance_id
+    // for each scan node: build ScanMorsels → morsel_queue_factory->append_morsels
+    // set_has_more_scan_ranges; optionally close scan nodes that hit limit
+    // notify_source_observers so blocked scan drivers wake up
+    return Status::OK();
 }
 ```
 
-**Prepare.** Ordered stages match the class diagram: query ctx → fragment ctx → plan/morsels → pipelines/drivers → register.
-
-```cpp
-// FragmentExecutor::prepare (control flow)
-UnifiedExecPlanFragmentParams request(common_request, unique_request);
-RETURN_IF_ERROR(_prepare_query_ctx(exec_env, request));
-RETURN_IF_ERROR(_prepare_fragment_ctx(request));
-RETURN_IF_ERROR(_prepare_workgroup(request));
-RETURN_IF_ERROR(_prepare_runtime_state(exec_env, request));
-RETURN_IF_ERROR(_prepare_global_dict(request));
-RETURN_IF_ERROR(_prepare_exec_plan(exec_env, request));
-RETURN_IF_ERROR(_prepare_pipeline_driver(exec_env, request));
-RETURN_IF_ERROR(_query_ctx->fragment_mgr()->register_ctx(
-        request.fragment_instance_id(), _fragment_ctx));
-_query_ctx->mark_prepared();
-```
-
-**Plan → pipelines.** DOP comes from fragment params; the **`ExecNode`** tree decomposes into operator factories, then drivers are instantiated per DOP and bound to morsel queues (scan side).
-
-```cpp
-// FragmentExecutor::_prepare_pipeline_driver (abbreviated)
-const auto degree_of_parallelism = _calc_dop(exec_env, request);
-ExecNode* plan = _fragment_ctx->plan();
-PipelineBuilderContext context(_fragment_ctx.get(), degree_of_parallelism, sink_dop);
-PipelineBuilder builder(context);
-ASSIGN_OR_RETURN(auto exec_ops, plan->decompose_to_pipeline(&context));
-// DataSink::create_data_sink + decompose_data_sink_to_pipeline when output_sink set
-// PipelineBuilder::build → FragmentContext::set_pipelines
-// instantiate PipelineDriver × DOP; driver->set_morsel_queue(...)
-```
-
-**Execute.** Drivers are prepared then handed to the workgroup executor; the RPC returns once submission succeeds—the instance runs asynchronously on driver threads.
-
-```cpp
-// FragmentExecutor::execute
-_fragment_ctx->acquire_runtime_filters();
-RETURN_IF_ERROR(_fragment_ctx->prepare_active_drivers());
-auto* executor = _wg->executors()->driver_executor();
-RETURN_IF_ERROR(_fragment_ctx->submit_active_drivers(executor));
-```
-
-**Incremental ranges.** A later **`exec_plan_fragment`** without a `fragment` body appends scan ranges to a live instance via **`FragmentExecutor::append_incremental_scan_ranges`** (morsels only; no full rebuild).
+While drivers run, **`PipelineDriver::process`** pulls operators until EOS or cancel; exchange sinks use **`transmit_chunk`**, the root **`ResultSinkOperator`** serves FE **`fetch_data`**, and **`ExecStateReporter`** sends **`reportExecStatus`**.
