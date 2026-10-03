@@ -1,7 +1,6 @@
 ---
-title: "Sentinel: flow control internals and Spring Cloud starter"
+title: "Sentinel: flow control internals"
 date: 2026-08-24T22:00:00+02:00
-draft: true
 categories:
 - java
 - spring-cloud
@@ -13,291 +12,25 @@ tags:
 keywords:
 - sentinel
 - spring-cloud-alibaba
+- qps
 #thumbnailImage: //example.com/image.jpg
 ---
-**Sentinel** is Alibaba's flow-control and circuit-breaking library. In Spring Cloud it ships as **`spring-cloud-starter-alibaba-sentinel`**, which registers web filters, annotation AOP, and dynamic rule datasources on top of the core **`SphU.entry`** slot chain. This post traces QPS limiting in the Sentinel core and how the starter wires it into a Spring Boot app.
+**Sentinel** is Alibaba's library for flow control, concurrency limiting, circuit breaking, and system protection. An application protects a named **resource** by entering it through **`SphU.entry`**. A processor slot chain records statistics for that resource and applies the rules loaded at runtime.
 <!--more-->
-
-Related: [NACOS](../nacos/).
 
 ---
 
 ## 1. Overview
 
-Sentinel protects a **resource** (URL, method name, remote call) with rules loaded at runtime. For **QPS flow control**, each protected call passes through a fixed **processor slot chain**; **`FlowSlot`** compares rolling QPS against a **`FlowRule`** and throws **`FlowException`** when the threshold is exceeded.
+A resource is a string chosen by the caller: an HTTP path, a service method, or any other name. **`SphU.entry(resourceName)`** opens the resource and **`entry.exit()`** closes it. Between those two calls, Sentinel runs a **`ProcessorSlotChain`** built once per resource.
 
-| Layer | Role |
-|-------|------|
-| **Sentinel core** (`sentinel-core`) | Entry API, slot chain, metrics window, rule managers |
-| **Adapters** (WebMVC, Gateway, AspectJ, Feign) | Turn HTTP / annotations / RPC into `SphU.entry(resourceName)` |
-| **Spring Cloud starter** | Auto-config, `SentinelProperties`, datasource → `FlowRuleManager` |
-| **Dashboard / Nacos** | Push or store JSON rule sets |
+Each slot has one job. **`StatisticSlot`** maintains counters. **`FlowSlot`** applies flow rules. Other slots apply authority rules, system rules, and circuit-breaking rules. Rules live in managers such as **`FlowRuleManager`** and can be replaced without restarting the process.
 
-The starter does **not** reimplement flow control; every path ends at **`SphU.entry`**.
+![Sentinel procedure: SphU.entry runs NodeSelectorSlot, ClusterBuilderSlot, LogSlot, StatisticSlot, AuthoritySlot, SystemSlot, FlowSlot, DefaultCircuitBreakerSlot, and DegradeSlot, then the business call or the block handler, then entry.exit](images/sentinel-procedure.svg)
 
----
+A rejected call never reaches the business method. **`entry.exit()`** still runs on both paths.
 
-## 2. Architecture
-
-### 2.1 Entry and slot chain
-
-A call begins at **`SphU.entry(name)`**, which delegates to **`CtSph`**. **`lookProcessChain`** returns a cached **`ProcessorSlotChain`** per resource (built once by **`DefaultSlotChainBuilder`** via SPI).
-
-Default slot order (by `@Spi(order)`):
-
-```text
-NodeSelectorSlot → ClusterBuilderSlot → LogSlot → StatisticSlot
-  → AuthoritySlot → SystemSlot → FlowSlot → DefaultCircuitBreakerSlot → DegradeSlot
-```
-
-For QPS limits the important pair is **`StatisticSlot`** then **`FlowSlot`**.
-
-```plantuml
-@startuml
-
-class SphU {
-  entry(resourceName)
-}
-
-class CtSph {
-  lookProcessChain()
-  entryWithPriority()
-}
-
-class DefaultSlotChainBuilder {
-  build()
-}
-
-class ProcessorSlotChain {
-  entry()
-  exit()
-}
-
-class StatisticSlot {
-  fireEntry()
-  addPassRequest()
-}
-
-class FlowSlot {
-  checkFlow()
-}
-
-class FlowRuleManager {
-  getFlowRules()
-  loadRules()
-}
-
-class ClusterNode {
-  passQps()
-  addPassRequest()
-}
-
-class ArrayMetric {
-  addPass()
-  pass()
-}
-
-class LeapArray {
-  currentWindow()
-}
-
-class MetricBucket {
-  pass()
-}
-
-SphU ..> CtSph
-CtSph ..> DefaultSlotChainBuilder
-DefaultSlotChainBuilder --> ProcessorSlotChain
-ProcessorSlotChain --> StatisticSlot
-StatisticSlot --> FlowSlot
-FlowSlot ..> FlowRuleManager
-FlowSlot ..> ClusterNode : passQps()
-StatisticSlot ..> ClusterNode : addPassRequest()
-ClusterNode *-- ArrayMetric
-ArrayMetric *-- LeapArray
-LeapArray o-- MetricBucket
-
-@enduml
-```
-
-**Design note.** In **`StatisticSlot.entry()`**, the slot calls **`fireEntry()` first** (downstream slots including **`FlowSlot`** run before metrics for *this* request are incremented). QPS checks therefore use statistics from **already-finished** requests in the sliding window, then the current pass is recorded if **`FlowSlot`** allows it.
-
-### 2.2 QPS measurement and check
-
-**`ClusterNode`** holds an **`ArrayMetric`** backed by **`LeapArray<MetricBucket>`** (default: 1 s window, 2 buckets of 500 ms).
-
-- **Write (after pass):** **`StatisticSlot`** → **`node.addPassRequest(count)`** → **`MetricBucket.addPass`**
-- **Read (in FlowSlot):** **`DefaultController.canPass()`** → **`node.passQps()`** = sum of bucket **`pass`** counts / window seconds
-
-**`FlowRule`** fields for QPS:
-
-| Field | Meaning |
-|-------|---------|
-| **`resource`** | Resource name (must match `SphU.entry`) |
-| **`grade`** | `RuleConstant.FLOW_GRADE_QPS` (= 1) |
-| **`count`** | Max QPS threshold |
-| **`controlBehavior`** | `DEFAULT` (fast fail), warm-up, rate limiter, etc. |
-
-**`FlowRuleChecker`** loads rules from **`FlowRuleManager.getFlowRules(resource)`**, picks the node (direct / origin / chain strategy), and calls **`rule.getRater().canPass(node, acquireCount)`**. For default QPS behavior the rater is **`DefaultController`**, which rejects when **`passQps() + acquireCount > count`**.
-
-### 2.3 Spring integration layers
-
-Sentinel core lives in the **Sentinel** repository. **Spring Cloud Alibaba** adds Boot auto-configuration on top of adapter JARs already in Sentinel:
-
-| Integration | Class | Effect |
-|-------------|-------|--------|
-| Web MVC | **`SentinelWebInterceptor`** | `preHandle` → **`ContextUtil.enter`** + **`SphU.entry(url)`** |
-| Annotation | **`SentinelResourceAspect`** | `@Around` on **`@SentinelResource`** → **`SphU.entry`** |
-| Starter core | **`SentinelAutoConfiguration`** | Registers aspect, datasource handler, JSON/XML rule converters |
-| Web starter | **`SentinelWebAutoConfiguration`** | Registers interceptor + block handler |
-| Rules | **`SentinelDataSourceHandler`** | Binds `spring.cloud.sentinel.datasource.*` → **`ReadableDataSource`** → **`FlowRuleManager`** |
-
-```plantuml
-@startuml
-
-class SentinelAutoConfiguration {
-  sentinelResourceAspect()
-  sentinelDataSourceHandler()
-}
-
-class SentinelWebAutoConfiguration {
-  sentinelWebInterceptor()
-  sentinelWebMvcConfig()
-}
-
-class SentinelWebInterceptor {
-  preHandle()
-}
-
-class SentinelResourceAspect {
-  invokeResourceWithSentinel()
-}
-
-class SentinelDataSourceHandler {
-  afterSingletonsInstantiated()
-}
-
-class SentinelProperties {
-  datasource
-  transport
-  filter
-}
-
-SentinelAutoConfiguration --> SentinelResourceAspect
-SentinelAutoConfiguration --> SentinelDataSourceHandler
-SentinelWebAutoConfiguration --> SentinelWebInterceptor
-SentinelDataSourceHandler --> SentinelProperties
-SentinelDataSourceHandler ..> FlowRuleManager : register2Property
-SentinelWebInterceptor ..> SphU : entry()
-SentinelResourceAspect ..> SphU : entry()
-
-@enduml
-```
-
-**`SentinelAutoConfiguration`** is gated by **`spring.cloud.sentinel.enabled=true`** (default). It always exposes **`SentinelResourceAspect`** and **`SentinelDataSourceHandler`**. **`SentinelWebAutoConfiguration`** (servlet apps) registers **`SentinelWebInterceptor`** when **`spring.cloud.sentinel.filter.enabled`** is true (default).
-
-On each HTTP request, **`AbstractSentinelInterceptor.preHandle`** (conceptually):
-
-1. Resolve **resource name** from URL (optionally prefixed with HTTP method).
-2. **`ContextUtil.enter(contextName, origin)`**
-3. **`Entry entry = SphU.entry(resourceName, COMMON_WEB, IN)`**
-4. On **`BlockException`**, invoke **`BlockExceptionHandler`** (default 429) and abort the handler chain.
-
----
-
-## 3. Implementation
-
-### 3.1 QPS limit call flow
-
-1. **`SphU.entry("GET:/api/order")`**
-2. **`CtSph.lookProcessChain`** → cached chain for that resource
-3. **`NodeSelectorSlot` / `ClusterBuilderSlot`** — attach **`ClusterNode`**
-4. **`StatisticSlot.entry`** — **`fireEntry()`** downstream
-5. **`FlowSlot.entry`** — **`FlowRuleChecker.checkFlow`**
-6. For each **`FlowRule`** with **`grade == FLOW_GRADE_QPS`**: **`DefaultController.canPass`** reads **`node.passQps()`** from the sliding window
-7. If over **`count`**, throw **`FlowException`** → Spring block handler
-8. Otherwise **`fireEntry`** continues; on return, **`StatisticSlot`** calls **`addPassRequest(1)`**
-9. Business code runs; **`entry.exit()`** records RT and thread count
-
-### 3.2 How the starter loads rules
-
-At context refresh, **`SentinelDataSourceHandler.afterSingletonsInstantiated()`** walks **`spring.cloud.sentinel.datasource`**. For each entry it builds a **`ReadableDataSource`** bean (file, Nacos, etc.), converts JSON/XML to **`List<FlowRule>`**, and registers a listener on **`FlowRuleManager`**. When Nacos or a local file changes, rules hot-reload without restart.
-
-**`FlowRuleUtil.buildFlowRuleMap`** validates rules and attaches a **`TrafficShapingController`** (`DefaultController` for QPS + fast fail) before rules enter memory.
-
-### 3.3 Complete configuration example
-
-**Maven** (from Spring Cloud Alibaba sentinel-core-example):
-
-```xml
-<dependency>
-  <groupId>com.alibaba.cloud</groupId>
-  <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
-</dependency>
-<dependency>
-  <groupId>com.alibaba.cloud</groupId>
-  <artifactId>spring-cloud-alibaba-sentinel-datasource</artifactId>
-</dependency>
-<dependency>
-  <groupId>org.springframework.boot</groupId>
-  <artifactId>spring-boot-starter-web</artifactId>
-</dependency>
-```
-
-**`application.yml`** — dashboard, file + Nacos flow rules, block page, eager init:
-
-```yaml
-spring:
-  application:
-    name: order-service
-  cloud:
-    sentinel:
-      enabled: true
-      eager: true                    # init transport before first request
-      transport:
-        dashboard: localhost:8080    # Sentinel Dashboard
-        port: 8719                   # client port for dashboard API
-      filter:
-        enabled: true                # SentinelWebInterceptor
-        url-patterns: /**
-      http-method-specify: true      # resource = GET:/api/order not /api/order
-      block-page: /errorPage         # redirect when blocked (optional)
-      datasource:
-        ds-file:
-          file:
-            file: classpath:flowrule.json
-            data-type: json
-            rule-type: flow
-        ds-nacos:
-          nacos:
-            server-addr: 127.0.0.1:8848
-            data-id: order-service-flow-rules
-            group-id: SENTINEL_GROUP
-            data-type: json
-            rule-type: flow
-
-server:
-  port: 8080
-```
-
-**`flowrule.json`** — QPS = 100 on `/api/order`, fast fail:
-
-```json
-[
-  {
-    "resource": "GET:/api/order",
-    "limitApp": "default",
-    "grade": 1,
-    "count": 100,
-    "strategy": 0,
-    "controlBehavior": 0
-  }
-]
-```
-
-Field values: **`grade: 1`** = QPS; **`controlBehavior: 0`** = reject immediately; **`strategy: 0`** = direct (limit this resource only). With **`http-method-specify: true`**, the resource name must include the verb prefix to match the interceptor.
-
-**Optional annotation path** (same core entry, explicit resource name):
+In a Spring application the usual entry is **`spring-cloud-starter-alibaba-sentinel`**. The starter registers **`SentinelResourceAspect`**, which wraps methods annotated with **`@SentinelResource`**. The annotation value is the resource name. On **`BlockException`** the aspect calls the **`blockHandler`** method instead of the business method.
 
 ```java
 @RestController
@@ -315,13 +48,409 @@ public class OrderController {
 }
 ```
 
-**`@SentinelResource`** is handled by **`SentinelResourceAspect`** (bean from **`SentinelAutoConfiguration`**). The web filter and the annotation can protect different resource names on the same endpoint; avoid duplicating limits unless intentional.
+**`handleBlock`** must be on the same class and must repeat the business parameters, with **`BlockException`** added at the end. The aspect turns that annotation into the same entry the core API uses:
 
-### 3.4 Verifying QPS limit
+```java
+entry = SphU.entry("getOrder", resourceType, entryType, args);
+return pjp.proceed();
+```
 
-1. Start **Sentinel Dashboard** on `8080`, app on `8080`/`8719` as configured.
-2. Confirm **`order-service`** appears in Dashboard → cluster machine list.
-3. Flow rules from file/Nacos appear under **流控规则**.
-4. Load test `GET /api/order`; when QPS > 100, responses hit **`DefaultBlockExceptionHandler`** (HTTP 429) or **`block-page`**.
+A rule loaded for the resource **`getOrder`** therefore applies to **`OrderController.getOrder`**. The HTTP path and the resource name are independent: the web interceptor, when enabled, protects the URL under its own resource name.
 
-Runtime metrics for a resource are also exposed on the embedded command port (`curl localhost:8719/cnode?id=<resource>`): **`pass`** / **`block`** columns reflect the same **`LeapArray`** counters **`FlowSlot`** uses.
+---
+
+## 2. Flow control
+
+A **`FlowRule`** selects one mode on each of three axes: what is counted, which node is measured, and what happens when the threshold is exceeded. **`FlowSlot`** then runs that choice. The controller attached to the rule performs the comparison.
+
+### 2.1 Modes
+
+**Grade** chooses the metric.
+
+| **`grade`** | Constant | Metric |
+|-------------|----------|--------|
+| 1 | **`FLOW_GRADE_QPS`** | **`passQps()`** over the recent window |
+| 0 | **`FLOW_GRADE_THREAD`** | **`curThreadNum()`**, threads currently inside the resource |
+
+**Strategy** chooses the node those metrics are read from. Sentinel calls this the flow-control mode.
+
+| **`strategy`** | Constant | Node |
+|----------------|----------|------|
+| 0 | **`STRATEGY_DIRECT`** | This resource. With **`limitApp=default`**, that is **`ClusterNode`**. |
+| 1 | **`STRATEGY_RELATE`** | **`ClusterNode`** of **`refResource`**. This resource is limited by the related resource's traffic. |
+| 2 | **`STRATEGY_CHAIN`** | This resource's node, and only when the context name equals **`refResource`**. Any other context skips the rule. |
+
+**Control behavior** chooses the effect after a QPS rule is over threshold. It applies only when **`grade`** is QPS. A thread-count rule always uses **`DefaultController`**.
+
+| **`controlBehavior`** | Constant | Controller | Effect |
+|-----------------------|----------|------------|--------|
+| 0 | **`CONTROL_BEHAVIOR_DEFAULT`** | **`DefaultController`** | Reject at once |
+| 1 | **`CONTROL_BEHAVIOR_WARM_UP`** | **`WarmUpController`** | Allow less than **`count`** while the resource is cold |
+| 2 | **`CONTROL_BEHAVIOR_RATE_LIMITER`** | **`ThrottlingController`** | Queue until the next even interval, or reject if the wait exceeds **`maxQueueingTimeMs`** |
+| 3 | **`CONTROL_BEHAVIOR_WARM_UP_RATE_LIMITER`** | **`WarmUpRateLimiterController`** | Warm-up threshold, then the same queue |
+
+**`FlowRuleUtil.generateRater`** builds that controller when the rule is loaded. **`FlowRuleChecker`** selects the node from **`strategy`**, then calls **`rater.canPass`**.
+
+### 2.2 Implementation
+
+**`StatisticSlot`** stands in front of **`FlowSlot`**, but it counts a pass only after the downstream slots return. Every mode therefore sees calls that have already passed, not the call being judged. A rejected call increments **block** and does not increment **pass**.
+
+```plantuml
+@startuml
+class FlowSlot {
+  entry()
+  checkFlow()
+}
+
+class FlowRuleChecker {
+  checkFlow()
+  passLocalCheck()
+}
+
+class FlowRule {
+  resource
+  count
+  grade
+  rater
+}
+
+class TrafficShapingController {
+  canPass(node, acquireCount)
+}
+
+class DefaultController {
+  count
+  grade
+}
+
+class WarmUpController {
+  storedTokens
+  warningToken
+}
+
+class ThrottlingController {
+  latestPassedTime
+  maxQueueingTimeMs
+}
+
+class WarmUpRateLimiterController {
+}
+
+class StatisticSlot {
+  entry()
+  addPassRequest()
+}
+
+class ClusterNode {
+  passQps()
+  addPassRequest(count)
+}
+
+class StatisticNode {
+  rollingCounterInSecond
+}
+
+class ArrayMetric {
+  pass()
+  addPass(count)
+}
+
+class LeapArray {
+  values()
+}
+
+class MetricBucket {
+  pass
+}
+
+FlowSlot --> FlowRuleChecker
+FlowRuleChecker --> FlowRule
+FlowRule --> TrafficShapingController
+DefaultController --|> TrafficShapingController
+WarmUpController --|> TrafficShapingController
+ThrottlingController --|> TrafficShapingController
+WarmUpRateLimiterController --|> TrafficShapingController
+StatisticSlot --> FlowSlot : fireEntry()
+DefaultController ..> ClusterNode : passQps()
+WarmUpController ..> ClusterNode : passQps()
+StatisticSlot ..> ClusterNode : addPassRequest()
+ClusterNode --|> StatisticNode
+StatisticNode *-- ArrayMetric
+ArrayMetric *-- LeapArray
+LeapArray o-- MetricBucket
+@enduml
+```
+
+**`StatisticSlot`** stands in front of **`FlowSlot`**, but it counts a pass only after the downstream slots return. The QPS check therefore sees calls that have already passed, not the call being judged.
+
+```java
+public void entry(...) throws Throwable {
+    try {
+        fireEntry(context, resourceWrapper, node, count, prioritized, args);
+        node.increaseThreadNum();
+        node.addPassRequest(count);
+    } catch (BlockException e) {
+        context.getCurEntry().setBlockError(e);
+        node.increaseBlockQps(count);
+        throw e;
+    }
+}
+```
+
+**`FlowSlot`** delegates to **`FlowRuleChecker`**. If any rule refuses the call, the checker throws **`FlowException`**.
+
+```java
+public void entry(...) throws Throwable {
+    checkFlow(resourceWrapper, context, node, count, prioritized);
+    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+}
+
+public void checkFlow(...) throws BlockException {
+    Collection<FlowRule> rules = ruleProvider.apply(resource.getName());
+    if (rules != null) {
+        for (FlowRule rule : rules) {
+            if (!canPassCheck(rule, context, node, count, prioritized)) {
+                throw new FlowException(rule.getLimitApp(), rule);
+            }
+        }
+    }
+}
+```
+
+For a local rule with **`limitApp = default`** and direct strategy, the selected node is the resource's **`ClusterNode`**. **`DefaultController.canPass`** rejects when the truncated pass rate plus this call's **`acquireCount`** exceeds **`count`**. **`SphU.entry(name)`** uses **`acquireCount = 1`**.
+
+```java
+public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+    int curCount = avgUsedTokens(node);
+    if (curCount + acquireCount > count) {
+        return false;
+    }
+    return true;
+}
+
+private int avgUsedTokens(Node node) {
+    if (node == null) {
+        return 0;
+    }
+    return grade == RuleConstant.FLOW_GRADE_THREAD
+        ? node.curThreadNum()
+        : (int) (node.passQps());
+}
+```
+
+**`passQps()`** is the **`pass`** total of the live one-second window divided by the window length in seconds. The default window is 1000 ms split into two buckets of 500 ms. **`ArrayMetric.pass()`** sums buckets that are still inside that interval.
+
+```java
+public double passQps() {
+    return rollingCounterInSecond.pass() / rollingCounterInSecond.getWindowIntervalInSec();
+}
+
+public void addPassRequest(int count) {
+    rollingCounterInSecond.addPass(count);
+    rollingCounterInMinute.addPass(count);
+}
+```
+
+The minute counter is updated together with the second counter, but **`passQps()`** reads only the one-second metric.
+
+A direct fast-fail rule of 20 QPS is loaded as follows. **`FlowRuleUtil.generateRater`** then stores a **`DefaultController(20, FLOW_GRADE_QPS)`** on the rule.
+
+```java
+FlowRule rule = new FlowRule();
+rule.setResource("getOrder");
+rule.setCount(20);
+rule.setGrade(RuleConstant.FLOW_GRADE_QPS);
+rule.setStrategy(RuleConstant.STRATEGY_DIRECT);
+rule.setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_DEFAULT);
+rule.setLimitApp(RuleConstant.LIMIT_APP_DEFAULT);
+FlowRuleManager.loadRules(Collections.singletonList(rule));
+```
+
+Suppose the two live buckets hold 12 and 8 passes. Their sum is 20, the divisor is 1 second, and **`passQps`** is 20. The next call computes `20 + 1 > 20`, throws **`FlowException`**, and **`StatisticSlot`** increments **block** without calling **`addPassRequest`**. After the bucket of 12 falls outside the 1000 ms interval, **`passQps`** drops to 8 and a new call is admitted.
+
+The comparison and **`addPassRequest`** are separate steps. Concurrent callers can both observe a rate under **`count`** and both pass, so the window can briefly exceed the threshold.
+
+Thread-count mode uses the same **`DefaultController`**, but **`avgUsedTokens`** reads **`curThreadNum()`** instead of **`passQps()`**. The call is rejected when the number of threads already inside the resource plus **`acquireCount`** exceeds **`count`**.
+
+**`WarmUpController`** keeps a token balance, **`storedTokens`**. While that balance is at or above **`warningToken`**, the allowed rate is a slope below **`count`**. Once the balance drops under the warning line, the check is the same as fast-fail: **`passQps + acquireCount <= count`**.
+
+```java
+long restToken = storedTokens.get();
+if (restToken >= warningToken) {
+    long aboveToken = restToken - warningToken;
+    double warningQps = Math.nextUp(1.0 / (aboveToken * slope + 1.0 / count));
+    return passQps + acquireCount <= warningQps;
+}
+return passQps + acquireCount <= count;
+```
+
+**`ThrottlingController`** does not read **`passQps`**. It spaces passes by **`statDurationMs * acquireCount / count`** (the default stat duration is 1000 ms). If the next slot is already due, the call passes. If the wait is longer than **`maxQueueingTimeMs`**, the call is rejected. Otherwise the caller sleeps until that slot.
+
+```java
+long costTime = Math.round(1.0d * statDurationMs * acquireCount / count);
+long expectedTime = costTime + latestPassedTime.get();
+if (expectedTime <= currentTime) {
+    latestPassedTime.set(currentTime);
+    return true;
+}
+long waitTime = expectedTime - currentTime;
+if (waitTime > maxQueueingTimeMs) {
+    return false;
+}
+```
+
+**`WarmUpRateLimiterController`** applies the warm-up ceiling first and then the same queue. **`FlowRuleChecker`** still selects the node before any of these **`canPass`** methods run, so relate mode and chain mode change which **`ClusterNode`** is passed in, not the arithmetic inside the controller.
+
+---
+
+## 3. Spring and Spring Cloud integration
+
+**`spring-cloud-starter-alibaba-sentinel`** registers the beans that turn Spring calls into **`SphU.entry`**. It does not replace **`FlowSlot`**. A rule still rejects a call by the QPS check in section 2; the starter only chooses the resource name, opens the entry, and maps **`BlockException`** to an HTTP or fallback result.
+
+**`SentinelAutoConfiguration`** is active when **`spring.cloud.sentinel.enabled`** is true or omitted. It exposes **`SentinelResourceAspect`** and **`SentinelDataSourceHandler`**. On a servlet application, **`SentinelWebAutoConfiguration`** adds **`SentinelWebInterceptor`** when **`spring.cloud.sentinel.filter.enabled`** is true or omitted. Feign and Spring Cloud Gateway are separate switches.
+
+```plantuml
+@startuml
+class SentinelAutoConfiguration {
+  sentinelResourceAspect()
+  sentinelDataSourceHandler()
+}
+
+class SentinelWebAutoConfiguration {
+  sentinelWebInterceptor()
+  sentinelWebMvcConfig()
+}
+
+class SentinelWebMvcConfigurer {
+  addInterceptors()
+}
+
+class SentinelResourceAspect {
+  invokeResourceWithSentinel()
+}
+
+class SentinelWebInterceptor {
+  preHandle()
+  getResourceName()
+}
+
+class SentinelDataSourceHandler {
+  afterSingletonsInstantiated()
+}
+
+class SentinelFeignAutoConfiguration {
+  feignSentinelBuilder()
+}
+
+class FlowRuleManager {
+  register2Property()
+}
+
+SentinelAutoConfiguration --> SentinelResourceAspect
+SentinelAutoConfiguration --> SentinelDataSourceHandler
+SentinelWebAutoConfiguration --> SentinelWebInterceptor
+SentinelWebMvcConfigurer --> SentinelWebInterceptor
+SentinelDataSourceHandler ..> FlowRuleManager
+SentinelResourceAspect ..> SphU
+SentinelWebInterceptor ..> SphU
+@enduml
+```
+
+### 3.1 Inbound HTTP
+
+**`SentinelWebMvcConfigurer`** registers the interceptor for **`spring.cloud.sentinel.filter.url-patterns`**, which defaults to **`/**`**. On each request **`preHandle`** resolves the resource, enters a context, and opens an inbound entry. **`BlockException`** is handled and the interceptor returns false, so the controller method is not called.
+
+```java
+String resourceName = getResourceName(request);
+String origin = parseOrigin(request);
+ContextUtil.enter(contextName, origin);
+Entry entry = SphU.entry(resourceName, ResourceTypeConstants.COMMON_WEB, EntryType.IN);
+```
+
+The resource name is Spring MVC's best matching pattern, such as **`/api/order`**. **`http-method-specify`** defaults to false. When it is set to true, the name becomes **`GET:/api/order`**. A **`UrlCleaner`** bean, if present, rewrites the pattern before that prefix is added.
+
+If the application defines a **`BlockExceptionHandler`**, that bean is used. Otherwise a configured **`spring.cloud.sentinel.block-page`** sends a redirect. With neither, **`DefaultBlockExceptionHandler`** sets HTTP 429.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant SentinelWebInterceptor
+    participant SphU
+    participant FlowSlot
+    participant Controller
+
+    Client->>SentinelWebInterceptor: GET /api/order
+    SentinelWebInterceptor->>SphU: entry("/api/order", IN)
+    SphU->>FlowSlot: slot chain
+    alt passQps within count
+        FlowSlot-->>SentinelWebInterceptor: entry open
+        SentinelWebInterceptor->>Controller: preHandle returns true
+    else over count
+        FlowSlot-->>SentinelWebInterceptor: FlowException
+        SentinelWebInterceptor-->>Client: 429, controller not called
+    end
+```
+
+The annotation on **`getOrder`** is a second entry, named **`getOrder`**, opened by **`SentinelResourceAspect`** only if the interceptor let the request through. A flow rule on **`/api/order`** and a flow rule on **`getOrder`** are checked separately.
+
+### 3.2 Outbound calls
+
+**`SentinelFeignAutoConfiguration`** replaces Feign's **`Feign.Builder`** only when **`feign.sentinel.enabled`** is true. **`SentinelInvocationHandler`** then enters an outbound resource before the HTTP client runs. The default resource name is the method, the target URL, and the path:
+
+```java
+String resourceName = method + ":" + hardCodedTarget.url() + template.path();
+ContextUtil.enter(resourceName);
+entry = SphU.entry(resourceName, EntryType.OUT, 1, args);
+result = methodHandler.invoke(args);
+```
+
+**`EntryType.OUT`** marks the call as outbound. The QPS rule still has to use this resource string. A **`fallbackFactory`** on the Feign client is invoked when the entry is blocked.
+
+**`RestTemplate`** is not wrapped globally. **`SentinelBeanPostProcessor`** adds an interceptor only to beans annotated with **`@SentinelRestTemplate`**, and only when **`resttemplate.sentinel.enabled`** is true or omitted.
+
+When Spring Cloud Gateway is on the classpath, **`SentinelSCGAutoConfiguration`** registers **`SentinelGatewayFilter`** unless **`spring.cloud.sentinel.scg.enabled`** is false. That filter is the gateway entry; route-level limits use gateway rules rather than a **`FlowRule`** on a controller name.
+
+### 3.3 Loading rules
+
+**`SentinelDataSourceHandler.afterSingletonsInstantiated`** walks **`spring.cloud.sentinel.datasource`**. Each entry must select one source, such as **`file`** or **`nacos`**. The handler registers a **`ReadableDataSource`** bean and **`postRegister`** attaches its property to the manager for **`rule-type`**:
+
+```java
+switch (this.getRuleType()) {
+    case FLOW -> FlowRuleManager.register2Property(dataSource.getProperty());
+    case DEGRADE -> DegradeRuleManager.register2Property(dataSource.getProperty());
+    case SYSTEM -> SystemRuleManager.register2Property(dataSource.getProperty());
+    case AUTHORITY -> AuthorityRuleManager.register2Property(dataSource.getProperty());
+}
+```
+
+JSON and XML are converted by the **`sentinel-json-flow-converter`** style beans created in **`SentinelAutoConfiguration`**. A file of flow rules for the URL resource, matching the interceptor name when the method prefix is off, is:
+
+```yaml
+spring:
+  cloud:
+    sentinel:
+      filter:
+        enabled: true
+      http-method-specify: false
+      datasource:
+        ds-file:
+          file:
+            file: classpath:flowrule.json
+            data-type: json
+            rule-type: flow
+```
+
+```json
+[
+  {
+    "resource": "/api/order",
+    "limitApp": "default",
+    "grade": 1,
+    "count": 20,
+    "strategy": 0,
+    "controlBehavior": 0
+  }
+]
+```
+
+Loading still passes through **`FlowRuleUtil`**, which sets the rater to **`DefaultController`**. After the property updates, **`GET /api/order`** is judged by **`passQps()`** on the cluster node **`/api/order`**, the same comparison as **`SphU.entry("getOrder")`** in section 2.
