@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="860" viewBox="0 0 980 860" role="img" aria-label="Sentinel procedure: after the slot chain, PASS runs the business call and REJECT runs the block handler, then both call entry.exit">
+  <defs>
+    <marker id="sent-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="sent-pass" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="sent-reject" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c62828"/>
+    </marker>
+  </defs>
+  <rect width="980" height="860" fill="#f7f9fb"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Sentinel call procedure</text>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="250" y="46" width="140" height="48" rx="6" fill="#eceff1" stroke="#607d8b"/>
+    <text x="320" y="75" text-anchor="middle" font-size="13" font-weight="700" fill="#37474f">Caller</text>
+
+    <line x1="390" y1="70" x2="428" y2="70" stroke="#37474f" stroke-width="1.5" marker-end="url(#sent-arr)"/>
+
+    <rect x="430" y="46" width="250" height="48" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="555" y="66" text-anchor="middle" font-size="13" font-weight="700" fill="#0d47a1">Enter</text>
+    <text x="555" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1565c0">SphU.entry(resource)</text>
+
+    <line x1="490" y1="94" x2="490" y2="124" stroke="#37474f" stroke-width="1.5" marker-end="url(#sent-arr)"/>
+
+    <rect x="275" y="126" width="430" height="448" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="291" y="150" font-size="13" font-weight="700" fill="#37474f">ProcessorSlotChain</text>
+    <text x="460" y="150" font-size="11" fill="#607d8b">default order</text>
+
+    <g font-family="Consolas, monospace" font-size="12">
+      <rect x="295" y="166" width="390" height="30" rx="4" fill="#e3f2fd" stroke="#1565c0"/>
+      <text x="490" y="186" text-anchor="middle" fill="#0d47a1">NodeSelectorSlot</text>
+      <line x1="490" y1="196" x2="490" y2="208" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="210" width="390" height="30" rx="4" fill="#e3f2fd" stroke="#1565c0"/>
+      <text x="490" y="230" text-anchor="middle" fill="#0d47a1">ClusterBuilderSlot</text>
+      <line x1="490" y1="240" x2="490" y2="252" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="254" width="390" height="30" rx="4" fill="#e3f2fd" stroke="#1565c0"/>
+      <text x="490" y="274" text-anchor="middle" fill="#0d47a1">LogSlot</text>
+      <line x1="490" y1="284" x2="490" y2="296" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="298" width="390" height="30" rx="4" fill="#e3f2fd" stroke="#1565c0"/>
+      <text x="490" y="318" text-anchor="middle" fill="#0d47a1">StatisticSlot</text>
+      <line x1="490" y1="328" x2="490" y2="340" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="342" width="390" height="30" rx="4" fill="#fff8e1" stroke="#f9a825"/>
+      <text x="490" y="362" text-anchor="middle" fill="#e65100">AuthoritySlot</text>
+      <line x1="490" y1="372" x2="490" y2="384" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="386" width="390" height="30" rx="4" fill="#fff8e1" stroke="#f9a825"/>
+      <text x="490" y="406" text-anchor="middle" fill="#e65100">SystemSlot</text>
+      <line x1="490" y1="416" x2="490" y2="428" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="430" width="390" height="30" rx="4" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.5"/>
+      <text x="490" y="450" text-anchor="middle" fill="#e65100">FlowSlot</text>
+      <line x1="490" y1="460" x2="490" y2="472" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+
+      <rect x="295" y="474" width="390" height="30" rx="4" fill="#fff8e1" stroke="#f9a825"/>
+      <text x="490" y="494" text-anchor="middle" font-size="11" fill="#e65100">DefaultCircuitBreakerSlot</text>
+      <line x1="490" y1="504" x2="490" y2="516" stroke="#37474f" stroke-width="1.2" marker-end="url(#sent-arr)"/>
+      <rect x="295" y="518" width="390" height="30" rx="4" fill="#fff8e1" stroke="#f9a825"/>
+      <text x="490" y="538" text-anchor="middle" fill="#e65100">DegradeSlot</text>
+    </g>
+
+    <!-- Fork from the bottom of the slot chain -->
+    <line x1="490" y1="574" x2="490" y2="612" stroke="#37474f" stroke-width="2"/>
+    <polyline points="490,612 230,612 230,658" fill="none" stroke="#2e7d32" stroke-width="3" marker-end="url(#sent-pass)"/>
+    <polyline points="490,612 750,612 750,658" fill="none" stroke="#c62828" stroke-width="3" marker-end="url(#sent-reject)"/>
+    <rect x="168" y="578" width="52" height="20" rx="10" fill="#2e7d32"/>
+    <text x="194" y="592" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">PASS</text>
+    <rect x="688" y="578" width="68" height="20" rx="10" fill="#c62828"/>
+    <text x="722" y="592" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">REJECT</text>
+
+    <rect x="60" y="660" width="340" height="72" rx="6" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="230" y="688" text-anchor="middle" font-size="14" font-weight="700" fill="#1b5e20">Business call</text>
+    <text x="230" y="710" text-anchor="middle" font-size="12" fill="#2e7d32">every slot returned</text>
+
+    <rect x="580" y="660" width="340" height="72" rx="6" fill="#ffebee" stroke="#c62828" stroke-width="2"/>
+    <text x="750" y="688" text-anchor="middle" font-size="14" font-weight="700" fill="#b71c1c">Block handler</text>
+    <text x="750" y="710" text-anchor="middle" font-size="12" fill="#c62828">BlockException; later slots skipped</text>
+
+    <polyline points="230,732 230,760 490,760" fill="none" stroke="#2e7d32" stroke-width="2.5"/>
+    <polyline points="750,732 750,760 490,760" fill="none" stroke="#c62828" stroke-width="2.5"/>
+    <line x1="490" y1="760" x2="490" y2="788" stroke="#455a64" stroke-width="2" marker-end="url(#sent-arr)"/>
+
+    <rect x="340" y="790" width="300" height="52" rx="6" fill="#eceff1" stroke="#455a64" stroke-width="1.5"/>
+    <text x="490" y="812" text-anchor="middle" font-size="13" font-weight="700" fill="#263238">Exit</text>
+    <text x="490" y="830" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#37474f">entry.exit()</text>
+  </g>
+</svg>
