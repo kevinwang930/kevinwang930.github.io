@@ -284,7 +284,154 @@ context.curEntry → CtEntry e1 {
 
 A second nested `SphU.entry` repeats step 4: `e1.child = e2`, `e2.parent = e1`, `context.curEntry = e2`. On `e2.exit()`, the chain’s `exit` runs, then `curEntry` returns to `e1`.
 
-The slot list that `chain.entry` walks is built as follows.
+**Slot chain creation.** The first `SphU.entry` for a resource calls `CtSph.lookProcessChain`, which caches one `ProcessorSlotChain` per `ResourceWrapper` in `chainMap`. Building goes through `SlotChainProvider.newSlotChain` → `DefaultSlotChainBuilder.build` → `SpiLoader.loadInstanceListSorted()` for every `ProcessorSlot`. `NodeSelectorSlot` and `ClusterBuilderSlot` use `@Spi(isSingleton = false)`, so each `build()` allocates a **new** instance (each chain has its own `NodeSelectorSlot.map`). Other default slots are singletons shared across chains.
+
+```plantuml
+@startuml
+class CtSph {
+  {static} -chainMap : Map<ResourceWrapper, ProcessorSlotChain>
+  -lookProcessChain()
+}
+
+interface SlotChainBuilder {
+  +build()
+}
+
+class SlotChainProvider {
+  {static} -slotChainBuilder : SlotChainBuilder
+  {static} +newSlotChain()
+}
+
+class DefaultSlotChainBuilder {
+  +build()
+}
+
+class SpiLoader {
+  +loadInstanceListSorted()
+  -createInstance()
+}
+
+abstract class ProcessorSlotChain {
+  +addLast()
+}
+
+class DefaultProcessorSlotChain {
+  -first : AbstractLinkedProcessorSlot
+  -end : AbstractLinkedProcessorSlot
+  +addLast()
+}
+
+class NodeSelectorSlot {
+  -map : Map<String, DefaultNode>
+  +entry()
+  +exit()
+}
+
+class ClusterBuilderSlot {
+  -clusterNode : ClusterNode
+}
+
+class FlowSlot
+
+abstract class ResourceWrapper {
+  #name : String
+}
+
+ProcessorSlotChain <|-- DefaultProcessorSlotChain
+SlotChainBuilder <|.. DefaultSlotChainBuilder
+CtSph --> ProcessorSlotChain : chainMap
+CtSph --> ResourceWrapper : chainMap key
+CtSph ..> SlotChainProvider : newSlotChain
+SlotChainProvider --> SlotChainBuilder
+DefaultSlotChainBuilder ..> SpiLoader : loadInstanceListSorted
+DefaultSlotChainBuilder --> DefaultProcessorSlotChain : build
+DefaultProcessorSlotChain o--> NodeSelectorSlot : addLast
+SpiLoader ..> NodeSelectorSlot : new per build
+SpiLoader ..> FlowSlot : singleton
+@enduml
+```
+
+```java
+ProcessorSlot<Object> lookProcessChain(ResourceWrapper resourceWrapper) {
+    ProcessorSlotChain chain = chainMap.get(resourceWrapper);
+    if (chain == null) {
+        synchronized (LOCK) {
+            chain = chainMap.get(resourceWrapper);
+            if (chain == null) {
+                if (chainMap.size() >= Constants.MAX_SLOT_CHAIN_SIZE) {
+                    return null;
+                }
+                chain = SlotChainProvider.newSlotChain();
+                Map<ResourceWrapper, ProcessorSlotChain> newMap =
+                    new HashMap<ResourceWrapper, ProcessorSlotChain>(chainMap.size() + 1);
+                newMap.putAll(chainMap);
+                newMap.put(resourceWrapper, chain);
+                chainMap = newMap;
+            }
+        }
+    }
+    return chain;
+}
+```
+
+```java
+public static ProcessorSlotChain newSlotChain() {
+    if (slotChainBuilder != null) {
+        return slotChainBuilder.build();
+    }
+    slotChainBuilder = SpiLoader.of(SlotChainBuilder.class).loadFirstInstanceOrDefault();
+    if (slotChainBuilder == null) {
+        slotChainBuilder = new DefaultSlotChainBuilder();
+    }
+    return slotChainBuilder.build();
+}
+```
+
+```java
+@Override
+public ProcessorSlotChain build() {
+    ProcessorSlotChain chain = new DefaultProcessorSlotChain();
+    List<ProcessorSlot> sortedSlotList =
+        SpiLoader.of(ProcessorSlot.class).loadInstanceListSorted();
+    for (ProcessorSlot slot : sortedSlotList) {
+        if (!(slot instanceof AbstractLinkedProcessorSlot)) {
+            continue;
+        }
+        chain.addLast((AbstractLinkedProcessorSlot<?>) slot);
+    }
+    return chain;
+}
+```
+
+```java
+private S createInstance(Class<? extends S> clazz, boolean singleton) {
+    if (singleton) {
+        S instance = singletonMap.get(clazz.getName());
+        if (instance == null) {
+            synchronized (this) {
+                instance = singletonMap.get(clazz.getName());
+                if (instance == null) {
+                    instance = service.cast(clazz.newInstance());
+                    singletonMap.put(clazz.getName(), instance);
+                }
+            }
+        }
+        return instance;
+    } else {
+        return service.cast(clazz.newInstance());
+    }
+}
+```
+
+```java
+@Spi(isSingleton = false, order = Constants.ORDER_NODE_SELECTOR_SLOT)
+public class NodeSelectorSlot extends AbstractLinkedProcessorSlot<Object> {
+    private volatile Map<String, DefaultNode> map = new HashMap<String, DefaultNode>(10);
+    // ...
+}
+```
+
+So `getOrder` and `/api/order` each own a `NodeSelectorSlot` and a `map`. The default context name does not collide across resources. The linked slots in default order:
 
 ```plantuml
 @startuml
@@ -349,9 +496,6 @@ DefaultProcessorSlotChain o-- AbstractLinkedProcessorSlot : first / next
 @enduml
 ```
 
-
-
-
 | Order  | Slot                        | Role                                                                                 |
 | ------ | --------------------------- | ------------------------------------------------------------------------------------ |
 | −10000 | `NodeSelectorSlot`          | Create or select the per-context `DefaultNode` and set it as the current node.       |
@@ -363,8 +507,6 @@ DefaultProcessorSlotChain o-- AbstractLinkedProcessorSlot : first / next
 | −2000  | `FlowSlot`                  | Enforce per-resource QPS or concurrency (`FlowRule`).                                |
 | −1500  | `DefaultCircuitBreakerSlot` | Run default circuit breakers when the resource has no degrade rules.                 |
 | −1000  | `DegradeSlot`               | Run resource-specific circuit breakers (`DegradeRule`).                              |
-
-
 
 ### 2.1 NodeSelectorSlot
 
@@ -505,7 +647,7 @@ Constants --> ClusterNode : ENTRY_NODE
 @enduml
 ```
 
-Same resource shares one `ProcessorSlotChain`, so this slot keys its cache by **context name**, not resource name. On first entry for a context it creates a `DefaultNode`, links it under `context.getLastNode()`, sets `curNode`, and passes that node to later slots:
+As in the opening, each resource chain has its own `NodeSelectorSlot` and `map`. Inside one chain the map key is only `context.getName()` (often the default context). On first entry for that name the slot creates a `DefaultNode`, links it under `context.getLastNode()`, sets `curNode`, and passes that node to later slots:
 
 ```java
 @Override
