@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="720" viewBox="0 0 1040 720" role="img" aria-label="Sentinel in-memory graph: ThreadLocal Context and Entry point at DefaultNode and shared ClusterNode where pass and block QPS for flow control are stored">
+  <defs>
+    <marker id="mem-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="mem-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="mem-arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="720" fill="#f7f9fb"/>
+  <text x="520" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">Flow-control state in memory</text>
+  <text x="520" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#607d8b">Context and Entry locate the call; ClusterNode keeps the QPS / thread counters FlowSlot reads</text>
+
+  <!-- Left: per-thread -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="24" y="70" width="300" height="620" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="174" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="#37474f">Per thread (ThreadLocal)</text>
+
+    <rect x="44" y="116" width="260" height="150" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="174" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#0d47a1">Context</text>
+    <text x="58" y="166" font-family="Consolas, monospace" font-size="11" fill="#1565c0">name = entrance1</text>
+    <text x="58" y="186" font-family="Consolas, monospace" font-size="11" fill="#1565c0">origin = appA</text>
+    <text x="58" y="206" font-family="Consolas, monospace" font-size="11" fill="#1565c0">entranceNode ----+</text>
+    <text x="58" y="226" font-family="Consolas, monospace" font-size="11" fill="#1565c0">curEntry --------+</text>
+    <text x="58" y="248" font-size="11" fill="#607d8b">active call path for this thread</text>
+
+    <rect x="44" y="300" width="260" height="170" rx="6" fill="#e8eaf6" stroke="#3949ab" stroke-width="1.5"/>
+    <text x="174" y="324" text-anchor="middle" font-size="13" font-weight="700" fill="#1a237e">Entry (CtEntry)</text>
+    <text x="58" y="350" font-family="Consolas, monospace" font-size="11" fill="#283593">resource = getOrder</text>
+    <text x="58" y="370" font-family="Consolas, monospace" font-size="11" fill="#283593">parent / child stack</text>
+    <text x="58" y="390" font-family="Consolas, monospace" font-size="11" fill="#283593">curNode -----------+</text>
+    <text x="58" y="410" font-family="Consolas, monospace" font-size="11" fill="#283593">originNode --------+</text>
+    <text x="58" y="430" font-family="Consolas, monospace" font-size="11" fill="#283593">chain = SlotChain</text>
+    <text x="58" y="452" font-size="11" fill="#607d8b">one SphU.entry ... exit</text>
+
+    <rect x="44" y="508" width="260" height="152" rx="6" fill="#eceff1" stroke="#607d8b"/>
+    <text x="174" y="532" text-anchor="middle" font-size="12" font-weight="700" fill="#37474f">Not durable store</text>
+    <text x="58" y="558" font-size="11" fill="#546e7a">Context / Entry exist only</text>
+    <text x="58" y="576" font-size="11" fill="#546e7a">while the call is open.</text>
+    <text x="58" y="600" font-size="11" fill="#546e7a">They point into the shared</text>
+    <text x="58" y="618" font-size="11" fill="#546e7a">node graph on the right.</text>
+    <text x="58" y="642" font-size="11" fill="#546e7a">exit() pops curEntry.</text>
+  </g>
+
+  <!-- Arrows from left into global tree -->
+  <g stroke="#1565c0" stroke-width="1.5" fill="none">
+    <path d="M 324 206 C 360 206, 360 206, 400 206" marker-end="url(#mem-arr-blue)"/>
+    <path d="M 304 390 C 360 390, 380 390, 400 318" marker-end="url(#mem-arr-blue)"/>
+    <path d="M 304 410 C 340 410, 360 470, 620 470" marker-end="url(#mem-arr-blue)"/>
+  </g>
+  <text x="332" y="198" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">entranceNode</text>
+  <text x="312" y="378" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">curNode</text>
+  <text x="430" y="458" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#1565c0">originNode</text>
+
+  <!-- Right: process-wide graph -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="400" y="70" width="616" height="420" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="708" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="#37474f">Process-wide node graph (survives the request)</text>
+
+    <rect x="430" y="120" width="200" height="44" rx="6" fill="#eceff1" stroke="#546e7a"/>
+    <text x="530" y="147" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#37474f">ROOT</text>
+
+    <line x1="530" y1="164" x2="530" y2="196" stroke="#37474f" stroke-width="1.5" marker-end="url(#mem-arr)"/>
+
+    <rect x="400" y="198" width="260" height="52" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="530" y="220" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">EntranceNode(entrance1)</text>
+    <text x="530" y="238" text-anchor="middle" font-size="10" fill="#607d8b">shared for context name</text>
+
+    <line x1="530" y1="250" x2="530" y2="282" stroke="#37474f" stroke-width="1.5" marker-end="url(#mem-arr)"/>
+    <line x1="480" y1="250" x2="480" y2="282" stroke="#90a4ae" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#mem-arr)"/>
+
+    <rect x="400" y="284" width="260" height="64" rx="6" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="530" y="308" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">DefaultNode(getOrder)</text>
+    <text x="530" y="328" text-anchor="middle" font-size="10" fill="#2e7d32">per resource + context</text>
+    <text x="530" y="342" text-anchor="middle" font-size="10" fill="#558b2f">own windows + childList</text>
+
+    <!-- second entrance dashed -->
+    <rect x="400" y="370" width="260" height="40" rx="6" fill="#f1f8e9" stroke="#7cb342" stroke-dasharray="4 3"/>
+    <text x="530" y="388" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#33691e">DefaultNode(getOrder) @ entrance2</text>
+    <text x="530" y="402" text-anchor="middle" font-size="10" fill="#689f38">same resource, other context</text>
+
+    <path d="M 660 316 C 700 316, 700 316, 740 316" stroke="#ef6c00" stroke-width="2" fill="none" marker-end="url(#mem-arr-orange)"/>
+    <path d="M 660 390 C 700 390, 720 340, 740 330" stroke="#ef6c00" stroke-width="1.5" stroke-dasharray="4 3" fill="none" marker-end="url(#mem-arr-orange)"/>
+    <text x="690" y="304" font-size="10" fill="#ef6c00">clusterNode</text>
+
+    <rect x="740" y="198" width="250" height="220" rx="6" fill="#fff3e0" stroke="#ef6c00" stroke-width="2"/>
+    <text x="865" y="224" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">ClusterNode(getOrder)</text>
+    <text x="865" y="244" text-anchor="middle" font-size="10" fill="#ef6c00">one per resource (all contexts)</text>
+    <rect x="760" y="258" width="210" height="88" rx="4" fill="#ffffff" stroke="#ffb74d"/>
+    <text x="865" y="280" text-anchor="middle" font-size="11" font-weight="700" fill="#e65100">sliding window</text>
+    <text x="772" y="302" font-family="Consolas, monospace" font-size="11" fill="#bf360c">passQps / blockQps</text>
+    <text x="772" y="320" font-family="Consolas, monospace" font-size="11" fill="#bf360c">curThreadNum / RT</text>
+    <text x="760" y="366" font-size="11" fill="#6d4c41">FlowSlot reads these metrics</text>
+    <text x="760" y="384" font-size="11" fill="#6d4c41">StatisticSlot writes them</text>
+    <text x="760" y="402" font-family="Consolas, monospace" font-size="10" fill="#8d6e63">originCountMap: appA -&gt; StatisticNode</text>
+
+    <text x="708" y="470" text-anchor="middle" font-size="11" fill="#607d8b">DefaultNode.addPassRequest also updates ClusterNode</text>
+  </g>
+
+  <!-- Bottom: rules -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="400" y="510" width="616" height="180" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="708" y="536" text-anchor="middle" font-size="13" font-weight="700" fill="#37474f">Rules (separate from counters)</text>
+
+    <rect x="430" y="556" width="260" height="100" rx="6" fill="#fce4ec" stroke="#c2185b"/>
+    <text x="560" y="584" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#880e4f">FlowRuleManager</text>
+    <text x="448" y="610" font-family="Consolas, monospace" font-size="11" fill="#ad1457">resource = getOrder</text>
+    <text x="448" y="628" font-family="Consolas, monospace" font-size="11" fill="#ad1457">count = 20, grade = QPS</text>
+    <text x="448" y="646" font-size="10" fill="#8e24aa">threshold config, not live QPS</text>
+
+    <path d="M 690 606 C 760 606, 800 340, 800 340" stroke="#c2185b" stroke-width="1.5" stroke-dasharray="5 4" fill="none" marker-end="url(#mem-arr)"/>
+    <text x="760" y="560" font-size="11" fill="#ad1457">FlowSlot compares</text>
+    <text x="760" y="576" font-size="11" fill="#ad1457">rule.count to</text>
+    <text x="760" y="592" font-size="11" fill="#ad1457">ClusterNode.passQps()</text>
+
+    <rect x="720" y="620" width="270" height="48" rx="6" fill="#fff8e1" stroke="#f9a825"/>
+    <text x="855" y="640" text-anchor="middle" font-size="11" font-weight="700" fill="#e65100">Live status = node windows</text>
+    <text x="855" y="658" text-anchor="middle" font-size="10" fill="#f57c00">pass / block / thread in ClusterNode</text>
+  </g>
+</svg>
