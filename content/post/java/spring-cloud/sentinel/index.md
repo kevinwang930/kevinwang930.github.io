@@ -937,9 +937,10 @@ public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode 
 
 On **exit**, `recordCompleteFor` writes RT and success (or exception QPS), decreases thread count, sets `completeTimestamp`, then `fireExit`. Circuit-breaker slots that run later on exit therefore see a completed timestamp.
 
-`ClusterNode` (via `StatisticNode`) stores pass counts in a sliding window. `passQps()` is the `pass` total of the live one-second window divided by the window length in seconds. The default window is 1000 ms split into two buckets of 500 ms. `ArrayMetric.pass()` sums buckets that are still inside that interval. The minute counter is updated together with the second counter, but `passQps()` reads only the one-second metric.
+`ClusterNode` (via `StatisticNode`) stores counters in rolling windows; `passQps()` and related reads are implemented in §3. Both the one-second and one-minute metrics are updated on pass:
 
 ```java
+// StatisticNode
 public double passQps() {
     return rollingCounterInSecond.pass() / rollingCounterInSecond.getWindowIntervalInSec();
 }
@@ -958,11 +959,144 @@ public void addPassRequest(int count) {
 
 It reads rules from `AuthorityRuleManager`. `AuthorityRuleChecker.passCheck` uses `context.getOrigin()`. Failure throws `AuthorityException`. Exit only `fireExit`.
 
+Origin comes from `ContextUtil.enter(name, origin)`, not from the resource string. Empty origin always passes. The slot does not authenticate the caller: any code that can call `enter` (or set origin from a client header / query arg) can supply a whitelist name such as `appA` and pass. Treat origin as an application-controlled label, not as proof of identity.
+
+**Whitelist example.** Only `appA` and `appE` may enter `getOrder`:
+
+```java
+AuthorityRule rule = new AuthorityRule();
+rule.setResource("getOrder");
+rule.setStrategy(RuleConstant.AUTHORITY_WHITE);
+rule.setLimitApp("appA,appE");
+AuthorityRuleManager.loadRules(Collections.singletonList(rule));
+
+ContextUtil.enter("orderEntrance", "appA");
+Entry entry = null;
+try {
+    entry = SphU.entry("getOrder");   // passes
+} catch (AuthorityException ex) {
+    // blocked
+} finally {
+    if (entry != null) {
+        entry.exit();
+    }
+    ContextUtil.exit();
+}
+
+ContextUtil.enter("orderEntrance", "appB");
+try {
+    SphU.entry("getOrder");           // AuthorityException
+} finally {
+    ContextUtil.exit();
+}
+```
+
+**Blacklist example.** `appA` and `appB` are refused; other origins pass:
+
+```java
+AuthorityRule rule = new AuthorityRule();
+rule.setResource("getOrder");
+rule.setStrategy(RuleConstant.AUTHORITY_BLACK);
+rule.setLimitApp("appA,appB");
+AuthorityRuleManager.loadRules(Collections.singletonList(rule));
+```
+
+```java
+@Override
+public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node,
+                  int count, boolean prioritized, Object... args) throws Throwable {
+    checkBlackWhiteAuthority(resourceWrapper, context);
+    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+}
+
+void checkBlackWhiteAuthority(ResourceWrapper resource, Context context)
+        throws AuthorityException {
+    List<AuthorityRule> rules = AuthorityRuleManager.getRules(resource.getName());
+    if (rules == null) {
+        return;
+    }
+    for (AuthorityRule rule : rules) {
+        if (!AuthorityRuleChecker.passCheck(rule, context)) {
+            throw new AuthorityException(context.getOrigin(), rule);
+        }
+    }
+}
+```
+
 ### 2.6 SystemSlot
 
 `SystemSlot` applies process-wide protection (`SystemRule`: load, inbound QPS, average RT, thread count, CPU).
 
 It calls `SystemRuleManager.checkSystem`. Metrics come from `Constants.ENTRY_NODE`, not from the per-resource `DefaultNode`. Failure throws `SystemBlockException`. Exit only `fireExit`.
+
+`SystemSlot` does not register or sum resources itself. There is one global `ClusterNode` (`Constants.ENTRY_NODE`). On every **inbound** pass, `StatisticSlot` (which calls `fireEntry` first, then writes metrics) adds to that node:
+
+```java
+// StatisticSlot — after Authority / System / Flow return
+if (resourceWrapper.getEntryType() == EntryType.IN) {
+    Constants.ENTRY_NODE.increaseThreadNum();
+    Constants.ENTRY_NODE.addPassRequest(count);
+}
+```
+
+So `getOrder` and `/api/user` both feed the same counters when entered as `EntryType.IN`. `SystemRule` has no `resource` field: one threshold covers all inbound traffic. `SystemSlot` only **reads** `ENTRY_NODE` (plus CPU/load from the status listener) and may block the current inbound entry before this call’s pass is written.
+
+The check runs only for `EntryType.IN`. Outbound entries (`EntryType.OUT`, the default of `SphU.entry(name)`) skip system rules. Inbound HTTP adapters normally use `EntryType.IN`, so URL resources are covered.
+
+**Example.** Cap total inbound QPS at 20 and concurrent inbound threads at 10:
+
+```java
+SystemRule rule = new SystemRule();
+rule.setQps(20);
+rule.setMaxThread(10);
+// optional: rule.setAvgRt(50);
+// optional: rule.setHighestCpuUsage(0.8);
+// optional: rule.setHighestSystemLoad(3.0);  // Linux load average
+SystemRuleManager.loadRules(Collections.singletonList(rule));
+
+Entry entry = null;
+try {
+    entry = SphU.entry("getOrder", EntryType.IN);
+    // business
+} catch (SystemBlockException ex) {
+    // global inbound limit hit (threshold name in ex.getLimitType())
+} finally {
+    if (entry != null) {
+        entry.exit();
+    }
+}
+```
+
+`checkSystem` compares those shared totals to the rule:
+
+```java
+@Override
+public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node,
+                  int count, boolean prioritized, Object... args) throws Throwable {
+    SystemRuleManager.checkSystem(resourceWrapper, count);
+    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+}
+```
+
+```java
+public static void checkSystem(ResourceWrapper resourceWrapper, int count)
+        throws BlockException {
+    if (resourceWrapper.getEntryType() != EntryType.IN) {
+        return;
+    }
+    double currentQps = Constants.ENTRY_NODE.passQps();
+    if (currentQps + count > qps) {
+        throw new SystemBlockException(resourceWrapper.getName(), "qps");
+    }
+    int currentThread = Constants.ENTRY_NODE.curThreadNum();
+    if (currentThread > maxThread) {
+        throw new SystemBlockException(resourceWrapper.getName(), "thread");
+    }
+    // avgRt / load / cpu ...
+}
+```
+
+Unlike `FlowRule`, a `SystemRule` is not bound to one resource name: any inbound entry can be blocked once the process-wide window exceeds the threshold.
 
 ### 2.7 FlowSlot
 
@@ -1208,9 +1342,193 @@ It loads breakers from `DegradeRuleManager.getCircuitBreakers`. Entry uses `tryP
 
 ---
 
+## 3. Rolling window
 
+`StatisticSlot` writes into a `StatisticNode`. That node does not keep a single counter: it keeps a **leap array** of short buckets. Flow and system checks read the sum of buckets that are still inside the configured interval.
 
-## 3. Spring and Spring Cloud integration
+Each `StatisticNode` holds two `ArrayMetric` instances:
+
+| Field | Default | Role |
+|-------|---------|------|
+| `rollingCounterInSecond` | `sampleCount = 2`, `intervalInMs = 1000` | QPS / RT used by `passQps()` and most rules |
+| `rollingCounterInMinute` | 60 buckets × 1000 ms | Minute-level totals / dashboard |
+
+Defaults come from `SampleCountProperty.SAMPLE_COUNT` (2) and `IntervalProperty.INTERVAL` (1000 ms). So the live second window is two buckets of 500 ms. `passQps()` is `pass() / intervalInSecond` on the second metric only.
+
+```plantuml
+@startuml
+interface Metric {
+  +pass()
+  +addPass()
+  +block()
+  +addBlock()
+}
+
+class ArrayMetric {
+  -data : LeapArray<MetricBucket>
+  +pass()
+  +addPass()
+}
+
+abstract class LeapArray {
+  -windowLengthInMs : int
+  -sampleCount : int
+  -intervalInMs : int
+  -array : AtomicReferenceArray
+  +currentWindow()
+  +values()
+}
+
+class BucketLeapArray
+class OccupiableBucketLeapArray
+
+class WindowWrap {
+  -windowLengthInMs : long
+  -windowStart : long
+  -value : T
+}
+
+class MetricBucket {
+  -counters : LongAdder[]
+  +addPass()
+  +pass()
+}
+
+class StatisticNode {
+  -rollingCounterInSecond : Metric
+  -rollingCounterInMinute : Metric
+  +passQps()
+  +addPassRequest()
+}
+
+Metric <|.. ArrayMetric
+LeapArray <|-- BucketLeapArray
+LeapArray <|-- OccupiableBucketLeapArray
+ArrayMetric --> LeapArray : data
+LeapArray o--> WindowWrap : array
+WindowWrap --> MetricBucket : value
+StatisticNode --> ArrayMetric : rollingCounterInSecond
+StatisticNode --> ArrayMetric : rollingCounterInMinute
+@enduml
+```
+
+![LeapArray: two circular WindowWrap slots of 500 ms; write maps time to an index, read sums non-deprecated buckets for passQps](images/sentinel-leap-array.svg)
+
+The path from a recorded pass to a QPS read is four steps.
+
+**Step 1 — Record a pass on the node.** After rule slots admit the call, `StatisticSlot` calls `addPassRequest` on the `DefaultNode` (and related nodes). Both second- and minute-level metrics receive the same increment:
+
+```java
+// StatisticNode
+public void addPassRequest(int count) {
+    rollingCounterInSecond.addPass(count);
+    rollingCounterInMinute.addPass(count);
+}
+```
+
+**Step 2 — Resolve the bucket for “now” and increment.** `ArrayMetric.addPass` asks the leap array for the current `WindowWrap`, then adds to that bucket’s `LongAdder`:
+
+```java
+// ArrayMetric
+@Override
+public void addPass(int count) {
+    WindowWrap<MetricBucket> wrap = data.currentWindow();
+    wrap.value().addPass(count);
+}
+```
+
+**Step 3 — Map time to a circular slot.** `LeapArray.currentWindow(timeMillis)` computes the index and the bucket’s start, then creates, reuses, or resets that slot:
+
+```java
+// LeapArray
+private int calculateTimeIdx(long timeMillis) {
+    long timeId = timeMillis / windowLengthInMs;
+    return (int)(timeId % array.length());
+}
+
+protected long calculateWindowStart(long timeMillis) {
+    return timeMillis - timeMillis % windowLengthInMs;
+}
+
+public WindowWrap<T> currentWindow(long timeMillis) {
+    int idx = calculateTimeIdx(timeMillis);
+    long windowStart = calculateWindowStart(timeMillis);
+    while (true) {
+        WindowWrap<T> old = array.get(idx);
+        if (old == null) {
+            WindowWrap<T> window = new WindowWrap<T>(
+                windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+            if (array.compareAndSet(idx, null, window)) {
+                return window;                        // empty slot → create
+            }
+            Thread.yield();
+        } else if (windowStart == old.windowStart()) {
+            return old;                               // same bucket
+        } else if (windowStart > old.windowStart()) {
+            if (updateLock.tryLock()) {
+                try {
+                    return resetWindowTo(old, windowStart);  // deprecated → clear and reuse
+                } finally {
+                    updateLock.unlock();
+                }
+            }
+            Thread.yield();
+        } else {
+            return new WindowWrap<T>(windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+        }
+    }
+}
+```
+
+**Step 4 — Sum non-deprecated buckets and divide by the interval.** A later `FlowSlot` / `SystemSlot` read calls `passQps()`. That is `pass()` over `intervalInSecond` (1.0 for the default second metric). `pass()` first touches `currentWindow()` so the live slot exists, then sums only buckets that `values()` still considers valid:
+
+```java
+// StatisticNode
+public double passQps() {
+    return rollingCounterInSecond.pass() / rollingCounterInSecond.getWindowIntervalInSec();
+}
+```
+
+```java
+// ArrayMetric
+@Override
+public long pass() {
+    data.currentWindow();
+    long pass = 0;
+    List<MetricBucket> list = data.values();
+    for (MetricBucket window : list) {
+        pass += window.pass();
+    }
+    return pass;
+}
+```
+
+```java
+// LeapArray
+public List<T> values(long timeMillis) {
+    List<T> result = new ArrayList<T>(array.length());
+    for (int i = 0; i < array.length(); i++) {
+        WindowWrap<T> windowWrap = array.get(i);
+        if (windowWrap == null || isWindowDeprecated(timeMillis, windowWrap)) {
+            continue;
+        }
+        result.add(windowWrap.value());
+    }
+    return result;
+}
+
+public boolean isWindowDeprecated(long time, WindowWrap<T> windowWrap) {
+    return time - windowWrap.windowStart() > intervalInMs;
+}
+```
+
+A bucket whose `windowStart` is more than `intervalInMs` behind “now” is skipped. As time moves forward the oldest 500 ms drops out of `passQps` without scanning a queue.
+
+`FlowSlot` and `SystemSlot` therefore always see a recent window of prior passes, never a lifetime total. The comparison (step 4) and `addPassRequest` (step 1) are separate, so concurrent callers can briefly exceed the threshold.
+
+---
+
+## 4. Spring and Spring Cloud integration
 
 `spring-cloud-starter-alibaba-sentinel` registers the beans that turn Spring calls into `SphU.entry`. It does not replace `FlowSlot`. A rule still rejects a call by the QPS check in §2.7; the starter only chooses the resource name, opens the entry, and maps `BlockException` to an HTTP or fallback result.
 
@@ -1265,7 +1583,7 @@ SentinelWebInterceptor ..> SphU
 
 
 
-### 3.1 Inbound HTTP
+### 4.1 Inbound HTTP
 
 `SentinelWebMvcConfigurer` registers the interceptor for `spring.cloud.sentinel.filter.url-patterns`, which defaults to `/**`. On each request `preHandle` resolves the resource, enters a context, and opens an inbound entry. `BlockException` is handled and the interceptor returns false, so the controller method is not called.
 
@@ -1304,7 +1622,7 @@ sequenceDiagram
 
 The annotation on `getOrder` is a second entry, named `getOrder`, opened by `SentinelResourceAspect` only if the interceptor let the request through. A flow rule on `/api/order` and a flow rule on `getOrder` are checked separately.
 
-### 3.2 Outbound calls
+### 4.2 Outbound calls
 
 `SentinelFeignAutoConfiguration` replaces Feign's `Feign.Builder` only when `feign.sentinel.enabled` is true. `SentinelInvocationHandler` then enters an outbound resource before the HTTP client runs. The default resource name is the method, the target URL, and the path:
 
@@ -1321,7 +1639,7 @@ result = methodHandler.invoke(args);
 
 When Spring Cloud Gateway is on the classpath, `SentinelSCGAutoConfiguration` registers `SentinelGatewayFilter` unless `spring.cloud.sentinel.scg.enabled` is false. That filter is the gateway entry; route-level limits use gateway rules rather than a `FlowRule` on a controller name.
 
-### 3.3 Loading rules
+### 4.3 Loading rules
 
 `SentinelDataSourceHandler.afterSingletonsInstantiated` walks `spring.cloud.sentinel.datasource`. Each entry must select one source, such as `file` or `nacos`. The handler registers a `ReadableDataSource` bean and `postRegister` attaches its property to the manager for `rule-type`:
 
