@@ -726,7 +726,8 @@ Entry --&gt; ResourceWrapper : resourceWrapper
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> e;
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>On <strong>exit</strong>, <code>recordCompleteFor</code> writes RT and success (or exception QPS), decreases thread count, sets <code>completeTimestamp</code>, then <code>fireExit</code>. Circuit-breaker slots that run later on exit therefore see a completed timestamp.</p><p><code>ClusterNode</code> (via <code>StatisticNode</code>) stores pass counts in a sliding window. <code>passQps()</code> is the <code>pass</code> total of the live one-second window divided by the window length in seconds. The default window is 1000 ms split into two buckets of 500 ms. <code>ArrayMetric.pass()</code> sums buckets that are still inside that interval. The minute counter is updated together with the second counter, but <code>passQps()</code> reads only the one-second metric.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>double</span> <span style=color:#a6e22e>passQps</span>() {
+</span></span></code></pre></div><p>On <strong>exit</strong>, <code>recordCompleteFor</code> writes RT and success (or exception QPS), decreases thread count, sets <code>completeTimestamp</code>, then <code>fireExit</code>. Circuit-breaker slots that run later on exit therefore see a completed timestamp.</p><p><code>ClusterNode</code> (via <code>StatisticNode</code>) stores counters in rolling windows; <code>passQps()</code> and related reads are implemented in §3. Both the one-second and one-minute metrics are updated on pass:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StatisticNode</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>double</span> <span style=color:#a6e22e>passQps</span>() {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> rollingCounterInSecond.<span style=color:#a6e22e>pass</span>() <span style=color:#f92672>/</span> rollingCounterInSecond.<span style=color:#a6e22e>getWindowIntervalInSec</span>();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
@@ -734,7 +735,101 @@ Entry --&gt; ResourceWrapper : resourceWrapper
 </span></span><span style=display:flex><span>    rollingCounterInSecond.<span style=color:#a6e22e>addPass</span>(count);
 </span></span><span style=display:flex><span>    rollingCounterInMinute.<span style=color:#a6e22e>addPass</span>(count);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=25-authorityslot>2.5 AuthoritySlot</h3><p><code>AuthoritySlot</code> applies black/white origin rules (<code>AuthorityRule</code>) and blocks unauthorized callers.</p><p>It reads rules from <code>AuthorityRuleManager</code>. <code>AuthorityRuleChecker.passCheck</code> uses <code>context.getOrigin()</code>. Failure throws <code>AuthorityException</code>. Exit only <code>fireExit</code>.</p><h3 id=26-systemslot>2.6 SystemSlot</h3><p><code>SystemSlot</code> applies process-wide protection (<code>SystemRule</code>: load, inbound QPS, average RT, thread count, CPU).</p><p>It calls <code>SystemRuleManager.checkSystem</code>. Metrics come from <code>Constants.ENTRY_NODE</code>, not from the per-resource <code>DefaultNode</code>. Failure throws <code>SystemBlockException</code>. Exit only <code>fireExit</code>.</p><h3 id=27-flowslot>2.7 FlowSlot</h3><p><code>FlowSlot</code> applies per-resource flow rules (<code>FlowRule</code>: QPS or concurrency, strategy, and control behavior).</p><p><code>entry</code> runs <code>checkFlow</code> before <code>fireEntry</code>. A <code>FlowRule</code> selects one mode on each of three axes: what is counted, which node is measured, and what happens when the threshold is exceeded. The controller attached to the rule performs the comparison.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span></code></pre></div><h3 id=25-authorityslot>2.5 AuthoritySlot</h3><p><code>AuthoritySlot</code> applies black/white origin rules (<code>AuthorityRule</code>) and blocks unauthorized callers.</p><p>It reads rules from <code>AuthorityRuleManager</code>. <code>AuthorityRuleChecker.passCheck</code> uses <code>context.getOrigin()</code>. Failure throws <code>AuthorityException</code>. Exit only <code>fireExit</code>.</p><p>Origin comes from <code>ContextUtil.enter(name, origin)</code>, not from the resource string. Empty origin always passes. The slot does not authenticate the caller: any code that can call <code>enter</code> (or set origin from a client header / query arg) can supply a whitelist name such as <code>appA</code> and pass. Treat origin as an application-controlled label, not as proof of identity.</p><p><strong>Whitelist example.</strong> Only <code>appA</code> and <code>appE</code> may enter <code>getOrder</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>AuthorityRule rule <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AuthorityRule();
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setResource</span>(<span style=color:#e6db74>&#34;getOrder&#34;</span>);
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setStrategy</span>(RuleConstant.<span style=color:#a6e22e>AUTHORITY_WHITE</span>);
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setLimitApp</span>(<span style=color:#e6db74>&#34;appA,appE&#34;</span>);
+</span></span><span style=display:flex><span>AuthorityRuleManager.<span style=color:#a6e22e>loadRules</span>(Collections.<span style=color:#a6e22e>singletonList</span>(rule));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>ContextUtil.<span style=color:#a6e22e>enter</span>(<span style=color:#e6db74>&#34;orderEntrance&#34;</span>, <span style=color:#e6db74>&#34;appA&#34;</span>);
+</span></span><span style=display:flex><span>Entry entry <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>    entry <span style=color:#f92672>=</span> SphU.<span style=color:#a6e22e>entry</span>(<span style=color:#e6db74>&#34;getOrder&#34;</span>);   <span style=color:#75715e>// passes</span>
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>catch</span> (AuthorityException ex) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// blocked</span>
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (entry <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        entry.<span style=color:#a6e22e>exit</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    ContextUtil.<span style=color:#a6e22e>exit</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>ContextUtil.<span style=color:#a6e22e>enter</span>(<span style=color:#e6db74>&#34;orderEntrance&#34;</span>, <span style=color:#e6db74>&#34;appB&#34;</span>);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>    SphU.<span style=color:#a6e22e>entry</span>(<span style=color:#e6db74>&#34;getOrder&#34;</span>);           <span style=color:#75715e>// AuthorityException</span>
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>    ContextUtil.<span style=color:#a6e22e>exit</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Blacklist example.</strong> <code>appA</code> and <code>appB</code> are refused; other origins pass:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>AuthorityRule rule <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AuthorityRule();
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setResource</span>(<span style=color:#e6db74>&#34;getOrder&#34;</span>);
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setStrategy</span>(RuleConstant.<span style=color:#a6e22e>AUTHORITY_BLACK</span>);
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setLimitApp</span>(<span style=color:#e6db74>&#34;appA,appB&#34;</span>);
+</span></span><span style=display:flex><span>AuthorityRuleManager.<span style=color:#a6e22e>loadRules</span>(Collections.<span style=color:#a6e22e>singletonList</span>(rule));
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>entry</span>(Context context, ResourceWrapper resourceWrapper, DefaultNode node,
+</span></span><span style=display:flex><span>                  <span style=color:#66d9ef>int</span> count, <span style=color:#66d9ef>boolean</span> prioritized, Object... args) <span style=color:#66d9ef>throws</span> Throwable {
+</span></span><span style=display:flex><span>    checkBlackWhiteAuthority(resourceWrapper, context);
+</span></span><span style=display:flex><span>    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>checkBlackWhiteAuthority</span>(ResourceWrapper resource, Context context)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> AuthorityException {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>AuthorityRule<span style=color:#f92672>&gt;</span> rules <span style=color:#f92672>=</span> AuthorityRuleManager.<span style=color:#a6e22e>getRules</span>(resource.<span style=color:#a6e22e>getName</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (rules <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (AuthorityRule rule : rules) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>AuthorityRuleChecker.<span style=color:#a6e22e>passCheck</span>(rule, context)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> AuthorityException(context.<span style=color:#a6e22e>getOrigin</span>(), rule);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h3 id=26-systemslot>2.6 SystemSlot</h3><p><code>SystemSlot</code> applies process-wide protection (<code>SystemRule</code>: load, inbound QPS, average RT, thread count, CPU).</p><p>It calls <code>SystemRuleManager.checkSystem</code>. Metrics come from <code>Constants.ENTRY_NODE</code>, not from the per-resource <code>DefaultNode</code>. Failure throws <code>SystemBlockException</code>. Exit only <code>fireExit</code>.</p><p><code>SystemSlot</code> does not register or sum resources itself. There is one global <code>ClusterNode</code> (<code>Constants.ENTRY_NODE</code>). On every <strong>inbound</strong> pass, <code>StatisticSlot</code> (which calls <code>fireEntry</code> first, then writes metrics) adds to that node:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StatisticSlot — after Authority / System / Flow return</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (resourceWrapper.<span style=color:#a6e22e>getEntryType</span>() <span style=color:#f92672>==</span> EntryType.<span style=color:#a6e22e>IN</span>) {
+</span></span><span style=display:flex><span>    Constants.<span style=color:#a6e22e>ENTRY_NODE</span>.<span style=color:#a6e22e>increaseThreadNum</span>();
+</span></span><span style=display:flex><span>    Constants.<span style=color:#a6e22e>ENTRY_NODE</span>.<span style=color:#a6e22e>addPassRequest</span>(count);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>So <code>getOrder</code> and <code>/api/user</code> both feed the same counters when entered as <code>EntryType.IN</code>. <code>SystemRule</code> has no <code>resource</code> field: one threshold covers all inbound traffic. <code>SystemSlot</code> only <strong>reads</strong> <code>ENTRY_NODE</code> (plus CPU/load from the status listener) and may block the current inbound entry before this call’s pass is written.</p><p>The check runs only for <code>EntryType.IN</code>. Outbound entries (<code>EntryType.OUT</code>, the default of <code>SphU.entry(name)</code>) skip system rules. Inbound HTTP adapters normally use <code>EntryType.IN</code>, so URL resources are covered.</p><p><strong>Example.</strong> Cap total inbound QPS at 20 and concurrent inbound threads at 10:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>SystemRule rule <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> SystemRule();
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setQps</span>(20);
+</span></span><span style=display:flex><span>rule.<span style=color:#a6e22e>setMaxThread</span>(10);
+</span></span><span style=display:flex><span><span style=color:#75715e>// optional: rule.setAvgRt(50);</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// optional: rule.setHighestCpuUsage(0.8);</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// optional: rule.setHighestSystemLoad(3.0);  // Linux load average</span>
+</span></span><span style=display:flex><span>SystemRuleManager.<span style=color:#a6e22e>loadRules</span>(Collections.<span style=color:#a6e22e>singletonList</span>(rule));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Entry entry <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>    entry <span style=color:#f92672>=</span> SphU.<span style=color:#a6e22e>entry</span>(<span style=color:#e6db74>&#34;getOrder&#34;</span>, EntryType.<span style=color:#a6e22e>IN</span>);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// business</span>
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>catch</span> (SystemBlockException ex) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// global inbound limit hit (threshold name in ex.getLimitType())</span>
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (entry <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        entry.<span style=color:#a6e22e>exit</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>checkSystem</code> compares those shared totals to the rule:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>entry</span>(Context context, ResourceWrapper resourceWrapper, DefaultNode node,
+</span></span><span style=display:flex><span>                  <span style=color:#66d9ef>int</span> count, <span style=color:#66d9ef>boolean</span> prioritized, Object... args) <span style=color:#66d9ef>throws</span> Throwable {
+</span></span><span style=display:flex><span>    SystemRuleManager.<span style=color:#a6e22e>checkSystem</span>(resourceWrapper, count);
+</span></span><span style=display:flex><span>    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>checkSystem</span>(ResourceWrapper resourceWrapper, <span style=color:#66d9ef>int</span> count)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> BlockException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (resourceWrapper.<span style=color:#a6e22e>getEntryType</span>() <span style=color:#f92672>!=</span> EntryType.<span style=color:#a6e22e>IN</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>double</span> currentQps <span style=color:#f92672>=</span> Constants.<span style=color:#a6e22e>ENTRY_NODE</span>.<span style=color:#a6e22e>passQps</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (currentQps <span style=color:#f92672>+</span> count <span style=color:#f92672>&gt;</span> qps) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> SystemBlockException(resourceWrapper.<span style=color:#a6e22e>getName</span>(), <span style=color:#e6db74>&#34;qps&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> currentThread <span style=color:#f92672>=</span> Constants.<span style=color:#a6e22e>ENTRY_NODE</span>.<span style=color:#a6e22e>curThreadNum</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (currentThread <span style=color:#f92672>&gt;</span> maxThread) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> SystemBlockException(resourceWrapper.<span style=color:#a6e22e>getName</span>(), <span style=color:#e6db74>&#34;thread&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// avgRt / load / cpu ...</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Unlike <code>FlowRule</code>, a <code>SystemRule</code> is not bound to one resource name: any inbound entry can be blocked once the process-wide window exceeds the threshold.</p><h3 id=27-flowslot>2.7 FlowSlot</h3><p><code>FlowSlot</code> applies per-resource flow rules (<code>FlowRule</code>: QPS or concurrency, strategy, and control behavior).</p><p><code>entry</code> runs <code>checkFlow</code> before <code>fireEntry</code>. A <code>FlowRule</code> selects one mode on each of three axes: what is counted, which node is measured, and what happens when the threshold is exceeded. The controller attached to the rule performs the comparison.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>entry</span>(Context context, ResourceWrapper resourceWrapper, DefaultNode node,
 </span></span><span style=display:flex><span>                  <span style=color:#66d9ef>int</span> count, <span style=color:#66d9ef>boolean</span> prioritized, Object... args) <span style=color:#66d9ef>throws</span> Throwable {
 </span></span><span style=display:flex><span>    checkFlow(resourceWrapper, context, node, count, prioritized);
@@ -887,7 +982,141 @@ LeapArray o-- MetricBucket
 </span></span><span style=display:flex><span>    <span style=color:#75715e>// sleep until expectedTime, then pass</span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>WarmUpRateLimiterController</code> applies the warm-up ceiling first and then the same queue. <code>FlowRuleChecker</code> still selects the node before any of these <code>canPass</code> methods run, so relate mode and chain mode change which <code>ClusterNode</code> is passed in, not the arithmetic inside the controller.</p><h3 id=28-defaultcircuitbreakerslot>2.8 DefaultCircuitBreakerSlot</h3><p><code>DefaultCircuitBreakerSlot</code> runs Sentinel’s default circuit breakers when the resource has no degrade configuration.</p><p>It uses breakers from <code>DefaultCircuitBreakerRuleManager</code>. On entry, <code>CircuitBreaker.tryPass</code>; on exit, <code>onRequestComplete</code> if the entry was not blocked. Skipped when <code>DegradeRuleManager.hasConfig</code> is true for the resource.</p><h3 id=29-degradeslot>2.9 DegradeSlot</h3><p><code>DegradeSlot</code> runs resource-specific circuit breakers (<code>DegradeRule</code>) and samples completed requests on exit.</p><p>It loads breakers from <code>DegradeRuleManager.getCircuitBreakers</code>. Entry uses <code>tryPass</code>; exit calls <code>onRequestComplete</code> only when <code>curEntry.getBlockError()</code> is null, so a flow/authority/system block does not count as a completed sample for degrade.</p><hr><h2 id=3-spring-and-spring-cloud-integration>3. Spring and Spring Cloud integration</h2><p><code>spring-cloud-starter-alibaba-sentinel</code> registers the beans that turn Spring calls into <code>SphU.entry</code>. It does not replace <code>FlowSlot</code>. A rule still rejects a call by the QPS check in §2.7; the starter only chooses the resource name, opens the entry, and maps <code>BlockException</code> to an HTTP or fallback result.</p><p><code>SentinelAutoConfiguration</code> is active when <code>spring.cloud.sentinel.enabled</code> is true or omitted. It exposes <code>SentinelResourceAspect</code> and <code>SentinelDataSourceHandler</code>. On a servlet application, <code>SentinelWebAutoConfiguration</code> adds <code>SentinelWebInterceptor</code> when <code>spring.cloud.sentinel.filter.enabled</code> is true or omitted. Feign and Spring Cloud Gateway are separate switches.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p><code>WarmUpRateLimiterController</code> applies the warm-up ceiling first and then the same queue. <code>FlowRuleChecker</code> still selects the node before any of these <code>canPass</code> methods run, so relate mode and chain mode change which <code>ClusterNode</code> is passed in, not the arithmetic inside the controller.</p><h3 id=28-defaultcircuitbreakerslot>2.8 DefaultCircuitBreakerSlot</h3><p><code>DefaultCircuitBreakerSlot</code> runs Sentinel’s default circuit breakers when the resource has no degrade configuration.</p><p>It uses breakers from <code>DefaultCircuitBreakerRuleManager</code>. On entry, <code>CircuitBreaker.tryPass</code>; on exit, <code>onRequestComplete</code> if the entry was not blocked. Skipped when <code>DegradeRuleManager.hasConfig</code> is true for the resource.</p><h3 id=29-degradeslot>2.9 DegradeSlot</h3><p><code>DegradeSlot</code> runs resource-specific circuit breakers (<code>DegradeRule</code>) and samples completed requests on exit.</p><p>It loads breakers from <code>DegradeRuleManager.getCircuitBreakers</code>. Entry uses <code>tryPass</code>; exit calls <code>onRequestComplete</code> only when <code>curEntry.getBlockError()</code> is null, so a flow/authority/system block does not count as a completed sample for degrade.</p><hr><h2 id=3-rolling-window>3. Rolling window</h2><p><code>StatisticSlot</code> writes into a <code>StatisticNode</code>. That node does not keep a single counter: it keeps a <strong>leap array</strong> of short buckets. Flow and system checks read the sum of buckets that are still inside the configured interval.</p><p>Each <code>StatisticNode</code> holds two <code>ArrayMetric</code> instances:</p><table><thead><tr><th>Field</th><th>Default</th><th>Role</th></tr></thead><tbody><tr><td><code>rollingCounterInSecond</code></td><td><code>sampleCount = 2</code>, <code>intervalInMs = 1000</code></td><td>QPS / RT used by <code>passQps()</code> and most rules</td></tr><tr><td><code>rollingCounterInMinute</code></td><td>60 buckets × 1000 ms</td><td>Minute-level totals / dashboard</td></tr></tbody></table><p>Defaults come from <code>SampleCountProperty.SAMPLE_COUNT</code> (2) and <code>IntervalProperty.INTERVAL</code> (1000 ms). So the live second window is two buckets of 500 ms. <code>passQps()</code> is <code>pass() / intervalInSecond</code> on the second metric only.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface Metric {
+  +pass()
+  +addPass()
+  +block()
+  +addBlock()
+}
+
+class ArrayMetric {
+  -data : LeapArray&lt;MetricBucket&gt;
+  +pass()
+  +addPass()
+}
+
+abstract class LeapArray {
+  -windowLengthInMs : int
+  -sampleCount : int
+  -intervalInMs : int
+  -array : AtomicReferenceArray
+  +currentWindow()
+  +values()
+}
+
+class BucketLeapArray
+class OccupiableBucketLeapArray
+
+class WindowWrap {
+  -windowLengthInMs : long
+  -windowStart : long
+  -value : T
+}
+
+class MetricBucket {
+  -counters : LongAdder[]
+  +addPass()
+  +pass()
+}
+
+class StatisticNode {
+  -rollingCounterInSecond : Metric
+  -rollingCounterInMinute : Metric
+  +passQps()
+  +addPassRequest()
+}
+
+Metric &lt;|.. ArrayMetric
+LeapArray &lt;|-- BucketLeapArray
+LeapArray &lt;|-- OccupiableBucketLeapArray
+ArrayMetric --&gt; LeapArray : data
+LeapArray o--&gt; WindowWrap : array
+WindowWrap --&gt; MetricBucket : value
+StatisticNode --&gt; ArrayMetric : rollingCounterInSecond
+StatisticNode --&gt; ArrayMetric : rollingCounterInMinute
+@enduml
+</code></pre><p><img src=https://kevinwang930.github.io/post/java/spring-cloud/sentinel/images/sentinel-leap-array.svg alt="LeapArray: two circular WindowWrap slots of 500 ms; write maps time to an index, read sums non-deprecated buckets for passQps"></p><p>The path from a recorded pass to a QPS read is four steps.</p><p><strong>Step 1 — Record a pass on the node.</strong> After rule slots admit the call, <code>StatisticSlot</code> calls <code>addPassRequest</code> on the <code>DefaultNode</code> (and related nodes). Both second- and minute-level metrics receive the same increment:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StatisticNode</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>addPassRequest</span>(<span style=color:#66d9ef>int</span> count) {
+</span></span><span style=display:flex><span>    rollingCounterInSecond.<span style=color:#a6e22e>addPass</span>(count);
+</span></span><span style=display:flex><span>    rollingCounterInMinute.<span style=color:#a6e22e>addPass</span>(count);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Step 2 — Resolve the bucket for “now” and increment.</strong> <code>ArrayMetric.addPass</code> asks the leap array for the current <code>WindowWrap</code>, then adds to that bucket’s <code>LongAdder</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ArrayMetric</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>addPass</span>(<span style=color:#66d9ef>int</span> count) {
+</span></span><span style=display:flex><span>    WindowWrap<span style=color:#f92672>&lt;</span>MetricBucket<span style=color:#f92672>&gt;</span> wrap <span style=color:#f92672>=</span> data.<span style=color:#a6e22e>currentWindow</span>();
+</span></span><span style=display:flex><span>    wrap.<span style=color:#a6e22e>value</span>().<span style=color:#a6e22e>addPass</span>(count);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Step 3 — Map time to a circular slot.</strong> <code>LeapArray.currentWindow(timeMillis)</code> computes the index and the bucket’s start, then creates, reuses, or resets that slot:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LeapArray</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>calculateTimeIdx</span>(<span style=color:#66d9ef>long</span> timeMillis) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>long</span> timeId <span style=color:#f92672>=</span> timeMillis <span style=color:#f92672>/</span> windowLengthInMs;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> (<span style=color:#66d9ef>int</span>)(timeId <span style=color:#f92672>%</span> array.<span style=color:#a6e22e>length</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>long</span> <span style=color:#a6e22e>calculateWindowStart</span>(<span style=color:#66d9ef>long</span> timeMillis) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> timeMillis <span style=color:#f92672>-</span> timeMillis <span style=color:#f92672>%</span> windowLengthInMs;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>currentWindow</span>(<span style=color:#66d9ef>long</span> timeMillis) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> idx <span style=color:#f92672>=</span> calculateTimeIdx(timeMillis);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>long</span> windowStart <span style=color:#f92672>=</span> calculateWindowStart(timeMillis);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>while</span> (<span style=color:#66d9ef>true</span>) {
+</span></span><span style=display:flex><span>        WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> old <span style=color:#f92672>=</span> array.<span style=color:#a6e22e>get</span>(idx);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (old <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> window <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>(
+</span></span><span style=display:flex><span>                windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (array.<span style=color:#a6e22e>compareAndSet</span>(idx, <span style=color:#66d9ef>null</span>, window)) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> window;                        <span style=color:#75715e>// empty slot → create</span>
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            Thread.<span style=color:#a6e22e>yield</span>();
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (windowStart <span style=color:#f92672>==</span> old.<span style=color:#a6e22e>windowStart</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> old;                               <span style=color:#75715e>// same bucket</span>
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (windowStart <span style=color:#f92672>&gt;</span> old.<span style=color:#a6e22e>windowStart</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (updateLock.<span style=color:#a6e22e>tryLock</span>()) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> resetWindowTo(old, windowStart);  <span style=color:#75715e>// deprecated → clear and reuse</span>
+</span></span><span style=display:flex><span>                } <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>                    updateLock.<span style=color:#a6e22e>unlock</span>();
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            Thread.<span style=color:#a6e22e>yield</span>();
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>(windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><strong>Step 4 — Sum non-deprecated buckets and divide by the interval.</strong> A later <code>FlowSlot</code> / <code>SystemSlot</code> read calls <code>passQps()</code>. That is <code>pass()</code> over <code>intervalInSecond</code> (1.0 for the default second metric). <code>pass()</code> first touches <code>currentWindow()</code> so the live slot exists, then sums only buckets that <code>values()</code> still considers valid:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StatisticNode</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>double</span> <span style=color:#a6e22e>passQps</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> rollingCounterInSecond.<span style=color:#a6e22e>pass</span>() <span style=color:#f92672>/</span> rollingCounterInSecond.<span style=color:#a6e22e>getWindowIntervalInSec</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ArrayMetric</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>long</span> <span style=color:#a6e22e>pass</span>() {
+</span></span><span style=display:flex><span>    data.<span style=color:#a6e22e>currentWindow</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>long</span> pass <span style=color:#f92672>=</span> 0;
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>MetricBucket<span style=color:#f92672>&gt;</span> list <span style=color:#f92672>=</span> data.<span style=color:#a6e22e>values</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (MetricBucket window : list) {
+</span></span><span style=display:flex><span>        pass <span style=color:#f92672>+=</span> window.<span style=color:#a6e22e>pass</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> pass;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LeapArray</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> List<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>values</span>(<span style=color:#66d9ef>long</span> timeMillis) {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> result <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>(array.<span style=color:#a6e22e>length</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> array.<span style=color:#a6e22e>length</span>(); i<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>        WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> windowWrap <span style=color:#f92672>=</span> array.<span style=color:#a6e22e>get</span>(i);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (windowWrap <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>||</span> isWindowDeprecated(timeMillis, windowWrap)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        result.<span style=color:#a6e22e>add</span>(windowWrap.<span style=color:#a6e22e>value</span>());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>isWindowDeprecated</span>(<span style=color:#66d9ef>long</span> time, WindowWrap<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> windowWrap) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> time <span style=color:#f92672>-</span> windowWrap.<span style=color:#a6e22e>windowStart</span>() <span style=color:#f92672>&gt;</span> intervalInMs;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A bucket whose <code>windowStart</code> is more than <code>intervalInMs</code> behind “now” is skipped. As time moves forward the oldest 500 ms drops out of <code>passQps</code> without scanning a queue.</p><p><code>FlowSlot</code> and <code>SystemSlot</code> therefore always see a recent window of prior passes, never a lifetime total. The comparison (step 4) and <code>addPassRequest</code> (step 1) are separate, so concurrent callers can briefly exceed the threshold.</p><hr><h2 id=4-spring-and-spring-cloud-integration>4. Spring and Spring Cloud integration</h2><p><code>spring-cloud-starter-alibaba-sentinel</code> registers the beans that turn Spring calls into <code>SphU.entry</code>. It does not replace <code>FlowSlot</code>. A rule still rejects a call by the QPS check in §2.7; the starter only chooses the resource name, opens the entry, and maps <code>BlockException</code> to an HTTP or fallback result.</p><p><code>SentinelAutoConfiguration</code> is active when <code>spring.cloud.sentinel.enabled</code> is true or omitted. It exposes <code>SentinelResourceAspect</code> and <code>SentinelDataSourceHandler</code>. On a servlet application, <code>SentinelWebAutoConfiguration</code> adds <code>SentinelWebInterceptor</code> when <code>spring.cloud.sentinel.filter.enabled</code> is true or omitted. Feign and Spring Cloud Gateway are separate switches.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 class SentinelAutoConfiguration {
   sentinelResourceAspect()
   sentinelDataSourceHandler()
@@ -931,7 +1160,7 @@ SentinelDataSourceHandler ..&gt; FlowRuleManager
 SentinelResourceAspect ..&gt; SphU
 SentinelWebInterceptor ..&gt; SphU
 @enduml
-</code></pre><h3 id=31-inbound-http>3.1 Inbound HTTP</h3><p><code>SentinelWebMvcConfigurer</code> registers the interceptor for <code>spring.cloud.sentinel.filter.url-patterns</code>, which defaults to <code>/**</code>. On each request <code>preHandle</code> resolves the resource, enters a context, and opens an inbound entry. <code>BlockException</code> is handled and the interceptor returns false, so the controller method is not called.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String resourceName <span style=color:#f92672>=</span> getResourceName(request);
+</code></pre><h3 id=41-inbound-http>4.1 Inbound HTTP</h3><p><code>SentinelWebMvcConfigurer</code> registers the interceptor for <code>spring.cloud.sentinel.filter.url-patterns</code>, which defaults to <code>/**</code>. On each request <code>preHandle</code> resolves the resource, enters a context, and opens an inbound entry. <code>BlockException</code> is handled and the interceptor returns false, so the controller method is not called.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String resourceName <span style=color:#f92672>=</span> getResourceName(request);
 </span></span><span style=display:flex><span>String origin <span style=color:#f92672>=</span> parseOrigin(request);
 </span></span><span style=display:flex><span>ContextUtil.<span style=color:#a6e22e>enter</span>(contextName, origin);
 </span></span><span style=display:flex><span>Entry entry <span style=color:#f92672>=</span> SphU.<span style=color:#a6e22e>entry</span>(resourceName, ResourceTypeConstants.<span style=color:#a6e22e>COMMON_WEB</span>, EntryType.<span style=color:#a6e22e>IN</span>);
@@ -952,11 +1181,11 @@ SentinelWebInterceptor ..&gt; SphU
         FlowSlot--&gt;&gt;SentinelWebInterceptor: FlowException
         SentinelWebInterceptor--&gt;&gt;Client: 429, controller not called
     end
-</code></pre><p>The annotation on <code>getOrder</code> is a second entry, named <code>getOrder</code>, opened by <code>SentinelResourceAspect</code> only if the interceptor let the request through. A flow rule on <code>/api/order</code> and a flow rule on <code>getOrder</code> are checked separately.</p><h3 id=32-outbound-calls>3.2 Outbound calls</h3><p><code>SentinelFeignAutoConfiguration</code> replaces Feign&rsquo;s <code>Feign.Builder</code> only when <code>feign.sentinel.enabled</code> is true. <code>SentinelInvocationHandler</code> then enters an outbound resource before the HTTP client runs. The default resource name is the method, the target URL, and the path:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String resourceName <span style=color:#f92672>=</span> method <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;:&#34;</span> <span style=color:#f92672>+</span> hardCodedTarget.<span style=color:#a6e22e>url</span>() <span style=color:#f92672>+</span> template.<span style=color:#a6e22e>path</span>();
+</code></pre><p>The annotation on <code>getOrder</code> is a second entry, named <code>getOrder</code>, opened by <code>SentinelResourceAspect</code> only if the interceptor let the request through. A flow rule on <code>/api/order</code> and a flow rule on <code>getOrder</code> are checked separately.</p><h3 id=42-outbound-calls>4.2 Outbound calls</h3><p><code>SentinelFeignAutoConfiguration</code> replaces Feign&rsquo;s <code>Feign.Builder</code> only when <code>feign.sentinel.enabled</code> is true. <code>SentinelInvocationHandler</code> then enters an outbound resource before the HTTP client runs. The default resource name is the method, the target URL, and the path:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String resourceName <span style=color:#f92672>=</span> method <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;:&#34;</span> <span style=color:#f92672>+</span> hardCodedTarget.<span style=color:#a6e22e>url</span>() <span style=color:#f92672>+</span> template.<span style=color:#a6e22e>path</span>();
 </span></span><span style=display:flex><span>ContextUtil.<span style=color:#a6e22e>enter</span>(resourceName);
 </span></span><span style=display:flex><span>entry <span style=color:#f92672>=</span> SphU.<span style=color:#a6e22e>entry</span>(resourceName, EntryType.<span style=color:#a6e22e>OUT</span>, 1, args);
 </span></span><span style=display:flex><span>result <span style=color:#f92672>=</span> methodHandler.<span style=color:#a6e22e>invoke</span>(args);
-</span></span></code></pre></div><p><code>EntryType.OUT</code> marks the call as outbound. The QPS rule still has to use this resource string. A <code>fallbackFactory</code> on the Feign client is invoked when the entry is blocked.</p><p><code>RestTemplate</code> is not wrapped globally. <code>SentinelBeanPostProcessor</code> adds an interceptor only to beans annotated with <code>@SentinelRestTemplate</code>, and only when <code>resttemplate.sentinel.enabled</code> is true or omitted.</p><p>When Spring Cloud Gateway is on the classpath, <code>SentinelSCGAutoConfiguration</code> registers <code>SentinelGatewayFilter</code> unless <code>spring.cloud.sentinel.scg.enabled</code> is false. That filter is the gateway entry; route-level limits use gateway rules rather than a <code>FlowRule</code> on a controller name.</p><h3 id=33-loading-rules>3.3 Loading rules</h3><p><code>SentinelDataSourceHandler.afterSingletonsInstantiated</code> walks <code>spring.cloud.sentinel.datasource</code>. Each entry must select one source, such as <code>file</code> or <code>nacos</code>. The handler registers a <code>ReadableDataSource</code> bean and <code>postRegister</code> attaches its property to the manager for <code>rule-type</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>switch</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getRuleType</span>()) {
+</span></span></code></pre></div><p><code>EntryType.OUT</code> marks the call as outbound. The QPS rule still has to use this resource string. A <code>fallbackFactory</code> on the Feign client is invoked when the entry is blocked.</p><p><code>RestTemplate</code> is not wrapped globally. <code>SentinelBeanPostProcessor</code> adds an interceptor only to beans annotated with <code>@SentinelRestTemplate</code>, and only when <code>resttemplate.sentinel.enabled</code> is true or omitted.</p><p>When Spring Cloud Gateway is on the classpath, <code>SentinelSCGAutoConfiguration</code> registers <code>SentinelGatewayFilter</code> unless <code>spring.cloud.sentinel.scg.enabled</code> is false. That filter is the gateway entry; route-level limits use gateway rules rather than a <code>FlowRule</code> on a controller name.</p><h3 id=43-loading-rules>4.3 Loading rules</h3><p><code>SentinelDataSourceHandler.afterSingletonsInstantiated</code> walks <code>spring.cloud.sentinel.datasource</code>. Each entry must select one source, such as <code>file</code> or <code>nacos</code>. The handler registers a <code>ReadableDataSource</code> bean and <code>postRegister</code> attaches its property to the manager for <code>rule-type</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>switch</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getRuleType</span>()) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> FLOW <span style=color:#f92672>-&gt;</span> FlowRuleManager.<span style=color:#a6e22e>register2Property</span>(dataSource.<span style=color:#a6e22e>getProperty</span>());
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> DEGRADE <span style=color:#f92672>-&gt;</span> DegradeRuleManager.<span style=color:#a6e22e>register2Property</span>(dataSource.<span style=color:#a6e22e>getProperty</span>());
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> SYSTEM <span style=color:#f92672>-&gt;</span> SystemRuleManager.<span style=color:#a6e22e>register2Property</span>(dataSource.<span style=color:#a6e22e>getProperty</span>());

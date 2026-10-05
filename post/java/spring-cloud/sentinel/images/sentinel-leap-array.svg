@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="840" viewBox="0 0 1040 840" role="img" aria-label="Sentinel LeapArray: circular array indices wrap with time; write maps time to an index, read sums non-deprecated buckets for passQps">
+  <defs>
+    <marker id="la-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+    <marker id="la-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#1565c0"/>
+    </marker>
+    <marker id="la-arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2e7d32"/>
+    </marker>
+    <marker id="la-arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef6c00"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="840" fill="#f7f9fb"/>
+  <text x="520" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">LeapArray rolling window (default second metric)</text>
+  <text x="520" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#607d8b">sampleCount = 2, intervalInMs = 1000  =&gt;  windowLengthInMs = 500; idx = (t / 500) % 2 wraps on a circular array</text>
+
+  <!-- Panel: structure with circular array -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="24" y="64" width="992" height="260" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="40" y="90" font-size="13" font-weight="700" fill="#37474f">1. Circular array of indices</text>
+    <text x="230" y="90" font-family="Consolas, monospace" font-size="11" fill="#607d8b">AtomicReferenceArray&lt;WindowWrap&gt; length = sampleCount</text>
+
+    <!-- LeapArray box -->
+    <rect x="40" y="112" width="170" height="172" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="125" y="138" text-anchor="middle" font-size="12" font-weight="700" fill="#0d47a1">LeapArray</text>
+    <text x="56" y="164" font-family="Consolas, monospace" font-size="11" fill="#1565c0">sampleCount = 2</text>
+    <text x="56" y="184" font-family="Consolas, monospace" font-size="11" fill="#1565c0">intervalInMs = 1000</text>
+    <text x="56" y="204" font-family="Consolas, monospace" font-size="11" fill="#1565c0">windowLength = 500</text>
+    <text x="56" y="232" font-size="11" fill="#607d8b">currentWindow()</text>
+    <text x="56" y="250" font-size="11" fill="#607d8b">values()</text>
+
+    <line x1="210" y1="198" x2="268" y2="198" stroke="#1565c0" stroke-width="1.5" marker-end="url(#la-arr-blue)"/>
+    <text x="222" y="188" font-size="10" fill="#1565c0">array</text>
+
+    <!-- Circular ring centered at (360, 200): outer 78, inner 42 -->
+    <!-- [0] = upper half, [1] = lower half -->
+    <path d="M 282 200 A 78 78 0 0 1 438 200 L 402 200 A 42 42 0 0 0 318 200 Z"
+          fill="#c8e6c9" stroke="#2e7d32" stroke-width="1.8"/>
+    <path d="M 438 200 A 78 78 0 0 1 282 200 L 318 200 A 42 42 0 0 0 402 200 Z"
+          fill="#bbdefb" stroke="#1565c0" stroke-width="1.8"/>
+
+    <!-- Wrap arrow OUTSIDE the ring (clears outer r=78) -->
+    <path d="M 250 170 Q 360 30 470 170" fill="none" stroke="#ef6c00" stroke-width="2.6"
+          stroke-linecap="round" marker-end="url(#la-arr-orange)"/>
+
+    <!-- center label -->
+    <circle cx="360" cy="200" r="34" fill="#ffffff" stroke="#90a4ae" stroke-width="1.2"/>
+    <text x="360" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#37474f">% 2</text>
+    <text x="360" y="212" text-anchor="middle" font-size="10" fill="#607d8b">circular</text>
+
+    <!-- idx labels on ring mid-radius -->
+    <text x="360" y="155" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#1b5e20">[0]</text>
+    <text x="360" y="255" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#0d47a1">[1]</text>
+
+    <text x="360" y="310" text-anchor="middle" font-size="11" font-weight="700" fill="#ef6c00">time advances: idx 0 -&gt; 1 -&gt; 0 ...</text>
+
+    <!-- spokes from ring midpoints to WindowWraps -->
+    <line x1="418" y1="155" x2="520" y2="132" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#la-arr-green)"/>
+    <line x1="418" y1="245" x2="520" y2="252" stroke="#1565c0" stroke-width="1.4" marker-end="url(#la-arr-blue)"/>
+
+    <!-- WindowWrap 0 -->
+    <rect x="524" y="100" width="200" height="64" rx="6" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="624" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">WindowWrap [0]</text>
+    <text x="540" y="144" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">windowStart (aligned)</text>
+    <text x="540" y="160" font-family="Consolas, monospace" font-size="11" fill="#2e7d32">length = 500 ms</text>
+
+    <!-- WindowWrap 1 -->
+    <rect x="524" y="220" width="200" height="64" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="624" y="242" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">WindowWrap [1]</text>
+    <text x="540" y="264" font-family="Consolas, monospace" font-size="11" fill="#1565c0">windowStart (aligned)</text>
+    <text x="540" y="280" font-family="Consolas, monospace" font-size="11" fill="#1565c0">length = 500 ms</text>
+
+    <line x1="724" y1="132" x2="760" y2="132" stroke="#2e7d32" stroke-width="1.4" marker-end="url(#la-arr-green)"/>
+    <line x1="724" y1="252" x2="760" y2="252" stroke="#1565c0" stroke-width="1.4" marker-end="url(#la-arr-blue)"/>
+    <text x="732" y="122" font-size="10" fill="#2e7d32">value</text>
+    <text x="732" y="242" font-size="10" fill="#1565c0">value</text>
+
+    <!-- MetricBuckets -->
+    <rect x="764" y="100" width="130" height="64" rx="6" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.5"/>
+    <text x="829" y="124" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">MetricBucket</text>
+    <text x="829" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">pass LongAdder</text>
+
+    <rect x="764" y="220" width="130" height="64" rx="6" fill="#fff8e1" stroke="#ef6c00" stroke-width="1.5"/>
+    <text x="829" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">MetricBucket</text>
+    <text x="829" y="264" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#ef6c00">pass LongAdder</text>
+
+    <!-- map formula -->
+    <rect x="910" y="130" width="90" height="140" rx="6" fill="#fafafa" stroke="#b0bec5"/>
+    <text x="955" y="156" text-anchor="middle" font-size="11" font-weight="700" fill="#37474f">Map t</text>
+    <text x="955" y="182" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">idx =</text>
+    <text x="955" y="200" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">(t/500)</text>
+    <text x="955" y="216" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#ef6c00">% 2</text>
+    <text x="955" y="242" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">start =</text>
+    <text x="955" y="258" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#546e7a">t-t%500</text>
+  </g>
+
+  <!-- Panel: t = 800 -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="24" y="340" width="992" height="210" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="40" y="366" font-size="13" font-weight="700" fill="#37474f">2. Write then read at t = 800</text>
+    <text x="280" y="366" font-family="Consolas, monospace" font-size="11" fill="#607d8b">idx=(800/500)%2=0; both slots still valid</text>
+
+    <!-- mini circular index: now points at [0] but both live -->
+    <g transform="translate(70, 442)">
+      <path d="M -36 0 A 36 36 0 0 1 36 0 L 20 0 A 20 20 0 0 0 -20 0 Z"
+            fill="#c8e6c9" stroke="#2e7d32" stroke-width="1.5"/>
+      <path d="M 36 0 A 36 36 0 0 1 -36 0 L -20 0 A 20 20 0 0 0 20 0 Z"
+            fill="#bbdefb" stroke="#1565c0" stroke-width="1.5"/>
+      <!-- wrap arrow OUTSIDE mini ring (clears outer r=36) -->
+      <path d="M -55 10 Q 0 -110 55 10" fill="none" stroke="#ef6c00" stroke-width="2.2"
+            stroke-linecap="round" marker-end="url(#la-arr-orange)"/>
+      <circle cx="0" cy="0" r="16" fill="#ffffff" stroke="#c62828" stroke-width="2"/>
+      <text x="0" y="4" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#c62828">now</text>
+      <text x="0" y="-18" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1b5e20">0</text>
+      <text x="0" y="28" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">1</text>
+      <text x="0" y="62" text-anchor="middle" font-size="10" fill="#607d8b">ring</text>
+    </g>
+
+    <!-- time axis -->
+    <line x1="160" y1="442" x2="900" y2="442" stroke="#37474f" stroke-width="1.5" marker-end="url(#la-arr)"/>
+    <text x="920" y="446" font-size="11" fill="#37474f">time</text>
+
+    <line x1="200" y1="434" x2="200" y2="450" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="420" y1="434" x2="420" y2="450" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="640" y1="434" x2="640" y2="450" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="860" y1="434" x2="860" y2="450" stroke="#90a4ae" stroke-width="1.2"/>
+
+    <text x="200" y="470" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">0</text>
+    <text x="420" y="470" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">500</text>
+    <text x="640" y="470" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">1000</text>
+    <text x="860" y="470" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#90a4ae">1500</text>
+
+    <rect x="200" y="390" width="220" height="44" rx="4" fill="#c8e6c9" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="310" y="410" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">[0] pass = 12</text>
+    <text x="310" y="426" text-anchor="middle" font-size="10" fill="#2e7d32">windowStart = 0</text>
+
+    <rect x="420" y="390" width="220" height="44" rx="4" fill="#bbdefb" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="530" y="410" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">[1] pass = 8</text>
+    <text x="530" y="426" text-anchor="middle" font-size="10" fill="#1565c0">windowStart = 500</text>
+
+    <line x1="552" y1="382" x2="552" y2="452" stroke="#c62828" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="552" y="376" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">now = 800</text>
+
+    <rect x="160" y="486" width="820" height="48" rx="6" fill="#e8f5e9" stroke="#2e7d32"/>
+    <text x="180" y="506" font-family="Consolas, monospace" font-size="12" fill="#1b5e20">values() keeps both ring slots (800-0=800, 800-500=300 &lt;= 1000)</text>
+    <text x="180" y="526" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1b5e20">pass() = 12 + 8 = 20    passQps() = 20 / 1.0 = 20</text>
+  </g>
+
+  <!-- Panel: t = 1100 -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="24" y="566" width="992" height="248" rx="8" fill="#ffffff" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="40" y="592" font-size="13" font-weight="700" fill="#37474f">3. Wrap at t = 1100</text>
+    <text x="220" y="592" font-family="Consolas, monospace" font-size="11" fill="#607d8b">idx=(1100/500)%2=0 again -&gt; reuse [0], resetWindowTo(start=1000)</text>
+
+    <!-- mini circular index: highlight wrap back to [0] -->
+    <g transform="translate(70, 672)">
+      <path d="M -36 0 A 36 36 0 0 1 36 0 L 20 0 A 20 20 0 0 0 -20 0 Z"
+            fill="#fff3e0" stroke="#ef6c00" stroke-width="2.5"/>
+      <path d="M 36 0 A 36 36 0 0 1 -36 0 L -20 0 A 20 20 0 0 0 20 0 Z"
+            fill="#bbdefb" stroke="#1565c0" stroke-width="1.5"/>
+      <!-- wrap arrow OUTSIDE mini ring (clears outer r=36) -->
+      <path d="M -55 10 Q 0 -110 55 10" fill="none" stroke="#ef6c00" stroke-width="2.2"
+            stroke-linecap="round" marker-end="url(#la-arr-orange)"/>
+      <circle cx="0" cy="0" r="16" fill="#ffffff" stroke="#c62828" stroke-width="2"/>
+      <text x="0" y="4" text-anchor="middle" font-family="Consolas, monospace" font-size="10" font-weight="700" fill="#c62828">now</text>
+      <text x="0" y="-18" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#e65100">0</text>
+      <text x="0" y="28" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#0d47a1">1</text>
+      <text x="0" y="62" text-anchor="middle" font-size="10" fill="#ef6c00">wrap to [0]</text>
+    </g>
+
+    <line x1="160" y1="672" x2="900" y2="672" stroke="#37474f" stroke-width="1.5" marker-end="url(#la-arr)"/>
+    <text x="920" y="676" font-size="11" fill="#37474f">time</text>
+
+    <line x1="200" y1="664" x2="200" y2="680" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="420" y1="664" x2="420" y2="680" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="640" y1="664" x2="640" y2="680" stroke="#37474f" stroke-width="1.5"/>
+    <line x1="860" y1="664" x2="860" y2="680" stroke="#37474f" stroke-width="1.5"/>
+
+    <text x="200" y="700" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">0</text>
+    <text x="420" y="700" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">500</text>
+    <text x="640" y="700" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">1000</text>
+    <text x="860" y="700" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#546e7a">1500</text>
+
+    <rect x="200" y="620" width="220" height="44" rx="4" fill="#eceff1" stroke="#90a4ae" stroke-width="1.2" stroke-dasharray="5 4"/>
+    <text x="310" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#78909c">old [0] pass=12</text>
+    <text x="310" y="656" text-anchor="middle" font-size="10" fill="#90a4ae">cleared on reuse</text>
+
+    <rect x="420" y="620" width="220" height="44" rx="4" fill="#bbdefb" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="530" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">[1] pass = 8</text>
+    <text x="530" y="656" text-anchor="middle" font-size="10" fill="#1565c0">windowStart = 500</text>
+
+    <rect x="640" y="620" width="220" height="44" rx="4" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.5"/>
+    <text x="750" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#e65100">[0] pass = 1</text>
+    <text x="750" y="656" text-anchor="middle" font-size="10" fill="#ef6c00">reset windowStart = 1000</text>
+
+    <line x1="684" y1="612" x2="684" y2="682" stroke="#c62828" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="684" y="606" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#c62828">now = 1100</text>
+
+    <rect x="160" y="718" width="820" height="76" rx="6" fill="#e3f2fd" stroke="#1565c0"/>
+    <text x="180" y="740" font-family="Consolas, monospace" font-size="12" fill="#0d47a1">Same physical slot [0] is reused; only windowStart / counters change</text>
+    <text x="180" y="760" font-family="Consolas, monospace" font-size="12" fill="#0d47a1">values() = {start 500, start 1000}    pass() = 8 + 1 = 9</text>
+    <text x="180" y="780" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0d47a1">passQps() = 9 / 1.0 = 9   (QPS rule of 20 admits traffic again)</text>
+  </g>
+</svg>
