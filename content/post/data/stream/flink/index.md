@@ -1,7 +1,7 @@
 ---
 title: "Apache Flink: runtime, state, and event time"
 date: 2026-10-06T19:00:00+02:00
-draft:true
+draft: true
 categories:
 - data
 - stream
