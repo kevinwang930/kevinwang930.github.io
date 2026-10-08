@@ -239,68 +239,225 @@ Pipeline o-- Valve
 </code></pre><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
 Multiple host can be configured in catalina, each has its own request processing logic</p><h3 id=context>Context</h3><p>A context is a container that represents a servlet context, and therefore an individual web application, in the catalina servlet engine. A host may contain multiple contexts,each with a unique path.</p><h3 id=wrapper>wrapper</h3><p>A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application.
 It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
-Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><p>Valve chain ends at <code>StandardWrapperValve</code>. That valve allocates the servlet, builds a <code>FilterChain</code>, then calls <code>filterChain.doFilter(...)</code> — which walks matching filters and finally invokes <code>servlet.service()</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
-!theme plain
+&#39; parents above, subclasses below
 top to bottom direction
-skinparam linetype ortho
 
-interface Contained &lt;&lt; interface &gt;&gt;
-
-class StandardEngineValve extends ValveBase
-interface Valve &lt;&lt; interface &gt;&gt; {
-    Valve getNext()
-    void invoke( request,  response)
+interface Contained {
+    Container getContainer()
+    void setContainer(Container)
 }
-class ValveBase {
+
+interface Valve {
+    Valve getNext()
+    void setNext(Valve)
+    void invoke(Request, Response)
+}
+
+abstract class ValveBase {
     Container container
     Valve next
 }
 
-class StandardHostValve extends ValveBase
+class StandardEngineValve {
+    void invoke(Request, Response)
+}
 
-abstract class ValveBase implements Contained, Valve
+class StandardHostValve {
+    void invoke(Request, Response)
+    void throwable(Request, Response, Throwable)
+    void status(Request, Response)
+}
 
+class StandardContextValve {
+    void invoke(Request, Response)
+}
 
-interface Container &lt;&lt; interface &gt;&gt; 
-class ContainerBase implements Container
-interface Context &lt;&lt; interface &gt;&gt; extends Container, ContextBind 
-interface ContextBind &lt;&lt; interface &gt;&gt;
-class StandardContext extends ContainerBase implements Context
-class TomcatEmbeddedContext  extends StandardContext
-            
-class StandardContextValve extends ValveBase
+class StandardWrapperValve {
+    LongAdder processingTime
+    LongAdder requestCount
+    LongAdder errorCount
+    void invoke(Request, Response)
+}
+
+interface Container {
+    Pipeline getPipeline()
+}
+
+class ContainerBase {
+    Pipeline pipeline
+    HashMap children
+    Container parent
+}
+
+interface ContextBind {
+    void bind(ClassLoader)
+    void unbind(ClassLoader)
+}
+
+interface Context {
+}
+
+class StandardContext {
+    Map&lt;String,ApplicationFilterConfig&gt; filterConfigs
+    Map&lt;String,FilterDef&gt; filterDefs
+    ContextFilterMaps filterMaps
+    Map&lt;String,String&gt; servletMappings
+    boolean filterStart()
+    boolean filterStop()
+    FilterMap[] findFilterMaps()
+    FilterConfig findFilterConfig(String)
+    FilterDef findFilterDef(String)
+    boolean fireRequestInitEvent(ServletRequest)
+    boolean fireRequestDestroyEvent(ServletRequest)
+}
+
+class TomcatEmbeddedContext
 
 interface Wrapper {
+    String getName()
+    String getServletClass()
+    Servlet getServlet()
+    void setServlet(Servlet)
     Servlet allocate()
+    void deallocate(Servlet)
+    void load()
+    void unload()
+    boolean isUnavailable()
+    boolean isAsyncSupported()
 }
-class StandardWrapper extends ContainerBase implements Wrapper {
+
+class StandardWrapper {
     volatile Servlet instance
+    volatile boolean instanceInitialized
+    AtomicInteger countAllocated
+    String servletClass
+    int loadOnStartup
+    ArrayList&lt;String&gt; mappings
+    HashMap&lt;String,String&gt; parameters
+    StandardWrapperValve swValve
+    StandardWrapperFacade facade
+    Servlet allocate()
+    void deallocate(Servlet)
+    Servlet loadServlet()
+    void initServlet(Servlet)
+    void load()
+    void unload()
 }
 
-class StandardWrapperValve extends ValveBase  
+class ApplicationFilterFactory &lt;&lt; utility &gt;&gt; {
+    {static} ApplicationFilterChain createFilterChain(ServletRequest, Wrapper, Servlet)
+    {static} boolean matchFiltersServlet(FilterMap, String)
+    {static} boolean matchDispatcher(FilterMap, DispatcherType)
+}
 
-class ApplicationFilterChain 
+class ApplicationFilterChain {
+    ApplicationFilterConfig[] filters
+    int pos
+    int n
+    Servlet servlet
+    boolean servletSupportsAsync
+    void doFilter(ServletRequest, ServletResponse)
+    void addFilter(ApplicationFilterConfig)
+    void setServlet(Servlet)
+    void reuse()
+    void release()
+}
+
+class ApplicationFilterConfig {
+    Context context
+    FilterDef filterDef
+    Filter filter
+    Filter getFilter()
+    void initFilter()
+    void release()
+    String getFilterName()
+    String getInitParameter(String)
+}
+
+class FilterDef {
+    String filterName
+    String filterClass
+    Filter filter
+    Map&lt;String,String&gt; parameterMap
+    boolean asyncSupported
+}
+
+class FilterMap {
+    String filterName
+    String[] urlPatterns
+    String[] servletNames
+    int dispatcherMapping
+    boolean matchAllUrlPatterns
+    boolean matchAllServletNames
+}
+
+interface Filter {
+    void init(FilterConfig)
+    void doFilter(ServletRequest, ServletResponse, FilterChain)
+    void destroy()
+}
+
+interface Servlet {
+    void init(ServletConfig)
+    void service(ServletRequest, ServletResponse)
+    void destroy()
+}
 
 class DispatcherServlet {
-    void service( req,  res) 
+    void service(ServletRequest, ServletResponse)
 }
-      
-StandardEngineValve -right-&gt;StandardHostValve: call
 
-StandardHostValve -right-&gt; StandardContextValve:call
+&#39; inheritance: parent on top, child below
+ValveBase .up.|&gt; Contained
+ValveBase .up.|&gt; Valve
+StandardEngineValve -up-|&gt; ValveBase
+StandardHostValve -up-|&gt; ValveBase
+StandardContextValve -up-|&gt; ValveBase
+StandardWrapperValve -up-|&gt; ValveBase
+
+ContainerBase .up.|&gt; Container
+Context .up.|&gt; Container
+Context .up.|&gt; ContextBind
+StandardContext -up-|&gt; ContainerBase
+StandardContext .up.|&gt; Context
+TomcatEmbeddedContext -up-|&gt; StandardContext
+StandardWrapper -up-|&gt; ContainerBase
+StandardWrapper .up.|&gt; Wrapper
+DispatcherServlet -up-|&gt; Servlet
+
+&#39; invoke chain left -&gt; right among concrete valves
+StandardEngineValve -right-&gt; StandardHostValve : invoke
+StandardHostValve -right-&gt; StandardContextValve : invoke
+StandardContextValve -right-&gt; StandardWrapperValve : invoke
+StandardEngineValve -[hidden]right-&gt; StandardHostValve
+StandardHostValve -[hidden]right-&gt; StandardContextValve
+StandardContextValve -[hidden]right-&gt; StandardWrapperValve
 
 TomcatEmbeddedContext o-- StandardContextValve
-
-StandardContextValve -right-&gt; StandardWrapperValve: call     
-
 StandardWrapper o-- StandardWrapperValve
-
-StandardWrapperValve --&gt; ApplicationFilterChain
-ApplicationFilterChain --&gt; DispatcherServlet
+StandardWrapperValve --&gt; ApplicationFilterFactory : createFilterChain
+ApplicationFilterFactory --&gt; ApplicationFilterChain
+StandardContext o-- ApplicationFilterConfig
+StandardContext o-- FilterDef
+StandardContext o-- FilterMap
+ApplicationFilterConfig --&gt; FilterDef
+ApplicationFilterConfig --&gt; Filter
+ApplicationFilterChain o-- ApplicationFilterConfig
+StandardWrapper --&gt; Servlet : allocate / instance
+ApplicationFilterChain --&gt; Servlet : servlet.service
 
 @enduml
-</code></pre><h2 id=connector-internals>Connector Internals</h2><p><code>Adapter</code> represents the entry point in a coyote-based servlet container.</p><p><code>ProtocolHandler</code> abstract the protocol implementation, including threading.</p><p><code>EndPoint</code> handles the low level interactions with network socket.</p><p><code>Poller</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+</code></pre><h3 id=filter-in-the-pipeline>Filter in the pipeline</h3><p>Filters are a Context-level concern, not a Valve. <code>StandardContext</code> keeps three related structures:</p><ol><li><code>FilterDef</code> — <code>&lt;filter></code> from web.xml / programmatic registration (<code>filterName</code>, <code>filterClass</code>, init params, asyncSupported)</li><li><code>FilterMap</code> — <code>&lt;filter-mapping></code> (<code>url-pattern</code> and/or <code>servlet-name</code>, plus dispatcher types REQUEST/FORWARD/INCLUDE/ERROR/ASYNC)</li><li><code>ApplicationFilterConfig</code> — runtime <code>FilterConfig</code>; created in <code>filterStart()</code> when the Context starts, holds the live <code>Filter</code> instance after <code>init()</code></li></ol><h4 id=build-chain-applicationfilterfactory>Build chain: <code>ApplicationFilterFactory</code></h4><p><code>StandardWrapperValve.invoke</code> does roughly:</p><ol><li><code>servlet = wrapper.allocate()</code></li><li>set <code>DISPATCHER_TYPE_ATTR</code> / <code>DISPATCHER_REQUEST_PATH_ATTR</code> on the request</li><li><code>filterChain = ApplicationFilterFactory.createFilterChain(request, wrapper, servlet)</code></li><li><code>filterChain.doFilter(request.getRequest(), response.getResponse())</code></li><li><code>filterChain.release()</code> then <code>wrapper.deallocate(servlet)</code></li></ol><p><code>createFilterChain</code> reuses an <code>ApplicationFilterChain</code> cached on the Coyote <code>Request</code> when possible, sets the target servlet, then walks <code>context.findFilterMaps()</code> twice:</p><ol><li><strong>URL mappings first</strong> — dispatcher type matches, and <code>FilterUtil.matchFiltersURL(filterMap, requestPath)</code> matches the context-relative path</li><li><strong>Servlet-name mappings second</strong> — dispatcher type matches, and servlet name equals the mapping (or <code>*</code>)</li></ol><p>Matched maps resolve to <code>ApplicationFilterConfig</code> via <code>context.findFilterConfig(filterName)</code> and are appended with <code>filterChain.addFilter(...)</code>. The same filter config is not added twice.</p><p>Order in the chain follows declaration order of filter maps (url-mapped filters before servlet-name-mapped ones for the same request).</p><h4 id=run-chain-applicationfilterchain>Run chain: <code>ApplicationFilterChain</code></h4><p><code>ApplicationFilterChain</code> implements <code>jakarta.servlet.FilterChain</code>. Fields <code>filters[]</code>, <code>pos</code>, <code>n</code>, and <code>servlet</code> drive execution:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>doFilter(request, response):
+</span></span><span style=display:flex><span>  if pos &lt; n:
+</span></span><span style=display:flex><span>    filter = filters[pos++].getFilter()
+</span></span><span style=display:flex><span>    // if filter does not support async, clear ASYNC_SUPPORTED on request
+</span></span><span style=display:flex><span>    filter.doFilter(request, response, this)   // filter must call chain.doFilter to continue
+</span></span><span style=display:flex><span>    return
+</span></span><span style=display:flex><span>  else:
+</span></span><span style=display:flex><span>    servlet.service(request, response)         // end of chain
+</span></span></code></pre></div><p>Each filter receives the same chain instance and must call <code>chain.doFilter</code> to advance. When <code>pos</code> reaches <code>n</code>, the chain falls through to the servlet. After the request finishes, <code>release()</code> nulls filter references and resets counters so the chain object can be reused on the next request (<code>reuse()</code> only resets <code>pos</code>).</p><p>Valve vs Filter: Valves sit on every Container pipeline (Engine → Host → Context → Wrapper) and are Catalina-specific; Filters are Servlet-spec, scoped to a Context, selected per request by URL/servlet-name/dispatcher, and only run after the request has been routed to a concrete Wrapper.</p><h2 id=connector-internals>Connector Internals</h2><p><code>Adapter</code> represents the entry point in a coyote-based servlet container.</p><p><code>ProtocolHandler</code> abstract the protocol implementation, including threading.</p><p><code>EndPoint</code> handles the low level interactions with network socket.</p><p><code>Poller</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 interface Handler&lt;S&gt; {
     SocketState process(socket,SocketEvent status)
 }
