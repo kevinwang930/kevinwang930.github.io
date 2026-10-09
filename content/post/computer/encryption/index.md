@@ -119,37 +119,167 @@ SHA-2 and SHA-3 are not “similar to MD5” in security margin; they are the re
 
 ### 2.6 RSA (public-key cryptosystem)
 
-**RSA** (Rivest–Shamir–Adleman, 1977) is a public-key cryptosystem. A **public** key encrypts or verifies; a **private** key decrypts or signs. Practical systems use RSA for small payloads (session keys, signatures) and symmetric ciphers for bulk data.
+**RSA** uses a **public** key to encrypt (or verify) and a matching **private** key to decrypt (or sign). Unlike AES, no shared secret is needed beforehand. In practice RSA wraps small values (AES keys, digests); AES carries bulk data.
 
 ![RSA encryption, decryption, and signing](images/rsa-encrypt-sign.svg)
 
-#### Key generation
+#### Notation
 
-1. Choose large secret primes \(p\) and \(q\).
-2. Compute modulus \(n = pq\). Publish \(n\) as part of the public key.
-3. Compute Carmichael’s totient \(\lambda(n) = \operatorname{lcm}(p-1, q-1)\). Keep \(\lambda(n)\) secret (equivalently, many texts use \(\varphi(n)=(p-1)(q-1)\)).
-4. Choose public exponent \(e\) with \(1 < e < \lambda(n)\) and \(\gcd(e, \lambda(n)) = 1\) (common choice: \(e = 65537\)).
-5. Compute private exponent \(d\) such that
-   \[
-   d e \equiv 1 \pmod{\lambda(n)}.
-   \]
-6. Public key: \((n, e)\). Private key: \(d\) (with \(n\)), plus \(p, q\) in implementations that use CRT acceleration.
+| Write | Read as |
+|-------|---------|
+| \(n = p \times q\) | **Multiply** primes \(p\) and \(q\). The product \(n\) is later called the **modulus**. |
+| \(\varphi(n) = (p-1)(q-1)\) | **Euler totient** of \(n\) (a different number from \(n\) itself). Keep \(\varphi\) secret. Example: \(n=55\) ⇒ \(\varphi=4\times 10=40\). |
+| \(\gcd(a,b)\) | **Greatest common divisor**: largest positive integer that divides both \(a\) and \(b\). \(\gcd(e,\varphi)=1\) means \(e\) and \(\varphi\) share no common factor (they are coprime). Example: \(\gcd(3,40)=1\). |
+| \(a \bmod n\) | Remainder when \(a\) is divided by \(n\). Example: \(64 \bmod 55 = 9\). |
+| \(a \equiv b \pmod{n}\) | **Congruence**: \(a\) and \(b\) have the same remainder mod \(n\). Same idea as \(a \bmod n = b \bmod n\). |
 
-#### Encryption and decryption
+So \(c \equiv m^{e} \pmod{n}\) means: compute \(m^{e}\), take remainder mod \(n\), call it \(c\).
 
-For message representative \(m\) with \(0 \le m < n\):
+#### Mechanism
+
+**Step A — build keys**
+
+Pick secret primes \(p\) and \(q\).
+
+\[
+n = p \times q
+\]
+
+\[
+\varphi = (p-1)(q-1)
+\]
+
+(\(\varphi\) is secret and is **not** \(n\).)
+
+Choose public \(e\) with \(\gcd(e, \varphi) = 1\) (common choice: \(e = 65537\)).
+
+Compute private \(d\) so that:
+
+\[
+d \cdot e \equiv 1 \pmod{\varphi}
+\]
+
+which means:
+
+\[
+d = e^{-1} \bmod \varphi
+\]
+
+Publish \((n, e)\). Keep \(d\) (and \(p, q, \varphi\)) secret.
+
+**Step B — encrypt and decrypt**
 
 \[
 c \equiv m^{e} \pmod{n}
-\qquad
+\]
+
+\[
 m \equiv c^{d} \pmod{n}
 \]
 
-Padding schemes (for example **OAEP** for encryption, **PSS** for signatures) are mandatory in real systems; textbook RSA without padding is insecure.
+**Step C — why \(m^{\varphi} \equiv 1 \pmod{n}\)**
 
-#### Signatures (direction reversed)
+Assume \(\gcd(m, n) = 1\). Fermat on each prime:
 
-A digital signature applies the **private** exponent to a hash of the message; verification applies the **public** exponent. OpenPGP-style signing follows that pattern: sign with \(d\), verify with \((n, e)\). This authenticates origin and integrity; it does not encrypt the payload.
+\[
+m^{p-1} \equiv 1 \pmod{p}
+\]
+
+\[
+m^{q-1} \equiv 1 \pmod{q}
+\]
+
+Because \(\varphi = (p-1)(q-1)\):
+
+\[
+m^{\varphi} = (m^{p-1})^{q-1} \equiv 1 \pmod{p}
+\]
+
+\[
+m^{\varphi} = (m^{q-1})^{p-1} \equiv 1 \pmod{q}
+\]
+
+So both \(p\) and \(q\) divide \(m^{\varphi}-1\), hence \(n\) does:
+
+\[
+m^{\varphi} \equiv 1 \pmod{n}
+\]
+
+**Step D — why private \(d\) recovers \(m\)**
+
+From Step A, \(d\cdot e \equiv 1 \pmod{\varphi}\), so for some integer \(k\):
+
+\[
+e \cdot d = 1 + k \cdot \varphi
+\]
+
+Then:
+
+\[
+c^{d} \equiv (m^{e})^{d} \pmod{n}
+\]
+
+\[
+(m^{e})^{d} = m^{e \cdot d} \pmod{n}
+\]
+
+\[
+m^{e \cdot d} = m^{1 + k \cdot \varphi} \pmod{n}
+\]
+
+\[
+m^{1 + k \cdot \varphi} = m \cdot (m^{\varphi})^{k} \pmod{n}
+\]
+
+\[
+m \cdot (m^{\varphi})^{k} \equiv m \cdot 1^{k} \pmod{n}
+\]
+
+\[
+m \cdot 1^{k} = m
+\]
+
+So \(c^{d} \equiv m \pmod{n}\): \(d\) undoes \(e\).
+
+**Where safety sits.** Computing \(c = m^{e} \bmod n\) is easy with the public key. Getting \(m\) back without \(d\), or factoring \(n\) to rebuild \(\varphi\) and \(d\), is hard for large \(n\). Use OAEP/PSS padding in real systems.
+
+#### Example (toy numbers — not secure)
+
+\[
+p = 5,\quad q = 11
+\]
+
+\[
+n = 5 \times 11 = 55
+\]
+
+\[
+\varphi = (5-1)(11-1) = 40
+\]
+
+\[
+e = 3,\quad \gcd(3, 40) = 1
+\]
+
+\[
+d \cdot 3 \equiv 1 \pmod{40} \implies d = 27
+\]
+
+\[
+m = 4
+\]
+
+\[
+c = 4^{3} \bmod 55 = 64 \bmod 55 = 9
+\]
+
+\[
+9^{27} \bmod 55 = 4 = m
+\]
+
+#### Signatures
+
+Sign a **hash** of the message with \(d\); verify with \((n, e)\). Signing authenticates; it does not encrypt.
 
 ### 2.7 Elliptic-curve cryptography
 
