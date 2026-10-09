@@ -16,7 +16,7 @@ keywords:
 ![alt text]( images/image.png)
 
 
-# Beans
+# 1. Beans
 
 Beans are created with the configuration metadata that you supply to the container.
 In the container, the bean definitions are represented as `BeanDefinition` objects, contains:
@@ -51,7 +51,87 @@ class RootBeanDefinition extends AbstractBeanDefinition
 ```
 
 
-## BeanFactory
+## FactoryBean
+Interface to be implemented by objects used within a `BeanFactory` which are themselves factories for individual objects. 
+A bean that implements this interface cannot be used as normal bean.
+
+The container stores the `FactoryBean`. A normal lookup does not return that object: `getBean(name)` calls `FactoryBean.getObject()` and returns the product. Prefix the name with `&` to obtain the factory itself (`BeanFactory.FACTORY_BEAN_PREFIX`).
+
+```java
+public class Client {
+    private final String endpoint;
+    public Client(String endpoint) { this.endpoint = endpoint; }
+    public String endpoint() { return endpoint; }
+}
+
+public class ClientFactoryBean implements FactoryBean<Client> {
+    private String endpoint;
+
+    public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+
+    @Override
+    public Client getObject() {
+        return new Client(endpoint);
+    }
+
+    @Override
+    public Class<?> getObjectType() {
+        return Client.class;
+    }
+
+    @Override
+    public boolean isSingleton() {
+        return true; // container caches getObject() for this name
+    }
+}
+```
+
+```java
+@Configuration
+public class AppConfig {
+    @Bean
+    public ClientFactoryBean client() {
+        ClientFactoryBean factory = new ClientFactoryBean();
+        factory.setEndpoint("https://api.example.com");
+        return factory;
+    }
+}
+```
+
+```java
+ApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class);
+
+Client product = ctx.getBean("client", Client.class);
+// product.endpoint() == "https://api.example.com"
+// type is Client, not ClientFactoryBean
+
+ClientFactoryBean factory = (ClientFactoryBean) ctx.getBean("&client");
+// the FactoryBean instance registered under the name "client"
+```
+
+`isSingleton() == true` means later `getBean("client")` calls reuse the same `Client`. `isSingleton() == false` makes `getObject()` run on each lookup. Dependents that declare `Client` receive the product; dependents that declare `ClientFactoryBean` receive the factory.
+
+
+## Scope
+
+Strategy interface used by `ConfigurableBeanFactory` representing a target scope to hold bean instances in. common scope
+* singleton 
+* prototype
+* request
+* session
+
+```plantuml
+
+interface Scope {
+    Object get(String name, ObjectFactory<?> objectFactory)
+    Object remove(String name)
+}
+
+```
+
+
+# 2. BeanFactory
+
 The root interface for accessing a spring bean container.
 `BeanFactory` is a central registry of application components, and centralizes configuration components.
 
@@ -110,76 +190,9 @@ abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFactory im
 }
 ```
 
-## FactoryBean
-Interface to be implemented by objects used within a `BeanFactory` which are themselves factories for individual objects. 
-A bean that implements this interface cannot be used as normal bean.
 
+# 3. Core
 
-## BeanFactoryPostProcessor
-
-Factory hook that allows for custom modification of an application context'bean definitions.
-
-An `ApplicationContext` auto-detects `BeanFactoryPostProcessor` beans in its bean definitions and applies them before any other beans get created.
-
-`ConfigurationClassPostProcessor` A `BeanFactoryPostProcessor` used for bootstrapping processing of `@Configuration` class. In SpringBoot, `ConfigurationClassPostProcessor` loaded when creating spring context
-
-
-```plantuml
-interface BeanFactoryPostProcessor {
-    void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory)
-}
-interface BeanDefinitionRegistryPostProcessor extends BeanFactoryPostProcessor {
-    void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry)
-}
-class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPostProcessor
-
-```
-
-
-## BeanPostProcessor
-Factory hook that allows for custom modification of new bean instances
-
-```plantuml
-interface BeanPostProcessor {
-+ Object postProcessBeforeInitialization(Object,String)
-+ Object postProcessAfterInitialization(Object,String)
-}
-
-interface MergedBeanDefinitionPostProcessor extends BeanPostProcessor  {
-    void postProcessMergedBeanDefinition()
-}
-interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
-    default Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName)
-    default boolean postProcessAfterInstantiation(Object bean, String beanName)
-    default PropertyValues postProcessProperties()
-}
-interface SmartInstantiationAwareBeanPostProcessor extends InstantiationAwareBeanPostProcessor
-class AutowiredAnnotationBeanPostProcessor implements SmartInstantiationAwareBeanPostProcessor ,MergedBeanDefinitionPostProcessor
-```
-
-### AutowiredAnnotationBeanPostProcessor
-`BeanPostProcessor` implementation that autowires annotated fields,setter methods, and arbitrary config methods. Members to be injected are detected through annotations `@Autowired` and `@Value`
-
-
-## Scope
-
-Strategy interface used by `ConfigurableBeanFactory` representing a target scope to hold bean instances in. common scope
-* singleton 
-* prototype
-* request
-* session
-
-```plantuml
-
-interface Scope {
-    Object get(String name, ObjectFactory<?> objectFactory)
-    Object remove(String name)
-}
-
-```
-
-
-# Core
 
 ## SpringFactoriesLoader
 
@@ -285,7 +298,8 @@ MutablePropertySources o--      PropertySource
 ```
 
 
-# Context
+# 4. Context
+
 
 ## ApplicationContext
 
@@ -297,10 +311,6 @@ MutablePropertySources o--      PropertySource
 
 ```plantuml
 @startuml
-
-
-
-
 
 
 interface AnnotationConfigRegistry << interface >>
@@ -320,17 +330,12 @@ class GenericApplicationContext extends AbstractApplicationContext implements Be
 }
 
 
-
 class GenericWebApplicationContext extends GenericApplicationContext implements ConfigurableWebApplicationContext {
     ServletContext servletContext
 }
 interface Lifecycle << interface >>
 interface ResourceLoader << interface >>
 interface ResourcePatternResolver extends ResourceLoader
-
-
-
-
 
 
 interface ApplicationContext extends EnvironmentCapable,MessageSource, ApplicationEventPublisher, ResourcePatternResolver
@@ -409,7 +414,6 @@ ApplicationEventPublisher <|-- ApplicationContext
 ```
 
 
-
 ```plantuml
 title: SimpleApplicationEventMulticaster
 @startuml
@@ -456,11 +460,70 @@ SimpleApplicationEventMulticaster    -[#000082,plain]-^  AbstractApplicationEven
 ```
 
 
-## Configuration
+## Application context initialization
+
+`AbstractApplicationContext.refresh` builds the factory, runs bean-factory post-processors, then creates singleton beans. The `Environment` is created on first `getEnvironment()` and is already in place before those post-processors run.
+
+### 1. BeanFactoryPostProcessor loading and run
+
+Factory hook that allows for custom modification of an application context'bean definitions.
+
+An `ApplicationContext` auto-detects `BeanFactoryPostProcessor` beans in its bean definitions and applies them before any other beans get created.
+
+`ConfigurationClassPostProcessor` A `BeanFactoryPostProcessor` used for bootstrapping processing of `@Configuration` class. In SpringBoot, `ConfigurationClassPostProcessor` loaded when creating spring context
+
+
+```plantuml
+interface BeanFactoryPostProcessor {
+    void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory)
+}
+interface BeanDefinitionRegistryPostProcessor extends BeanFactoryPostProcessor {
+    void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry)
+}
+class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPostProcessor
+
+```
+
+
+`PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors` loads and runs every `BeanFactoryPostProcessor` before any normal singleton is created.
+
+Registry processors run first. `BeanDefinitionRegistryPostProcessor` beans already passed into `refresh`, then beans of that type found in the factory, are instantiated with `getBean` and called in this order: `PriorityOrdered`, `Ordered`, then the rest. Each call is `postProcessBeanDefinitionRegistry`. The scan repeats until no new registry processor appears, because one processor may register another. `ConfigurationClassPostProcessor` is `PriorityOrdered`. Its `postProcessBeanDefinitionRegistry` parses `@Configuration` classes: `@PropertySource`, `@ComponentScan`, `@Import`, `@ImportResource`, then `@Bean` methods, and registers the resulting `BeanDefinition`s. A full `@Configuration` class is enhanced by `ConfigurationClassEnhancer` so `@Bean` methods go through the container.
+
+After every registry processor has run, the same instances receive `postProcessBeanFactory`. Regular `BeanFactoryPostProcessor`s then run in the same priority order, also via `postProcessBeanFactory`. The delegate instantiates only these post-processor beans. Ordinary singletons stay uncreated until bean init.
+
+`registerBeanPostProcessors` runs next and only registers `BeanPostProcessor` beans. It does not create application singletons.
+
+### 2. Bean init
+
+Factory hook that allows for custom modification of new bean instances
+
+```plantuml
+interface BeanPostProcessor {
++ Object postProcessBeforeInitialization(Object,String)
++ Object postProcessAfterInitialization(Object,String)
+}
+
+interface MergedBeanDefinitionPostProcessor extends BeanPostProcessor  {
+    void postProcessMergedBeanDefinition()
+}
+interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
+    default Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName)
+    default boolean postProcessAfterInstantiation(Object bean, String beanName)
+    default PropertyValues postProcessProperties()
+}
+interface SmartInstantiationAwareBeanPostProcessor extends InstantiationAwareBeanPostProcessor
+class AutowiredAnnotationBeanPostProcessor implements SmartInstantiationAwareBeanPostProcessor ,MergedBeanDefinitionPostProcessor
+```
+
+#### AutowiredAnnotationBeanPostProcessor
+`BeanPostProcessor` implementation that autowires annotated fields,setter methods, and arbitrary config methods. Members to be injected are detected through annotations `@Autowired` and `@Value`
+
+
+#### Configuration
 `@Configuration` annotation can be used to indicates that a class 's primary purpose as a source of bean definitions,thus allow user to inject property sources, bean definitions in a much flexible way. 
 Spring uses `ConfigurationClassPostProcessor` to bootstrap `Configuration` class internally.
 
-### Annotation
+##### Annotation
 
 `@Configuration` indicates that a class declares one more `@Bean` methods
 
@@ -483,7 +546,6 @@ Annotations processing sequence:
 5. `@Bean`
 
 
-
 `ClassPathBeanDefinitionScanner` detects bean candidates on the classpath, registering corresponding bean definitions with a given registry.
 Candidates classes are detected through configurable type filters. The default filters include classes that are annotated with Spring's
 * `@Component`
@@ -496,8 +558,6 @@ Candidates classes are detected through configurable type filters. The default f
 
 ```plantuml
 title component scan
-
-
 
 
 class ConfigurationClassParser {
@@ -528,136 +588,31 @@ ConfigurationClassParser --> ComponentScanAnnotationParser: parse
 ComponentScanAnnotationParser --> ClassPathBeanDefinitionScanner:scan
 ```
 
-## Application context initialization
-1. `ApplicationContext` refresh will create `BeanFactory`
-2. `BeanFactory` will load all beanDefinitions
-3. BeanFactorypostprocess
-   1. BeanDefinitionRegistryPostProcessor
-      1. spring boot config bean
-      2. mybatis mapperscanner
-   2. BeanFactoryPostProcessor
-      1. configClassEnhancer - proxy to generate bean
-4. init all Singleton Beans
 
-```plantuml
-title: Application context initialization
+`finishBeanFactoryInitialization` freezes the definition set and calls `DefaultListableBeanFactory.preInstantiateSingletons`. Each non-lazy singleton is created with `getBean`.
 
-participant SpringApplication
+`AbstractAutowireCapableBeanFactory.createBean` resolves the class, then:
 
-group create 
-SpringApplication -> DefaultApplicationContextFactory: createContext
-activate DefaultApplicationContextFactory
-DefaultApplicationContextFactory <- SpringFactoriesLoader: load ApplicationContextFactories
-loop ApplicationContextFactories
-DefaultApplicationContextFactory -> DefaultApplicationContextFactory: create
-end
-opt context is null
-DefaultApplicationContextFactory -> DefaultApplicationContextFactory: create GenericApplicationContext
+1. `resolveBeforeInstantiation` lets an `InstantiationAwareBeanPostProcessor` return a proxy and skip the constructor.
+2. `createBeanInstance` uses an instance supplier, a `@Bean` factory method, an autowired constructor (`ConstructorResolver.autowireConstructor`), or the default constructor.
+3. `applyMergedBeanDefinitionPostProcessors` records injection metadata (for example `@Autowired` fields).
+4. `populateBean` injects properties and collaborators.
+5. `initializeBean` runs `Aware` callbacks, `BeanPostProcessor.postProcessBeforeInitialization`, the init method, then `postProcessAfterInitialization`.
+6. The instance is stored in the singleton cache. `registerDisposableBeanIfNecessary` records destruction callbacks.
 
-end
-DefaultApplicationContextFactory -> SpringApplication: AnnotationConfigApplicationContext
-end
-deactivate DefaultApplicationContextFactory
+`FactoryBean` products are obtained with `getObject` when something first requests the product name. Lazy beans stay as definitions until that lookup.
 
+### 3. Environment and property source load
 
-```
+`AbstractApplicationContext.getEnvironment` creates the environment on first use. A non-web context uses `createEnvironment()`, which returns a `StandardEnvironment`. The constructor builds a `MutablePropertySources`, wraps it in a `PropertySourcesPropertyResolver`, then calls `customizePropertySources`. `StandardEnvironment` appends two sources, highest precedence first:
 
-```plantuml
-title : bean factory initialization
-AbstractApplicationContext--> AbstractApplicationContext:refresh
-AbstractApplicationContext --> BeanFactory: create
-BeanFactory --> BeanFactory:loadBeanDefinitions
-AbstractApplicationContext --> AbstractApplicationContext:prepareBeanFactory
-AbstractApplicationContext --> AbstractApplicationContext:postProcessBeanFactory
-AbstractApplicationContext --> PostProcessorRegistrationDelegate:invokeBeanFactoryPostProcessors
-PostProcessorRegistrationDelegate --> BeanDefinitionRegistryPostProcessor:postProcessBeanDefinitionRegistry
-AbstractApplicationContext--> AbstractApplicationContext:registerBeanPostProcessors
-AbstractApplicationContext --> AbstractApplicationContext:finishBeanFactoryInitialization
-AbstractApplicationContext --> BeanFactory:preInstantiateSingletons
-```
+| Name | Contents |
+|------|----------|
+| `systemProperties` | `System.getProperties()` |
+| `systemEnvironment` | process environment variables |
 
+A web context overrides `createEnvironment` with `StandardServletEnvironment`. That subclass inserts stub sources `servletConfigInitParams`, `servletContextInitParams`, and optionally `jndiProperties` ahead of the system sources. `prepareRefresh` calls `initPropertySources`, which replaces those stubs with the live `ServletContext` and `ServletConfig`. It then calls `validateRequiredProperties`.
 
-## bean Initialization
+`prepareBeanFactory` registers the same `Environment` as the singleton bean `environment`, plus `systemProperties` and `systemEnvironment`. Placeholder resolution (`${...}`) in bean definitions uses `Environment.resolvePlaceholders`.
 
-```plantuml
-DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingletons
-activate DefaultListableBeanFactory
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory:getMergedLocalBeanDefinition
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory:preInstantiateSingleton
-
-activate DefaultListableBeanFactory
-DefaultListableBeanFactory --> DefaultListableBeanFactory:instantiateSingleton
-
-activate DefaultListableBeanFactory
-DefaultListableBeanFactory --> DefaultListableBeanFactory:getBean
-
-activate DefaultListableBeanFactory
-DefaultListableBeanFactory --> DefaultListableBeanFactory: createBean
-
-activate DefaultListableBeanFactory
-DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeanClass
-
-alt proxy
-DefaultListableBeanFactory --> DefaultListableBeanFactory: resolveBeforeInstantiation
-note right: InstantiationAwareBeanPostProcessor
-
-end
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory: createBeanInstance
-
-
-activate DefaultListableBeanFactory
-
-alt instanceSupplier
-DefaultListableBeanFactory --> DefaultListableBeanFactory: obtainFromSupplier
-end
-
-DefaultListableBeanFactory --> BeanDefinition: getFactoryMethodName
-alt factoryMethod
-DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateUsingFactoryMethod
-end
-
-
-alt autowireNecesary
-DefaultListableBeanFactory --> DefaultListableBeanFactory: autowireConstructor
-else 
-DefaultListableBeanFactory --> DefaultListableBeanFactory: instantiateBean
-end
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory: determineConstructorsFromBeanPostProcessors
-alt autowiremode
-DefaultListableBeanFactory --> ConstructorResolver: new
-ConstructorResolver --> ConstructorResolver: autowireConstructor
-ConstructorResolver --> ConstructorResolver: instantiate
-ConstructorResolver --> DefaultListableBeanFactory:beanWrapper
-else 
-DefaultListableBeanFactory --> DefaultListableBeanFactory:instantiateBean
-end
-
-deactivate 
-
-
-
-
-
-
-
-
-
-
-
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory:applyMergedBeanDefinitionPostProcessors
-DefaultListableBeanFactory --> DefaultListableBeanFactory:populateBean 
-note right: autowire Beans and handle properties
-DefaultListableBeanFactory --> DefaultListableBeanFactory:initializeBean
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory: getSingleton
-
-DefaultListableBeanFactory --> DefaultListableBeanFactory: registerDisposableBeanIfNecessary
-```
-
-
-
+`@PropertySource` is not part of that initial set. `ConfigurationClassPostProcessor` adds each declared `PropertySource` to the `Environment` while it parses configuration classes, which is during the bean-factory post-processor phase above. Later sources do not override an earlier source with the same name unless the code explicitly replaces it. Lookup walks `MutablePropertySources` from front to back, so `systemProperties` wins over `systemEnvironment`, and servlet init parameters win over both when they are present.
