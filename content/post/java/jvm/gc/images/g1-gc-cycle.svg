@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="540" viewBox="0 0 980 540" role="img" aria-label="G1 garbage collection cycle: Young-Only through Concurrent Start, Remark, Cleanup, then Mixed Space-Reclamation">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#37474f"/>
+    </marker>
+  </defs>
+  <rect width="980" height="540" fill="#f7f9fb"/>
+  <text x="490" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#263238">G1 garbage collection cycle</text>
+  <text x="490" y="46" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">After Oracle GC Tuning Guide Figure 7-2: Young-Only then Space-Reclamation</text>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="30" y="70" width="920" height="200" rx="10" fill="#fff8e1" stroke="#f9a825" stroke-width="1.5"/>
+    <text x="50" y="96" font-size="14" font-weight="700" fill="#e65100">Young-Only phase</text>
+
+    <rect x="50" y="120" width="140" height="50" rx="6" fill="#ef5350" stroke="#c62828"/>
+    <text x="120" y="142" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Normal young</text>
+    <text x="120" y="158" text-anchor="middle" font-size="10" fill="#ffcdd2">promote to old</text>
+
+    <line x1="190" y1="145" x2="228" y2="145" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="209" y="136" text-anchor="middle" font-size="10" fill="#546e7a">IHOP</text>
+
+    <rect x="234" y="120" width="150" height="50" rx="6" fill="#ff7043" stroke="#d84315"/>
+    <text x="309" y="142" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Concurrent Start</text>
+    <text x="309" y="158" text-anchor="middle" font-size="10" fill="#ffe0b2">young + start mark</text>
+
+    <line x1="384" y1="145" x2="422" y2="145" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <rect x="428" y="120" width="150" height="50" rx="6" fill="#ce93d8" stroke="#8e24aa"/>
+    <text x="503" y="142" text-anchor="middle" font-size="12" font-weight="700" fill="#4a148c">Concurrent Mark</text>
+    <text x="503" y="158" text-anchor="middle" font-size="10" fill="#6a1b9a">app still running</text>
+
+    <line x1="578" y1="145" x2="616" y2="145" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <rect x="622" y="112" width="120" height="32" rx="6" fill="#5c6bc0" stroke="#3949ab"/>
+    <text x="682" y="133" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Remark</text>
+    <line x1="682" y1="144" x2="682" y2="162" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="622" y="166" width="120" height="32" rx="6" fill="#5c6bc0" stroke="#3949ab"/>
+    <text x="682" y="187" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Cleanup</text>
+
+    <line x1="742" y1="182" x2="780" y2="182" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <rect x="786" y="157" width="140" height="50" rx="6" fill="#ef5350" stroke="#c62828"/>
+    <text x="856" y="179" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Prepare Mixed</text>
+    <text x="856" y="195" text-anchor="middle" font-size="10" fill="#ffcdd2">if candidates</text>
+
+    <text x="50" y="248" font-size="11" fill="#6d4c41">Normal young collections may continue while concurrent mark runs. Remark and Cleanup are short STW pauses.</text>
+
+    <line x1="856" y1="270" x2="856" y2="310" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <rect x="30" y="316" width="700" height="120" rx="10" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="50" y="342" font-size="14" font-weight="700" fill="#0d47a1">Space-Reclamation phase</text>
+
+    <rect x="50" y="360" width="130" height="48" rx="6" fill="#42a5f5" stroke="#1565c0"/>
+    <text x="115" y="382" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">Mixed</text>
+    <text x="115" y="398" text-anchor="middle" font-size="10" fill="#e3f2fd">young + old CSet</text>
+
+    <line x1="180" y1="384" x2="220" y2="384" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="226" y="360" width="130" height="48" rx="6" fill="#42a5f5" stroke="#1565c0"/>
+    <text x="291" y="382" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">Mixed</text>
+    <text x="291" y="398" text-anchor="middle" font-size="10" fill="#e3f2fd">...</text>
+
+    <line x1="356" y1="384" x2="396" y2="384" stroke="#37474f" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="402" y="360" width="180" height="48" rx="6" fill="#90caf9" stroke="#1565c0"/>
+    <text x="492" y="382" text-anchor="middle" font-size="12" font-weight="700" fill="#0d47a1">End when reclaim</text>
+    <text x="492" y="398" text-anchor="middle" font-size="10" fill="#1565c0">not worth the cost</text>
+
+    <text x="600" y="388" font-size="12" fill="#1565c0">restart</text>
+    <text x="600" y="404" font-size="12" fill="#1565c0">Young-Only</text>
+
+    <rect x="760" y="340" width="190" height="72" rx="6" fill="#ffebee" stroke="#c62828"/>
+    <text x="855" y="370" text-anchor="middle" font-size="12" font-weight="700" fill="#b71c1c">Full GC backup</text>
+    <text x="855" y="390" text-anchor="middle" font-size="10" fill="#c62828">whole-heap compaction</text>
+    <text x="855" y="404" text-anchor="middle" font-size="10" fill="#c62828">on allocation failure</text>
+
+    <path d="M 492 436 L 492 480 L 120 480 L 120 276" fill="none" stroke="#78909c" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)"/>
+    <text x="320" y="500" text-anchor="middle" font-size="11" fill="#78909c">cycle restarts with Young-Only</text>
+  </g>
+</svg>

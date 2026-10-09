@@ -102,8 +102,10 @@ CLion and other C++ IDEs support indexing via a standard compilation database (`
    ```shell
    make compile-commands-hotspot
    ```
-2. In CLion, select **File -> Open** and choose the generated `compile_commands.json` file. CLion will index the C++ source files based on the exact compile commands used by the build system.
-3. Configure custom build/debug targets in CLion to execute `make images` or `make exploded-image` before debugging.
+   The file is written to `build/<config>/compile_commands.json`.
+2. In CLion, select **File -> Open**, choose that `compile_commands.json`, and open it **as a project**.
+3. Point the project root at the source tree (CLion defaults to `build/<config>/`): main menu **Tools → Compilation Database → Change Project Root** (not Settings), select the repo root (parent of `src/` / `make/`). Or Find Action (`Ctrl+Shift+A`) → `Change Project Root`.
+4. Configure custom build/debug targets in CLion to run `make images` or `make exploded-image` with the working directory set to the source root (and `CONF=<config>` if needed) before debugging.
 
 ### Visual Studio Code
 Generate a VS Code workspace with C++ indexing:
