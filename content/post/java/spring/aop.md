@@ -15,38 +15,261 @@ keywords:
 <!--more-->
 
 
-`Aspect-oriented Programming (AOP)` is a programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does so by adding behavior to existing code(advice) without modifying the code.
+# Overview
 
-# AOP Interfaces
-`Aspect` A modularization of a concern that cuts across multiple classes. Example : Transaction management
+`Aspect-oriented Programming (AOP)` is a programming paradigm that increases modularity by separating cross-cutting concerns, such as transactions, security checks, and logging, from business code. The extra behavior is added to existing methods without changing those methods.
 
-`Joinpoint` represents a generic runtime joinpoint. A runtime joinPoint is an event that occurs on a static joinpoint.
+## Concepts
 
-`Advice` Action taken by an aspect at a particular joinpoint
+- **Join point**: a point in program execution. In Spring AOP it is always a method invocation on a bean.
+- **Pointcut**: a predicate that selects join points, for example `execution(* com.example.service.*.*(..))`, `within(...)`, or `@annotation(...)`.
+- **Advice**: the action run at a selected join point. The types are before, after returning, after throwing, after (finally), and around.
+- **Advisor**: Spring's unit that holds one advice and the pointcut that decides where it applies.
+- **Aspect**: a module that groups pointcuts and advice for one concern.
+- **Proxy**: the object that Spring puts in place of the bean. A call on the proxy runs the matching advice chain, then the target method. A JDK dynamic proxy is used when the target implements an interface; otherwise CGLIB generates a subclass.
 
-Advice types:
-1. before
-2. after
-3. finally
-4. around
+Whichever way advice is declared, it reaches the proxy as an `Advisor`. The auto-proxy creator collects every `Advisor` that applies to a bean and wraps that bean in a proxy.
 
-`Advisor` interface holding AOP `advice` and a filter determing the applicability of the advice(such as a `pointcut`)
+## Advice interfaces
 
-`Pointcut`  A predicate that matches joinpoint. Advice is associated with a pointcut expression that runs at any `Joinpoint` matched by the `pointcut`. Spring AOP supports several AspectJ pointcut designators
-* execution
-* within
-* @annotation
-
-`Proxy` An object created by the AOP framework in order to implement the aspect contracts.
-
+The first way is to implement Spring's advice interfaces and pair the advice with a pointcut in an `Advisor` bean. `MethodInterceptor` comes from AOP Alliance and covers around advice. Before, after-returning, and throws advice are Spring interfaces that are adapted to `MethodInterceptor` when the chain is built.
 
 ```plantuml
+@startuml
+top to bottom direction
 
-interface JoinPoint {
-    
+interface Advice
+interface Interceptor
+interface MethodInterceptor {
+    Object invoke(MethodInvocation invocation)
 }
-interface ProceedingJoinPoint extends JoinPoint
+interface BeforeAdvice
+interface AfterAdvice
+interface MethodBeforeAdvice {
+    void before(Method method, Object[] args, Object target)
+}
+interface AfterReturningAdvice {
+    void afterReturning(Object returnValue, Method method, Object[] args, Object target)
+}
+interface ThrowsAdvice
 
+interface Advisor {
+    Advice getAdvice()
+}
+interface PointcutAdvisor {
+    Pointcut getPointcut()
+}
+interface Pointcut {
+    ClassFilter getClassFilter()
+    MethodMatcher getMethodMatcher()
+}
+class DefaultPointcutAdvisor
+
+Advice <|-- Interceptor
+Interceptor <|-- MethodInterceptor
+Advice <|-- BeforeAdvice
+Advice <|-- AfterAdvice
+BeforeAdvice <|-- MethodBeforeAdvice
+AfterAdvice <|-- AfterReturningAdvice
+AfterAdvice <|-- ThrowsAdvice
+Advisor <|-- PointcutAdvisor
+PointcutAdvisor <|.. DefaultPointcutAdvisor
+DefaultPointcutAdvisor o-- Advice
+DefaultPointcutAdvisor o-- Pointcut
+@enduml
+```
+
+```java
+public class TimingInterceptor implements MethodInterceptor {
+    public Object invoke(MethodInvocation invocation) throws Throwable {
+        long start = System.nanoTime();
+        try {
+            return invocation.proceed(); // next advice or the target method
+        }
+        finally {
+            log.info(invocation.getMethod().getName() + " took " + (System.nanoTime() - start));
+        }
+    }
+}
+
+@Bean
+public Advisor timingAdvisor() {
+    AspectJExpressionPointcut pointcut = new AspectJExpressionPointcut();
+    pointcut.setExpression("execution(* com.example.service.*.*(..))");
+    return new DefaultPointcutAdvisor(pointcut, new TimingInterceptor());
+}
+```
+
+### Ready-made advisors
+
+Spring provides `Advisor` classes that can be declared as beans without writing a pointcut class. Each one fixes the kind of pointcut and takes the advice from `setAdvice`, or from `setAdviceBeanName` for the bean-factory variant.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface Advisor
+interface PointcutAdvisor
+interface IntroductionAdvisor
+abstract class AbstractPointcutAdvisor
+abstract class AbstractGenericPointcutAdvisor {
+    void setAdvice(Advice advice)
+}
+abstract class AbstractBeanFactoryPointcutAdvisor {
+    void setAdviceBeanName(String adviceBeanName)
+}
+class DefaultPointcutAdvisor {
+    void setPointcut(Pointcut pointcut)
+}
+class NameMatchMethodPointcutAdvisor {
+    void setMappedNames(String... mappedNames)
+}
+class RegexpMethodPointcutAdvisor {
+    void setPatterns(String... patterns)
+}
+class AspectJExpressionPointcutAdvisor {
+    void setExpression(String expression)
+}
+class DefaultBeanFactoryPointcutAdvisor {
+    void setPointcut(Pointcut pointcut)
+}
+class DefaultIntroductionAdvisor
+
+Advisor <|-- PointcutAdvisor
+Advisor <|-- IntroductionAdvisor
+PointcutAdvisor <|.. AbstractPointcutAdvisor
+AbstractPointcutAdvisor <|-- AbstractGenericPointcutAdvisor
+AbstractPointcutAdvisor <|-- AbstractBeanFactoryPointcutAdvisor
+AbstractGenericPointcutAdvisor <|-- DefaultPointcutAdvisor
+AbstractGenericPointcutAdvisor <|-- NameMatchMethodPointcutAdvisor
+AbstractGenericPointcutAdvisor <|-- RegexpMethodPointcutAdvisor
+AbstractGenericPointcutAdvisor <|-- AspectJExpressionPointcutAdvisor
+AbstractBeanFactoryPointcutAdvisor <|-- DefaultBeanFactoryPointcutAdvisor
+IntroductionAdvisor <|.. DefaultIntroductionAdvisor
+@enduml
+```
+
+| Advisor | Selects methods by |
+|---|---|
+| `DefaultPointcutAdvisor` | any `Pointcut` passed in; with only an advice, `Pointcut.TRUE` (every method) |
+| `NameMatchMethodPointcutAdvisor` | method names, with `*` wildcards (`get*`, `*Order`) |
+| `RegexpMethodPointcutAdvisor` | regular expressions on the fully qualified method name |
+| `AspectJExpressionPointcutAdvisor` | an AspectJ pointcut expression |
+| `DefaultBeanFactoryPointcutAdvisor` | any `Pointcut`; the advice is a bean looked up by name, created lazily |
+| `DefaultIntroductionAdvisor` | classes, not methods; adds interfaces to the proxy (introduction) |
+
+`DefaultPointcutAdvisor` is the general one: any `Pointcut` plus any `Advice`. The pointcut can be a built-in one or a small class that implements the match.
+
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Timed {}
+
+// built-in pointcut: methods annotated with @Timed
+@Bean
+public Advisor timedAdvisor() {
+    Pointcut pointcut = AnnotationMatchingPointcut.forMethodAnnotation(Timed.class);
+    return new DefaultPointcutAdvisor(pointcut, new TimingInterceptor());
+}
+
+// custom pointcut: public methods of classes in the service package
+@Bean
+public Advisor servicePublicMethodsAdvisor() {
+    Pointcut pointcut = new StaticMethodMatcherPointcut() {
+        public boolean matches(Method method, Class<?> targetClass) {
+            return Modifier.isPublic(method.getModifiers())
+                    && targetClass.getPackageName().startsWith("com.example.service");
+        }
+    };
+    return new DefaultPointcutAdvisor(pointcut, new TimingInterceptor());
+}
+
+// no pointcut: Pointcut.TRUE, every method of every proxied bean
+@Bean
+public Advisor everyMethodAdvisor() {
+    return new DefaultPointcutAdvisor(new TimingInterceptor());
+}
+
+@Service
+public class OrderService {
+    @Timed
+    public void placeOrder(Order order) { ... } // timedAdvisor applies
+}
+```
+
+```java
+@Bean
+public Advisor nameAdvisor() {
+    NameMatchMethodPointcutAdvisor advisor = new NameMatchMethodPointcutAdvisor(new TimingInterceptor());
+    advisor.setMappedNames("save*", "delete*");
+    return advisor;
+}
+
+@Bean
+public Advisor regexpAdvisor() {
+    RegexpMethodPointcutAdvisor advisor = new RegexpMethodPointcutAdvisor(new TimingInterceptor());
+    advisor.setPatterns(".*Service\\..*");
+    return advisor;
+}
+
+@Bean
+public Advisor expressionAdvisor() {
+    AspectJExpressionPointcutAdvisor advisor = new AspectJExpressionPointcutAdvisor();
+    advisor.setExpression("execution(* com.example.service.*.*(..))");
+    advisor.setAdvice(new TimingInterceptor());
+    return advisor;
+}
+```
+
+## @Aspect annotation
+
+The second way is an AspectJ-style class annotated with `@Aspect`. Its methods carry `@Pointcut`, `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After`, or `@Around`. No advice interface is implemented. With `@EnableAspectJAutoProxy`, `AnnotationAwareAspectJAutoProxyCreator` finds `@Aspect` beans through `BeanFactoryAspectJAdvisorsBuilder`. `ReflectiveAspectJAdvisorFactory` then turns each advice method into an `InstantiationModelAwarePointcutAdvisorImpl`, whose pointcut is an `AspectJExpressionPointcut` and whose advice wraps the method.
+
+| Annotation | Advice created by `ReflectiveAspectJAdvisorFactory` |
+|---|---|
+| `@Before` | `AspectJMethodBeforeAdvice` |
+| `@AfterReturning` | `AspectJAfterReturningAdvice` |
+| `@AfterThrowing` | `AspectJAfterThrowingAdvice` |
+| `@After` | `AspectJAfterAdvice` |
+| `@Around` | `AspectJAroundAdvice` |
+
+```java
+@Aspect
+@Component
+public class TimingAspect {
+
+    @Pointcut("execution(* com.example.service.*.*(..))")
+    void serviceMethods() {}
+
+    @Before("serviceMethods()")
+    public void before(JoinPoint joinPoint) {
+        log.info("enter " + joinPoint.getSignature());
+    }
+
+    @Around("serviceMethods()")
+    public Object time(ProceedingJoinPoint joinPoint) throws Throwable {
+        long start = System.nanoTime();
+        try {
+            return joinPoint.proceed(); // next advice or the target method
+        }
+        finally {
+            log.info(joinPoint.getSignature() + " took " + (System.nanoTime() - start));
+        }
+    }
+}
+```
+
+Both forms end up in the same list. `AnnotationAwareAspectJAutoProxyCreator.findCandidateAdvisors` returns the `Advisor` beans from the first form plus the advisors built from `@Aspect` classes.
+
+```java
+// AnnotationAwareAspectJAutoProxyCreator.findCandidateAdvisors
+protected List<Advisor> findCandidateAdvisors() {
+    List<Advisor> advisors = super.findCandidateAdvisors(); // Advisor beans
+    if (this.aspectJAdvisorsBuilder != null) {
+        advisors.addAll(this.aspectJAdvisorsBuilder.buildAspectJAdvisors()); // @Aspect methods
+    }
+    return advisors;
+}
 ```
 
 # AOP during Bean creation
