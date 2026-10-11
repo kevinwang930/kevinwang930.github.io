@@ -323,6 +323,215 @@ A valve is a request processing component associated with a Container. A series 
 
 
 
+# Tomcat startup
+
+Tomcat is a tree of lifecycle components. `StandardServer` owns one or more `StandardService`s; each service owns one `StandardEngine` (the request-processing container) and the `Connector`s that accept network traffic. Below the engine, containers nest as `StandardHost` (virtual host) → `StandardContext` (one web application, one `ServletContext`) → `StandardWrapper` (one servlet). Every component extends `LifecycleBase`, whose `start()` moves the state to `STARTING_PREP`, calls the subclass `startInternal()`, and then moves to `STARTED`.
+
+```plantuml
+top to bottom direction
+
+abstract class LifecycleBase {
+    + void start()
+    # {abstract} void startInternal()
+}
+abstract class ContainerBase {
+    # HashMap<String,Container> children
+    # ExecutorService startStopExecutor
+    # void startInternal()
+}
+class StandardServer {
+    - Service[] services
+}
+class StandardService {
+    - Engine engine
+    # Connector[] connectors
+    # MapperListener mapperListener
+}
+class Connector
+class StandardEngine
+class StandardHost
+class StandardContext {
+    # ApplicationContext context
+    - Map<String,FilterDef> filterDefs
+    - ContextFilterMaps filterMaps
+    - Map<String,ApplicationFilterConfig> filterConfigs
+    - Map<ServletContainerInitializer,Set<Class<?>>> initializers
+    # void startInternal()
+}
+class StandardWrapper {
+    # volatile Servlet instance
+    + void load()
+}
+class HostConfig {
+    + void lifecycleEvent(LifecycleEvent)
+    # void deployApps()
+}
+class ContextConfig {
+    + void lifecycleEvent(LifecycleEvent)
+    # void webConfig()
+}
+class "ApplicationContext" as TomcatApplicationContext
+
+LifecycleBase <|-- StandardServer
+LifecycleBase <|-- StandardService
+LifecycleBase <|-- Connector
+LifecycleBase <|-- ContainerBase
+ContainerBase <|-- StandardEngine
+ContainerBase <|-- StandardHost
+ContainerBase <|-- StandardContext
+ContainerBase <|-- StandardWrapper
+
+StandardServer *-- "N" StandardService : services
+StandardService *-- "1" StandardEngine : engine
+StandardService *-- "N" Connector : connectors
+StandardEngine *-- "N" StandardHost : children
+StandardHost *-- "N" StandardContext : children
+StandardContext *-- "N" StandardWrapper : children
+StandardContext *-- TomcatApplicationContext : context
+StandardHost o-- HostConfig : lifecycle listener
+StandardContext o-- ContextConfig : lifecycle listener
+```
+
+`LifecycleBase`, `ContainerBase` and the `Standard*` classes are simplified here; `StandardServer`, `StandardService` and `Connector` extend `LifecycleMBeanBase`, which extends `LifecycleBase`. The `ApplicationContext` box is Tomcat's `org.apache.catalina.core.ApplicationContext`, the `ServletContext` implementation, not Spring's `ApplicationContext`.
+
+## Start sequence
+
+Tomcat starts from `Bootstrap.main`, which calls `Catalina.load()` (parse `server.xml`, `getServer().init()`) and then `Catalina.start()` (`getServer().start()`). Each component starts its children before it becomes available:
+
+- `StandardServer.startInternal` starts every service.
+- `StandardService.startInternal` starts the engine first, then the `MapperListener` (which builds the URL → host/context/wrapper `Mapper`), and the connectors last. A port therefore accepts requests only after all web applications have started.
+- `ContainerBase.startInternal` submits every child to `startStopExecutor` as a `StartChild` task and waits for all results, then starts its pipeline and fires `START_EVENT`.
+- On a host, `START_EVENT` reaches `HostConfig.start()`, which calls `deployApps()`: deploy context XML descriptors, then WARs, then expanded directories. Each deployment creates a `StandardContext` and calls `host.addChild(context)`, which starts the context because the host is already starting.
+
+```mermaid
+sequenceDiagram
+    participant B as Bootstrap
+    participant C as Catalina
+    participant S as StandardServer
+    participant Svc as StandardService
+    participant E as StandardEngine
+    participant H as StandardHost
+    participant HC as HostConfig
+    participant Ctx as StandardContext
+    participant Con as Connector
+
+    B->>C: load()  (server.xml, server.init())
+    B->>C: start()
+    C->>S: start()
+    S->>Svc: start()
+    Svc->>E: start()
+    E->>H: StartChild (startStopExecutor)
+    H->>HC: lifecycleEvent(START_EVENT)
+    HC->>HC: deployApps()
+    HC->>Ctx: host.addChild(context) -> start()
+    Ctx->>Ctx: startInternal()
+    Svc->>Svc: mapperListener.start()
+    Svc->>Con: start()  (bind port, accept requests)
+```
+
+## Web application start
+
+`StandardContext.startInternal` brings up one web application. The order of its phases is fixed and determines what each phase can see:
+
+| Order | Phase | Effect |
+|-------|-------|--------|
+| 1 | resources and `WebappLoader` start | `WEB-INF/classes` and `WEB-INF/lib` become loadable through the webapp class loader |
+| 2 | `fireLifecycleEvent(CONFIGURE_START_EVENT)` | `ContextConfig.configureStart` → `webConfig`: parse `web.xml` and fragments, scan annotations, discover `ServletContainerInitializer`s, apply servlets, filters and listeners to the context |
+| 3 | start child wrappers and pipeline | servlets declared so far exist as `StandardWrapper`s, not yet initialized |
+| 4 | `mergeParameters()` | context init parameters become visible through `ServletContext.getInitParameter` |
+| 5 | `ServletContainerInitializer.onStartup(classes, servletContext)` | programmatic registration of servlets, filters and listeners |
+| 6 | `listenerStart()` | instantiate listeners, then call `ServletContextListener.contextInitialized` |
+| 7 | `filterStart()` | create an `ApplicationFilterConfig` for every `FilterDef`, which instantiates the filter and calls `Filter.init` |
+| 8 | `loadOnStartup(findChildren())` | call `wrapper.load()` → `Servlet.init` for wrappers with `loadOnStartup >= 0`, ascending by that value |
+
+```java
+// StandardContext.startInternal
+protected void startInternal() throws LifecycleException {
+    // ... resources, WebappLoader, naming
+    fireLifecycleEvent(CONFIGURE_START_EVENT, null);   // ContextConfig.configureStart -> webConfig
+    for (Container child : findChildren()) {
+        if (!child.getState().isAvailable()) {
+            child.start();
+        }
+    }
+    // ... pipeline, manager
+    mergeParameters();
+    for (Map.Entry<ServletContainerInitializer,Set<Class<?>>> entry : initializers.entrySet()) {
+        entry.getKey().onStartup(entry.getValue(), getServletContext());
+    }
+    if (ok) {
+        if (!listenerStart()) { ok = false; }          // ServletContextListener.contextInitialized
+    }
+    if (ok) {
+        if (!filterStart()) { ok = false; }            // new ApplicationFilterConfig -> Filter.init
+    }
+    if (ok) {
+        if (!loadOnStartup(findChildren())) { ok = false; }   // Servlet.init
+    }
+    // ...
+}
+```
+
+A `ServletContainerInitializer` (SCI) is a service provider: a jar declares an implementation by containing the file `META-INF/services/jakarta.servlet.ServletContainerInitializer`, whose lines are implementation class names. `spring-web`, for example, lists `org.springframework.web.SpringServletContainerInitializer` there. `ContextConfig.processServletContainerInitializers` reads these files through `WebappServiceLoader` rather than `java.util.ServiceLoader`, because the servlet specification adds rules that a single class loader lookup cannot express: files from the container class loader (Tomcat's `lib`) are read first and can be excluded with the context's `containerSciFilter`, then files from the web application class loader (`WEB-INF/classes`, `WEB-INF/lib`); when `web.xml` declares an absolute ordering, only the listed jars are read, in that order. Each class name is loaded and instantiated with the web application class loader.
+
+If an SCI class carries `@HandlesTypes`, every listed type is recorded in `typeInitializerMap`; the class scan in `processClasses` collects each application class that implements, extends or is annotated with such a type, and `webConfig` finally calls `context.addServletContainerInitializer(sci, classes)` so that phase 5 passes those classes to `onStartup`.
+
+```java
+// ContextConfig.processServletContainerInitializers
+protected void processServletContainerInitializers() {
+    List<ServletContainerInitializer> detectedScis;
+    WebappServiceLoader<ServletContainerInitializer> loader = new WebappServiceLoader<>(context);
+    detectedScis = loader.load(ServletContainerInitializer.class);
+    for (ServletContainerInitializer sci : detectedScis) {
+        initializerClassMap.put(sci, new HashSet<>());
+        HandlesTypes ht = sci.getClass().getAnnotation(HandlesTypes.class);
+        if (ht == null) {
+            continue;
+        }
+        for (Class<?> type : ht.value()) {
+            typeInitializerMap.computeIfAbsent(type, k -> new HashSet<>()).add(sci);
+        }
+    }
+}
+```
+
+## Programmatic registration
+
+Programmatic registration through `ServletContext.addServlet`, `addFilter` and `addListener` is accepted only while the context is in `STARTING_PREP`; `ApplicationContext.checkState` throws `IllegalStateException` otherwise. In practice this restricts registration to phases 5 and 6, before any filter or servlet is initialized.
+
+`addServlet` creates a `StandardWrapper`, adds it as a child of the context, and stores the servlet instance in it; the returned `ApplicationServletRegistration` writes mappings and the load-on-startup value directly into the wrapper and the context. `addServlet` returns `null` when a complete registration with that name already exists, so callers must treat `null` as a name conflict.
+
+```java
+// ApplicationContext.addServlet (Tomcat)
+private ServletRegistration.Dynamic addServlet(String servletName, String servletClass, Servlet servlet,
+        Map<String,String> initParams) throws IllegalStateException {
+    checkState("applicationContext.addServlet.ise");          // only in STARTING_PREP
+    Wrapper wrapper = (Wrapper) context.findChild(servletName);
+    if (wrapper == null) {
+        wrapper = context.createWrapper();
+        wrapper.setName(servletName);
+        context.addChild(wrapper);
+    } else {
+        if (wrapper.getName() != null && wrapper.getServletClass() != null) {
+            if (wrapper.isOverridable()) {
+                wrapper.setOverridable(false);
+            } else {
+                return null;
+            }
+        }
+    }
+    if (servlet == null) {
+        wrapper.setServletClass(servletClass);
+    } else {
+        wrapper.setServletClass(servlet.getClass().getName());
+        wrapper.setServlet(servlet);
+    }
+    // ... init parameters, @ServletSecurity
+    return new ApplicationServletRegistration(wrapper, context);
+}
+```
+
+
 # Request handling pipeline
 
 In `Container` section, we see that `Container` contains `Pipeline`,`Pipeline` contains `Valves` in order. the request handling is actually invoke the `Valves` in the `Pipeline` of the specified container one by one. 
@@ -552,6 +761,59 @@ Filters are a Context-level concern, not a Valve. `StandardContext` keeps three 
 2. `FilterMap` — `<filter-mapping>` (`url-pattern` and/or `servlet-name`, plus dispatcher types REQUEST/FORWARD/INCLUDE/ERROR/ASYNC)
 3. `ApplicationFilterConfig` — runtime `FilterConfig`; created in `filterStart()` when the Context starts, holds the live `Filter` instance after `init()`
 
+#### Registration: `FilterDef` and `FilterMap`
+
+`ServletContext.addFilter` creates the `FilterDef`; `FilterRegistration.Dynamic.addMappingForUrlPatterns` and `addMappingForServletNames` append a `FilterMap`, either after existing maps (`isMatchAfter = true`) or before the maps declared in `web.xml` (`false`).
+
+```java
+// ApplicationContext.addFilter (Tomcat)
+private FilterRegistration.Dynamic addFilter(String filterName, String filterClass, Filter filter)
+        throws IllegalStateException {
+    checkState("applicationContext.addFilter.ise");           // only in STARTING_PREP
+    FilterDef filterDef = context.findFilterDef(filterName);
+    if (filterDef == null) {
+        filterDef = new FilterDef();
+        filterDef.setFilterName(filterName);
+        context.addFilterDef(filterDef);
+    } else {
+        if (filterDef.getFilterName() != null && filterDef.getFilterClass() != null) {
+            return null;
+        }
+    }
+    if (filter == null) {
+        filterDef.setFilterClass(filterClass);
+    } else {
+        filterDef.setFilterClass(filter.getClass().getName());
+        filterDef.setFilter(filter);
+    }
+    return new ApplicationFilterRegistration(filterDef, context);
+}
+
+// ApplicationFilterRegistration.addMappingForUrlPatterns
+public void addMappingForUrlPatterns(EnumSet<DispatcherType> dispatcherTypes, boolean isMatchAfter,
+        String... urlPatterns) {
+    FilterMap filterMap = new FilterMap();
+    filterMap.setFilterName(filterDef.getFilterName());
+    if (dispatcherTypes != null) {
+        for (DispatcherType dispatcherType : dispatcherTypes) {
+            filterMap.setDispatcher(dispatcherType.name());
+        }
+    }
+    if (urlPatterns != null) {
+        for (String urlPattern : urlPatterns) {
+            filterMap.addURLPattern(urlPattern);
+        }
+        if (isMatchAfter) {
+            context.addFilterMap(filterMap);
+        } else {
+            context.addFilterMapBefore(filterMap);
+        }
+    }
+}
+```
+
+During web application start (phase 7 in the Tomcat startup section), `filterStart` turns every `FilterDef` into an `ApplicationFilterConfig`; its constructor instantiates the filter if only a class name was given and calls `Filter.init(filterConfig)`. Filters therefore initialize after `ServletContextListener.contextInitialized` and before load-on-startup servlets.
+
 #### Build chain: `ApplicationFilterFactory`
 
 `StandardWrapperValve.invoke` does roughly:
@@ -587,6 +849,74 @@ doFilter(request, response):
 ```
 
 Each filter receives the same chain instance and must call `chain.doFilter` to advance. When `pos` reaches `n`, the chain falls through to the servlet. After the request finishes, `release()` nulls filter references and resets counters so the chain object can be reused on the next request (`reuse()` only resets `pos`).
+
+```plantuml
+top to bottom direction
+
+class StandardContext {
+    - Map<String,FilterDef> filterDefs
+    - ContextFilterMaps filterMaps
+    - Map<String,ApplicationFilterConfig> filterConfigs
+    + boolean filterStart()
+    + FilterMap[] findFilterMaps()
+}
+class FilterDef {
+    - String filterName
+    - String filterClass
+    - Filter filter
+}
+class FilterMap {
+    - String filterName
+    - String[] servletNames
+    - String[] urlPatterns
+    - int dispatcherMapping
+}
+class ApplicationFilterConfig {
+    - FilterDef filterDef
+    - Filter filter
+}
+class ApplicationFilterFactory {
+    + {static} ApplicationFilterChain createFilterChain(ServletRequest, Wrapper, Servlet)
+}
+class ApplicationFilterChain {
+    - ApplicationFilterConfig[] filters
+    - int pos
+    - int n
+    - Servlet servlet
+    + void doFilter(ServletRequest, ServletResponse)
+}
+class StandardWrapperValve {
+    + void invoke(Request, Response)
+}
+
+StandardContext *-- "N" FilterDef : filterDefs
+StandardContext *-- "N" FilterMap : filterMaps
+StandardContext *-- "N" ApplicationFilterConfig : filterConfigs
+ApplicationFilterConfig o-- FilterDef
+StandardWrapperValve --> ApplicationFilterFactory : per request
+ApplicationFilterFactory --> ApplicationFilterChain : create
+ApplicationFilterChain o-- "N" ApplicationFilterConfig : filters
+```
+
+```mermaid
+sequenceDiagram
+    participant V as StandardWrapperValve
+    participant FF as ApplicationFilterFactory
+    participant FC as ApplicationFilterChain
+    participant F1 as Filter 1
+    participant F2 as Filter 2
+    participant DS as DispatcherServlet
+
+    V->>FF: createFilterChain(request, wrapper, servlet)
+    FF->>FF: URL-pattern matches, then servlet-name matches
+    FF-->>V: chain
+    V->>FC: doFilter(request, response)
+    FC->>F1: doFilter(req, res, chain)
+    F1->>FC: chain.doFilter
+    FC->>F2: doFilter(req, res, chain)
+    F2->>FC: chain.doFilter
+    FC->>DS: service(req, res)
+```
 
 Valve vs Filter: Valves sit on every Container pipeline (Engine → Host → Context → Wrapper) and are Catalina-specific; Filters are Servlet-spec, scoped to a Context, selected per request by URL/servlet-name/dispatcher, and only run after the request has been routed to a concrete Wrapper.
 

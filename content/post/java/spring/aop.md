@@ -358,12 +358,270 @@ class ProxyProcessorSupport {
 # boolean isInternalLanguageInterface(Class<?>)
 }
 
-interface AopProxy
+interface AopProxy {
++ Object getProxy(ClassLoader)
+}
+
+' advisor lookup
+class BeanFactoryAdvisorRetrievalHelper {
++ List<Advisor> findAdvisorBeans()
+}
+class BeanFactoryAspectJAdvisorsBuilder {
+- Map<String,List<Advisor>> advisorsCache
+- Map<String,MetadataAwareAspectInstanceFactory> aspectFactoryCache
++ List<Advisor> buildAspectJAdvisors()
+}
+interface AspectJAdvisorFactory {
++ boolean isAspect(Class<?>)
++ List<Advisor> getAdvisors(MetadataAwareAspectInstanceFactory)
++ Advisor getAdvisor(Method,MetadataAwareAspectInstanceFactory,int,String)
++ Advice getAdvice(Method,AspectJExpressionPointcut,MetadataAwareAspectInstanceFactory,int,String)
+}
+abstract class AbstractAspectJAdvisorFactory implements AspectJAdvisorFactory
+class ReflectiveAspectJAdvisorFactory extends AbstractAspectJAdvisorFactory
+interface MetadataAwareAspectInstanceFactory
+class BeanFactoryAspectInstanceFactory implements MetadataAwareAspectInstanceFactory
+
+' advisors and advice built from @Aspect methods
+interface Advisor
+interface PointcutAdvisor extends Advisor
+interface InstantiationModelAwarePointcutAdvisor extends PointcutAdvisor
+class InstantiationModelAwarePointcutAdvisorImpl implements InstantiationModelAwarePointcutAdvisor {
+- AspectJExpressionPointcut declaredPointcut
+- Method aspectJAdviceMethod
+- Advice instantiatedAdvice
++ Advice getAdvice()
+}
+class AspectJExpressionPointcut {
++ void setExpression(String)
++ boolean matches(Method,Class<?>)
+}
+interface Advice
+interface MethodInterceptor
+interface MethodBeforeAdvice
+interface AfterReturningAdvice
+abstract class AbstractAspectJAdvice implements Advice {
+# Object invokeAdviceMethod(...)
+}
+class AspectJAroundAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+class AspectJMethodBeforeAdvice extends AbstractAspectJAdvice implements MethodBeforeAdvice
+class AspectJAfterAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+class AspectJAfterReturningAdvice extends AbstractAspectJAdvice implements AfterReturningAdvice
+class AspectJAfterThrowingAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+
+' proxy creation and invocation
+class ProxyConfig
+class AdvisedSupport extends ProxyConfig {
+- List<Advisor> advisors
+- AdvisorChainFactory advisorChainFactory
++ void addAdvisors(Advisor...)
++ List<Object> getInterceptorsAndDynamicInterceptionAdvice(Method,Class<?>)
+}
+class ProxyCreatorSupport extends AdvisedSupport {
+- AopProxyFactory aopProxyFactory
+}
+class ProxyFactory extends ProxyCreatorSupport {
++ Object getProxy(ClassLoader)
+}
+interface AopProxyFactory
+class DefaultAopProxyFactory implements AopProxyFactory
+class JdkDynamicAopProxy implements AopProxy {
++ Object invoke(Object,Method,Object[])
+}
+class CglibAopProxy implements AopProxy
+class ObjenesisCglibAopProxy extends CglibAopProxy
+interface AdvisorChainFactory
+class DefaultAdvisorChainFactory implements AdvisorChainFactory
+interface AdvisorAdapterRegistry {
++ MethodInterceptor[] getInterceptors(Advisor)
+}
+class DefaultAdvisorAdapterRegistry implements AdvisorAdapterRegistry
+interface ProxyMethodInvocation
+class ReflectiveMethodInvocation implements ProxyMethodInvocation {
+# List<?> interceptorsAndDynamicMethodMatchers
+- int currentInterceptorIndex
++ Object proceed()
+}
 
 AspectJAutoProxyRegistrar  -right-> AnnotationAwareAspectJAutoProxyCreator:register
+AbstractAdvisorAutoProxyCreator *-- BeanFactoryAdvisorRetrievalHelper : advisorRetrievalHelper
+AnnotationAwareAspectJAutoProxyCreator *-- BeanFactoryAspectJAdvisorsBuilder : aspectJAdvisorsBuilder
+AnnotationAwareAspectJAutoProxyCreator o-- AspectJAdvisorFactory : aspectJAdvisorFactory
+BeanFactoryAspectJAdvisorsBuilder --> AspectJAdvisorFactory : getAdvisors
+BeanFactoryAspectJAdvisorsBuilder --> BeanFactoryAspectInstanceFactory : new
+ReflectiveAspectJAdvisorFactory --> InstantiationModelAwarePointcutAdvisorImpl : new
+ReflectiveAspectJAdvisorFactory --> AbstractAspectJAdvice : getAdvice
+InstantiationModelAwarePointcutAdvisorImpl *-- AspectJExpressionPointcut
+InstantiationModelAwarePointcutAdvisorImpl o-- AbstractAspectJAdvice
+AbstractAspectJAdvice o-- MetadataAwareAspectInstanceFactory : aspect bean
+AbstractAutoProxyCreator --> ProxyFactory : createProxy
+ProxyCreatorSupport o-- AopProxyFactory
+DefaultAopProxyFactory --> JdkDynamicAopProxy : interfaces
+DefaultAopProxyFactory --> ObjenesisCglibAopProxy : target class
+AdvisedSupport o-- AdvisorChainFactory
+DefaultAdvisorChainFactory --> AdvisorAdapterRegistry : getInterceptors
+JdkDynamicAopProxy --> ReflectiveMethodInvocation : proceed
 
 ```
 
+
+## Advisor resolution and interceptor chain
+
+A `MethodInterceptor` is not injected into the target bean. It is carried by an `Advisor`, copied into the proxy's `ProxyFactory`, and called by the proxy on each method invocation. An `@Aspect` class implements no advisor or advice interface; the auto-proxy creator builds `Advisor` objects from its annotated methods, and from then on they follow the same path.
+
+1. **Register the auto-proxy creator.** `@EnableAspectJAutoProxy` imports `AspectJAutoProxyRegistrar`, which registers `AnnotationAwareAspectJAutoProxyCreator` as a `BeanPostProcessor`.
+2. **Find the advisors.** After a bean is initialized, `postProcessAfterInitialization` calls `wrapIfNecessary`. `findCandidateAdvisors` returns two lists. `findAdvisorsThatCanApply` then keeps those whose pointcut matches some method of the bean class.
+   - **`Advisor` beans:** `BeanFactoryAdvisorRetrievalHelper` collects every bean of type `Advisor`.
+   - **`@Aspect` beans:** `BeanFactoryAspectJAdvisorsBuilder.buildAspectJAdvisors` lists every bean name, reads each bean type without creating the bean, and keeps types annotated with `@Aspect`. The class must already be a bean (for example `@Component`); `@Aspect` alone registers nothing. For each advice method (`@Before`, `@AfterReturning`, `@AfterThrowing`, `@After`, `@Around`; `@Pointcut` methods are skipped), `ReflectiveAspectJAdvisorFactory.getAdvisor` builds an `AspectJExpressionPointcut` from the annotation value and an `InstantiationModelAwarePointcutAdvisorImpl` holding that pointcut and the method. Its advice is created by `getAdvice`, which picks `AspectJMethodBeforeAdvice`, `AspectJAroundAdvice`, and so on by annotation type; each calls the method on the aspect bean by reflection. The result is cached per aspect bean, so this reflection runs once.
+3. **Build the proxy.** `createProxy` adds those advisors to a `ProxyFactory`, which returns a JDK or CGLIB proxy. The proxy replaces the bean in the container.
+4. **Build the chain per method.** On a call, the proxy asks `DefaultAdvisorChainFactory` for the interceptors of that method. `DefaultAdvisorAdapterRegistry.getInterceptors` uses a `MethodInterceptor` as-is and adapts `MethodBeforeAdvice`, `AfterReturningAdvice`, and `ThrowsAdvice` into one.
+5. **Run the chain.** `ReflectiveMethodInvocation.proceed` calls each interceptor in turn. Each one calls `invocation.proceed()`, and the last call invokes the target method.
+
+A `MethodInterceptor` bean that is not wrapped in an `Advisor` is ignored by the advisor lookup. It must be wrapped (for example in `DefaultPointcutAdvisor`), named in `setInterceptorNames` on an auto-proxy creator, or added with `ProxyFactory.addAdvice`, which wraps it in a `DefaultPointcutAdvisor` with `Pointcut.TRUE`.
+
+```mermaid
+sequenceDiagram
+    participant C as Container
+    participant A as AnnotationAwareAspectJAutoProxyCreator
+    participant F as ProxyFactory
+    participant P as Proxy
+    participant I as ReflectiveMethodInvocation
+    participant T as Target bean
+
+    C->>A: postProcessAfterInitialization(bean)
+    A->>A: findCandidateAdvisors / findAdvisorsThatCanApply
+    A->>F: addAdvisors(advisors)
+    F-->>C: proxy replaces bean
+    P->>P: getInterceptorsAndDynamicInterceptionAdvice(method)
+    P->>I: proceed()
+    I->>I: MethodInterceptor.invoke(this) per interceptor
+    I->>T: invokeJoinpoint()
+```
+
+```java
+// AbstractAutoProxyCreator.wrapIfNecessary
+protected Object wrapIfNecessary(Object bean, String beanName, Object cacheKey) {
+    Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
+    if (specificInterceptors != DO_NOT_PROXY) {
+        return createProxy(bean.getClass(), beanName, specificInterceptors, new SingletonTargetSource(bean));
+    }
+    return bean;
+}
+
+// AbstractAdvisorAutoProxyCreator.findEligibleAdvisors
+protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+    List<Advisor> candidateAdvisors = findCandidateAdvisors(); // Advisor beans + @Aspect advisors
+    List<Advisor> eligibleAdvisors = findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+    extendAdvisors(eligibleAdvisors);
+    return sortAdvisors(eligibleAdvisors); // @Order / Ordered
+}
+
+// BeanFactoryAdvisorRetrievalHelper.findAdvisorBeans
+advisorNames = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(this.beanFactory, Advisor.class, true, false);
+advisors.add(this.beanFactory.getBean(name, Advisor.class));
+
+// AnnotationAwareAspectJAutoProxyCreator.findCandidateAdvisors
+protected List<Advisor> findCandidateAdvisors() {
+    List<Advisor> advisors = super.findCandidateAdvisors(); // Advisor beans
+    if (this.aspectJAdvisorsBuilder != null) {
+        advisors.addAll(this.aspectJAdvisorsBuilder.buildAspectJAdvisors()); // @Aspect beans
+    }
+    return advisors;
+}
+
+// BeanFactoryAspectJAdvisorsBuilder.buildAspectJAdvisors
+String[] beanNames = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(this.beanFactory, Object.class, true, false);
+for (String beanName : beanNames) {
+    Class<?> beanType = this.beanFactory.getType(beanName, false); // do not create the bean
+    if (this.advisorFactory.isAspect(beanType)) {                 // @Aspect on the class
+        MetadataAwareAspectInstanceFactory factory = new BeanFactoryAspectInstanceFactory(this.beanFactory, beanName);
+        List<Advisor> classAdvisors = this.advisorFactory.getAdvisors(factory); // one per advice method
+        this.advisorsCache.put(beanName, classAdvisors);
+        advisors.addAll(classAdvisors);
+    }
+}
+
+// ReflectiveAspectJAdvisorFactory.getAdvisor
+public Advisor getAdvisor(Method candidateAdviceMethod, MetadataAwareAspectInstanceFactory aspectInstanceFactory,
+        int declarationOrderInAspect, String aspectName) {
+    AspectJExpressionPointcut expressionPointcut = getPointcut(
+            candidateAdviceMethod, aspectInstanceFactory.getAspectMetadata().getAspectClass());
+    if (expressionPointcut == null) {
+        return null; // not an advice method
+    }
+    return new InstantiationModelAwarePointcutAdvisorImpl(expressionPointcut, candidateAdviceMethod,
+            this, aspectInstanceFactory, declarationOrderInAspect, aspectName);
+}
+
+// ReflectiveAspectJAdvisorFactory.getPointcut
+private AspectJExpressionPointcut getPointcut(Method candidateAdviceMethod, Class<?> candidateAspectClass) {
+    AspectJAnnotation aspectJAnnotation = findAspectJAnnotationOnMethod(candidateAdviceMethod);
+    if (aspectJAnnotation == null) {
+        return null;
+    }
+    AspectJExpressionPointcut ajexp = new AspectJExpressionPointcut(candidateAspectClass, new String[0], new Class<?>[0]);
+    ajexp.setExpression(aspectJAnnotation.getPointcutExpression()); // e.g. "serviceMethods()"
+    return ajexp;
+}
+
+// ReflectiveAspectJAdvisorFactory.getAdvice
+switch (aspectJAnnotation.getAnnotationType()) {
+    case AtAround -> springAdvice = new AspectJAroundAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+    case AtBefore -> springAdvice = new AspectJMethodBeforeAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+    case AtAfter -> springAdvice = new AspectJAfterAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+    case AtAfterReturning -> springAdvice = new AspectJAfterReturningAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+    case AtAfterThrowing -> springAdvice = new AspectJAfterThrowingAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+}
+
+// AbstractAutoProxyCreator.buildProxy
+Advisor[] advisors = buildAdvisors(beanName, specificInterceptors);
+proxyFactory.addAdvisors(advisors);
+proxyFactory.setTargetSource(targetSource);
+return proxyFactory.getProxy(classLoader);
+
+// JdkDynamicAopProxy.invoke
+List<Object> chain = this.advised.getInterceptorsAndDynamicInterceptionAdvice(method, targetClass);
+if (chain.isEmpty()) {
+    retVal = AopUtils.invokeJoinpointUsingReflection(target, method, argsToUse);
+}
+else {
+    MethodInvocation invocation = new ReflectiveMethodInvocation(proxy, target, method, args, targetClass, chain);
+    retVal = invocation.proceed();
+}
+
+// DefaultAdvisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice
+for (Advisor advisor : config.getAdvisors()) {
+    if (advisor instanceof PointcutAdvisor pointcutAdvisor
+            && pointcutAdvisor.getPointcut().getClassFilter().matches(actualClass)
+            && pointcutAdvisor.getPointcut().getMethodMatcher().matches(method, actualClass)) {
+        interceptorList.addAll(Arrays.asList(registry.getInterceptors(advisor)));
+    }
+}
+
+// DefaultAdvisorAdapterRegistry.getInterceptors
+public MethodInterceptor[] getInterceptors(Advisor advisor) {
+    List<MethodInterceptor> interceptors = new ArrayList<>(3);
+    Advice advice = advisor.getAdvice();
+    if (advice instanceof MethodInterceptor methodInterceptor) {
+        interceptors.add(methodInterceptor); // used as-is
+    }
+    for (AdvisorAdapter adapter : this.adapters) { // before / after-returning / throws
+        if (adapter.supportsAdvice(advice)) {
+            interceptors.add(adapter.getInterceptor(advisor));
+        }
+    }
+    return interceptors.toArray(new MethodInterceptor[0]);
+}
+
+// ReflectiveMethodInvocation.proceed
+public Object proceed() throws Throwable {
+    if (this.currentInterceptorIndex == this.interceptorsAndDynamicMethodMatchers.size() - 1) {
+        return invokeJoinpoint(); // target method
+    }
+    Object interceptor = this.interceptorsAndDynamicMethodMatchers.get(++this.currentInterceptorIndex);
+    return ((MethodInterceptor) interceptor).invoke(this); // interceptor calls proceed() again
+}
+```
 
 # Target Source
 
