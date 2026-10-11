@@ -62,6 +62,7 @@
 </a><a class="tag tag--primary tag--small" href=#syntax-list data-tag=syntax>syntax
 </a><a class="tag tag--primary tag--small" href=#tcp%2fip-list data-tag=tcp/ip>tcp/ip
 </a><a class="tag tag--primary tag--small" href=#thread-list data-tag=thread>thread
+</a><a class="tag tag--primary tag--small" href=#thread-pool-list data-tag=thread-pool>thread-pool
 </a><a class="tag tag--primary tag--small" href=#time-list data-tag=time>time
 </a><a class="tag tag--primary tag--small" href=#tomcat-list data-tag=tomcat>tomcat
 </a><a class="tag tag--primary tag--small" href=#transaction-list data-tag=transaction>transaction
@@ -138,7 +139,7 @@ June 24, 2026</span></li><li class=archive-post><a class=archive-post-title href
 </a><span class=archive-post-date>-
 June 27, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/fork-join-framework/>Java Fork/Join Framework
 </a><span class=archive-post-date>-
-June 28, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - BlockingQueue
+June 28, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - thread pool and BlockingQueue
 </a><span class=archive-post-date>-
 July 5, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/computer/java-random/>Random Number Generation in the JDK: Lineages and Algorithms
 </a><span class=archive-post-date>-
@@ -202,7 +203,7 @@ April 6, 2024</span></li><li class=archive-post><a class=archive-post-title href
 </a><span class=archive-post-date>-
 June 24, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/fork-join-framework/>Java Fork/Join Framework
 </a><span class=archive-post-date>-
-June 28, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - BlockingQueue
+June 28, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - thread pool and BlockingQueue
 </a><span class=archive-post-date>-
 July 5, 2026</span></li></ul></div><div id=mysql-list class="archive box" data-tag=mysql><h4 class=archive-title><a class=link-unstyled href=mysql>mysql (6)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
 </a><span class=archive-post-date>-
@@ -242,7 +243,7 @@ February 25, 2024</span></li><li class=archive-post><a class=archive-post-title 
 </a><span class=archive-post-date>-
 June 23, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrenthashmap/>Java ConcurrentHashMap implementation
 </a><span class=archive-post-date>-
-June 24, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - BlockingQueue
+June 24, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - thread pool and BlockingQueue
 </a><span class=archive-post-date>-
 July 5, 2026</span></li></ul></div><div id=search-list class="archive box" data-tag=search><h4 class=archive-title><a class=link-unstyled href=search>search (4)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/search/kibana/>Kibana
 </a><span class=archive-post-date>-
@@ -336,7 +337,7 @@ June 23, 2026</span></li></ul></div><div id=annotation-list class="archive box" 
 </a><span class=archive-post-date>-
 February 25, 2025</span></li></ul></div><div id=aop-list class="archive box" data-tag=aop><h4 class=archive-title><a class=link-unstyled href=aop>aop (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring/aop/>spring aop 架构与实现
 </a><span class=archive-post-date>-
-April 1, 2024</span></li></ul></div><div id=blocking-queue-list class="archive box" data-tag=blocking-queue><h4 class=archive-title><a class=link-unstyled href=blocking-queue>blocking-queue (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - BlockingQueue
+April 1, 2024</span></li></ul></div><div id=blocking-queue-list class="archive box" data-tag=blocking-queue><h4 class=archive-title><a class=link-unstyled href=blocking-queue>blocking-queue (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - thread pool and BlockingQueue
 </a><span class=archive-post-date>-
 July 5, 2026</span></li></ul></div><div id=class-list class="archive box" data-tag=class><h4 class=archive-title><a class=link-unstyled href=class>class (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/jvm/class/>JAVA Class File and Reflection
 </a><span class=archive-post-date>-
@@ -410,7 +411,9 @@ March 31, 2024</span></li></ul></div><div id=tcp/ip-list class="archive box" dat
 </a><span class=archive-post-date>-
 July 22, 2024</span></li></ul></div><div id=thread-list class="archive box" data-tag=thread><h4 class=archive-title><a class=link-unstyled href=thread>thread (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/jvm/thread/>JVM Thread internals
 </a><span class=archive-post-date>-
-August 7, 2024</span></li></ul></div><div id=time-list class="archive box" data-tag=time><h4 class=archive-title><a class=link-unstyled href=time>time (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/time/>Java Date Time Objects
+August 7, 2024</span></li></ul></div><div id=thread-pool-list class="archive box" data-tag=thread-pool><h4 class=archive-title><a class=link-unstyled href=thread-pool>thread-pool (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/thread-pool-blocking-queue/>java concurrency - thread pool and BlockingQueue
+</a><span class=archive-post-date>-
+July 5, 2026</span></li></ul></div><div id=time-list class="archive box" data-tag=time><h4 class=archive-title><a class=link-unstyled href=time>time (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/time/>Java Date Time Objects
 </a><span class=archive-post-date>-
 February 3, 2026</span></li></ul></div><div id=tomcat-list class="archive box" data-tag=tomcat><h4 class=archive-title><a class=link-unstyled href=tomcat>tomcat (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/tomcat/>Tomcat- Servlet Container
 </a><span class=archive-post-date>-
