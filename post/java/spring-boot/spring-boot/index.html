@@ -1,0 +1,921 @@
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003e本文介绍springBoot架构与实现\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring-boot\/spring-boot\/","keywords":"[]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.167.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content><meta name=description content="本文介绍springBoot架构与实现"><meta property="og:description" content="本文介绍springBoot架构与实现"><meta property="og:type" content="article"><meta property="og:title" content="Spring Boot internals"><meta name=twitter:title content="Spring Boot internals"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring-boot/spring-boot/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring-boot/spring-boot/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="本文介绍springBoot架构与实现"><meta name=twitter:description content="本文介绍springBoot架构与实现"><meta property="og:locale" content="en"><meta property="article:published_time" content="2024-01-09T23:29:20"><meta property="article:modified_time" content="2024-01-09T23:29:20"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="springBoot"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Spring Boot internals</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring Boot internals</h1><div class="postShorten-meta post-meta"><time datetime=2024-01-09T23:29:20+08:00>January 9, 2024
+</time><span>in</span>
+<a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>本文介绍springBoot架构与实现</p><p>Spring Boot adds a launch path, auto-configuration, an embedded web server, typed configuration binding, logging setup, startup failure reports, Actuator endpoints, and an executable archive layout.</p><h1 id=auto-configuration>Auto Configuration</h1><p><code>@SpringBootApplication</code> pulls in <code>@EnableAutoConfiguration</code>. That annotation is meta-annotated with <code>@AutoConfigurationPackage</code> and <code>@Import(AutoConfigurationImportSelector.class)</code>. During configuration-class parsing, <code>AutoConfigurationImportSelector.getAutoConfigurationEntry</code> decides which auto-configuration classes become bean definitions.</p><ol><li><code>isEnabled</code> reads <code>spring.boot.enableautoconfiguration</code> (default <code>true</code>). <code>false</code> returns an empty entry and imports nothing.</li><li><code>getCandidateConfigurations</code> loads class names from <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code> through <code>ImportCandidates</code>. The selector&rsquo;s annotation type defaults to <code>@AutoConfiguration</code>, not <code>@EnableAutoConfiguration</code>. This list is not <code>META-INF/spring.factories</code>.</li><li>Duplicates are removed. Exclusions come from the annotation attributes <code>exclude</code> / <code>excludeName</code> and from the property <code>spring.autoconfigure.exclude</code>.</li><li><code>ConfigurationClassFilter</code> drops candidates whose <code>@Conditional</code> checks fail (on class, on bean, on property, and the other auto-configuration conditions).</li><li><code>AutoConfigurationImportEvent</code> is fired with the surviving list.</li></ol><p>Each surviving class is an <code>@AutoConfiguration</code>. Boot registers it as an imported configuration. Conditions on the class decide whether its beans are created.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface Aware
+interface BeanClassLoaderAware {
+  +void setBeanClassLoader(ClassLoader classLoader)
+}
+interface BeanFactoryAware {
+  +void setBeanFactory(BeanFactory beanFactory)
+}
+interface ResourceLoaderAware {
+  +void setResourceLoader(ResourceLoader resourceLoader)
+}
+interface EnvironmentAware {
+  +void setEnvironment(Environment environment)
+}
+interface Ordered {
+  +int getOrder()
+}
+interface ImportSelector {
+  +String[] selectImports(AnnotationMetadata importingClassMetadata)
+  +Predicate&lt;String&gt; getExclusionFilter()
+}
+interface DeferredImportSelector {
+  +Class&lt;? extends Group&gt; getImportGroup()
+}
+interface &#34;DeferredImportSelector.Group&#34; as Group {
+  +void process(AnnotationMetadata metadata, DeferredImportSelector selector)
+  +Iterable&lt;Entry&gt; selectImports()
+}
+interface Condition {
+  +boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata)
+}
+interface ConfigurationCondition {
+  +ConfigurationPhase getConfigurationPhase()
+}
+
+Aware &lt;|-- BeanClassLoaderAware
+Aware &lt;|-- BeanFactoryAware
+Aware &lt;|-- ResourceLoaderAware
+Aware &lt;|-- EnvironmentAware
+ImportSelector &lt;|-- DeferredImportSelector
+Condition &lt;|-- ConfigurationCondition
+
+annotation EnableAutoConfiguration {
+  +Class&lt;?&gt;[] exclude()
+  +String[] excludeName()
+}
+class AutoConfigurationImportSelector {
+  -ConfigurationClassFilter configurationClassFilter
+  +String[] selectImports(AnnotationMetadata annotationMetadata)
+  +Class&lt;? extends Group&gt; getImportGroup()
+  #AutoConfigurationEntry getAutoConfigurationEntry(AnnotationMetadata annotationMetadata)
+  #List&lt;String&gt; getCandidateConfigurations(AnnotationMetadata metadata, AnnotationAttributes attributes)
+  #Set&lt;String&gt; getExclusions(AnnotationMetadata metadata, AnnotationAttributes attributes)
+  #List&lt;AutoConfigurationImportFilter&gt; getAutoConfigurationImportFilters()
+  #List&lt;AutoConfigurationImportListener&gt; getAutoConfigurationImportListeners()
+}
+class &#34;AutoConfigurationImportSelector.AutoConfigurationGroup&#34; as AutoConfigurationGroup {
+  -Map&lt;String, AnnotationMetadata&gt; entries
+  -List&lt;AutoConfigurationEntry&gt; autoConfigurationEntries
+  +void process(AnnotationMetadata annotationMetadata, DeferredImportSelector deferredImportSelector)
+  +Iterable&lt;Entry&gt; selectImports()
+}
+class &#34;AutoConfigurationImportSelector.ConfigurationClassFilter&#34; as ConfigurationClassFilter {
+  -AutoConfigurationMetadata autoConfigurationMetadata
+  -List&lt;AutoConfigurationImportFilter&gt; filters
+  ~List&lt;String&gt; filter(List&lt;String&gt; configurations)
+}
+class &#34;AutoConfigurationImportSelector.AutoConfigurationEntry&#34; as AutoConfigurationEntry {
+  -List&lt;String&gt; configurations
+  -Set&lt;String&gt; exclusions
+}
+class ImportCandidates {
+  +{static} ImportCandidates load(Class&lt;?&gt; annotation, ClassLoader classLoader)
+  +List&lt;String&gt; getCandidates()
+}
+class AutoConfigurationSorter {
+  ~List&lt;String&gt; getInPriorityOrder(Collection&lt;String&gt; classNames)
+}
+interface AutoConfigurationImportFilter {
+  +boolean[] match(String[] autoConfigurationClasses, AutoConfigurationMetadata autoConfigurationMetadata)
+}
+abstract class SpringBootCondition {
+  +final boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata)
+  +{abstract} ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata)
+}
+abstract class FilteringSpringBootCondition {
+  +boolean[] match(String[] autoConfigurationClasses, AutoConfigurationMetadata autoConfigurationMetadata)
+  #{abstract} ConditionOutcome[] getOutcomes(String[] autoConfigurationClasses, AutoConfigurationMetadata autoConfigurationMetadata)
+}
+class OnClassCondition
+class OnBeanCondition
+class OnWebApplicationCondition
+interface AutoConfigurationImportListener {
+  +void onAutoConfigurationImportEvent(AutoConfigurationImportEvent event)
+}
+class ConditionEvaluationReportAutoConfigurationImportListener
+class AutoConfigurationImportEvent {
+  -List&lt;String&gt; candidateConfigurations
+  -Set&lt;String&gt; exclusions
+}
+
+SpringBootCondition &lt;|-- FilteringSpringBootCondition
+AutoConfigurationImportFilter &lt;|.. FilteringSpringBootCondition
+FilteringSpringBootCondition &lt;|-- OnClassCondition
+FilteringSpringBootCondition &lt;|-- OnBeanCondition
+FilteringSpringBootCondition &lt;|-- OnWebApplicationCondition
+AutoConfigurationImportListener &lt;|.. ConditionEvaluationReportAutoConfigurationImportListener
+
+EnableAutoConfiguration ..&gt; AutoConfigurationImportSelector : @Import
+AutoConfigurationImportSelector ..&gt; AutoConfigurationGroup : getImportGroup
+AutoConfigurationImportSelector *-- ConfigurationClassFilter : configurationClassFilter
+AutoConfigurationImportSelector ..&gt; ImportCandidates : META-INF/spring/*.imports
+AutoConfigurationImportSelector ..&gt; AutoConfigurationEntry : create
+AutoConfigurationImportSelector ..&gt; AutoConfigurationImportEvent : fire
+ConfigurationClassFilter o-- &#34;N&#34; AutoConfigurationImportFilter : filters
+AutoConfigurationGroup o-- &#34;N&#34; AutoConfigurationEntry : autoConfigurationEntries
+AutoConfigurationGroup ..&gt; AutoConfigurationSorter : sort
+AutoConfigurationImportListener ..&gt; AutoConfigurationImportEvent
+
+DeferredImportSelector &lt;|.. AutoConfigurationImportSelector
+BeanClassLoaderAware &lt;|.. AutoConfigurationImportSelector
+ResourceLoaderAware &lt;|.. AutoConfigurationImportSelector
+BeanFactoryAware &lt;|.. AutoConfigurationImportSelector
+EnvironmentAware &lt;|.. AutoConfigurationImportSelector
+Ordered &lt;|.. AutoConfigurationImportSelector
+Group &lt;|.. AutoConfigurationGroup
+BeanClassLoaderAware &lt;|.. AutoConfigurationGroup
+BeanFactoryAware &lt;|.. AutoConfigurationGroup
+ResourceLoaderAware &lt;|.. AutoConfigurationGroup
+Condition &lt;|.. SpringBootCondition
+BeanFactoryAware &lt;|.. FilteringSpringBootCondition
+BeanClassLoaderAware &lt;|.. FilteringSpringBootCondition
+ConfigurationCondition &lt;|.. OnBeanCondition
+BeanFactoryAware &lt;|.. ConditionEvaluationReportAutoConfigurationImportListener
+@enduml
+</code></pre><p>Processing starts at the application class. <code>@SpringBootApplication</code> includes <code>@EnableAutoConfiguration</code>, which imports <code>AutoConfigurationImportSelector</code>. Because the selector is a <code>DeferredImportSelector</code>, configuration-class parsing does not call it immediately; it records the selector and runs it after every configuration class of the current pass has been parsed. At that point the selector&rsquo;s group, <code>AutoConfigurationGroup</code>, calls <code>getAutoConfigurationEntry</code> in <code>process</code>, and <code>selectImports</code> on the group sorts the survivors with <code>AutoConfigurationSorter</code> (<code>@AutoConfigureBefore</code> / <code>@AutoConfigureAfter</code> / <code>@AutoConfigureOrder</code>). Those class names are imported as configuration classes.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ---- 0. Application class: the bean that triggers auto-configuration ----</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@SpringBootApplication</span> <span style=color:#75715e>// @SpringBootConfiguration + @EnableAutoConfiguration + @ComponentScan</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>class</span> <span style=color:#a6e22e>DemoApplication</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>main</span>(String<span style=color:#f92672>[]</span> args) {
+</span></span><span style=display:flex><span><span style=color:#75715e>// SpringApplication.run</span>
+</span></span><span style=display:flex><span>        run(DemoApplication.<span style=color:#a6e22e>class</span>, args);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@AutoConfigurationPackage</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Import</span>(AutoConfigurationImportSelector.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#a6e22e>@interface</span> EnableAutoConfiguration {
+</span></span><span style=display:flex><span>    String ENABLED_OVERRIDE_PROPERTY <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;spring.boot.enableautoconfiguration&#34;</span>;
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;[]</span> <span style=color:#a6e22e>exclude</span>() <span style=color:#66d9ef>default</span> {};
+</span></span><span style=display:flex><span>    String<span style=color:#f92672>[]</span> <span style=color:#a6e22e>excludeName</span>() <span style=color:#66d9ef>default</span> {};
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 1. Shape of a class named in AutoConfiguration.imports ----</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@AutoConfiguration</span> <span style=color:#75715e>// @Configuration(proxyBeanMethods = false)</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@ConditionalOnClass</span>(DataSource.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@ConditionalOnMissingBean</span>(DataSource.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>class</span> <span style=color:#a6e22e>DataSourceAutoConfiguration</span> {
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Bean</span>
+</span></span><span style=display:flex><span>    DataSource <span style=color:#a6e22e>dataSource</span>() { <span style=color:#75715e>/* created only when the conditions match */</span> }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 2. DeferredImportSelector entry: AutoConfigurationImportSelector ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.selectImports</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> String<span style=color:#f92672>[]</span> <span style=color:#a6e22e>selectImports</span>(AnnotationMetadata annotationMetadata) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isEnabled(annotationMetadata)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> NO_IMPORTS;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    AutoConfigurationEntry entry <span style=color:#f92672>=</span> getAutoConfigurationEntry(annotationMetadata);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> StringUtils.<span style=color:#a6e22e>toStringArray</span>(entry.<span style=color:#a6e22e>getConfigurations</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.getImportGroup</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Class<span style=color:#f92672>&lt;?</span> <span style=color:#66d9ef>extends</span> Group<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getImportGroup</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> AutoConfigurationGroup.<span style=color:#a6e22e>class</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 3. Candidate list, exclusions, condition filter, event ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.getAutoConfigurationEntry</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> AutoConfigurationEntry <span style=color:#a6e22e>getAutoConfigurationEntry</span>(
+</span></span><span style=display:flex><span>        AnnotationMetadata annotationMetadata) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isEnabled(annotationMetadata)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> EMPTY_ENTRY;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    AnnotationAttributes attributes <span style=color:#f92672>=</span> getAttributes(annotationMetadata); <span style=color:#75715e>// @EnableAutoConfiguration</span>
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> configurations <span style=color:#f92672>=</span> getCandidateConfigurations(annotationMetadata, attributes);
+</span></span><span style=display:flex><span>    configurations <span style=color:#f92672>=</span> removeDuplicates(configurations);
+</span></span><span style=display:flex><span>    Set<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> exclusions <span style=color:#f92672>=</span> getExclusions(annotationMetadata, attributes);
+</span></span><span style=display:flex><span>    checkExcludedClasses(configurations, exclusions);
+</span></span><span style=display:flex><span>    configurations.<span style=color:#a6e22e>removeAll</span>(exclusions);
+</span></span><span style=display:flex><span>    configurations <span style=color:#f92672>=</span> getConfigurationClassFilter().<span style=color:#a6e22e>filter</span>(configurations);
+</span></span><span style=display:flex><span>    fireAutoConfigurationImportEvents(configurations, exclusions);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> AutoConfigurationEntry(configurations, exclusions);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.isEnabled</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>isEnabled</span>(AnnotationMetadata metadata) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> getEnvironment().<span style=color:#a6e22e>getProperty</span>(
+</span></span><span style=display:flex><span>            EnableAutoConfiguration.<span style=color:#a6e22e>ENABLED_OVERRIDE_PROPERTY</span>, Boolean.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 4. Read META-INF/spring/....AutoConfiguration.imports ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.getCandidateConfigurations</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getCandidateConfigurations</span>(
+</span></span><span style=display:flex><span>        AnnotationMetadata metadata, AnnotationAttributes attributes) {
+</span></span><span style=display:flex><span>    ImportCandidates importCandidates <span style=color:#f92672>=</span> ImportCandidates.<span style=color:#a6e22e>load</span>(AutoConfiguration.<span style=color:#a6e22e>class</span>, getBeanClassLoader());
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> configurations <span style=color:#f92672>=</span> importCandidates.<span style=color:#a6e22e>getCandidates</span>();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// empty list is an error: packaging dropped the imports file</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> configurations;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 5. Annotation exclude / excludeName and spring.autoconfigure.exclude ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.getExclusions</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> Set<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getExclusions</span>(
+</span></span><span style=display:flex><span>        AnnotationMetadata metadata, AnnotationAttributes attributes) {
+</span></span><span style=display:flex><span>    Set<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> excluded <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> LinkedHashSet<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>    excluded.<span style=color:#a6e22e>addAll</span>(asList(attributes, <span style=color:#e6db74>&#34;exclude&#34;</span>));
+</span></span><span style=display:flex><span>    excluded.<span style=color:#a6e22e>addAll</span>(asList(attributes, <span style=color:#e6db74>&#34;excludeName&#34;</span>));
+</span></span><span style=display:flex><span>    excluded.<span style=color:#a6e22e>addAll</span>(getExcludeAutoConfigurationsProperty()); <span style=color:#75715e>// Binder &#34;spring.autoconfigure.exclude&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> getAutoConfigurationReplacements().<span style=color:#a6e22e>replaceAll</span>(excluded);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.getExcludeAutoConfigurationsProperty</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getExcludeAutoConfigurationsProperty</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Binder.<span style=color:#a6e22e>get</span>(getEnvironment())
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>bind</span>(<span style=color:#e6db74>&#34;spring.autoconfigure.exclude&#34;</span>, String<span style=color:#f92672>[]</span>.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>map</span>(Arrays::asList)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>orElse</span>(Collections.<span style=color:#a6e22e>emptyList</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 6. OnClass / OnBean condition filters from spring.factories ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.ConfigurationClassFilter.filter</span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>filter</span>(List<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> configurations) {
+</span></span><span style=display:flex><span>    String<span style=color:#f92672>[]</span> candidates <span style=color:#f92672>=</span> StringUtils.<span style=color:#a6e22e>toStringArray</span>(configurations);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (AutoConfigurationImportFilter filter : <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>filters</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span><span style=color:#f92672>[]</span> match <span style=color:#f92672>=</span> filter.<span style=color:#a6e22e>match</span>(candidates, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>autoConfigurationMetadata</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> match.<span style=color:#a6e22e>length</span>; i<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>match<span style=color:#f92672>[</span>i<span style=color:#f92672>]</span>) {
+</span></span><span style=display:flex><span>                candidates<span style=color:#f92672>[</span>i<span style=color:#f92672>]</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// drop nulls and return the classes that still match</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ---- 7. Group: collect, drop exclusions again, sort, hand names back to the parser ----</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.AutoConfigurationGroup.process</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>process</span>(
+</span></span><span style=display:flex><span>        AnnotationMetadata annotationMetadata, DeferredImportSelector selector) {
+</span></span><span style=display:flex><span>    AutoConfigurationEntry entry <span style=color:#f92672>=</span> ((AutoConfigurationImportSelector) selector)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>getAutoConfigurationEntry</span>(annotationMetadata);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>autoConfigurationEntries</span>.<span style=color:#a6e22e>add</span>(entry);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (String importClassName : entry.<span style=color:#a6e22e>getConfigurations</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>entries</span>.<span style=color:#a6e22e>putIfAbsent</span>(importClassName, annotationMetadata);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AutoConfigurationImportSelector.AutoConfigurationGroup.selectImports</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Iterable<span style=color:#f92672>&lt;</span>Entry<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>selectImports</span>() {
+</span></span><span style=display:flex><span>    Set<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> processed <span style=color:#f92672>=</span> <span style=color:#75715e>/* configurations minus exclusions */</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> sortAutoConfigurations(processed, getAutoConfigurationMetadata()).<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>map</span>(<span style=color:#66d9ef>this</span>::getEntry)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>toList</span>();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// AutoConfigurationSorter.getInPriorityOrder uses @AutoConfigureBefore/After/Order</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// the parser then registers each Entry as an imported configuration class</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=import-group>Import group</h2><p>A <code>DeferredImportSelector</code> can name a <code>DeferredImportSelector.Group</code> through <code>getImportGroup()</code>. The parser puts all deferred selectors that name the same group class into one bucket and asks a single group instance for the final list in two steps:</p><ol><li><code>process(metadata, selector)</code> is called once per selector in the bucket. The group collects that selector&rsquo;s candidates.</li><li><code>selectImports()</code> is called once for the bucket. The group returns the merged list as <code>Entry(importingClassMetadata, className)</code> pairs, and the parser imports each class on behalf of the configuration class that declared the selector.</li></ol><p>A selector without a group gets a private default group, which imports exactly what the selector&rsquo;s own <code>selectImports</code> returns.</p><p><code>AutoConfigurationImportSelector</code> and its subclass <code>ImportAutoConfigurationImportSelector</code> (behind <code>@ImportAutoConfiguration</code>) both return <code>AutoConfigurationGroup</code>, so every auto-configuration request in the application shares one group:</p><ul><li><code>process</code> runs <code>getAutoConfigurationEntry</code> for each selector and keeps each <code>AutoConfigurationEntry</code> (candidates plus exclusions).</li><li><code>selectImports</code> merges the candidates of all entries, removes the union of all exclusions, and sorts the result once.</li></ul><p>An exclusion therefore applies regardless of which annotation declared it, and the before/after/order rules hold across all auto-configuration classes, not only within one selector&rsquo;s list.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant P as ConfigurationClassParser
+    participant G as AutoConfigurationGroup
+    participant S1 as AutoConfigurationImportSelector
+    participant S2 as ImportAutoConfigurationImportSelector
+
+    P-&gt;&gt;P: parse all configuration classes, collect deferred selectors
+    P-&gt;&gt;G: process(appMetadata, S1)
+    G-&gt;&gt;S1: getAutoConfigurationEntry
+    P-&gt;&gt;G: process(testMetadata, S2)
+    G-&gt;&gt;S2: getAutoConfigurationEntry
+    P-&gt;&gt;G: selectImports()
+    G-&gt;&gt;G: merge candidates, remove all exclusions, AutoConfigurationSorter
+    G--&gt;&gt;P: Entry(metadata, className) in sorted order
+    P-&gt;&gt;P: processImports for each entry
+</code></pre><h1 id=bootstrap-process>Bootstrap process</h1><h2 id=springapplication>SpringApplication</h2><p><code>SpringApplication.run</code> is the launch path. <code>createBootstrapContext</code> runs first, then run listeners, then the environment, the application context, refresh, runners, and the ready event.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class SpringApplication {
+  bootstrapRegistryInitializers
+  initializers : ApplicationContextInitializer
+  listeners : ApplicationListener
+  applicationContextFactory : ApplicationContextFactory
+  properties : ApplicationProperties
+  +run(args) : ConfigurableApplicationContext
+  +prepareEnvironment()
+  +prepareContext()
+  +refreshContext()
+  +callRunners()
+}
+class DefaultBootstrapContext
+class SpringApplicationRunListeners
+class ConfigurableEnvironment
+class ConfigurableApplicationContext
+SpringApplication --&gt; DefaultBootstrapContext : createBootstrapContext
+SpringApplication --&gt; SpringApplicationRunListeners : getRunListeners
+SpringApplication --&gt; ConfigurableEnvironment : prepareEnvironment
+SpringApplication --&gt; ConfigurableApplicationContext : createApplicationContext
+@enduml
+</code></pre><p><code>createBootstrapContext</code> constructs a <code>DefaultBootstrapContext</code> and applies every <code>BootstrapRegistryInitializer</code>. <code>getRunListeners</code> loads <code>SpringApplicationRunListener</code> instances from <code>META-INF/spring.factories</code> (<code>EventPublishingRunListener</code> in the core jar) and calls <code>starting</code>.</p><p><code>prepareEnvironment</code> constructs the Boot <code>Environment</code>, attaches <code>ConfigurationPropertySources</code>, and publishes <code>environmentPrepared</code>. Config files are not read during construction; they are imported by <code>EnvironmentPostProcessor</code>s on that event. After the event, <code>bindToSpringApplication</code> binds <code>spring.main</code> onto <code>ApplicationProperties</code>.</p><p><code>prepareContext</code> sets that environment on the context, runs <code>ApplicationContextInitializer</code>s, publishes context-prepared, closes the bootstrap context, registers the singletons <code>springApplicationArguments</code> and <code>springBootBanner</code>, and <code>load</code>s the user&rsquo;s <code>@SpringBootApplication</code> sources as bean definitions. <code>refreshContext</code> calls <code>ApplicationContext.refresh</code>. <code>listeners.started</code> then <code>callRunners</code> (<code>ApplicationRunner</code>, then <code>CommandLineRunner</code>). If the context is still running, <code>listeners.ready</code> publishes readiness.</p><h3 id=bootstrapcontext>BootstrapContext</h3><p><code>DefaultBootstrapContext</code> implements <code>ConfigurableBootstrapContext</code>. It is alive from <code>createBootstrapContext</code> until <code>prepareContext</code> calls <code>bootstrapContext.close(context)</code>. Run listeners and <code>EnvironmentPostProcessor</code>s use it to share objects before the application context exists. Closing it promotes registered instances into the application context where the registration asked for that.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface BootstrapContext
+interface BootstrapRegistry
+interface ConfigurableBootstrapContext
+class DefaultBootstrapContext
+ConfigurableBootstrapContext --|&gt; BootstrapContext
+ConfigurableBootstrapContext --|&gt; BootstrapRegistry
+DefaultBootstrapContext --|&gt; ConfigurableBootstrapContext
+interface BootstrapRegistryInitializer {
+  +initialize(ConfigurableBootstrapContext)
+}
+DefaultBootstrapContext ..&gt; BootstrapRegistryInitializer
+@enduml
+</code></pre><h3 id=springapplicationrunlisteners>SpringApplicationRunListeners</h3><p><code>SpringApplicationRunListeners</code> holds the <code>SpringApplicationRunListener</code> list and fans each callback out. The listener registered in core <code>spring.factories</code> is <code>EventPublishingRunListener</code>. It does not run environment post-processors itself. It multicasts Boot events through a <code>SimpleApplicationEventMulticaster</code> that still holds the listeners loaded from <code>spring.factories</code> under <code>org.springframework.context.ApplicationListener</code> (<code>EnvironmentPostProcessorApplicationListener</code>, <code>LoggingApplicationListener</code>, <code>FileEncodingApplicationListener</code>), because the application context does not exist yet. <code>contextLoaded</code> moves that list onto the running application.</p><table><thead><tr><th>Callback</th><th>Event</th></tr></thead><tbody><tr><td><code>starting</code></td><td><code>ApplicationStartingEvent</code></td></tr><tr><td><code>environmentPrepared</code></td><td><code>ApplicationEnvironmentPreparedEvent</code></td></tr><tr><td><code>contextPrepared</code></td><td><code>ApplicationContextInitializedEvent</code></td></tr><tr><td><code>contextLoaded</code></td><td>moves listeners onto the context, then <code>ApplicationPreparedEvent</code></td></tr><tr><td><code>started</code></td><td><code>ApplicationStartedEvent</code>, liveness <code>CORRECT</code></td></tr><tr><td><code>ready</code></td><td><code>ApplicationReadyEvent</code>, readiness <code>ACCEPTING_TRAFFIC</code></td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class SpringApplicationRunListeners {
+  listeners : SpringApplicationRunListener[]
+}
+interface SpringApplicationRunListener {
+  +starting(bootstrapContext)
+  +environmentPrepared(bootstrapContext, environment)
+  +contextPrepared(context)
+  +contextLoaded(context)
+  +started(context, timeTaken)
+  +ready(context, timeTaken)
+}
+class EventPublishingRunListener
+class SimpleApplicationEventMulticaster
+SpringApplicationRunListeners o-- SpringApplicationRunListener
+EventPublishingRunListener --|&gt; SpringApplicationRunListener
+EventPublishingRunListener --&gt; SimpleApplicationEventMulticaster
+@enduml
+</code></pre><h2 id=applicationcontextfactory>ApplicationContextFactory</h2><p><code>ApplicationContextFactory</code> creates both the <code>Environment</code> and the <code>ApplicationContext</code> for a <code>WebApplicationType</code>. <code>ApplicationContextFactory.DEFAULT</code> is <code>DefaultApplicationContextFactory</code>. It loads every <code>ApplicationContextFactory</code> from <code>spring.factories</code> and uses the first candidate that returns non-null.</p><table><thead><tr><th><code>WebApplicationType</code></th><th>Factory</th><th>Environment</th><th>Context</th></tr></thead><tbody><tr><td><code>SERVLET</code></td><td><code>ServletWebServerApplicationContextFactory</code></td><td><code>ApplicationServletEnvironment</code></td><td><code>AnnotationConfigServletWebServerApplicationContext</code></td></tr><tr><td><code>REACTIVE</code></td><td><code>ReactiveWebServerApplicationContextFactory</code></td><td>reactive servlet-less environment</td><td>reactive web-server context</td></tr><tr><td><code>NONE</code></td><td>no factory matches</td><td><code>ApplicationEnvironment</code></td><td><code>AnnotationConfigApplicationContext</code></td></tr></tbody></table><p>When AOT generated artifacts are in use, the servlet factory returns a plain <code>ServletWebServerApplicationContext</code> and the default factory returns a <code>GenericApplicationContext</code>, because bean definitions are already generated.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+interface ApplicationContextFactory {
+  +createEnvironment(webApplicationType)
+  +create(webApplicationType)
+  +getEnvironmentType(webApplicationType)
+}
+class DefaultApplicationContextFactory
+class ServletWebServerApplicationContextFactory
+class ApplicationEnvironment
+class ApplicationServletEnvironment
+class AnnotationConfigApplicationContext
+class AnnotationConfigServletWebServerApplicationContext
+DefaultApplicationContextFactory --|&gt; ApplicationContextFactory
+ServletWebServerApplicationContextFactory --|&gt; ApplicationContextFactory
+DefaultApplicationContextFactory ..&gt; ApplicationEnvironment : NONE
+ServletWebServerApplicationContextFactory ..&gt; ApplicationServletEnvironment : SERVLET
+DefaultApplicationContextFactory ..&gt; AnnotationConfigApplicationContext : NONE
+ServletWebServerApplicationContextFactory ..&gt; AnnotationConfigServletWebServerApplicationContext : SERVLET
+@enduml
+</code></pre><h1 id=environment>Environment</h1><p>The environment is a <code>ConfigurableEnvironment</code> of <code>PropertySource</code>s. Construction only chooses the Boot type and seeds a few sources. <code>application.properties</code>, <code>application.yaml</code>, profile documents, and <code>spring.config.import</code> are loaded later, on <code>ApplicationEnvironmentPreparedEvent</code>.</p><p><code>getOrCreateEnvironment</code> asks <code>ApplicationContextFactory.createEnvironment</code> for the <code>WebApplicationType</code>. A servlet app receives <code>ApplicationServletEnvironment</code>. Anything the factories decline falls back to <code>ApplicationEnvironment</code>. Both types install Boot&rsquo;s <code>ConfigurationPropertySources</code> resolver, so <code>Binder</code> accepts relaxed names (<code>server.port</code>, <code>SERVER_PORT</code>, <code>SPRING_MAIN_WEB_APPLICATION_TYPE</code>). Both also return <code>null</code> from <code>doGetActiveProfilesProperty</code> and <code>doGetDefaultProfilesProperty</code>, so a profile named only in a config file is not read at construction time.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+class StandardEnvironment
+class StandardServletEnvironment
+class ApplicationEnvironment {
+  #String doGetActiveProfilesProperty()
+  #ConfigurablePropertyResolver createPropertyResolver(MutablePropertySources propertySources)
+}
+class ApplicationServletEnvironment {
+  #String doGetActiveProfilesProperty()
+  #ConfigurablePropertyResolver createPropertyResolver(MutablePropertySources propertySources)
+}
+
+StandardEnvironment &lt;|-- StandardServletEnvironment
+StandardEnvironment &lt;|-- ApplicationEnvironment
+StandardServletEnvironment &lt;|-- ApplicationServletEnvironment
+@enduml
+</code></pre><p><code>configureEnvironment</code> then seeds sources that already exist before any file is opened:</p><ol><li><code>ApplicationConversionService</code> is installed when conversion is enabled.</li><li><code>SpringApplication.defaultProperties</code>, if set, become a <code>DefaultPropertiesPropertySource</code>.</li><li>Command-line arguments, when present, become a <code>SimpleCommandLinePropertySource</code> at the front of the list.</li><li><code>ApplicationInfoPropertySource</code> is added at the end.</li></ol><p><code>ConfigurationPropertySources.attach</code> wraps that list so later <code>Binder</code> calls see the same sources. <code>listeners.environmentPrepared</code> then publishes the event. After every <code>EnvironmentPostProcessor</code> has run, <code>ApplicationInfoPropertySource</code> and <code>DefaultPropertiesPropertySource</code> are moved to the end so files and command-line arguments outrank them, and <code>spring.main</code> is bound onto <code>ApplicationProperties</code>. If the environment type does not match the context factory, <code>EnvironmentConverter</code> replaces it and attaches configuration property sources again.</p><p>An <code>EnvironmentPostProcessor</code> is not a bean. Implementations are listed under <code>org.springframework.boot.EnvironmentPostProcessor</code> in <code>META-INF/spring.factories</code>. Constructors may take <code>DeferredLogFactory</code>, <code>ConfigurableBootstrapContext</code>, or a <code>Log</code>. <code>EnvironmentPostProcessorApplicationListener</code> is a <code>SmartApplicationListener</code> on <code>ApplicationEnvironmentPreparedEvent</code>. It loads those processors and calls <code>postProcessEnvironment</code> on each, in <code>Ordered</code> order. On <code>ApplicationPreparedEvent</code> or <code>ApplicationFailedEvent</code> it switches deferred logs over to the real logging system.</p><table><thead><tr><th>Processor</th><th>Order</th><th>Role</th></tr></thead><tbody><tr><td><code>RandomValuePropertySourceEnvironmentPostProcessor</code></td><td><code>HIGHEST_PRECEDENCE + 1</code></td><td>Adds <code>RandomValuePropertySource</code>. Names under <code>random.</code> resolve here: <code>random.int</code>, <code>random.long</code>, <code>random.uuid</code>, and any other suffix as random bytes.</td></tr><tr><td><code>SystemEnvironmentPropertySourceEnvironmentPostProcessor</code></td><td><code>HIGHEST_PRECEDENCE + 4</code></td><td>Replaces the existing system-environment <code>PropertySource</code> with an origin-aware source, and applies an environment prefix when <code>SpringApplication</code> has one.</td></tr><tr><td><code>SpringApplicationJsonEnvironmentPostProcessor</code></td><td><code>HIGHEST_PRECEDENCE + 5</code></td><td>Parses the <code>spring.application.json</code> property or the <code>SPRING_APPLICATION_JSON</code> variable into a map <code>PropertySource</code> placed above system properties.</td></tr><tr><td><code>CloudFoundryVcapEnvironmentPostProcessor</code></td><td><code>ConfigData</code> order − 5</td><td>Parses <code>VCAP_APPLICATION</code> and <code>VCAP_SERVICES</code> into property sources when those variables are set.</td></tr><tr><td><code>ConfigDataEnvironmentPostProcessor</code></td><td><code>HIGHEST_PRECEDENCE + 10</code></td><td>Loads <code>application.properties</code> and <code>application.yaml</code>, including profile-specific files and <code>spring.config.import</code>, and adds them as <code>PropertySource</code>s on the <code>Environment</code>.</td></tr></tbody></table><p><code>ConfigDataEnvironmentPostProcessor</code> is the processor that puts <code>application.properties</code> on the environment. The classpath file <code>spring.properties</code> is a different file: <code>SpringProperties</code> reads it in a static initializer and keeps those entries as library flags.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface EnvironmentPostProcessor {
+  +void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application)
+}
+class EnvironmentPostProcessorApplicationListener {
+  +void onApplicationEvent(ApplicationEvent event)
+}
+class ConfigDataEnvironmentPostProcessor {
+  +{static} int ORDER
+  +void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application)
+}
+class ConfigDataEnvironment {
+  +void processAndApply()
+}
+interface ConfigDataLocationResolver
+interface ConfigDataLoader
+interface PropertySourceLoader {
+  +String[] getFileExtensions()
+  +List&lt;PropertySource&lt;?&gt;&gt; load(String name, Resource resource)
+}
+class StandardConfigDataLocationResolver
+class StandardConfigDataLoader
+class PropertiesPropertySourceLoader
+class YamlPropertySourceLoader
+
+EnvironmentPostProcessor &lt;|.. ConfigDataEnvironmentPostProcessor
+ConfigDataLocationResolver &lt;|.. StandardConfigDataLocationResolver
+ConfigDataLoader &lt;|.. StandardConfigDataLoader
+PropertySourceLoader &lt;|.. PropertiesPropertySourceLoader
+PropertySourceLoader &lt;|.. YamlPropertySourceLoader
+ConfigDataEnvironmentPostProcessor -[hidden]down- ConfigDataEnvironment
+EnvironmentPostProcessorApplicationListener .[norank].&gt; EnvironmentPostProcessor
+ConfigDataEnvironmentPostProcessor .[norank].&gt; ConfigDataEnvironment
+ConfigDataEnvironment .[norank].&gt; ConfigDataLocationResolver
+ConfigDataEnvironment .[norank].&gt; ConfigDataLoader
+StandardConfigDataLocationResolver .[norank].&gt; PropertySourceLoader
+@enduml
+</code></pre><p><code>ConfigDataEnvironmentPostProcessor.postProcessEnvironment</code> builds a <code>ConfigDataEnvironment</code> from the current environment, resource loader, additional profiles, and bootstrap context, then calls <code>processAndApply</code>.</p><p>The constructor first wraps every existing <code>PropertySource</code> as a contributor (command line, system properties, system environment, and the rest), keeping <code>DefaultPropertiesPropertySource</code> for the end of that list. It then adds initial import contributors from three properties, each bound from the environment as it stands before any file is read:</p><table><thead><tr><th>Property</th><th>If absent</th></tr></thead><tbody><tr><td><code>spring.config.import</code></td><td>no extra locations</td></tr><tr><td><code>spring.config.additional-location</code></td><td>no extra locations</td></tr><tr><td><code>spring.config.location</code></td><td><code>optional:classpath:/;optional:classpath:/config/</code> and <code>optional:file:./;optional:file:./config/;optional:file:./config/*/</code></td></tr></tbody></table><p>Locations in each property are contributed last-to-first, so a later location in the list outranks an earlier one. <code>spring.config.location</code> replaces the default search; <code>additional-location</code> and <code>import</code> add to it. A location may be marked <code>optional:</code>. <code>spring.config.on-not-found</code> (<code>FAIL</code> by default) decides what happens when a mandatory location is missing.</p><p>A directory location is expanded by <code>StandardConfigDataLocationResolver</code>. The file name is <code>spring.config.name</code> (default <code>application</code>) plus each <code>PropertySourceLoader</code> extension: <code>properties</code> and <code>xml</code> from <code>PropertiesPropertySourceLoader</code>, <code>yml</code> and <code>yaml</code> from <code>YamlPropertySourceLoader</code>. A profile-specific file is <code>application-{profile}.{ext}</code>. A concrete file location is used as given. Resolvers and loaders themselves come from <code>spring.factories</code> (<code>ConfigTreeConfigDataLocationResolver</code> and <code>SystemEnvironmentConfigDataLocationResolver</code> sit beside the standard file resolver).</p><p><code>processAndApply</code> walks contributors in four import passes. <code>ConfigDataImporter</code> resolves each <code>spring.config.import</code> (and the initial locations) through <code>ConfigDataLocationResolver</code>, loads each resource once through <code>ConfigDataLoader</code>, and records children on the contributor. A YAML file can yield several documents; each document becomes its own contributor.</p><ol><li><code>processInitial</code> imports contributors that do not need an activation context.</li><li><code>createActivationContext</code> binds early properties from what has been loaded so far.</li><li><code>processWithoutProfiles</code> imports documents that are not profile-specific.</li><li><code>withProfiles</code> builds <code>Profiles</code> from <code>spring.profiles.active</code>, <code>spring.profiles.default</code>, <code>spring.profiles.include</code>, <code>spring.profiles.group</code>, and any additional profiles on <code>SpringApplication</code>.</li><li><code>processWithProfiles</code> imports <code>application-{profile}.*</code> and other profile-specific resources.</li><li><code>applyToEnvironment</code> adds each active <code>BOUND_IMPORT</code> <code>PropertySource</code> with <code>addLast</code>, moves default properties to the end, and calls <code>setActiveProfiles</code> / <code>setDefaultProfiles</code>.</li></ol><p><code>spring.config.import</code> on a loaded document is an ordinary property. Binding it (<code>ConfigDataProperties</code>) adds child locations, which the same loop resolves. <code>spring.config.activate.on-profile</code> and <code>spring.config.activate.on-cloud-platform</code> decide whether that document is active. An inactive source is not applied. <code>spring.profiles</code> as a document key in config data is rejected; the replacement is <code>spring.config.activate.on-profile</code>.</p><p>Contributor iteration visits after-profile-activation children first, then before-profile-activation children, then the parent. Combined with <code>addLast</code>, profile-specific sources therefore sit above the non-profile file they were imported from, and file locations sit above classpath locations. Command-line and system sources remain at the front, where <code>configurePropertySources</code> put them.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant SA as SpringApplication
+    participant L as EnvironmentPostProcessorApplicationListener
+    participant CD as ConfigDataEnvironmentPostProcessor
+    participant E as ConfigDataEnvironment
+    participant I as ConfigDataImporter
+    participant R as StandardConfigDataLocationResolver
+    participant Ld as StandardConfigDataLoader
+
+    SA-&gt;&gt;SA: getOrCreateEnvironment, configurePropertySources
+    SA-&gt;&gt;SA: ConfigurationPropertySources.attach
+    SA-&gt;&gt;L: ApplicationEnvironmentPreparedEvent
+    L-&gt;&gt;CD: postProcessEnvironment
+    CD-&gt;&gt;E: processAndApply
+    E-&gt;&gt;I: processInitial / processWithoutProfiles
+    I-&gt;&gt;R: resolve directories and files
+    I-&gt;&gt;Ld: load PropertySource documents
+    E-&gt;&gt;E: withProfiles (active / default / include)
+    E-&gt;&gt;I: processWithProfiles
+    I-&gt;&gt;R: resolve application-profile.ext
+    E-&gt;&gt;E: applyToEnvironment addLast, setActiveProfiles
+    SA-&gt;&gt;SA: bind spring.main
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// SpringApplication.prepareEnvironment</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> ConfigurableEnvironment <span style=color:#a6e22e>prepareEnvironment</span>(SpringApplicationRunListeners listeners,
+</span></span><span style=display:flex><span>        DefaultBootstrapContext bootstrapContext, ApplicationArguments applicationArguments) {
+</span></span><span style=display:flex><span>    ConfigurableEnvironment environment <span style=color:#f92672>=</span> getOrCreateEnvironment();
+</span></span><span style=display:flex><span>    configureEnvironment(environment, applicationArguments.<span style=color:#a6e22e>getSourceArgs</span>());
+</span></span><span style=display:flex><span>    ConfigurationPropertySources.<span style=color:#a6e22e>attach</span>(environment);
+</span></span><span style=display:flex><span>    listeners.<span style=color:#a6e22e>environmentPrepared</span>(bootstrapContext, environment);
+</span></span><span style=display:flex><span>    ApplicationInfoPropertySource.<span style=color:#a6e22e>moveToEnd</span>(environment);
+</span></span><span style=display:flex><span>    DefaultPropertiesPropertySource.<span style=color:#a6e22e>moveToEnd</span>(environment);
+</span></span><span style=display:flex><span>    Assert.<span style=color:#a6e22e>state</span>(<span style=color:#f92672>!</span>environment.<span style=color:#a6e22e>containsProperty</span>(<span style=color:#e6db74>&#34;spring.main.environment-prefix&#34;</span>),
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;Environment prefix cannot be set via properties.&#34;</span>);
+</span></span><span style=display:flex><span>    bindToSpringApplication(environment);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>isCustomEnvironment</span>) {
+</span></span><span style=display:flex><span>        EnvironmentConverter environmentConverter <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> EnvironmentConverter(getClassLoader());
+</span></span><span style=display:flex><span>        environment <span style=color:#f92672>=</span> environmentConverter.<span style=color:#a6e22e>convertEnvironmentIfNecessary</span>(environment, deduceEnvironmentClass());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    ConfigurationPropertySources.<span style=color:#a6e22e>attach</span>(environment);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> environment;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// SpringApplication.configurePropertySources</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>configurePropertySources</span>(ConfigurableEnvironment environment, String<span style=color:#f92672>[]</span> args) {
+</span></span><span style=display:flex><span>    MutablePropertySources sources <span style=color:#f92672>=</span> environment.<span style=color:#a6e22e>getPropertySources</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>CollectionUtils.<span style=color:#a6e22e>isEmpty</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>defaultProperties</span>)) {
+</span></span><span style=display:flex><span>        DefaultPropertiesPropertySource.<span style=color:#a6e22e>addOrMerge</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>defaultProperties</span>, sources);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>addCommandLineProperties</span> <span style=color:#f92672>&amp;&amp;</span> args.<span style=color:#a6e22e>length</span> <span style=color:#f92672>&gt;</span> 0) {
+</span></span><span style=display:flex><span>        String name <span style=color:#f92672>=</span> CommandLinePropertySource.<span style=color:#a6e22e>COMMAND_LINE_PROPERTY_SOURCE_NAME</span>;
+</span></span><span style=display:flex><span>        PropertySource<span style=color:#f92672>&lt;?&gt;</span> source <span style=color:#f92672>=</span> sources.<span style=color:#a6e22e>get</span>(name);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (source <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            CompositePropertySource composite <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> CompositePropertySource(name);
+</span></span><span style=display:flex><span>            composite
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>addPropertySource</span>(<span style=color:#66d9ef>new</span> SimpleCommandLinePropertySource(<span style=color:#e6db74>&#34;springApplicationCommandLineArgs&#34;</span>, args));
+</span></span><span style=display:flex><span>            composite.<span style=color:#a6e22e>addPropertySource</span>(source);
+</span></span><span style=display:flex><span>            sources.<span style=color:#a6e22e>replace</span>(name, composite);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            sources.<span style=color:#a6e22e>addFirst</span>(<span style=color:#66d9ef>new</span> SimpleCommandLinePropertySource(args));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    environment.<span style=color:#a6e22e>getPropertySources</span>().<span style=color:#a6e22e>addLast</span>(<span style=color:#66d9ef>new</span> ApplicationInfoPropertySource(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mainApplicationClass</span>));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ApplicationEnvironment.doGetActiveProfilesProperty</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> String <span style=color:#a6e22e>doGetActiveProfilesProperty</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ApplicationEnvironment.createPropertyResolver</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> ConfigurablePropertyResolver <span style=color:#a6e22e>createPropertyResolver</span>(MutablePropertySources propertySources) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> ConfigurationPropertySources.<span style=color:#a6e22e>createPropertyResolver</span>(propertySources);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// EnvironmentPostProcessorApplicationListener.onApplicationEnvironmentPreparedEvent</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onApplicationEnvironmentPreparedEvent</span>(ApplicationEnvironmentPreparedEvent event) {
+</span></span><span style=display:flex><span>    ConfigurableEnvironment environment <span style=color:#f92672>=</span> event.<span style=color:#a6e22e>getEnvironment</span>();
+</span></span><span style=display:flex><span>    SpringApplication application <span style=color:#f92672>=</span> event.<span style=color:#a6e22e>getSpringApplication</span>();
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>EnvironmentPostProcessor<span style=color:#f92672>&gt;</span> postProcessors <span style=color:#f92672>=</span> getEnvironmentPostProcessors(application.<span style=color:#a6e22e>getResourceLoader</span>(),
+</span></span><span style=display:flex><span>            event.<span style=color:#a6e22e>getBootstrapContext</span>());
+</span></span><span style=display:flex><span>    addAotGeneratedEnvironmentPostProcessorIfNecessary(postProcessors, application);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (EnvironmentPostProcessor postProcessor : postProcessors) {
+</span></span><span style=display:flex><span>        postProcessor.<span style=color:#a6e22e>postProcessEnvironment</span>(environment, application);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ConfigDataEnvironmentPostProcessor.postProcessEnvironment</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>postProcessEnvironment</span>(ConfigurableEnvironment environment, SpringApplication application) {
+</span></span><span style=display:flex><span>    postProcessEnvironment(environment, application.<span style=color:#a6e22e>getResourceLoader</span>(), application.<span style=color:#a6e22e>getAdditionalProfiles</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ConfigDataEnvironment.processAndApply</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>processAndApply</span>() {
+</span></span><span style=display:flex><span>    ConfigDataImporter importer <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ConfigDataImporter(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>logFactory</span>, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>notFoundAction</span>, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>resolvers</span>,
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>loaders</span>);
+</span></span><span style=display:flex><span>    registerBootstrapBinder(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>contributors</span>, <span style=color:#66d9ef>null</span>, DENY_INACTIVE_BINDING);
+</span></span><span style=display:flex><span>    ConfigDataEnvironmentContributors contributors <span style=color:#f92672>=</span> processInitial(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>contributors</span>, importer);
+</span></span><span style=display:flex><span>    ConfigDataActivationContext activationContext <span style=color:#f92672>=</span> createActivationContext(
+</span></span><span style=display:flex><span>            contributors.<span style=color:#a6e22e>getBinder</span>(<span style=color:#66d9ef>null</span>, BinderOption.<span style=color:#a6e22e>FAIL_ON_BIND_TO_INACTIVE_SOURCE</span>));
+</span></span><span style=display:flex><span>    contributors <span style=color:#f92672>=</span> processWithoutProfiles(contributors, importer, activationContext);
+</span></span><span style=display:flex><span>    activationContext <span style=color:#f92672>=</span> withProfiles(contributors, activationContext);
+</span></span><span style=display:flex><span>    contributors <span style=color:#f92672>=</span> processWithProfiles(contributors, importer, activationContext);
+</span></span><span style=display:flex><span>    applyToEnvironment(contributors, activationContext, importer.<span style=color:#a6e22e>getLoadedLocations</span>(),
+</span></span><span style=display:flex><span>            importer.<span style=color:#a6e22e>getOptionalLocations</span>());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ConfigDataEnvironment.getInitialImportContributors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> List<span style=color:#f92672>&lt;</span>ConfigDataEnvironmentContributor<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getInitialImportContributors</span>(Binder binder) {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>ConfigDataEnvironmentContributor<span style=color:#f92672>&gt;</span> initialContributors <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>    addInitialImportContributors(initialContributors, bindLocations(binder, IMPORT_PROPERTY, EMPTY_LOCATIONS));
+</span></span><span style=display:flex><span>    addInitialImportContributors(initialContributors,
+</span></span><span style=display:flex><span>            bindLocations(binder, ADDITIONAL_LOCATION_PROPERTY, EMPTY_LOCATIONS));
+</span></span><span style=display:flex><span>    addInitialImportContributors(initialContributors,
+</span></span><span style=display:flex><span>            bindLocations(binder, LOCATION_PROPERTY, DEFAULT_SEARCH_LOCATIONS));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> initialContributors;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// StandardConfigDataLocationResolver.getConfigNames</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> String<span style=color:#f92672>[]</span> <span style=color:#a6e22e>getConfigNames</span>(Binder binder) {
+</span></span><span style=display:flex><span>    String<span style=color:#f92672>[]</span> configNames <span style=color:#f92672>=</span> binder.<span style=color:#a6e22e>bind</span>(CONFIG_NAME_PROPERTY, String<span style=color:#f92672>[]</span>.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>orElse</span>(DEFAULT_CONFIG_NAMES);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (String configName : configNames) {
+</span></span><span style=display:flex><span>        validateConfigName(configName);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> configNames;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ConfigDataEnvironment.applyToEnvironment</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>applyToEnvironment</span>(ConfigDataEnvironmentContributors contributors,
+</span></span><span style=display:flex><span>        ConfigDataActivationContext activationContext, Set<span style=color:#f92672>&lt;</span>ConfigDataLocation<span style=color:#f92672>&gt;</span> loadedLocations,
+</span></span><span style=display:flex><span>        Set<span style=color:#f92672>&lt;</span>ConfigDataLocation<span style=color:#f92672>&gt;</span> optionalLocations) {
+</span></span><span style=display:flex><span>    checkForInvalidProperties(contributors);
+</span></span><span style=display:flex><span>    checkMandatoryLocations(contributors, activationContext, loadedLocations, optionalLocations);
+</span></span><span style=display:flex><span>    MutablePropertySources propertySources <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>environment</span>.<span style=color:#a6e22e>getPropertySources</span>();
+</span></span><span style=display:flex><span>    applyContributor(contributors, activationContext, propertySources);
+</span></span><span style=display:flex><span>    DefaultPropertiesPropertySource.<span style=color:#a6e22e>moveToEnd</span>(propertySources);
+</span></span><span style=display:flex><span>    Profiles profiles <span style=color:#f92672>=</span> activationContext.<span style=color:#a6e22e>getProfiles</span>();
+</span></span><span style=display:flex><span>    Assert.<span style=color:#a6e22e>state</span>(profiles <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>, <span style=color:#e6db74>&#34;&#39;profiles&#39; must not be null&#34;</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>environment</span>.<span style=color:#a6e22e>setDefaultProfiles</span>(StringUtils.<span style=color:#a6e22e>toStringArray</span>(profiles.<span style=color:#a6e22e>getDefault</span>()));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>environment</span>.<span style=color:#a6e22e>setActiveProfiles</span>(StringUtils.<span style=color:#a6e22e>toStringArray</span>(profiles.<span style=color:#a6e22e>getActive</span>()));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>environmentUpdateListener</span>.<span style=color:#a6e22e>onSetProfiles</span>(profiles);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h1 id=embedded-web-server>Embedded web server</h1><p>A servlet application does not deploy a WAR. <code>ServletWebServerApplicationContext.onRefresh</code> calls <code>createWebServer</code> before the context finishes refreshing. <code>getWebServerFactory</code> requires exactly one <code>ServletWebServerFactory</code> bean. Auto-configuration contributes that bean from the server on the classpath (<code>TomcatServletWebServerFactory</code> or <code>JettyServletWebServerFactory</code>). A reactive app uses a Netty (or other reactive) factory instead. <code>factory.getWebServer</code> builds the server and registers two lifecycles: <code>webServerStartStop</code> starts it when the context starts, and <code>webServerGracefulShutdown</code> stops accepting traffic first when <code>server.shutdown=graceful</code>.</p><p>If a <code>ServletContext</code> already exists, Boot does not create a server. <code>SpringBootServletInitializer</code> is the path that runs the same application inside an external servlet container.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class ServletWebServerApplicationContext {
+  +onRefresh()
+  -createWebServer()
+  -getWebServerFactory()
+}
+interface ServletWebServerFactory {
+  +getWebServer()
+}
+interface WebServer
+class WebServerStartStopLifecycle
+class WebServerGracefulShutdownLifecycle
+ServletWebServerApplicationContext --&gt; ServletWebServerFactory
+ServletWebServerFactory ..&gt; WebServer
+ServletWebServerApplicationContext --&gt; WebServerStartStopLifecycle
+ServletWebServerApplicationContext --&gt; WebServerGracefulShutdownLifecycle
+@enduml
+</code></pre><p>A reactive application uses <code>ReactiveWebServerApplicationContextFactory</code> and a reactive <code>WebServerFactory</code> the same way. <code>WebApplicationType.NONE</code> creates neither.</p><h1 id=configuration-properties>Configuration properties</h1><p><code>@ConfigurationProperties</code> binds a prefix from the environment onto a bean. <code>ConfigurationPropertiesBindingPostProcessor</code> is registered under its own class name and runs at <code>HIGHEST_PRECEDENCE + 1</code>, before ordinary initialization. <code>postProcessBeforeInitialization</code> builds a <code>ConfigurationPropertiesBean</code> and <code>ConfigurationPropertiesBinder.bind</code> copies matching properties into the instance. Constructor-bound value objects are skipped here; they are bound when the bean is created. <code>@EnableConfigurationProperties</code> and <code>@ConfigurationPropertiesScan</code> register the beans that this post-processor then fills.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class ConfigurationPropertiesBindingPostProcessor {
+  +postProcessBeforeInitialization()
+}
+class ConfigurationPropertiesBean
+class ConfigurationPropertiesBinder {
+  +bind()
+}
+class Binder
+ConfigurationPropertiesBindingPostProcessor --&gt; ConfigurationPropertiesBean
+ConfigurationPropertiesBindingPostProcessor --&gt; ConfigurationPropertiesBinder
+ConfigurationPropertiesBinder --&gt; Binder
+@enduml
+</code></pre><p>Binding uses the same relaxed names as config data (<code>server.port</code>, <code>SERVER_PORT</code>). A failed bind throws <code>ConfigurationPropertiesBindException</code> and startup stops.</p><h1 id=logging>Logging</h1><p><code>LoggingApplicationListener</code> is one of the early Boot listeners. On <code>ApplicationEnvironmentPreparedEvent</code> it calls <code>LoggingSystem.get</code> for the classpath (Logback, Log4j2, or <code>java.util.logging</code>) and <code>initialize</code>. That applies <code>logging.file.name</code> / <code>logging.config</code>, then <code>logging.level.*</code>. Earlier events only set a temporary level so startup logs are not lost. On <code>ApplicationPreparedEvent</code> the chosen <code>LoggingSystem</code> is registered as the bean <code>springBootLoggingSystem</code>. <code>EnvironmentPostProcessor</code>s log through <code>DeferredLogFactory</code> until this listener switches those logs onto the real system.</p><h1 id=failure-analysis>Failure analysis</h1><p>If <code>run</code> throws, <code>handleRunFailure</code> asks <code>FailureAnalyzers</code>, a <code>SpringBootExceptionReporter</code> loaded from <code>spring.factories</code>. <code>reportException</code> walks every <code>FailureAnalyzer</code>. The first <code>analyze</code> that returns a <code>FailureAnalysis</code> wins. <code>FailureAnalysisReporter</code> implementations then print it. The core reporter is <code>LoggingFailureAnalysisReporter</code>, which is why a missing port or a bad config file ends as a short description and action instead of only a stack trace.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+class FailureAnalyzers {
+  +reportException()
+}
+interface FailureAnalyzer {
+  +analyze(Throwable) : FailureAnalysis
+}
+interface FailureAnalysisReporter {
+  +report(FailureAnalysis)
+}
+class LoggingFailureAnalysisReporter
+FailureAnalyzers ..&gt; FailureAnalyzer
+FailureAnalyzers ..&gt; FailureAnalysisReporter
+LoggingFailureAnalysisReporter --|&gt; FailureAnalysisReporter
+@enduml
+</code></pre><h1 id=actuator>Actuator</h1><p>Actuator is optional. With it on the classpath, auto-configuration exposes operations as endpoints. <code>WebEndpointDiscoverer</code> scans beans for endpoint annotations and builds web operations. <code>management.endpoints.web.exposure.include</code> decides which ids are mapped. <code>HealthEndpoint</code> reads a <code>HealthContributorRegistry</code>: each contributor (disk, database, custom) returns a <code>Health</code>, and the endpoint aggregates them into one descriptor. HTTP mapping lives under <code>management.endpoints.web.base-path</code> (default <code>/actuator</code>). JMX uses <code>JmxEndpointDiscoverer</code> when that exposure is enabled. The application does not call these types; a request to the endpoint does.</p><h1 id=fat-jar>Fat jar</h1><p>A fat jar is one ZIP that <code>java -jar</code> can start. The JVM loads <code>Main-Class</code> from the archive root and then from classpath URLs that point at files. A JAR nested inside another JAR is not a classpath entry for the platform class loader. Boot therefore writes two layers into one archive: loader classes at the root, so the JVM can construct <code>JarLauncher</code>, and the application plus its libraries under <code>BOOT-INF/</code>, so they do not collide with the loader and can be opened as nested JARs.</p><p>The Maven <code>repackage</code> goal calls <code>Repackager</code>. That type takes the project&rsquo;s ordinary JAR (classes at the root, no nested libraries) and rewrites it. A file that already has <code>Spring-Boot-Version</code> in its manifest is left unchanged. Gradle <code>bootJar</code> writes the same layout through <code>BootJar</code> and <code>BootZipCopyAction</code> instead of calling <code>Repackager</code>.</p><pre tabindex=0><code>demo.jar
+├── META-INF/MANIFEST.MF
+├── org/springframework/boot/loader/...
+├── BOOT-INF/
+│   ├── classes/          application classes and resources
+│   ├── lib/              nested dependency JARs
+│   ├── classpath.idx
+│   └── layers.idx        only when layers are enabled
+</code></pre><p><code>Layouts.forFile</code> chooses the layout from the source name. A <code>.jar</code> uses <code>Layouts.Jar</code>. A <code>.war</code> uses <code>Layouts.War</code>. A directory or <code>.zip</code> uses <code>Layouts.Expanded</code>.</p><table><thead><tr><th>Layout</th><th>Launcher (<code>Main-Class</code>)</th><th>Application classes</th><th>Libraries</th></tr></thead><tbody><tr><td><code>Jar</code></td><td><code>JarLauncher</code></td><td><code>BOOT-INF/classes/</code></td><td><code>BOOT-INF/lib/</code></td></tr><tr><td><code>War</code></td><td><code>WarLauncher</code></td><td><code>WEB-INF/classes/</code></td><td><code>WEB-INF/lib/</code>, provided scope in <code>WEB-INF/lib-provided/</code></td></tr><tr><td><code>Expanded</code></td><td><code>PropertiesLauncher</code></td><td>same as <code>Jar</code></td><td>same as <code>Jar</code></td></tr><tr><td><code>None</code></td><td>none; not executable</td><td>same as <code>Jar</code></td><td>same as <code>Jar</code></td></tr></tbody></table><p><code>Jar</code> implements <code>RepackagingLayout</code>. During the rewrite, every transformable entry of the source JAR is moved under <code>BOOT-INF/classes/</code>. <code>META-INF/</code> stays at the root except <code>META-INF/aop.xml</code>, <code>META-INF/services/</code>, and <code>*.kotlin_module</code>, which move with the application. <code>BOOT-INF/</code> entries and <code>module-info.class</code> are left as they are. A WAR is already laid out under <code>WEB-INF/</code>, so <code>War</code> is not a <code>RepackagingLayout</code> and those paths are not rewritten.</p><p>The written manifest always records the Boot version. For an executable layout it also records:</p><table><thead><tr><th>Attribute</th><th>Typical jar value</th></tr></thead><tbody><tr><td><code>Main-Class</code></td><td><code>org.springframework.boot.loader.launch.JarLauncher</code></td></tr><tr><td><code>Start-Class</code></td><td>the application&rsquo;s <code>main</code> class</td></tr><tr><td><code>Spring-Boot-Classes</code></td><td><code>BOOT-INF/classes/</code></td></tr><tr><td><code>Spring-Boot-Lib</code></td><td><code>BOOT-INF/lib/</code></td></tr><tr><td><code>Spring-Boot-Classpath-Index</code></td><td><code>BOOT-INF/classpath.idx</code></td></tr><tr><td><code>Spring-Boot-Layers-Index</code></td><td><code>BOOT-INF/layers.idx</code> when layers are enabled</td></tr></tbody></table><p><code>Start-Class</code> comes from <code>Repackager.setMainClass</code>, else from the source <code>Main-Class</code>, else from a search that prefers a class annotated with <code>@SpringBootApplication</code>. <code>Main-Class</code> is then overwritten with the layout&rsquo;s launcher. <code>java -jar</code> therefore starts the loader; the loader starts the application.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface Layout {
+  +String getLauncherClassName()
+  +String getLibraryLocation(String libraryName, LibraryScope scope)
+  +String getClassesLocation()
+  +boolean isExecutable()
+}
+interface RepackagingLayout {
+  +String getRepackagedClassesLocation()
+}
+class &#34;Layouts.Jar&#34; as Jar {
+  +String getLauncherClassName()
+  +String getLibraryLocation(String libraryName, LibraryScope scope)
+  +String getRepackagedClassesLocation()
+}
+class &#34;Layouts.Expanded&#34; as Expanded
+class &#34;Layouts.None&#34; as None
+class &#34;Layouts.War&#34; as War {
+  +String getLauncherClassName()
+  +String getLibraryLocation(String libraryName, LibraryScope scope)
+}
+abstract class Packager {
+  #void write(JarFile sourceJar, Libraries libraries, AbstractJarWriter writer)
+  -Manifest buildManifest(JarFile source)
+}
+class Repackager {
+  +void repackage(File destination, Libraries libraries)
+}
+abstract class AbstractJarWriter {
+  +void writeManifest(Manifest manifest)
+  +void writeLoaderClasses()
+  +void writeNestedLibrary(String location, Library library)
+}
+class JarWriter
+
+Layout &lt;|-- RepackagingLayout
+RepackagingLayout &lt;|.. Jar
+Jar &lt;|-- Expanded
+Jar &lt;|-- None
+Layout &lt;|.. War
+Packager &lt;|-- Repackager
+Packager -[norank]-&gt; Layout
+AbstractJarWriter &lt;|-- JarWriter
+Packager .[norank].&gt; AbstractJarWriter
+@enduml
+</code></pre><p>On the Maven path, <code>Packager.write</code> fills the archive in this order:</p><ol><li><code>writeManifest</code> writes the attributes above.</li><li><code>writeLoaderClasses</code> copies class files from the <code>spring-boot-loader</code> JAR onto the archive root (<code>org/springframework/boot/loader/...</code>). Those are the only application-facing types the JVM can load before a nested class loader exists.</li><li><code>writeEntries</code> copies the source JAR through <code>RepackagingEntryTransformer</code>, which prefixes application entries with <code>BOOT-INF/classes/</code> when the layout is a <code>RepackagingLayout</code>.</li><li>Each dependency that is itself a ZIP is written as a nested library under <code>BOOT-INF/lib/</code> (or the WAR locations). <code>JarModeLibrary.TOOLS</code> is added unless that is disabled.</li><li><code>BOOT-INF/classpath.idx</code> lists those library paths in write order. When layers are enabled, <code>BOOT-INF/layers.idx</code> lists every file under <code>dependencies</code>, <code>spring-boot-loader</code>, <code>snapshot-dependencies</code>, or <code>application</code>, so an image build can copy unchanged dependency bytes into their own layer.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant M as Maven repackage
+    participant R as Repackager
+    participant P as Packager
+    participant W as JarWriter
+
+    M-&gt;&gt;R: repackage(sourceJar, libraries)
+    R-&gt;&gt;W: create destination
+    R-&gt;&gt;P: write(sourceJar, libraries, writer)
+    P-&gt;&gt;W: writeManifest (Main-Class, Start-Class, Boot attributes)
+    P-&gt;&gt;W: writeLoaderClasses
+    P-&gt;&gt;W: writeEntries (move classes to BOOT-INF/classes)
+    P-&gt;&gt;W: writeNestedLibrary for each BOOT-INF/lib/*.jar
+    P-&gt;&gt;W: writeIndexFile classpath.idx
+</code></pre><p>A nested library is written as <code>ZipEntry.STORED</code>: uncompressed, with a known CRC and size. <code>ZipContent</code> can parse a ZIP that lives as a byte range inside another file only when that range is itself a complete ZIP. A DEFLATE-compressed nested JAR would not be. The classpath URL for such an entry is <code>jar:nested:/path/demo.jar/!BOOT-INF/lib/foo.jar!/</code>. <code>Handlers.register</code> adds <code>org.springframework.boot.loader.net.protocol</code> to <code>java.protocol.handler.pkgs</code> so the <code>nested:</code> handler and Boot&rsquo;s <code>jar:</code> handler are found. <code>NestedJarFile</code> then opens <code>ZipContent</code> on the outer file plus the entry name and behaves as a <code>JarFile</code>.</p><p>A library that must be a real file (typically one with JNI natives) is marked to unpack. The writer stores the comment <code>UNPACK</code>. <code>JarFileArchive</code> copies that entry to a temporary file and puts that file on the classpath instead of a nested URL.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Packager.write</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>write</span>(JarFile sourceJar, AbstractJarWriter writer, PackagedLibraries libraries) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (isLayered()) {
+</span></span><span style=display:flex><span>        writer.<span style=color:#a6e22e>useLayers</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>layers</span>, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>layersIndex</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    writer.<span style=color:#a6e22e>writeManifest</span>(buildManifest(sourceJar));
+</span></span><span style=display:flex><span>    writeLoaderClasses(writer);
+</span></span><span style=display:flex><span>    writer.<span style=color:#a6e22e>writeEntries</span>(sourceJar, getEntityTransformer(), libraries.<span style=color:#a6e22e>getUnpackHandler</span>(),
+</span></span><span style=display:flex><span>            libraries.<span style=color:#a6e22e>getLibraryLookup</span>());
+</span></span><span style=display:flex><span>    Map<span style=color:#f92672>&lt;</span>String, Library<span style=color:#f92672>&gt;</span> writtenLibraries <span style=color:#f92672>=</span> libraries.<span style=color:#a6e22e>write</span>(writer);
+</span></span><span style=display:flex><span>    writeNativeImageArgFile(writer, sourceJar, writtenLibraries);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (isLayered()) {
+</span></span><span style=display:flex><span>        writeLayerIndex(writer);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    writeSignatureFileIfNecessary(writtenLibraries, writer);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Packager.addMainAndStartAttributes</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>addMainAndStartAttributes</span>(JarFile source, Manifest manifest) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    String mainClass <span style=color:#f92672>=</span> getMainClass(source, manifest);
+</span></span><span style=display:flex><span>    String launcherClass <span style=color:#f92672>=</span> getLayout().<span style=color:#a6e22e>getLauncherClassName</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (launcherClass <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        Assert.<span style=color:#a6e22e>state</span>(mainClass <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>, <span style=color:#e6db74>&#34;Unable to find main class&#34;</span>);
+</span></span><span style=display:flex><span>        manifest.<span style=color:#a6e22e>getMainAttributes</span>().<span style=color:#a6e22e>putValue</span>(MAIN_CLASS_ATTRIBUTE, launcherClass);
+</span></span><span style=display:flex><span>        manifest.<span style=color:#a6e22e>getMainAttributes</span>().<span style=color:#a6e22e>putValue</span>(START_CLASS_ATTRIBUTE, mainClass);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (mainClass <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        manifest.<span style=color:#a6e22e>getMainAttributes</span>().<span style=color:#a6e22e>putValue</span>(MAIN_CLASS_ATTRIBUTE, mainClass);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Packager.RepackagingEntryTransformer.transformName</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> String <span style=color:#a6e22e>transformName</span>(String name) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>layout</span>.<span style=color:#a6e22e>getRepackagedClassesLocation</span>() <span style=color:#f92672>+</span> name;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractJarWriter.writeNestedLibrary</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>writeNestedLibrary</span>(String location, Library library) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    JarArchiveEntry entry <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> JarArchiveEntry(location <span style=color:#f92672>+</span> library.<span style=color:#a6e22e>getName</span>());
+</span></span><span style=display:flex><span>    entry.<span style=color:#a6e22e>setTime</span>(getNestedLibraryTime(library));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>new</span> StoredEntryPreparator(library.<span style=color:#a6e22e>openStream</span>(), <span style=color:#66d9ef>new</span> LibraryUnpackHandler(library).<span style=color:#a6e22e>requiresUnpack</span>(location))
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>prepareStoredEntry</span>(entry);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> (InputStream inputStream <span style=color:#f92672>=</span> library.<span style=color:#a6e22e>openStream</span>()) {
+</span></span><span style=display:flex><span>        writeEntry(entry, library, <span style=color:#66d9ef>new</span> InputStreamEntryWriter(inputStream));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractJarWriter.StoredEntryPreparator.prepareStoredEntry</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>prepareStoredEntry</span>(ZipArchiveEntry entry) {
+</span></span><span style=display:flex><span>    entry.<span style=color:#a6e22e>setSize</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>size</span>);
+</span></span><span style=display:flex><span>    entry.<span style=color:#a6e22e>setCompressedSize</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>size</span>);
+</span></span><span style=display:flex><span>    entry.<span style=color:#a6e22e>setCrc</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>crc</span>.<span style=color:#a6e22e>getValue</span>());
+</span></span><span style=display:flex><span>    entry.<span style=color:#a6e22e>setMethod</span>(ZipEntry.<span style=color:#a6e22e>STORED</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>unpack</span>) {
+</span></span><span style=display:flex><span>        entry.<span style=color:#a6e22e>setComment</span>(<span style=color:#e6db74>&#34;UNPACK&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>java -jar demo.jar</code> loads <code>JarLauncher</code> from the archive root. The <code>JarLauncher</code> constructor builds an <code>Archive</code> for that file (<code>JarFileArchive</code>) or, if the same tree was exploded, an <code>ExplodedArchive</code>. <code>launch</code> then:</p><ol><li>Calls <code>Handlers.register</code> unless the archive is exploded.</li><li>Collects classpath URLs: the <code>BOOT-INF/classes/</code> directory and every <code>BOOT-INF/lib/</code> entry (<code>WarLauncher</code> uses the <code>WEB-INF/</code> equivalents, including <code>lib-provided</code>).</li><li>Builds a <code>LaunchedClassLoader</code> (<code>JarUrlClassLoader</code>) whose parent is the launcher&rsquo;s own class loader. Application types therefore resolve from the nested URLs; loader types stay on the parent.</li><li>Reads <code>Start-Class</code> from the manifest. If the <code>jarmode</code> system property is set, <code>JarModeRunner</code> is used instead and loads a <code>JarMode</code> from <code>spring.factories</code>.</li><li>Sets the thread context class loader and invokes <code>main</code>.</li></ol><p>On an exploded archive, <code>classpath.idx</code> is loaded and appended so the directory order matches the original fat jar. A packed archive already has that order in its ZIP entries, so the index is not applied at launch.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+abstract class Launcher {
+  #void launch(String[] args)
+  #ClassLoader createClassLoader(Collection&lt;URL&gt; urls)
+  #{abstract} Archive getArchive()
+  #{abstract} String getMainClass()
+  #{abstract} Set&lt;URL&gt; getClassPathUrls()
+  #boolean isLibraryFileOrClassesDirectory(Archive.Entry entry)
+}
+abstract class ExecutableArchiveLauncher {
+  #String getMainClass()
+  #Set&lt;URL&gt; getClassPathUrls()
+}
+class JarLauncher {
+  +{static} void main(String[] args)
+}
+class WarLauncher {
+  +{static} void main(String[] args)
+  #boolean isLibraryFileOrClassesDirectory(Archive.Entry entry)
+}
+class PropertiesLauncher
+interface Archive {
+  +Manifest getManifest()
+  +Set&lt;URL&gt; getClassPathUrls(Predicate&lt;Entry&gt; includeFilter, Predicate&lt;Entry&gt; directorySearchFilter)
+}
+class JarFileArchive
+class ExplodedArchive
+class JarUrlClassLoader
+class LaunchedClassLoader
+class NestedJarFile
+class ZipContent
+
+Launcher &lt;|-- ExecutableArchiveLauncher
+ExecutableArchiveLauncher &lt;|-- JarLauncher
+ExecutableArchiveLauncher &lt;|-- WarLauncher
+Launcher &lt;|-- PropertiesLauncher
+Archive &lt;|.. JarFileArchive
+Archive &lt;|.. ExplodedArchive
+JarUrlClassLoader &lt;|-- LaunchedClassLoader
+ExecutableArchiveLauncher o-[norank]- Archive
+Launcher .[norank].&gt; LaunchedClassLoader : createClassLoader
+JarFileArchive -[hidden]down- NestedJarFile
+NestedJarFile -[hidden]down- ZipContent
+JarFileArchive .[norank].&gt; NestedJarFile
+NestedJarFile .[norank].&gt; ZipContent
+@enduml
+</code></pre><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant JVM
+    participant JL as JarLauncher
+    participant L as Launcher
+    participant A as JarFileArchive
+    participant CL as LaunchedClassLoader
+    participant App as Start-Class
+
+    JVM-&gt;&gt;JL: main (manifest Main-Class)
+    JL-&gt;&gt;L: launch(args)
+    L-&gt;&gt;L: Handlers.register
+    L-&gt;&gt;A: getClassPathUrls (BOOT-INF/classes, BOOT-INF/lib)
+    A--&gt;&gt;L: jar:nested:... URLs
+    L-&gt;&gt;CL: new LaunchedClassLoader(urls)
+    L-&gt;&gt;A: getManifest Start-Class
+    L-&gt;&gt;CL: Class.forName(Start-Class)
+    L-&gt;&gt;App: main(args)
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// JarLauncher.main</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>main</span>(String<span style=color:#f92672>[]</span> args) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>new</span> JarLauncher().<span style=color:#a6e22e>launch</span>(args);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Launcher.launch</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>launch</span>(String<span style=color:#f92672>[]</span> args) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isExploded()) {
+</span></span><span style=display:flex><span>        Handlers.<span style=color:#a6e22e>register</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        ClassLoader classLoader <span style=color:#f92672>=</span> createClassLoader(getClassPathUrls());
+</span></span><span style=display:flex><span>        String jarMode <span style=color:#f92672>=</span> System.<span style=color:#a6e22e>getProperty</span>(<span style=color:#e6db74>&#34;jarmode&#34;</span>);
+</span></span><span style=display:flex><span>        String mainClassName <span style=color:#f92672>=</span> hasLength(jarMode) <span style=color:#f92672>?</span> JAR_MODE_RUNNER_CLASS_NAME : getMainClass();
+</span></span><span style=display:flex><span>        launch(classLoader, mainClassName, args);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (UncheckedIOException ex) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> ex.<span style=color:#a6e22e>getCause</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ExecutableArchiveLauncher.getMainClass</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> String <span style=color:#a6e22e>getMainClass</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    Manifest manifest <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>archive</span>.<span style=color:#a6e22e>getManifest</span>();
+</span></span><span style=display:flex><span>    String mainClass <span style=color:#f92672>=</span> (manifest <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) <span style=color:#f92672>?</span> manifest.<span style=color:#a6e22e>getMainAttributes</span>().<span style=color:#a6e22e>getValue</span>(START_CLASS_ATTRIBUTE) : <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (mainClass <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;No &#39;Start-Class&#39; manifest entry specified in &#34;</span> <span style=color:#f92672>+</span> <span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> mainClass;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Launcher.isLibraryFileOrClassesDirectory</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>isLibraryFileOrClassesDirectory</span>(Archive.<span style=color:#a6e22e>Entry</span> entry) {
+</span></span><span style=display:flex><span>    String name <span style=color:#f92672>=</span> entry.<span style=color:#a6e22e>name</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (entry.<span style=color:#a6e22e>isDirectory</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> name.<span style=color:#a6e22e>equals</span>(<span style=color:#e6db74>&#34;BOOT-INF/classes/&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> name.<span style=color:#a6e22e>startsWith</span>(<span style=color:#e6db74>&#34;BOOT-INF/lib/&#34;</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Handlers.register</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>() {
+</span></span><span style=display:flex><span>    String packages <span style=color:#f92672>=</span> System.<span style=color:#a6e22e>getProperty</span>(PROTOCOL_HANDLER_PACKAGES, <span style=color:#e6db74>&#34;&#34;</span>);
+</span></span><span style=display:flex><span>    packages <span style=color:#f92672>=</span> (<span style=color:#f92672>!</span>packages.<span style=color:#a6e22e>isEmpty</span>() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>packages.<span style=color:#a6e22e>contains</span>(PACKAGE)) <span style=color:#f92672>?</span> packages <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;|&#34;</span> <span style=color:#f92672>+</span> PACKAGE : PACKAGE;
+</span></span><span style=display:flex><span>    System.<span style=color:#a6e22e>setProperty</span>(PROTOCOL_HANDLER_PACKAGES, packages);
+</span></span><span style=display:flex><span>    resetCachedUrlHandlers();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// JarUrl.create</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> URL <span style=color:#a6e22e>create</span>(File file, String nestedEntryName, String path) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        path <span style=color:#f92672>=</span> (path <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) <span style=color:#f92672>?</span> path : <span style=color:#e6db74>&#34;&#34;</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> URL(<span style=color:#66d9ef>null</span>, <span style=color:#e6db74>&#34;jar:&#34;</span> <span style=color:#f92672>+</span> getJarReference(file, nestedEntryName) <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;!/&#34;</span> <span style=color:#f92672>+</span> path, Handler.<span style=color:#a6e22e>INSTANCE</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (MalformedURLException ex) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;Unable to create JarFileArchive URL&#34;</span>, ex);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h1 id=startup>Startup</h1><p><code>SpringApplication.run</code> is the ordered call. The bootstrap section names the types; this is the order they are used.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+participant Main
+participant SpringApplication
+participant Bootstrap as DefaultBootstrapContext
+participant Listeners as SpringApplicationRunListeners
+participant Env as Environment
+participant Ctx as ApplicationContext
+
+Main -&gt; SpringApplication : run(args)
+SpringApplication -&gt; Bootstrap : createBootstrapContext()
+SpringApplication -&gt; Listeners : starting(bootstrapContext)
+SpringApplication -&gt; Env : prepareEnvironment()
+Listeners -&gt; Env : environmentPrepared\n(EnvironmentPostProcessor)
+SpringApplication -&gt; Ctx : createApplicationContext()
+SpringApplication -&gt; Ctx : prepareContext()\ninitializers, load sources
+SpringApplication -&gt; Bootstrap : close(context)
+SpringApplication -&gt; Ctx : refresh()
+SpringApplication -&gt; Listeners : started(context)
+SpringApplication -&gt; Ctx : callRunners()
+SpringApplication -&gt; Listeners : ready(context)
+@enduml
+</code></pre><p>Auto-configuration import runs inside <code>refresh</code>, after this sequence has already chosen the web-server context and loaded config data. The embedded server (Tomcat, Jetty, or Netty) is started by that Boot web-server context, not by a separate step in <code>run</code>.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/springboot/>springBoot</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/java-nio/ data-tooltip="Java Nio" aria-label="NEXT: Java Nio"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--disabled"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring-boot/spring-boot/",this.page.identifier="/post/java/spring-boot/spring-boot/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/java-nio/ data-tooltip="Java Nio" aria-label="NEXT: Java Nio"><i class="fa fa-angle-left"></i>
+<span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--disabled"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring-boot/spring-boot/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring-boot%2Fspring-boot%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring-boot%2Fspring-boot%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring-boot%2Fspring-boot%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>
+    
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    
+    
+    
+    const getMermaidTheme = () =>
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
+
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: getMermaidTheme(),
+    });
+
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll(".mermaid"),
+        });
+    } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+    }
+</script><style>.mermaid svg{display:block;margin:auto}</style><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+    MathJax.Hub.Config({
+      CommonHTML: { linebreaks: { automatic: true } },
+      tex2jax: {
+        inlineMath: [ ['$', '$'], ['\\(', '\\)'] ],
+        displayMath: [ ['$$', '$$'], ['\\[', '\\]'] ],
+        processEscapes: true,
+        processEnvironments: true,
+        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      },
+      messageStyle: 'none'
+    });
+  </script><script type=text/javascript async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_CHTML-full" integrity="sha256-GhM+5JHb6QUzOQPXSJLEWP7R73CbkisjzK5Eyij4U9w=" crossorigin=anonymous></script></body></html>
