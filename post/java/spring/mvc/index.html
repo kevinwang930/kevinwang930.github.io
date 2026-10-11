@@ -1,7 +1,8 @@
 <!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThis article describes Spring MVC\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/java\/spring\/mvc\/","keywords":"[spring, mvc]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.167.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="spring,mvc"><meta name=description content="This article describes Spring MVC"><meta property="og:description" content="This article describes Spring MVC"><meta property="og:type" content="article"><meta property="og:title" content="Spring MVC"><meta name=twitter:title content="Spring MVC"><meta property="og:url" content="https://kevinwang930.github.io/post/java/spring/mvc/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/java/spring/mvc/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="This article describes Spring MVC"><meta name=twitter:description content="This article describes Spring MVC"><meta property="og:locale" content="en"><meta property="article:published_time" content="2024-03-27T14:39:29"><meta property="article:modified_time" content="2024-03-27T14:39:29"><meta property="article:section" content="java"><meta property="article:section" content="spring"><meta property="article:tag" content="spring"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Spring MVC</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/java/spring/mvc/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Spring MVC</h1><div class="postShorten-meta post-meta"><time datetime=2024-03-27T14:39:29+08:00>March 27, 2024
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/java>java</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article describes Spring MVC</p><h1 id=web-on-servlet>web on servlet</h1><p>Servlet-stack web applications built on the servlet API and deployed to Servlet containers</p><h2 id=servletcontext>ServletContext</h2><p><code>ServletContext</code> Defines a set of methods that a servlet uses to communicate with its servlet container</p><p>spring uses <code>ContextLoaderListener</code> to listen to the initialization of <code>ServletContext</code>, then init spring <code>WebApplicationContext</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+<a class=category-link href=https://kevinwang930.github.io/categories/spring>spring</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>This article describes Spring MVC</p><h1 id=web-on-servlet>web on servlet</h1><p>Servlet-stack web applications built on the servlet API and deployed to Servlet containers</p><h2 id=servletcontext>ServletContext</h2><p><code>ServletContext</code> Defines a set of methods that a servlet uses to communicate with its servlet container</p><p>spring uses <code>ContextLoaderListener</code> to listen to the initialization of <code>ServletContext</code>, then init spring <code>WebApplicationContext</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
 package Tomcat {
     interface ServletContextListener {
         + void contextInitialized( sce)
@@ -23,13 +24,26 @@ package Tomcat {
         + void setSessionTimeout(int)
     }
 
-    class ApplicationContext implements ServletContext {
+    class &#34;ApplicationContext&#34; as TomcatApplicationContext {
         Map&lt;String,Object&gt; attributes
-
     }
+    note &#34;org.apache.catalina.core.ApplicationContext\nTomcat&#39;s ServletContext, not Spring&#39;s ApplicationContext&#34; as TomcatNote
+    TomcatApplicationContext .. TomcatNote
+    ServletContext &lt;|.. TomcatApplicationContext
 }
 
 package Spring {
+    interface ApplicationContext
+    interface ConfigurableApplicationContext
+    interface WebApplicationContext {
+        ServletContext getServletContext()
+    }
+    interface ConfigurableWebApplicationContext {
+        void setServletContext(ServletContext)
+        void setServletConfig(ServletConfig)
+    }
+    abstract class AbstractRefreshableConfigApplicationContext
+
     class ContextLoader {
         {static} Map&lt;ClassLoader, WebApplicationContext&gt; currentContextPerThread
         {static} volatile  currentContext
@@ -52,20 +66,20 @@ package Spring {
     class XmlWebApplicationContext extends AbstractRefreshableWebApplicationContext {
 
     }
-      ContextLoader &lt;|-up-ContextLoaderListener
-    ContextLoader -left-&gt; XmlWebApplicationContext:create
+    ContextLoader &lt;|-up- ContextLoaderListener
+    ContextLoader -left-&gt; XmlWebApplicationContext : create
+
+    ApplicationContext &lt;|-- ConfigurableApplicationContext
+    ApplicationContext &lt;|-- WebApplicationContext
+    WebApplicationContext &lt;|-- ConfigurableWebApplicationContext
+    ConfigurableApplicationContext &lt;|-- ConfigurableWebApplicationContext
+    AbstractRefreshableConfigApplicationContext &lt;|-- AbstractRefreshableWebApplicationContext
+    ConfigurableWebApplicationContext &lt;|.. AbstractRefreshableWebApplicationContext
 }
 
-
-ApplicationContext &lt;|-- ConfigurableApplicationContext 
-
-
-    
-
-
-
- ServletContextListener &lt;|..... ContextLoaderListener
-ConfigurableApplicationContext *-- XmlWebApplicationContext
+ServletContextListener &lt;|.[norank]. ContextLoaderListener
+TomcatNote -[hidden]down- ApplicationContext
+AbstractRefreshableWebApplicationContext o-[norank]- ServletContext : servletContext
 </code></pre><h1 id=dispatcherservlet>DispatcherServlet</h1><p>Spring MVC is designed aroud the front controller pattern where a central <code>servlet</code>, the <code>DispatcherServlet</code>, provides a shared algorithm for request processing, while actual work is performed by configurable delegate components.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 package Tomcat {
     interface Servlet {
@@ -137,23 +151,710 @@ Servlet &lt;|.. GenericServlet
 ServletConfig &lt;|.. GenericServlet
 GenericServlet &lt;|-- HttpServlet
 HttpServlet&lt;|-- HttpServletBean
-</code></pre><h1 id=request-handling>Request Handling</h1><p>url and form-data parameters will transformed to parameters of request, and binds to the Controller method args.
+</code></pre><h1 id=servlet-registration>Servlet registration</h1><p>A servlet container learns about servlets, filters and listeners from three sources: <code>web.xml</code>, annotations such as <code>@WebServlet</code>, and programmatic calls to <code>ServletContext.addServlet</code>, <code>addFilter</code> and <code>addListener</code>. Programmatic calls are accepted only while the web application is starting, from a <code>ServletContainerInitializer.onStartup</code> or a <code>ServletContextListener.contextInitialized</code> callback. Spring MVC uses the programmatic path to register <code>ContextLoaderListener</code> and <code>DispatcherServlet</code> without <code>web.xml</code>; a classic <code>web.xml</code> that declares the same two classes produces the same result.</p><p>The container then runs three callbacks in a fixed order, and that order defines Spring&rsquo;s initialization order:</p><table><thead><tr><th>Container callback</th><th>Spring work</th></tr></thead><tbody><tr><td><code>ServletContainerInitializer.onStartup</code></td><td><code>SpringServletContainerInitializer</code> calls each <code>WebApplicationInitializer</code>, which registers the listener, the <code>DispatcherServlet</code> and filters</td></tr><tr><td><code>ServletContextListener.contextInitialized</code></td><td><code>ContextLoaderListener</code> refreshes the root <code>WebApplicationContext</code> and stores it as a <code>ServletContext</code> attribute</td></tr><tr><td><code>Filter.init</code></td><td>filters initialize; <code>DelegatingFilterProxy</code> can already resolve its delegate bean from the root context</td></tr><tr><td><code>Servlet.init</code> for load-on-startup servlets</td><td><code>DispatcherServlet</code> creates and refreshes its own context with the root context as parent, then initializes its strategies</td></tr></tbody></table><p>The Tomcat side of this sequence is described in <a href=https://kevinwang930.github.io/post/java/tomcat/>Tomcat startup</a>.</p><h2 id=springservletcontainerinitializer>SpringServletContainerInitializer</h2><p><code>spring-web</code> ships <code>SpringServletContainerInitializer</code> as a service entry in <code>META-INF/services/jakarta.servlet.ServletContainerInitializer</code>. It declares <code>@HandlesTypes(WebApplicationInitializer.class)</code>, so Tomcat passes every class that implements <code>WebApplicationInitializer</code> to <code>onStartup</code>. The SCI instantiates each concrete class, sorts the instances by <code>@Order</code>/<code>Ordered</code>, and calls <code>WebApplicationInitializer.onStartup(servletContext)</code> on each one.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
+package Tomcat {
+    interface ServletContainerInitializer {
+        + void onStartup(Set&lt;Class&lt;?&gt;&gt; c, ServletContext ctx)
+    }
+    interface ServletContext {
+        + ServletRegistration.Dynamic addServlet(String,Servlet)
+        + FilterRegistration.Dynamic addFilter(String,Filter)
+        + void addListener(T)
+    }
+    interface &#34;ServletRegistration.Dynamic&#34; as ServletDynamic {
+        + Set&lt;String&gt; addMapping(String...)
+        + void setLoadOnStartup(int)
+        + void setAsyncSupported(boolean)
+    }
+    class ApplicationServletRegistration {
+        - Wrapper wrapper
+        - Context context
+    }
+    ServletDynamic &lt;|.. ApplicationServletRegistration
+    note &#34;org.apache.catalina.core.ApplicationServletRegistration\nreturned by ApplicationContext.addServlet&#34; as RegistrationNote
+    ApplicationServletRegistration .. RegistrationNote
+}
+
+package Spring {
+    class SpringServletContainerInitializer {
+        + void onStartup(Set&lt;Class&lt;?&gt;&gt; webAppInitializerClasses, ServletContext servletContext)
+    }
+    interface WebApplicationInitializer {
+        + void onStartup(ServletContext servletContext)
+    }
+    abstract class AbstractContextLoaderInitializer {
+        + void onStartup(ServletContext servletContext)
+        # void registerContextLoaderListener(ServletContext servletContext)
+        # {abstract} WebApplicationContext createRootApplicationContext()
+    }
+    abstract class AbstractDispatcherServletInitializer {
+        + {static} String DEFAULT_SERVLET_NAME = &#34;dispatcher&#34;
+        + void onStartup(ServletContext servletContext)
+        # void registerDispatcherServlet(ServletContext servletContext)
+        # FrameworkServlet createDispatcherServlet(WebApplicationContext servletAppContext)
+        # {abstract} WebApplicationContext createServletApplicationContext()
+        # {abstract} String[] getServletMappings()
+        # Filter[] getServletFilters()
+        # FilterRegistration.Dynamic registerServletFilter(ServletContext servletContext, Filter filter)
+    }
+    abstract class AbstractAnnotationConfigDispatcherServletInitializer {
+        # WebApplicationContext createRootApplicationContext()
+        # WebApplicationContext createServletApplicationContext()
+        # {abstract} Class&lt;?&gt;[] getRootConfigClasses()
+        # {abstract} Class&lt;?&gt;[] getServletConfigClasses()
+    }
+
+    WebApplicationInitializer &lt;|.. AbstractContextLoaderInitializer
+    AbstractContextLoaderInitializer &lt;|-- AbstractDispatcherServletInitializer
+    AbstractDispatcherServletInitializer &lt;|-- AbstractAnnotationConfigDispatcherServletInitializer
+    SpringServletContainerInitializer --&gt; &#34;N&#34; WebApplicationInitializer : onStartup
+}
+
+ServletContainerInitializer &lt;|.[norank]. SpringServletContainerInitializer
+AbstractDispatcherServletInitializer .[norank].&gt; ServletContext : addServlet / addFilter
+RegistrationNote -[hidden]down- SpringServletContainerInitializer
+</code></pre><p><code>AbstractDispatcherServletInitializer.onStartup</code> first lets the superclass register a <code>ContextLoaderListener</code> that wraps the root context (<code>createRootApplicationContext</code>), and then registers the <code>DispatcherServlet</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// SpringServletContainerInitializer.onStartup</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onStartup</span>(<span style=color:#a6e22e>@Nullable</span> Set<span style=color:#f92672>&lt;</span>Class<span style=color:#f92672>&lt;?&gt;&gt;</span> webAppInitializerClasses, ServletContext servletContext)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> ServletException {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>WebApplicationInitializer<span style=color:#f92672>&gt;</span> initializers <span style=color:#f92672>=</span> Collections.<span style=color:#a6e22e>emptyList</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (webAppInitializerClasses <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        initializers <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(webAppInitializerClasses.<span style=color:#a6e22e>size</span>());
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Class<span style=color:#f92672>&lt;?&gt;</span> waiClass : webAppInitializerClasses) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>waiClass.<span style=color:#a6e22e>isInterface</span>() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>Modifier.<span style=color:#a6e22e>isAbstract</span>(waiClass.<span style=color:#a6e22e>getModifiers</span>()) <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>                    WebApplicationInitializer.<span style=color:#a6e22e>class</span>.<span style=color:#a6e22e>isAssignableFrom</span>(waiClass)) {
+</span></span><span style=display:flex><span>                initializers.<span style=color:#a6e22e>add</span>((WebApplicationInitializer)
+</span></span><span style=display:flex><span>                        ReflectionUtils.<span style=color:#a6e22e>accessibleConstructor</span>(waiClass).<span style=color:#a6e22e>newInstance</span>());
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (initializers.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        servletContext.<span style=color:#a6e22e>log</span>(<span style=color:#e6db74>&#34;No Spring WebApplicationInitializer types detected on classpath&#34;</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    AnnotationAwareOrderComparator.<span style=color:#a6e22e>sort</span>(initializers);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (WebApplicationInitializer initializer : initializers) {
+</span></span><span style=display:flex><span>        initializer.<span style=color:#a6e22e>onStartup</span>(servletContext);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractDispatcherServletInitializer.onStartup</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onStartup</span>(ServletContext servletContext) <span style=color:#66d9ef>throws</span> ServletException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>super</span>.<span style=color:#a6e22e>onStartup</span>(servletContext);          <span style=color:#75715e>// registerContextLoaderListener</span>
+</span></span><span style=display:flex><span>    registerDispatcherServlet(servletContext);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractContextLoaderInitializer.registerContextLoaderListener</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>registerContextLoaderListener</span>(ServletContext servletContext) {
+</span></span><span style=display:flex><span>    WebApplicationContext rootAppContext <span style=color:#f92672>=</span> createRootApplicationContext();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (rootAppContext <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        ContextLoaderListener listener <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ContextLoaderListener(rootAppContext, servletContext);
+</span></span><span style=display:flex><span>        listener.<span style=color:#a6e22e>setContextInitializers</span>(getRootApplicationContextInitializers());
+</span></span><span style=display:flex><span>        servletContext.<span style=color:#a6e22e>addListener</span>(listener);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractDispatcherServletInitializer.registerDispatcherServlet</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>registerDispatcherServlet</span>(ServletContext servletContext) {
+</span></span><span style=display:flex><span>    String servletName <span style=color:#f92672>=</span> getServletName();
+</span></span><span style=display:flex><span>    WebApplicationContext servletAppContext <span style=color:#f92672>=</span> createServletApplicationContext();
+</span></span><span style=display:flex><span>    FrameworkServlet dispatcherServlet <span style=color:#f92672>=</span> createDispatcherServlet(servletAppContext);
+</span></span><span style=display:flex><span>    dispatcherServlet.<span style=color:#a6e22e>setContextInitializers</span>(getServletApplicationContextInitializers());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    ServletRegistration.<span style=color:#a6e22e>Dynamic</span> registration <span style=color:#f92672>=</span> servletContext.<span style=color:#a6e22e>addServlet</span>(servletName, dispatcherServlet);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (registration <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;Failed to register servlet with name &#39;&#34;</span> <span style=color:#f92672>+</span> servletName <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;&#39;. &#34;</span> <span style=color:#f92672>+</span>
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;Check if there is another servlet registered under the same name.&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    registration.<span style=color:#a6e22e>setLoadOnStartup</span>(1);
+</span></span><span style=display:flex><span>    registration.<span style=color:#a6e22e>addMapping</span>(getServletMappings());
+</span></span><span style=display:flex><span>    registration.<span style=color:#a6e22e>setAsyncSupported</span>(isAsyncSupported());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    Filter<span style=color:#f92672>[]</span> filters <span style=color:#f92672>=</span> getServletFilters();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>ObjectUtils.<span style=color:#a6e22e>isEmpty</span>(filters)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Filter filter : filters) {
+</span></span><span style=display:flex><span>            registerServletFilter(servletContext, filter);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    customizeRegistration(registration);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>An application supplies only the configuration classes and mappings:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>class</span> <span style=color:#a6e22e>WebInitializer</span> <span style=color:#66d9ef>extends</span> AbstractAnnotationConfigDispatcherServletInitializer {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>protected</span> Class<span style=color:#f92672>&lt;?&gt;[]</span> <span style=color:#a6e22e>getRootConfigClasses</span>() {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> Class<span style=color:#f92672>&lt;?&gt;[]</span> { ServiceConfig.<span style=color:#a6e22e>class</span> };
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>protected</span> Class<span style=color:#f92672>&lt;?&gt;[]</span> <span style=color:#a6e22e>getServletConfigClasses</span>() {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> Class<span style=color:#f92672>&lt;?&gt;[]</span> { WebMvcConfig.<span style=color:#a6e22e>class</span> };
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>protected</span> String<span style=color:#f92672>[]</span> <span style=color:#a6e22e>getServletMappings</span>() {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> String<span style=color:#f92672>[]</span> { <span style=color:#e6db74>&#34;/&#34;</span> };
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=from-addservlet-to-servletinit>From addServlet to Servlet.init</h2><p>The container&rsquo;s <code>addServlet</code> returns <code>null</code> when a servlet with the same name is already fully registered, which is why <code>registerDispatcherServlet</code> treats <code>null</code> as a name conflict.</p><p><code>setLoadOnStartup(1)</code> makes the container initialize the servlet at the end of web application start, after listeners and filters, by calling <code>DispatcherServlet.init(ServletConfig)</code>. <code>HttpServletBean.init</code> binds init parameters and calls <code>FrameworkServlet.initServletBean</code>, which calls <code>initWebApplicationContext</code>: the root context is read from the <code>ServletContext</code> attribute that <code>ContextLoaderListener</code> set in <code>contextInitialized</code>, set as the parent of the servlet&rsquo;s context, and the servlet&rsquo;s context is refreshed. <code>DispatcherServlet.onRefresh</code> then runs <code>initStrategies</code> to load handler mappings, adapters and resolvers. Without <code>loadOnStartup</code>, the same initialization happens on the first request that maps to the servlet.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant Ctx as Servlet container
+    participant SCI as SpringServletContainerInitializer
+    participant WI as AbstractDispatcherServletInitializer
+    participant SC as ServletContext
+    participant L as ContextLoaderListener
+    participant DS as DispatcherServlet
+
+    Ctx-&gt;&gt;SCI: onStartup(initializerClasses, servletContext)
+    SCI-&gt;&gt;WI: onStartup(servletContext)
+    WI-&gt;&gt;SC: addListener(ContextLoaderListener)
+    WI-&gt;&gt;SC: addServlet(&#34;dispatcher&#34;, dispatcherServlet)
+    WI-&gt;&gt;SC: setLoadOnStartup(1), addMapping(&#34;/&#34;)
+    Ctx-&gt;&gt;L: contextInitialized -&gt; refresh root context
+    Ctx-&gt;&gt;Ctx: filterStart()
+    Ctx-&gt;&gt;DS: loadOnStartup -&gt; init(ServletConfig)
+    DS-&gt;&gt;DS: initWebApplicationContext (parent = root) -&gt; onRefresh -&gt; initStrategies
+</code></pre><h1 id=filter-registration>Filter registration</h1><p>Tomcat stores a filter registered through <code>ServletContext.addFilter</code> as a <code>FilterDef</code>, and every <code>addMappingForUrlPatterns</code> or <code>addMappingForServletNames</code> call appends a <code>FilterMap</code>. Filters are initialized after <code>ServletContextListener.contextInitialized</code> and before load-on-startup servlets; for each request Tomcat builds an <code>ApplicationFilterChain</code> from the matching mappings and calls the servlet at the end of the chain. The container mechanics are described in the <a href=https://kevinwang930.github.io/post/java/tomcat/>Tomcat post</a>. Spring contributes filters to that chain in two ways: filters bound to the <code>DispatcherServlet</code> by the initializer, and <code>DelegatingFilterProxy</code>, which forwards to a filter bean.</p><h2 id=dispatcherservlet-filters-and-delegatingfilterproxy>DispatcherServlet filters and DelegatingFilterProxy</h2><p><code>AbstractDispatcherServletInitializer.getServletFilters()</code> returns filters that apply only to the <code>DispatcherServlet</code>. <code>registerServletFilter</code> derives the filter name from the class (<code>Conventions.getVariableName</code>), appends <code>#0</code>, <code>#1</code>, … on name conflicts, and maps the filter by servlet name, not by URL pattern:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractDispatcherServletInitializer.registerServletFilter</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> FilterRegistration.<span style=color:#a6e22e>Dynamic</span> <span style=color:#a6e22e>registerServletFilter</span>(ServletContext servletContext, Filter filter) {
+</span></span><span style=display:flex><span>    String filterName <span style=color:#f92672>=</span> Conventions.<span style=color:#a6e22e>getVariableName</span>(filter);
+</span></span><span style=display:flex><span>    Dynamic registration <span style=color:#f92672>=</span> servletContext.<span style=color:#a6e22e>addFilter</span>(filterName, filter);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (registration <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> counter <span style=color:#f92672>=</span> 0;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> (registration <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (counter <span style=color:#f92672>==</span> 100) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;Failed to register filter with name &#39;&#34;</span> <span style=color:#f92672>+</span> filterName <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;&#39;. &#34;</span> <span style=color:#f92672>+</span>
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;Check if there is another filter registered under the same name.&#34;</span>);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            registration <span style=color:#f92672>=</span> servletContext.<span style=color:#a6e22e>addFilter</span>(filterName <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;#&#34;</span> <span style=color:#f92672>+</span> counter, filter);
+</span></span><span style=display:flex><span>            counter<span style=color:#f92672>++</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    registration.<span style=color:#a6e22e>setAsyncSupported</span>(isAsyncSupported());
+</span></span><span style=display:flex><span>    registration.<span style=color:#a6e22e>addMappingForServletNames</span>(getDispatcherTypes(), <span style=color:#66d9ef>false</span>, getServletName());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> registration;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>The dispatcher types are <code>REQUEST</code>, <code>FORWARD</code>, <code>INCLUDE</code>, plus <code>ASYNC</code> when <code>isAsyncSupported()</code> returns <code>true</code> (the default).</p><p>A filter registered this way is an object created by the initializer, not a Spring bean. <code>DelegatingFilterProxy</code> bridges the two: it is registered with the container under a name, and on <code>initFilterBean</code> (from <code>Filter.init</code>) or on the first <code>doFilter</code> it looks up the <code>WebApplicationContext</code> from the <code>ServletContext</code> and fetches the bean whose name equals <code>targetBeanName</code>, defaulting to the filter name. Every request is then forwarded to that bean. Spring Security&rsquo;s <code>springSecurityFilterChain</code> is registered through this proxy.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DelegatingFilterProxy.doFilter</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doFilter</span>(ServletRequest request, ServletResponse response, FilterChain filterChain)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> ServletException, IOException {
+</span></span><span style=display:flex><span>    Filter delegateToUse <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>delegate</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (delegateToUse <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>delegateLock</span>.<span style=color:#a6e22e>lock</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            delegateToUse <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>delegate</span>;
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (delegateToUse <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                WebApplicationContext wac <span style=color:#f92672>=</span> findWebApplicationContext();
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (wac <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;No WebApplicationContext found: &#34;</span> <span style=color:#f92672>+</span>
+</span></span><span style=display:flex><span>                            <span style=color:#e6db74>&#34;no ContextLoaderListener or DispatcherServlet registered?&#34;</span>);
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>                delegateToUse <span style=color:#f92672>=</span> initDelegate(wac);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>delegate</span> <span style=color:#f92672>=</span> delegateToUse;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>delegateLock</span>.<span style=color:#a6e22e>unlock</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    invokeDelegate(delegateToUse, request, response, filterChain);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// DelegatingFilterProxy.initDelegate</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> Filter <span style=color:#a6e22e>initDelegate</span>(WebApplicationContext wac) <span style=color:#66d9ef>throws</span> ServletException {
+</span></span><span style=display:flex><span>    String targetBeanName <span style=color:#f92672>=</span> getTargetBeanName();
+</span></span><span style=display:flex><span>    Assert.<span style=color:#a6e22e>state</span>(targetBeanName <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>, <span style=color:#e6db74>&#34;No target bean name set&#34;</span>);
+</span></span><span style=display:flex><span>    Filter delegate <span style=color:#f92672>=</span> wac.<span style=color:#a6e22e>getBean</span>(targetBeanName, Filter.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (isTargetFilterLifecycle()) {
+</span></span><span style=display:flex><span>        delegate.<span style=color:#a6e22e>init</span>(getFilterConfig());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> delegate;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>The lazy path in <code>doFilter</code> exists because the root context may not be refreshed yet when the proxy&rsquo;s <code>Filter.init</code> runs; with <code>ContextLoaderListener</code>, <code>contextInitialized</code> runs before <code>Filter.init</code>, and the delegate is usually resolved in <code>initFilterBean</code>.</p><h1 id=handler-mapping>Handler mapping</h1><p>An endpoint in Spring MVC is a handler: for annotated controllers, a <code>HandlerMethod</code> that pairs a controller bean with one of its <code>@RequestMapping</code> methods. <code>DispatcherServlet</code> does not know how handlers are declared; it asks an ordered list of <code>HandlerMapping</code> strategies for a <code>HandlerExecutionChain</code>, which is the handler plus the interceptors that apply to the request. Mapping therefore has two halves: registering endpoints when the application context starts, and looking up the endpoint for each request.</p><p><code>DispatcherServlet.initStrategies</code> fills the list in <code>initHandlerMappings</code>. With <code>detectAllHandlerMappings</code> (the default) it collects every <code>HandlerMapping</code> bean from its own context and the root context and sorts them by <code>Ordered</code>/<code>@Order</code>. If no bean exists, it instantiates the defaults listed in <code>DispatcherServlet.properties</code>: <code>BeanNameUrlHandlerMapping</code>, <code>RequestMappingHandlerMapping</code> and <code>RouterFunctionMapping</code>. With <code>@EnableWebMvc</code>, which imports <code>DelegatingWebMvcConfiguration</code>, <code>WebMvcConfigurationSupport.requestMappingHandlerMapping</code> declares the <code>RequestMappingHandlerMapping</code> bean with order <code>0</code> and passes it the interceptors from <code>WebMvcConfigurer.addInterceptors</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
+interface HandlerMapping {
+    + HandlerExecutionChain getHandler(HttpServletRequest request)
+}
+interface InitializingBean {
+    + void afterPropertiesSet()
+}
+abstract class AbstractHandlerMapping {
+    - List&lt;Object&gt; interceptors
+    - List&lt;HandlerInterceptor&gt; adaptedInterceptors
+    - int order
+    + final HandlerExecutionChain getHandler(HttpServletRequest request)
+    # {abstract} Object getHandlerInternal(HttpServletRequest request)
+    # HandlerExecutionChain getHandlerExecutionChain(Object handler, HttpServletRequest request)
+}
+abstract class &#34;AbstractHandlerMethodMapping&lt;T&gt;&#34; as AbstractHandlerMethodMapping {
+    - MappingRegistry mappingRegistry
+    + void afterPropertiesSet()
+    # void initHandlerMethods()
+    # void detectHandlerMethods(Object handler)
+    # void registerHandlerMethod(Object handler, Method method, T mapping)
+    # HandlerMethod getHandlerInternal(HttpServletRequest request)
+    # HandlerMethod lookupHandlerMethod(String lookupPath, HttpServletRequest request)
+    # {abstract} boolean isHandler(Class&lt;?&gt; beanType)
+    # {abstract} T getMappingForMethod(Method method, Class&lt;?&gt; handlerType)
+}
+abstract class RequestMappingInfoHandlerMapping
+class RequestMappingHandlerMapping {
+    # boolean isHandler(Class&lt;?&gt; beanType)
+    # RequestMappingInfo getMappingForMethod(Method method, Class&lt;?&gt; handlerType)
+}
+class MappingRegistry {
+    - Map&lt;T, MappingRegistration&lt;T&gt;&gt; registry
+    - MultiValueMap&lt;String, T&gt; pathLookup
+    - Map&lt;String, List&lt;HandlerMethod&gt;&gt; nameLookup
+    - Map&lt;HandlerMethod, CorsConfiguration&gt; corsLookup
+    - ReentrantReadWriteLock readWriteLock
+    + void register(T mapping, Object handler, Method method)
+}
+class RequestMappingInfo {
+    - PathPatternsRequestCondition pathPatternsCondition
+    - RequestMethodsRequestCondition methodsCondition
+    - ParamsRequestCondition paramsCondition
+    - HeadersRequestCondition headersCondition
+    - ConsumesRequestCondition consumesCondition
+    - ProducesRequestCondition producesCondition
+}
+class HandlerMethod {
+    - Object bean
+    - Method method
+}
+
+HandlerMapping &lt;|.. AbstractHandlerMapping
+AbstractHandlerMapping &lt;|-- AbstractHandlerMethodMapping
+InitializingBean &lt;|.. AbstractHandlerMethodMapping
+AbstractHandlerMethodMapping &lt;|-- RequestMappingInfoHandlerMapping
+RequestMappingInfoHandlerMapping &lt;|-- RequestMappingHandlerMapping
+AbstractHandlerMethodMapping *-- MappingRegistry : mappingRegistry
+MappingRegistry o-- &#34;N&#34; RequestMappingInfo : registry key
+MappingRegistry o-- &#34;N&#34; HandlerMethod : registry value
+</code></pre><p><code>HandlerMethod.method</code> is declared in its parent class <code>AnnotatedMethod</code>; it is shown on <code>HandlerMethod</code> for brevity.</p><h2 id=endpoint-registration>Endpoint registration</h2><p><code>AbstractHandlerMethodMapping</code> implements <code>InitializingBean</code>, so registration runs once, in <code>afterPropertiesSet</code>, while the mapping bean is initialized during the refresh of the context that declares it (normally the <code>DispatcherServlet</code>&rsquo;s context). It walks every bean name in the context, keeps beans whose type <code>isHandler</code> accepts, and for each such bean builds one mapping per annotated method:</p><ol><li><code>RequestMappingHandlerMapping.isHandler</code> accepts a type annotated with <code>@Controller</code>, directly or through a meta-annotation such as <code>@RestController</code>.</li><li><code>detectHandlerMethods</code> calls <code>MethodIntrospector.selectMethods</code>, which visits the user class (unwrapping CGLIB subclasses) and its interfaces and keeps every method for which <code>getMappingForMethod</code> returns a non-null mapping.</li><li><code>getMappingForMethod</code> builds a <code>RequestMappingInfo</code> from the method&rsquo;s <code>@RequestMapping</code> (or <code>@GetMapping</code>, <code>@PostMapping</code>, …), combines it with the type-level <code>@RequestMapping</code>, and applies a configured path prefix.</li><li><code>registerHandlerMethod</code> passes the mapping to <code>MappingRegistry.register</code>, which creates the <code>HandlerMethod</code>, rejects a second method with an equal mapping (<code>Ambiguous mapping</code>), indexes the mapping under each pattern without wildcards (<code>pathLookup</code>), and records CORS configuration from <code>@CrossOrigin</code>.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.afterPropertiesSet</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>afterPropertiesSet</span>() {
+</span></span><span style=display:flex><span>    initHandlerMethods();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.initHandlerMethods</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>initHandlerMethods</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (String beanName : getCandidateBeanNames()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>beanName.<span style=color:#a6e22e>startsWith</span>(SCOPED_TARGET_NAME_PREFIX)) {
+</span></span><span style=display:flex><span>            processCandidateBean(beanName);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    handlerMethodsInitialized(getHandlerMethods());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.processCandidateBean</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>processCandidateBean</span>(String beanName) {
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;</span> beanType <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        beanType <span style=color:#f92672>=</span> obtainApplicationContext().<span style=color:#a6e22e>getType</span>(beanName);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>catch</span> (Throwable ex) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// unresolvable bean type, ignored</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (beanType <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> isHandler(beanType)) {
+</span></span><span style=display:flex><span>        detectHandlerMethods(beanName);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.detectHandlerMethods</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>detectHandlerMethods</span>(Object handler) {
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;</span> handlerType <span style=color:#f92672>=</span> (handler <span style=color:#66d9ef>instanceof</span> String beanName <span style=color:#f92672>?</span>
+</span></span><span style=display:flex><span>            obtainApplicationContext().<span style=color:#a6e22e>getType</span>(beanName) : handler.<span style=color:#a6e22e>getClass</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (handlerType <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        Class<span style=color:#f92672>&lt;?&gt;</span> userType <span style=color:#f92672>=</span> ClassUtils.<span style=color:#a6e22e>getUserClass</span>(handlerType);
+</span></span><span style=display:flex><span>        Map<span style=color:#f92672>&lt;</span>Method, T<span style=color:#f92672>&gt;</span> methods <span style=color:#f92672>=</span> MethodIntrospector.<span style=color:#a6e22e>selectMethods</span>(userType,
+</span></span><span style=display:flex><span>                (MethodIntrospector.<span style=color:#a6e22e>MetadataLookup</span><span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>) method <span style=color:#f92672>-&gt;</span> getMappingForMethod(method, userType));
+</span></span><span style=display:flex><span>        methods.<span style=color:#a6e22e>forEach</span>((method, mapping) <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>            Method invocableMethod <span style=color:#f92672>=</span> AopUtils.<span style=color:#a6e22e>selectInvocableMethod</span>(method, userType);
+</span></span><span style=display:flex><span>            registerHandlerMethod(handler, invocableMethod, mapping);
+</span></span><span style=display:flex><span>        });
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// RequestMappingHandlerMapping.isHandler</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>isHandler</span>(Class<span style=color:#f92672>&lt;?&gt;</span> beanType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> AnnotatedElementUtils.<span style=color:#a6e22e>hasAnnotation</span>(beanType, Controller.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// RequestMappingHandlerMapping.getMappingForMethod</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#a6e22e>@Nullable</span> RequestMappingInfo <span style=color:#a6e22e>getMappingForMethod</span>(Method method, Class<span style=color:#f92672>&lt;?&gt;</span> handlerType) {
+</span></span><span style=display:flex><span>    validateCglibProxyMethodVisibility(method, handlerType);
+</span></span><span style=display:flex><span>    RequestMappingInfo info <span style=color:#f92672>=</span> createRequestMappingInfo(method);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (info <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        RequestMappingInfo typeInfo <span style=color:#f92672>=</span> createRequestMappingInfo(handlerType);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (typeInfo <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            info <span style=color:#f92672>=</span> typeInfo.<span style=color:#a6e22e>combine</span>(info);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (info.<span style=color:#a6e22e>isEmptyMapping</span>()) {
+</span></span><span style=display:flex><span>            info <span style=color:#f92672>=</span> info.<span style=color:#a6e22e>mutate</span>().<span style=color:#a6e22e>paths</span>(<span style=color:#e6db74>&#34;&#34;</span>, <span style=color:#e6db74>&#34;/&#34;</span>).<span style=color:#a6e22e>options</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>config</span>).<span style=color:#a6e22e>build</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        String prefix <span style=color:#f92672>=</span> getPathPrefix(handlerType);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (prefix <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            info <span style=color:#f92672>=</span> RequestMappingInfo.<span style=color:#a6e22e>paths</span>(prefix).<span style=color:#a6e22e>options</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>config</span>).<span style=color:#a6e22e>build</span>().<span style=color:#a6e22e>combine</span>(info);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> info;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.MappingRegistry.register</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(T mapping, Object handler, Method method) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>readWriteLock</span>.<span style=color:#a6e22e>writeLock</span>().<span style=color:#a6e22e>lock</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        HandlerMethod handlerMethod <span style=color:#f92672>=</span> createHandlerMethod(handler, method);
+</span></span><span style=display:flex><span>        validateMethodMapping(handlerMethod, mapping);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        Set<span style=color:#f92672>&lt;</span>String<span style=color:#f92672>&gt;</span> directPaths <span style=color:#f92672>=</span> AbstractHandlerMethodMapping.<span style=color:#a6e22e>this</span>.<span style=color:#a6e22e>getDirectPaths</span>(mapping);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (String path : directPaths) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>pathLookup</span>.<span style=color:#a6e22e>add</span>(path, mapping);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        String name <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (getNamingStrategy() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            name <span style=color:#f92672>=</span> getNamingStrategy().<span style=color:#a6e22e>getName</span>(handlerMethod, mapping);
+</span></span><span style=display:flex><span>            addMappingName(name, handlerMethod);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        CorsConfiguration corsConfig <span style=color:#f92672>=</span> initCorsConfiguration(handler, method, mapping);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (corsConfig <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            corsConfig.<span style=color:#a6e22e>validateAllowCredentials</span>();
+</span></span><span style=display:flex><span>            corsConfig.<span style=color:#a6e22e>validateAllowPrivateNetwork</span>();
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>corsLookup</span>.<span style=color:#a6e22e>put</span>(handlerMethod, corsConfig);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        handlerMethod <span style=color:#f92672>=</span> handlerMethod.<span style=color:#a6e22e>createWithValidateFlags</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>registry</span>.<span style=color:#a6e22e>put</span>(mapping,
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> MappingRegistration<span style=color:#f92672>&lt;&gt;</span>(mapping, handlerMethod, directPaths, name, corsConfig <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>readWriteLock</span>.<span style=color:#a6e22e>writeLock</span>().<span style=color:#a6e22e>unlock</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>The handler is registered by bean name, so the <code>HandlerMethod</code> initially holds a <code>String</code>; <code>createWithResolvedBean</code> replaces it with the bean instance at lookup time, which keeps lazy and scoped controllers working.</p><p>For a controller</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@RestController</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@RequestMapping</span>(<span style=color:#e6db74>&#34;/orders&#34;</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderController</span> {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@GetMapping</span>(<span style=color:#e6db74>&#34;/{id}&#34;</span>)
+</span></span><span style=display:flex><span>    Order <span style=color:#a6e22e>get</span>(<span style=color:#a6e22e>@PathVariable</span> <span style=color:#66d9ef>long</span> id) { ... }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@PostMapping</span>(consumes <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;application/json&#34;</span>)
+</span></span><span style=display:flex><span>    Order <span style=color:#a6e22e>create</span>(<span style=color:#a6e22e>@RequestBody</span> Order order) { ... }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>the registry holds two <code>RequestMappingInfo</code> keys: <code>{GET [/orders/{id}]}</code> and <code>{POST [/orders], consumes [application/json]}</code>. Only the second is a direct path and appears in <code>pathLookup</code> under <code>/orders</code>.</p><h2 id=endpoint-lookup>Endpoint lookup</h2><p>For each request, <code>DispatcherServlet.doDispatch</code> calls <code>getHandler</code>, which asks the mappings in order and takes the first non-null chain. <code>AbstractHandlerMapping.getHandler</code> is a template method: the subclass resolves the handler in <code>getHandlerInternal</code>, and the base class wraps it with interceptors in <code>getHandlerExecutionChain</code>. When no mapping returns a handler, <code>noHandlerFound</code> sends <code>404</code> or throws <code>NoHandlerFoundException</code>.</p><p><code>lookupHandlerMethod</code> first tries the mappings indexed under the exact lookup path and scans all mappings only when none of them match. Each candidate&rsquo;s <code>RequestMappingInfo.getMatchingCondition(request)</code> checks every condition (pattern, method, params, headers, consumes, produces, version) and returns a condition narrowed to this request, or <code>null</code>. When several candidates match, they are sorted by specificity (for example <code>/orders/{id}</code> before <code>/orders/**</code>, an explicit <code>GET</code> before no method), and two equally specific matches raise <code>Ambiguous handler methods</code>.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant DS as DispatcherServlet
+    participant HM as RequestMappingHandlerMapping
+    participant MR as MappingRegistry
+    participant HA as HandlerAdapter
+
+    DS-&gt;&gt;DS: doDispatch -&gt; getHandler(request)
+    DS-&gt;&gt;HM: getHandler(request)
+    HM-&gt;&gt;HM: getHandlerInternal -&gt; initLookupPath
+    HM-&gt;&gt;MR: getMappingsByDirectPath(lookupPath)
+    HM-&gt;&gt;HM: addMatchingMappings, sort, best match
+    HM-&gt;&gt;HM: getHandlerExecutionChain(handlerMethod, request)
+    HM--&gt;&gt;DS: HandlerExecutionChain
+    DS-&gt;&gt;DS: applyPreHandle
+    DS-&gt;&gt;HA: handle(request, response, handlerMethod)
+    DS-&gt;&gt;DS: applyPostHandle, processDispatchResult
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DispatcherServlet.getHandler</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#a6e22e>@Nullable</span> HandlerExecutionChain <span style=color:#a6e22e>getHandler</span>(HttpServletRequest request) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>handlerMappings</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (HandlerMapping mapping : <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>handlerMappings</span>) {
+</span></span><span style=display:flex><span>            HandlerExecutionChain handler <span style=color:#f92672>=</span> mapping.<span style=color:#a6e22e>getHandler</span>(request);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (handler <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> handler;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMapping.getHandler</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#a6e22e>@Nullable</span> HandlerExecutionChain <span style=color:#a6e22e>getHandler</span>(HttpServletRequest request) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    initApiVersion(request);
+</span></span><span style=display:flex><span>    Object handler <span style=color:#f92672>=</span> getHandlerInternal(request);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (handler <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        handler <span style=color:#f92672>=</span> getDefaultHandler();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (handler <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (handler <span style=color:#66d9ef>instanceof</span> String handlerName) {
+</span></span><span style=display:flex><span>        handler <span style=color:#f92672>=</span> obtainApplicationContext().<span style=color:#a6e22e>getBean</span>(handlerName);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>ServletRequestPathUtils.<span style=color:#a6e22e>hasCachedPath</span>(request)) {
+</span></span><span style=display:flex><span>        initLookupPath(request);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    HandlerExecutionChain executionChain <span style=color:#f92672>=</span> getHandlerExecutionChain(handler, request);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... CORS handling</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> executionChain;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.getHandlerInternal</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#a6e22e>@Nullable</span> HandlerMethod <span style=color:#a6e22e>getHandlerInternal</span>(HttpServletRequest request) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    String lookupPath <span style=color:#f92672>=</span> initLookupPath(request);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mappingRegistry</span>.<span style=color:#a6e22e>acquireReadLock</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        HandlerMethod handlerMethod <span style=color:#f92672>=</span> lookupHandlerMethod(lookupPath, request);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> (handlerMethod <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> handlerMethod.<span style=color:#a6e22e>createWithResolvedBean</span>() : <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>finally</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mappingRegistry</span>.<span style=color:#a6e22e>releaseReadLock</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMethodMapping.lookupHandlerMethod</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#a6e22e>@Nullable</span> HandlerMethod <span style=color:#a6e22e>lookupHandlerMethod</span>(String lookupPath, HttpServletRequest request) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>Match<span style=color:#f92672>&gt;</span> matches <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> directPathMatches <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mappingRegistry</span>.<span style=color:#a6e22e>getMappingsByDirectPath</span>(lookupPath);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (directPathMatches <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        addMatchingMappings(directPathMatches, matches, request);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (matches.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        addMatchingMappings(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mappingRegistry</span>.<span style=color:#a6e22e>getRegistrations</span>().<span style=color:#a6e22e>keySet</span>(), matches, request);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>matches.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        Match bestMatch <span style=color:#f92672>=</span> matches.<span style=color:#a6e22e>get</span>(0);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (matches.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>&gt;</span> 1) {
+</span></span><span style=display:flex><span>            Comparator<span style=color:#f92672>&lt;</span>Match<span style=color:#f92672>&gt;</span> comparator <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> MatchComparator(getMappingComparator(request));
+</span></span><span style=display:flex><span>            matches.<span style=color:#a6e22e>sort</span>(comparator);
+</span></span><span style=display:flex><span>            bestMatch <span style=color:#f92672>=</span> matches.<span style=color:#a6e22e>get</span>(0);
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// ... CORS pre-flight handling</span>
+</span></span><span style=display:flex><span>            Match secondBestMatch <span style=color:#f92672>=</span> matches.<span style=color:#a6e22e>get</span>(1);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (comparator.<span style=color:#a6e22e>compare</span>(bestMatch, secondBestMatch) <span style=color:#f92672>==</span> 0) {
+</span></span><span style=display:flex><span>                Method m1 <span style=color:#f92672>=</span> bestMatch.<span style=color:#a6e22e>getHandlerMethod</span>().<span style=color:#a6e22e>getMethod</span>();
+</span></span><span style=display:flex><span>                Method m2 <span style=color:#f92672>=</span> secondBestMatch.<span style=color:#a6e22e>getHandlerMethod</span>().<span style=color:#a6e22e>getMethod</span>();
+</span></span><span style=display:flex><span>                String uri <span style=color:#f92672>=</span> request.<span style=color:#a6e22e>getRequestURI</span>();
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;Ambiguous handler methods mapped for &#39;&#34;</span> <span style=color:#f92672>+</span> uri <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;&#39;: {&#34;</span> <span style=color:#f92672>+</span> m1 <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;, &#34;</span> <span style=color:#f92672>+</span> m2 <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;}&#34;</span>);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        request.<span style=color:#a6e22e>setAttribute</span>(BEST_MATCHING_HANDLER_ATTRIBUTE, bestMatch.<span style=color:#a6e22e>getHandlerMethod</span>());
+</span></span><span style=display:flex><span>        handleMatch(bestMatch.<span style=color:#a6e22e>mapping</span>, lookupPath, request);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> bestMatch.<span style=color:#a6e22e>getHandlerMethod</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> handleNoMatch(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>mappingRegistry</span>.<span style=color:#a6e22e>getRegistrations</span>().<span style=color:#a6e22e>keySet</span>(), lookupPath, request);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>handleMatch</code> (in <code>RequestMappingInfoHandlerMapping</code>) stores URI template variables, matrix variables and producible media types as request attributes; <code>@PathVariable</code> arguments are later resolved from those attributes. <code>handleNoMatch</code> distinguishes a path that exists with the wrong method or media type, and raises <code>HttpRequestMethodNotSupportedException</code> (<code>405</code>), <code>HttpMediaTypeNotSupportedException</code> (<code>415</code>), <code>HttpMediaTypeNotAcceptableException</code> (<code>406</code>) or <code>UnsatisfiedServletRequestParameterException</code> (<code>400</code>) instead of returning <code>null</code>.</p><h1 id=handler-interceptors>Handler interceptors</h1><p>A <code>HandlerInterceptor</code> runs inside <code>DispatcherServlet</code>, around the handler chosen by the handler mapping. Unlike a servlet <code>Filter</code>, it is selected per handler mapping, it receives the resolved handler object (for a controller, the <code>HandlerMethod</code> with its annotations), and it has three callbacks that bracket handler invocation and view rendering:</p><table><thead><tr><th>Callback</th><th>Called</th><th>Order across interceptors</th></tr></thead><tbody><tr><td><code>boolean preHandle(request, response, handler)</code></td><td>before the <code>HandlerAdapter</code> invokes the handler; returning <code>false</code> stops processing</td><td>registration order</td></tr><tr><td><code>void postHandle(request, response, handler, modelAndView)</code></td><td>after the handler returns and before the view is rendered; skipped when the handler throws</td><td>reverse order</td></tr><tr><td><code>void afterCompletion(request, response, handler, ex)</code></td><td>after rendering or after an exception, for every interceptor whose <code>preHandle</code> returned <code>true</code></td><td>reverse order</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
+interface WebMvcConfigurer {
+    + void addInterceptors(InterceptorRegistry registry)
+}
+class InterceptorRegistry {
+    - List&lt;InterceptorRegistration&gt; registrations
+    + InterceptorRegistration addInterceptor(HandlerInterceptor interceptor)
+    # List&lt;Object&gt; getInterceptors()
+}
+class InterceptorRegistration {
+    - HandlerInterceptor interceptor
+    - List&lt;String&gt; includePatterns
+    - List&lt;String&gt; excludePatterns
+    - int order
+    + InterceptorRegistration addPathPatterns(String... patterns)
+    + InterceptorRegistration excludePathPatterns(String... patterns)
+    + InterceptorRegistration order(int order)
+    # Object getInterceptor()
+}
+interface HandlerInterceptor {
+    + boolean preHandle(request, response, Object handler)
+    + void postHandle(request, response, Object handler, ModelAndView modelAndView)
+    + void afterCompletion(request, response, Object handler, Exception ex)
+}
+class MappedInterceptor {
+    - PatternAdapter[] includePatterns
+    - PatternAdapter[] excludePatterns
+    - HandlerInterceptor interceptor
+    + boolean matches(HttpServletRequest request)
+}
+abstract class AbstractHandlerMapping {
+    - List&lt;Object&gt; interceptors
+    - List&lt;HandlerInterceptor&gt; adaptedInterceptors
+    # void initApplicationContext()
+    # HandlerExecutionChain getHandlerExecutionChain(Object handler, HttpServletRequest request)
+}
+class HandlerExecutionChain {
+    - Object handler
+    - List&lt;HandlerInterceptor&gt; interceptorList
+    - int interceptorIndex
+    ~ boolean applyPreHandle(request, response)
+    ~ void applyPostHandle(request, response, ModelAndView mv)
+    ~ void triggerAfterCompletion(request, response, Exception ex)
+}
+
+WebMvcConfigurer ..&gt; InterceptorRegistry : addInterceptors
+InterceptorRegistry *-- &#34;N&#34; InterceptorRegistration : registrations
+InterceptorRegistration ..&gt; MappedInterceptor : getInterceptor
+HandlerInterceptor &lt;|.. MappedInterceptor
+MappedInterceptor o-[norank]- HandlerInterceptor : interceptor
+AbstractHandlerMapping o-[norank]- &#34;N&#34; HandlerInterceptor : adaptedInterceptors
+AbstractHandlerMapping ..&gt; HandlerExecutionChain : create per request
+HandlerExecutionChain o-[norank]- &#34;N&#34; HandlerInterceptor : interceptorList
+</code></pre><h2 id=interceptor-registration>Interceptor registration</h2><p>Interceptors are attached to handler mappings, not to the servlet. With <code>@EnableWebMvc</code>, <code>WebMvcConfigurationSupport.getInterceptors</code> creates an <code>InterceptorRegistry</code>, calls <code>addInterceptors</code> (which <code>DelegatingWebMvcConfiguration</code> forwards to every <code>WebMvcConfigurer</code> bean), appends two framework interceptors that expose the conversion service and the resource URL provider as request attributes, and passes the sorted list to each handler mapping through <code>setInterceptors</code>. <code>InterceptorRegistration.getInterceptor</code> returns the interceptor itself when no path or HTTP method patterns are set, and otherwise wraps it in a <code>MappedInterceptor</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// WebMvcConfigurationSupport.getInterceptors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>final</span> Object<span style=color:#f92672>[]</span> <span style=color:#a6e22e>getInterceptors</span>(
+</span></span><span style=display:flex><span>        FormattingConversionService mvcConversionService,
+</span></span><span style=display:flex><span>        ResourceUrlProvider mvcResourceUrlProvider) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptors</span> <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        InterceptorRegistry registry <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> InterceptorRegistry();
+</span></span><span style=display:flex><span>        addInterceptors(registry);
+</span></span><span style=display:flex><span>        registry.<span style=color:#a6e22e>addInterceptor</span>(<span style=color:#66d9ef>new</span> ConversionServiceExposingInterceptor(mvcConversionService));
+</span></span><span style=display:flex><span>        registry.<span style=color:#a6e22e>addInterceptor</span>(<span style=color:#66d9ef>new</span> ResourceUrlProviderExposingInterceptor(mvcResourceUrlProvider));
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptors</span> <span style=color:#f92672>=</span> registry.<span style=color:#a6e22e>getInterceptors</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptors</span>.<span style=color:#a6e22e>toArray</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// InterceptorRegistry.getInterceptors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> List<span style=color:#f92672>&lt;</span>Object<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getInterceptors</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>registrations</span>.<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>sorted</span>(INTERCEPTOR_ORDER_COMPARATOR)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>map</span>(InterceptorRegistration::getInterceptor)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>toList</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>The handler mapping finalizes its list when it receives the application context. <code>AbstractHandlerMapping.initApplicationContext</code> adds every <code>MappedInterceptor</code> bean found in the context hierarchy (so a <code>MappedInterceptor</code> can also be declared as a bean) and adapts the configured interceptors into <code>adaptedInterceptors</code>. At request time, <code>getHandlerExecutionChain</code> copies plain interceptors into the chain unconditionally and adds a <code>MappedInterceptor</code>&rsquo;s delegate only when <code>matches(request)</code> accepts the lookup path and HTTP method:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMapping.initApplicationContext</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>initApplicationContext</span>() <span style=color:#66d9ef>throws</span> BeansException {
+</span></span><span style=display:flex><span>    extendInterceptors(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptors</span>);
+</span></span><span style=display:flex><span>    detectMappedInterceptors(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>adaptedInterceptors</span>);
+</span></span><span style=display:flex><span>    initInterceptors();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractHandlerMapping.getHandlerExecutionChain</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> HandlerExecutionChain <span style=color:#a6e22e>getHandlerExecutionChain</span>(Object handler, HttpServletRequest request) {
+</span></span><span style=display:flex><span>    HandlerExecutionChain chain <span style=color:#f92672>=</span> (handler <span style=color:#66d9ef>instanceof</span> HandlerExecutionChain handlerExecutionChain <span style=color:#f92672>?</span>
+</span></span><span style=display:flex><span>            handlerExecutionChain : <span style=color:#66d9ef>new</span> HandlerExecutionChain(handler));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (HandlerInterceptor interceptor : <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>adaptedInterceptors</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (interceptor <span style=color:#66d9ef>instanceof</span> MappedInterceptor mappedInterceptor) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (mappedInterceptor.<span style=color:#a6e22e>matches</span>(request)) {
+</span></span><span style=display:flex><span>                chain.<span style=color:#a6e22e>addInterceptor</span>(mappedInterceptor.<span style=color:#a6e22e>getInterceptor</span>());
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            chain.<span style=color:#a6e22e>addInterceptor</span>(interceptor);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... API version deprecation interceptor</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> chain;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A typical configuration registers an interceptor for part of the URL space:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Configuration</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@EnableWebMvc</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>WebMvcConfig</span> <span style=color:#66d9ef>implements</span> WebMvcConfigurer {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>addInterceptors</span>(InterceptorRegistry registry) {
+</span></span><span style=display:flex><span>        registry.<span style=color:#a6e22e>addInterceptor</span>(<span style=color:#66d9ef>new</span> AuthInterceptor())
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>addPathPatterns</span>(<span style=color:#e6db74>&#34;/api/**&#34;</span>)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>excludePathPatterns</span>(<span style=color:#e6db74>&#34;/api/public/**&#34;</span>)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>order</span>(1);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>AuthInterceptor</span> <span style=color:#66d9ef>implements</span> HandlerInterceptor {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>public</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>preHandle</span>(HttpServletRequest request, HttpServletResponse response, Object handler)
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (request.<span style=color:#a6e22e>getHeader</span>(<span style=color:#e6db74>&#34;Authorization&#34;</span>) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            response.<span style=color:#a6e22e>sendError</span>(HttpServletResponse.<span style=color:#a6e22e>SC_UNAUTHORIZED</span>);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=interceptor-execution>Interceptor execution</h2><p><code>HandlerExecutionChain</code> records in <code>interceptorIndex</code> the last interceptor whose <code>preHandle</code> returned <code>true</code>. If an interceptor returns <code>false</code>, the chain immediately calls <code>afterCompletion</code> on the interceptors before it, in reverse order, and <code>doDispatch</code> returns without invoking the handler. <code>postHandle</code> runs in reverse order only when the handler completes normally. <code>afterCompletion</code> runs from <code>processDispatchResult</code> after the view is rendered, or from <code>triggerAfterCompletion</code> when dispatch fails, and walks back from <code>interceptorIndex</code>, so every interceptor that was entered is also exited.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant DS as DispatcherServlet
+    participant C as HandlerExecutionChain
+    participant I1 as Interceptor 1
+    participant I2 as Interceptor 2
+    participant HA as HandlerAdapter
+
+    DS-&gt;&gt;C: applyPreHandle
+    C-&gt;&gt;I1: preHandle -&gt; true (interceptorIndex = 0)
+    C-&gt;&gt;I2: preHandle -&gt; true (interceptorIndex = 1)
+    DS-&gt;&gt;HA: handle(request, response, handler)
+    DS-&gt;&gt;C: applyPostHandle(mv)
+    C-&gt;&gt;I2: postHandle
+    C-&gt;&gt;I1: postHandle
+    DS-&gt;&gt;DS: render view
+    DS-&gt;&gt;C: triggerAfterCompletion(ex)
+    C-&gt;&gt;I2: afterCompletion
+    C-&gt;&gt;I1: afterCompletion
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// HandlerExecutionChain.applyPreHandle</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>applyPreHandle</span>(HttpServletRequest request, HttpServletResponse response) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorList</span>.<span style=color:#a6e22e>size</span>(); i<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>        HandlerInterceptor interceptor <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorList</span>.<span style=color:#a6e22e>get</span>(i);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>interceptor.<span style=color:#a6e22e>preHandle</span>(request, response, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>handler</span>)) {
+</span></span><span style=display:flex><span>            triggerAfterCompletion(request, response, <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorIndex</span> <span style=color:#f92672>=</span> i;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// HandlerExecutionChain.applyPostHandle</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>applyPostHandle</span>(HttpServletRequest request, HttpServletResponse response, <span style=color:#a6e22e>@Nullable</span> ModelAndView mv)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorList</span>.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>-</span> 1; i <span style=color:#f92672>&gt;=</span> 0; i<span style=color:#f92672>--</span>) {
+</span></span><span style=display:flex><span>        HandlerInterceptor interceptor <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorList</span>.<span style=color:#a6e22e>get</span>(i);
+</span></span><span style=display:flex><span>        interceptor.<span style=color:#a6e22e>postHandle</span>(request, response, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>handler</span>, mv);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// HandlerExecutionChain.triggerAfterCompletion</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>triggerAfterCompletion</span>(HttpServletRequest request, HttpServletResponse response, <span style=color:#a6e22e>@Nullable</span> Exception ex) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorIndex</span>; i <span style=color:#f92672>&gt;=</span> 0; i<span style=color:#f92672>--</span>) {
+</span></span><span style=display:flex><span>        HandlerInterceptor interceptor <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorList</span>.<span style=color:#a6e22e>get</span>(i);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            interceptor.<span style=color:#a6e22e>afterCompletion</span>(request, response, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>handler</span>, ex);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>catch</span> (Throwable ex2) {
+</span></span><span style=display:flex><span>            logger.<span style=color:#a6e22e>error</span>(<span style=color:#e6db74>&#34;HandlerInterceptor.afterCompletion threw exception&#34;</span>, ex2);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>For <code>@ResponseBody</code> methods the response body is written by the <code>HandlerAdapter</code> inside <code>handle</code>, so <code>postHandle</code> sees an already committed response and cannot change headers; <code>ResponseBodyAdvice</code> is the hook for that case. When a handler starts asynchronous processing, <code>postHandle</code> and <code>afterCompletion</code> are not called on the first dispatch; <code>AsyncHandlerInterceptor.afterConcurrentHandlingStarted</code> is called instead, and the full callbacks run on the async re-dispatch.</p><h1 id=request-handling>Request Handling</h1><p>url and form-data parameters will transformed to parameters of request, and binds to the Controller method args.
 Request body will read by the converters, and convert to controller args.</p><h2 id=parameter-handling>parameter handling</h2><p><code>@RequestBody</code> indicates a method parameter should be bound to the body of web request.</p><p><code>@RequestParam</code> indicates a method parameter should be bound to a web request parameter in url or form-data.</p><p><code>@ModelAttribute</code> binds a method parameter or method return value to a named model attribute.</p><p><code>@PathVariable</code> indicates that a method parameter should be bound to a URI template variable.</p><pre tabindex=0><code>@GetMapping(&#34;/hello/{name}/{age}&#34;)
 
 public void select(@PathVariable(&#34;name&#34;) String name,
                     @PathVariable(&#34;age&#34;) int age)
 </code></pre><p><code>RequestParam</code> indicates that a method parameter should be bound to a web request parameter.
-In spring mvc, request parameters map to a query parameters, form data and parts in multipart request.</p><h1 id=aspect-oriented-programming>Aspect Oriented Programming</h1><p>Aspect A modularization of a concern that cuts across multiple classes.</p><p>Joint Point A point during the execution of a program. In Spring AOP , a join point always represents a method execution.</p><p>Advice: Action taken by an aspect at a particular join point.
-advice types:
-* before
-* around
-* after</p><p>PointCut: A predicate that matches join points. Advice is associated with a pointCut expression and runs at any join point matched by the pointCut.</p><h2 id=point-cut-expression>Point cut expression</h2><p>signature and point cut expression</p><pre tabindex=0><code>@Pointcut(&#34;execution(* transfer(..))&#34;) // the pointcut expression
-private void anyOldTransfer() {} // the pointcut signature
-</code></pre></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="NEXT: go Syntax"><i class="fa fa-angle-left"></i>
+In spring mvc, request parameters map to a query parameters, form data and parts in multipart request.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/spring/>spring</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="NEXT: go Syntax"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/tree/ data-tooltip="Data structure — trees" aria-label="PREVIOUS: Data structure — trees"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring/mvc/",this.page.identifier="/post/java/spring/mvc/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="NEXT: go Syntax"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/tree/ data-tooltip="Data structure — trees" aria-label="PREVIOUS: Data structure — trees"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
-<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/mvc/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Fmvc%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>
+    
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    
+    
+    
+    const getMermaidTheme = () =>
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
+
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: getMermaidTheme(),
+    });
+
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll(".mermaid"),
+        });
+    } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+    }
+</script><style>.mermaid svg{display:block;margin:auto}</style><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
     MathJax.Hub.Config({
       CommonHTML: { linebreaks: { automatic: true } },
       tex2jax: {

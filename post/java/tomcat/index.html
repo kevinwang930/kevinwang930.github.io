@@ -239,7 +239,160 @@ Pipeline o-- Valve
 </code></pre><h3 id=engine>Engine</h3><p>Engine represents request processing pipeline for a specific service. As a Service may have multiple Connectors, the Engine receives and processes all requests from these connectors, handling the response back to the appropriate connector for transmission to the client.</p><h3 id=host>Host</h3><p>A Host is a Container that represents a virtual host in the catalina servlet engine.
 Multiple host can be configured in catalina, each has its own request processing logic</p><h3 id=context>Context</h3><p>A context is a container that represents a servlet context, and therefore an individual web application, in the catalina servlet engine. A host may contain multiple contexts,each with a unique path.</p><h3 id=wrapper>wrapper</h3><p>A wrapper is a container that represents an individual sevlet definition from the deployment descriptor of the web application.
 It provides mechanism to use interceptors that see every single request to the servlet represented by this definition.
-Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><p>Valve chain ends at <code>StandardWrapperValve</code>. That valve allocates the servlet, builds a <code>FilterChain</code>, then calls <code>filterChain.doFilter(...)</code> — which walks matching filters and finally invokes <code>servlet.service()</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+Implementations are responsible for managing the sevlet life circle.</p><h3 id=valve>Valve</h3><p>A valve is a request processing component associated with a Container. A series of Valves are associated with each other into a pipeline.</p><p><code>StandardWrapperValve</code> in tomcat call FilterChain to filter request before invoke servlet.</p><h1 id=tomcat-startup>Tomcat startup</h1><p>Tomcat is a tree of lifecycle components. <code>StandardServer</code> owns one or more <code>StandardService</code>s; each service owns one <code>StandardEngine</code> (the request-processing container) and the <code>Connector</code>s that accept network traffic. Below the engine, containers nest as <code>StandardHost</code> (virtual host) → <code>StandardContext</code> (one web application, one <code>ServletContext</code>) → <code>StandardWrapper</code> (one servlet). Every component extends <code>LifecycleBase</code>, whose <code>start()</code> moves the state to <code>STARTING_PREP</code>, calls the subclass <code>startInternal()</code>, and then moves to <code>STARTED</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
+abstract class LifecycleBase {
+    + void start()
+    # {abstract} void startInternal()
+}
+abstract class ContainerBase {
+    # HashMap&lt;String,Container&gt; children
+    # ExecutorService startStopExecutor
+    # void startInternal()
+}
+class StandardServer {
+    - Service[] services
+}
+class StandardService {
+    - Engine engine
+    # Connector[] connectors
+    # MapperListener mapperListener
+}
+class Connector
+class StandardEngine
+class StandardHost
+class StandardContext {
+    # ApplicationContext context
+    - Map&lt;String,FilterDef&gt; filterDefs
+    - ContextFilterMaps filterMaps
+    - Map&lt;String,ApplicationFilterConfig&gt; filterConfigs
+    - Map&lt;ServletContainerInitializer,Set&lt;Class&lt;?&gt;&gt;&gt; initializers
+    # void startInternal()
+}
+class StandardWrapper {
+    # volatile Servlet instance
+    + void load()
+}
+class HostConfig {
+    + void lifecycleEvent(LifecycleEvent)
+    # void deployApps()
+}
+class ContextConfig {
+    + void lifecycleEvent(LifecycleEvent)
+    # void webConfig()
+}
+class &#34;ApplicationContext&#34; as TomcatApplicationContext
+
+LifecycleBase &lt;|-- StandardServer
+LifecycleBase &lt;|-- StandardService
+LifecycleBase &lt;|-- Connector
+LifecycleBase &lt;|-- ContainerBase
+ContainerBase &lt;|-- StandardEngine
+ContainerBase &lt;|-- StandardHost
+ContainerBase &lt;|-- StandardContext
+ContainerBase &lt;|-- StandardWrapper
+
+StandardServer *-- &#34;N&#34; StandardService : services
+StandardService *-- &#34;1&#34; StandardEngine : engine
+StandardService *-- &#34;N&#34; Connector : connectors
+StandardEngine *-- &#34;N&#34; StandardHost : children
+StandardHost *-- &#34;N&#34; StandardContext : children
+StandardContext *-- &#34;N&#34; StandardWrapper : children
+StandardContext *-- TomcatApplicationContext : context
+StandardHost o-- HostConfig : lifecycle listener
+StandardContext o-- ContextConfig : lifecycle listener
+</code></pre><p><code>LifecycleBase</code>, <code>ContainerBase</code> and the <code>Standard*</code> classes are simplified here; <code>StandardServer</code>, <code>StandardService</code> and <code>Connector</code> extend <code>LifecycleMBeanBase</code>, which extends <code>LifecycleBase</code>. The <code>ApplicationContext</code> box is Tomcat&rsquo;s <code>org.apache.catalina.core.ApplicationContext</code>, the <code>ServletContext</code> implementation, not Spring&rsquo;s <code>ApplicationContext</code>.</p><h2 id=start-sequence>Start sequence</h2><p>Tomcat starts from <code>Bootstrap.main</code>, which calls <code>Catalina.load()</code> (parse <code>server.xml</code>, <code>getServer().init()</code>) and then <code>Catalina.start()</code> (<code>getServer().start()</code>). Each component starts its children before it becomes available:</p><ul><li><code>StandardServer.startInternal</code> starts every service.</li><li><code>StandardService.startInternal</code> starts the engine first, then the <code>MapperListener</code> (which builds the URL → host/context/wrapper <code>Mapper</code>), and the connectors last. A port therefore accepts requests only after all web applications have started.</li><li><code>ContainerBase.startInternal</code> submits every child to <code>startStopExecutor</code> as a <code>StartChild</code> task and waits for all results, then starts its pipeline and fires <code>START_EVENT</code>.</li><li>On a host, <code>START_EVENT</code> reaches <code>HostConfig.start()</code>, which calls <code>deployApps()</code>: deploy context XML descriptors, then WARs, then expanded directories. Each deployment creates a <code>StandardContext</code> and calls <code>host.addChild(context)</code>, which starts the context because the host is already starting.</li></ul><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant B as Bootstrap
+    participant C as Catalina
+    participant S as StandardServer
+    participant Svc as StandardService
+    participant E as StandardEngine
+    participant H as StandardHost
+    participant HC as HostConfig
+    participant Ctx as StandardContext
+    participant Con as Connector
+
+    B-&gt;&gt;C: load()  (server.xml, server.init())
+    B-&gt;&gt;C: start()
+    C-&gt;&gt;S: start()
+    S-&gt;&gt;Svc: start()
+    Svc-&gt;&gt;E: start()
+    E-&gt;&gt;H: StartChild (startStopExecutor)
+    H-&gt;&gt;HC: lifecycleEvent(START_EVENT)
+    HC-&gt;&gt;HC: deployApps()
+    HC-&gt;&gt;Ctx: host.addChild(context) -&gt; start()
+    Ctx-&gt;&gt;Ctx: startInternal()
+    Svc-&gt;&gt;Svc: mapperListener.start()
+    Svc-&gt;&gt;Con: start()  (bind port, accept requests)
+</code></pre><h2 id=web-application-start>Web application start</h2><p><code>StandardContext.startInternal</code> brings up one web application. The order of its phases is fixed and determines what each phase can see:</p><table><thead><tr><th>Order</th><th>Phase</th><th>Effect</th></tr></thead><tbody><tr><td>1</td><td>resources and <code>WebappLoader</code> start</td><td><code>WEB-INF/classes</code> and <code>WEB-INF/lib</code> become loadable through the webapp class loader</td></tr><tr><td>2</td><td><code>fireLifecycleEvent(CONFIGURE_START_EVENT)</code></td><td><code>ContextConfig.configureStart</code> → <code>webConfig</code>: parse <code>web.xml</code> and fragments, scan annotations, discover <code>ServletContainerInitializer</code>s, apply servlets, filters and listeners to the context</td></tr><tr><td>3</td><td>start child wrappers and pipeline</td><td>servlets declared so far exist as <code>StandardWrapper</code>s, not yet initialized</td></tr><tr><td>4</td><td><code>mergeParameters()</code></td><td>context init parameters become visible through <code>ServletContext.getInitParameter</code></td></tr><tr><td>5</td><td><code>ServletContainerInitializer.onStartup(classes, servletContext)</code></td><td>programmatic registration of servlets, filters and listeners</td></tr><tr><td>6</td><td><code>listenerStart()</code></td><td>instantiate listeners, then call <code>ServletContextListener.contextInitialized</code></td></tr><tr><td>7</td><td><code>filterStart()</code></td><td>create an <code>ApplicationFilterConfig</code> for every <code>FilterDef</code>, which instantiates the filter and calls <code>Filter.init</code></td></tr><tr><td>8</td><td><code>loadOnStartup(findChildren())</code></td><td>call <code>wrapper.load()</code> → <code>Servlet.init</code> for wrappers with <code>loadOnStartup >= 0</code>, ascending by that value</td></tr></tbody></table><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// StandardContext.startInternal</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startInternal</span>() <span style=color:#66d9ef>throws</span> LifecycleException {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... resources, WebappLoader, naming</span>
+</span></span><span style=display:flex><span>    fireLifecycleEvent(CONFIGURE_START_EVENT, <span style=color:#66d9ef>null</span>);   <span style=color:#75715e>// ContextConfig.configureStart -&gt; webConfig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Container child : findChildren()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>child.<span style=color:#a6e22e>getState</span>().<span style=color:#a6e22e>isAvailable</span>()) {
+</span></span><span style=display:flex><span>            child.<span style=color:#a6e22e>start</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... pipeline, manager</span>
+</span></span><span style=display:flex><span>    mergeParameters();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Map.<span style=color:#a6e22e>Entry</span><span style=color:#f92672>&lt;</span>ServletContainerInitializer,Set<span style=color:#f92672>&lt;</span>Class<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span> entry : initializers.<span style=color:#a6e22e>entrySet</span>()) {
+</span></span><span style=display:flex><span>        entry.<span style=color:#a6e22e>getKey</span>().<span style=color:#a6e22e>onStartup</span>(entry.<span style=color:#a6e22e>getValue</span>(), getServletContext());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (ok) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>listenerStart()) { ok <span style=color:#f92672>=</span> <span style=color:#66d9ef>false</span>; }          <span style=color:#75715e>// ServletContextListener.contextInitialized</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (ok) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>filterStart()) { ok <span style=color:#f92672>=</span> <span style=color:#66d9ef>false</span>; }            <span style=color:#75715e>// new ApplicationFilterConfig -&gt; Filter.init</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (ok) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>loadOnStartup(findChildren())) { ok <span style=color:#f92672>=</span> <span style=color:#66d9ef>false</span>; }   <span style=color:#75715e>// Servlet.init</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ...</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>A <code>ServletContainerInitializer</code> (SCI) is a service provider: a jar declares an implementation by containing the file <code>META-INF/services/jakarta.servlet.ServletContainerInitializer</code>, whose lines are implementation class names. <code>spring-web</code>, for example, lists <code>org.springframework.web.SpringServletContainerInitializer</code> there. <code>ContextConfig.processServletContainerInitializers</code> reads these files through <code>WebappServiceLoader</code> rather than <code>java.util.ServiceLoader</code>, because the servlet specification adds rules that a single class loader lookup cannot express: files from the container class loader (Tomcat&rsquo;s <code>lib</code>) are read first and can be excluded with the context&rsquo;s <code>containerSciFilter</code>, then files from the web application class loader (<code>WEB-INF/classes</code>, <code>WEB-INF/lib</code>); when <code>web.xml</code> declares an absolute ordering, only the listed jars are read, in that order. Each class name is loaded and instantiated with the web application class loader.</p><p>If an SCI class carries <code>@HandlesTypes</code>, every listed type is recorded in <code>typeInitializerMap</code>; the class scan in <code>processClasses</code> collects each application class that implements, extends or is annotated with such a type, and <code>webConfig</code> finally calls <code>context.addServletContainerInitializer(sci, classes)</code> so that phase 5 passes those classes to <code>onStartup</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ContextConfig.processServletContainerInitializers</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>processServletContainerInitializers</span>() {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>ServletContainerInitializer<span style=color:#f92672>&gt;</span> detectedScis;
+</span></span><span style=display:flex><span>    WebappServiceLoader<span style=color:#f92672>&lt;</span>ServletContainerInitializer<span style=color:#f92672>&gt;</span> loader <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> WebappServiceLoader<span style=color:#f92672>&lt;&gt;</span>(context);
+</span></span><span style=display:flex><span>    detectedScis <span style=color:#f92672>=</span> loader.<span style=color:#a6e22e>load</span>(ServletContainerInitializer.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ServletContainerInitializer sci : detectedScis) {
+</span></span><span style=display:flex><span>        initializerClassMap.<span style=color:#a6e22e>put</span>(sci, <span style=color:#66d9ef>new</span> HashSet<span style=color:#f92672>&lt;&gt;</span>());
+</span></span><span style=display:flex><span>        HandlesTypes ht <span style=color:#f92672>=</span> sci.<span style=color:#a6e22e>getClass</span>().<span style=color:#a6e22e>getAnnotation</span>(HandlesTypes.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ht <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Class<span style=color:#f92672>&lt;?&gt;</span> type : ht.<span style=color:#a6e22e>value</span>()) {
+</span></span><span style=display:flex><span>            typeInitializerMap.<span style=color:#a6e22e>computeIfAbsent</span>(type, k <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> HashSet<span style=color:#f92672>&lt;&gt;</span>()).<span style=color:#a6e22e>add</span>(sci);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=programmatic-registration>Programmatic registration</h2><p>Programmatic registration through <code>ServletContext.addServlet</code>, <code>addFilter</code> and <code>addListener</code> is accepted only while the context is in <code>STARTING_PREP</code>; <code>ApplicationContext.checkState</code> throws <code>IllegalStateException</code> otherwise. In practice this restricts registration to phases 5 and 6, before any filter or servlet is initialized.</p><p><code>addServlet</code> creates a <code>StandardWrapper</code>, adds it as a child of the context, and stores the servlet instance in it; the returned <code>ApplicationServletRegistration</code> writes mappings and the load-on-startup value directly into the wrapper and the context. <code>addServlet</code> returns <code>null</code> when a complete registration with that name already exists, so callers must treat <code>null</code> as a name conflict.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ApplicationContext.addServlet (Tomcat)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> ServletRegistration.<span style=color:#a6e22e>Dynamic</span> <span style=color:#a6e22e>addServlet</span>(String servletName, String servletClass, Servlet servlet,
+</span></span><span style=display:flex><span>        Map<span style=color:#f92672>&lt;</span>String,String<span style=color:#f92672>&gt;</span> initParams) <span style=color:#66d9ef>throws</span> IllegalStateException {
+</span></span><span style=display:flex><span>    checkState(<span style=color:#e6db74>&#34;applicationContext.addServlet.ise&#34;</span>);          <span style=color:#75715e>// only in STARTING_PREP</span>
+</span></span><span style=display:flex><span>    Wrapper wrapper <span style=color:#f92672>=</span> (Wrapper) context.<span style=color:#a6e22e>findChild</span>(servletName);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (wrapper <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        wrapper <span style=color:#f92672>=</span> context.<span style=color:#a6e22e>createWrapper</span>();
+</span></span><span style=display:flex><span>        wrapper.<span style=color:#a6e22e>setName</span>(servletName);
+</span></span><span style=display:flex><span>        context.<span style=color:#a6e22e>addChild</span>(wrapper);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (wrapper.<span style=color:#a6e22e>getName</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> wrapper.<span style=color:#a6e22e>getServletClass</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (wrapper.<span style=color:#a6e22e>isOverridable</span>()) {
+</span></span><span style=display:flex><span>                wrapper.<span style=color:#a6e22e>setOverridable</span>(<span style=color:#66d9ef>false</span>);
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (servlet <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        wrapper.<span style=color:#a6e22e>setServletClass</span>(servletClass);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        wrapper.<span style=color:#a6e22e>setServletClass</span>(servlet.<span style=color:#a6e22e>getClass</span>().<span style=color:#a6e22e>getName</span>());
+</span></span><span style=display:flex><span>        wrapper.<span style=color:#a6e22e>setServlet</span>(servlet);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... init parameters, @ServletSecurity</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> ApplicationServletRegistration(wrapper, context);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h1 id=request-handling-pipeline>Request handling pipeline</h1><p>In <code>Container</code> section, we see that <code>Container</code> contains <code>Pipeline</code>,<code>Pipeline</code> contains <code>Valves</code> in order. the request handling is actually invoke the <code>Valves</code> in the <code>Pipeline</code> of the specified container one by one.</p><p>Valve chain ends at <code>StandardWrapperValve</code>. That valve allocates the servlet, builds a <code>FilterChain</code>, then calls <code>filterChain.doFilter(...)</code> — which walks matching filters and finally invokes <code>servlet.service()</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 &#39; parents above, subclasses below
 top to bottom direction
@@ -449,7 +602,51 @@ StandardWrapper --&gt; Servlet : allocate / instance
 ApplicationFilterChain --&gt; Servlet : servlet.service
 
 @enduml
-</code></pre><h3 id=filter-in-the-pipeline>Filter in the pipeline</h3><p>Filters are a Context-level concern, not a Valve. <code>StandardContext</code> keeps three related structures:</p><ol><li><code>FilterDef</code> — <code>&lt;filter></code> from web.xml / programmatic registration (<code>filterName</code>, <code>filterClass</code>, init params, asyncSupported)</li><li><code>FilterMap</code> — <code>&lt;filter-mapping></code> (<code>url-pattern</code> and/or <code>servlet-name</code>, plus dispatcher types REQUEST/FORWARD/INCLUDE/ERROR/ASYNC)</li><li><code>ApplicationFilterConfig</code> — runtime <code>FilterConfig</code>; created in <code>filterStart()</code> when the Context starts, holds the live <code>Filter</code> instance after <code>init()</code></li></ol><h4 id=build-chain-applicationfilterfactory>Build chain: <code>ApplicationFilterFactory</code></h4><p><code>StandardWrapperValve.invoke</code> does roughly:</p><ol><li><code>servlet = wrapper.allocate()</code></li><li>set <code>DISPATCHER_TYPE_ATTR</code> / <code>DISPATCHER_REQUEST_PATH_ATTR</code> on the request</li><li><code>filterChain = ApplicationFilterFactory.createFilterChain(request, wrapper, servlet)</code></li><li><code>filterChain.doFilter(request.getRequest(), response.getResponse())</code></li><li><code>filterChain.release()</code> then <code>wrapper.deallocate(servlet)</code></li></ol><p><code>createFilterChain</code> reuses an <code>ApplicationFilterChain</code> cached on the Coyote <code>Request</code> when possible, sets the target servlet, then walks <code>context.findFilterMaps()</code> twice:</p><ol><li><strong>URL mappings first</strong> — dispatcher type matches, and <code>FilterUtil.matchFiltersURL(filterMap, requestPath)</code> matches the context-relative path</li><li><strong>Servlet-name mappings second</strong> — dispatcher type matches, and servlet name equals the mapping (or <code>*</code>)</li></ol><p>Matched maps resolve to <code>ApplicationFilterConfig</code> via <code>context.findFilterConfig(filterName)</code> and are appended with <code>filterChain.addFilter(...)</code>. The same filter config is not added twice.</p><p>Order in the chain follows declaration order of filter maps (url-mapped filters before servlet-name-mapped ones for the same request).</p><h4 id=run-chain-applicationfilterchain>Run chain: <code>ApplicationFilterChain</code></h4><p><code>ApplicationFilterChain</code> implements <code>jakarta.servlet.FilterChain</code>. Fields <code>filters[]</code>, <code>pos</code>, <code>n</code>, and <code>servlet</code> drive execution:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>doFilter(request, response):
+</code></pre><h3 id=filter-in-the-pipeline>Filter in the pipeline</h3><p>Filters are a Context-level concern, not a Valve. <code>StandardContext</code> keeps three related structures:</p><ol><li><code>FilterDef</code> — <code>&lt;filter></code> from web.xml / programmatic registration (<code>filterName</code>, <code>filterClass</code>, init params, asyncSupported)</li><li><code>FilterMap</code> — <code>&lt;filter-mapping></code> (<code>url-pattern</code> and/or <code>servlet-name</code>, plus dispatcher types REQUEST/FORWARD/INCLUDE/ERROR/ASYNC)</li><li><code>ApplicationFilterConfig</code> — runtime <code>FilterConfig</code>; created in <code>filterStart()</code> when the Context starts, holds the live <code>Filter</code> instance after <code>init()</code></li></ol><h4 id=registration-filterdef-and-filtermap>Registration: <code>FilterDef</code> and <code>FilterMap</code></h4><p><code>ServletContext.addFilter</code> creates the <code>FilterDef</code>; <code>FilterRegistration.Dynamic.addMappingForUrlPatterns</code> and <code>addMappingForServletNames</code> append a <code>FilterMap</code>, either after existing maps (<code>isMatchAfter = true</code>) or before the maps declared in <code>web.xml</code> (<code>false</code>).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ApplicationContext.addFilter (Tomcat)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> FilterRegistration.<span style=color:#a6e22e>Dynamic</span> <span style=color:#a6e22e>addFilter</span>(String filterName, String filterClass, Filter filter)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> IllegalStateException {
+</span></span><span style=display:flex><span>    checkState(<span style=color:#e6db74>&#34;applicationContext.addFilter.ise&#34;</span>);           <span style=color:#75715e>// only in STARTING_PREP</span>
+</span></span><span style=display:flex><span>    FilterDef filterDef <span style=color:#f92672>=</span> context.<span style=color:#a6e22e>findFilterDef</span>(filterName);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (filterDef <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        filterDef <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> FilterDef();
+</span></span><span style=display:flex><span>        filterDef.<span style=color:#a6e22e>setFilterName</span>(filterName);
+</span></span><span style=display:flex><span>        context.<span style=color:#a6e22e>addFilterDef</span>(filterDef);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (filterDef.<span style=color:#a6e22e>getFilterName</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> filterDef.<span style=color:#a6e22e>getFilterClass</span>() <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (filter <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        filterDef.<span style=color:#a6e22e>setFilterClass</span>(filterClass);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        filterDef.<span style=color:#a6e22e>setFilterClass</span>(filter.<span style=color:#a6e22e>getClass</span>().<span style=color:#a6e22e>getName</span>());
+</span></span><span style=display:flex><span>        filterDef.<span style=color:#a6e22e>setFilter</span>(filter);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> ApplicationFilterRegistration(filterDef, context);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ApplicationFilterRegistration.addMappingForUrlPatterns</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>addMappingForUrlPatterns</span>(EnumSet<span style=color:#f92672>&lt;</span>DispatcherType<span style=color:#f92672>&gt;</span> dispatcherTypes, <span style=color:#66d9ef>boolean</span> isMatchAfter,
+</span></span><span style=display:flex><span>        String... urlPatterns) {
+</span></span><span style=display:flex><span>    FilterMap filterMap <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> FilterMap();
+</span></span><span style=display:flex><span>    filterMap.<span style=color:#a6e22e>setFilterName</span>(filterDef.<span style=color:#a6e22e>getFilterName</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (dispatcherTypes <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (DispatcherType dispatcherType : dispatcherTypes) {
+</span></span><span style=display:flex><span>            filterMap.<span style=color:#a6e22e>setDispatcher</span>(dispatcherType.<span style=color:#a6e22e>name</span>());
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (urlPatterns <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (String urlPattern : urlPatterns) {
+</span></span><span style=display:flex><span>            filterMap.<span style=color:#a6e22e>addURLPattern</span>(urlPattern);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (isMatchAfter) {
+</span></span><span style=display:flex><span>            context.<span style=color:#a6e22e>addFilterMap</span>(filterMap);
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            context.<span style=color:#a6e22e>addFilterMapBefore</span>(filterMap);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>During web application start (phase 7 in the Tomcat startup section), <code>filterStart</code> turns every <code>FilterDef</code> into an <code>ApplicationFilterConfig</code>; its constructor instantiates the filter if only a class name was given and calls <code>Filter.init(filterConfig)</code>. Filters therefore initialize after <code>ServletContextListener.contextInitialized</code> and before load-on-startup servlets.</p><h4 id=build-chain-applicationfilterfactory>Build chain: <code>ApplicationFilterFactory</code></h4><p><code>StandardWrapperValve.invoke</code> does roughly:</p><ol><li><code>servlet = wrapper.allocate()</code></li><li>set <code>DISPATCHER_TYPE_ATTR</code> / <code>DISPATCHER_REQUEST_PATH_ATTR</code> on the request</li><li><code>filterChain = ApplicationFilterFactory.createFilterChain(request, wrapper, servlet)</code></li><li><code>filterChain.doFilter(request.getRequest(), response.getResponse())</code></li><li><code>filterChain.release()</code> then <code>wrapper.deallocate(servlet)</code></li></ol><p><code>createFilterChain</code> reuses an <code>ApplicationFilterChain</code> cached on the Coyote <code>Request</code> when possible, sets the target servlet, then walks <code>context.findFilterMaps()</code> twice:</p><ol><li><strong>URL mappings first</strong> — dispatcher type matches, and <code>FilterUtil.matchFiltersURL(filterMap, requestPath)</code> matches the context-relative path</li><li><strong>Servlet-name mappings second</strong> — dispatcher type matches, and servlet name equals the mapping (or <code>*</code>)</li></ol><p>Matched maps resolve to <code>ApplicationFilterConfig</code> via <code>context.findFilterConfig(filterName)</code> and are appended with <code>filterChain.addFilter(...)</code>. The same filter config is not added twice.</p><p>Order in the chain follows declaration order of filter maps (url-mapped filters before servlet-name-mapped ones for the same request).</p><h4 id=run-chain-applicationfilterchain>Run chain: <code>ApplicationFilterChain</code></h4><p><code>ApplicationFilterChain</code> implements <code>jakarta.servlet.FilterChain</code>. Fields <code>filters[]</code>, <code>pos</code>, <code>n</code>, and <code>servlet</code> drive execution:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>doFilter(request, response):
 </span></span><span style=display:flex><span>  if pos &lt; n:
 </span></span><span style=display:flex><span>    filter = filters[pos++].getFilter()
 </span></span><span style=display:flex><span>    // if filter does not support async, clear ASYNC_SUPPORTED on request
@@ -457,7 +654,69 @@ ApplicationFilterChain --&gt; Servlet : servlet.service
 </span></span><span style=display:flex><span>    return
 </span></span><span style=display:flex><span>  else:
 </span></span><span style=display:flex><span>    servlet.service(request, response)         // end of chain
-</span></span></code></pre></div><p>Each filter receives the same chain instance and must call <code>chain.doFilter</code> to advance. When <code>pos</code> reaches <code>n</code>, the chain falls through to the servlet. After the request finishes, <code>release()</code> nulls filter references and resets counters so the chain object can be reused on the next request (<code>reuse()</code> only resets <code>pos</code>).</p><p>Valve vs Filter: Valves sit on every Container pipeline (Engine → Host → Context → Wrapper) and are Catalina-specific; Filters are Servlet-spec, scoped to a Context, selected per request by URL/servlet-name/dispatcher, and only run after the request has been routed to a concrete Wrapper.</p><h2 id=connector-internals>Connector Internals</h2><p><code>Adapter</code> represents the entry point in a coyote-based servlet container.</p><p><code>ProtocolHandler</code> abstract the protocol implementation, including threading.</p><p><code>EndPoint</code> handles the low level interactions with network socket.</p><p><code>Poller</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
+</span></span></code></pre></div><p>Each filter receives the same chain instance and must call <code>chain.doFilter</code> to advance. When <code>pos</code> reaches <code>n</code>, the chain falls through to the servlet. After the request finishes, <code>release()</code> nulls filter references and resets counters so the chain object can be reused on the next request (<code>reuse()</code> only resets <code>pos</code>).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>top to bottom direction
+
+class StandardContext {
+    - Map&lt;String,FilterDef&gt; filterDefs
+    - ContextFilterMaps filterMaps
+    - Map&lt;String,ApplicationFilterConfig&gt; filterConfigs
+    + boolean filterStart()
+    + FilterMap[] findFilterMaps()
+}
+class FilterDef {
+    - String filterName
+    - String filterClass
+    - Filter filter
+}
+class FilterMap {
+    - String filterName
+    - String[] servletNames
+    - String[] urlPatterns
+    - int dispatcherMapping
+}
+class ApplicationFilterConfig {
+    - FilterDef filterDef
+    - Filter filter
+}
+class ApplicationFilterFactory {
+    + {static} ApplicationFilterChain createFilterChain(ServletRequest, Wrapper, Servlet)
+}
+class ApplicationFilterChain {
+    - ApplicationFilterConfig[] filters
+    - int pos
+    - int n
+    - Servlet servlet
+    + void doFilter(ServletRequest, ServletResponse)
+}
+class StandardWrapperValve {
+    + void invoke(Request, Response)
+}
+
+StandardContext *-- &#34;N&#34; FilterDef : filterDefs
+StandardContext *-- &#34;N&#34; FilterMap : filterMaps
+StandardContext *-- &#34;N&#34; ApplicationFilterConfig : filterConfigs
+ApplicationFilterConfig o-- FilterDef
+StandardWrapperValve --&gt; ApplicationFilterFactory : per request
+ApplicationFilterFactory --&gt; ApplicationFilterChain : create
+ApplicationFilterChain o-- &#34;N&#34; ApplicationFilterConfig : filters
+</code></pre><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant V as StandardWrapperValve
+    participant FF as ApplicationFilterFactory
+    participant FC as ApplicationFilterChain
+    participant F1 as Filter 1
+    participant F2 as Filter 2
+    participant DS as DispatcherServlet
+
+    V-&gt;&gt;FF: createFilterChain(request, wrapper, servlet)
+    FF-&gt;&gt;FF: URL-pattern matches, then servlet-name matches
+    FF--&gt;&gt;V: chain
+    V-&gt;&gt;FC: doFilter(request, response)
+    FC-&gt;&gt;F1: doFilter(req, res, chain)
+    F1-&gt;&gt;FC: chain.doFilter
+    FC-&gt;&gt;F2: doFilter(req, res, chain)
+    F2-&gt;&gt;FC: chain.doFilter
+    FC-&gt;&gt;DS: service(req, res)
+</code></pre><p>Valve vs Filter: Valves sit on every Container pipeline (Engine → Host → Context → Wrapper) and are Catalina-specific; Filters are Servlet-spec, scoped to a Context, selected per request by URL/servlet-name/dispatcher, and only run after the request has been routed to a concrete Wrapper.</p><h2 id=connector-internals>Connector Internals</h2><p><code>Adapter</code> represents the entry point in a coyote-based servlet container.</p><p><code>ProtocolHandler</code> abstract the protocol implementation, including threading.</p><p><code>EndPoint</code> handles the low level interactions with network socket.</p><p><code>Poller</code></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>
 interface Handler&lt;S&gt; {
     SocketState process(socket,SocketEvent status)
 }
@@ -755,7 +1014,39 @@ StandardWrapper *-right- StandardWrapperValve
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip="Spring Security" aria-label="PREVIOUS: Spring Security"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/tomcat/",this.page.identifier="/post/java/tomcat/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/concurrency/synchronizer-framework/ data-tooltip="java concurrency - Synchronizer Framework" aria-label="NEXT: java concurrency - Synchronizer Framework"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip="Spring Security" aria-label="PREVIOUS: Spring Security"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
-<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/tomcat/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Ftomcat%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>
+    
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    
+    
+    
+    const getMermaidTheme = () =>
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
+
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: getMermaidTheme(),
+    });
+
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll(".mermaid"),
+        });
+    } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+    }
+</script><style>.mermaid svg{display:block;margin:auto}</style><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
     MathJax.Hub.Config({
       CommonHTML: { linebreaks: { automatic: true } },
       tex2jax: {

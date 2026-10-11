@@ -56,6 +56,19 @@ interface SavepointManager {
 abstract class AbstractTransactionStatus
 class DefaultTransactionStatus
 
+interface Advice
+interface Interceptor
+interface MethodInterceptor {
+    +invoke(MethodInvocation) : Object
+}
+interface Serializable
+interface BeanFactoryAware {
+    +setBeanFactory(BeanFactory)
+}
+interface InitializingBean {
+    +afterPropertiesSet()
+}
+
 abstract class TransactionAspectSupport {
     +invokeWithinTransaction(Method, Class, InvocationCallback) : Object
 }
@@ -90,7 +103,13 @@ SavepointManager &lt;|-- TransactionStatus
 TransactionStatus &lt;|.. AbstractTransactionStatus
 AbstractTransactionStatus &lt;|-- DefaultTransactionStatus
 
-TransactionInterceptor --|&gt; TransactionAspectSupport
+Advice &lt;|-- Interceptor
+Interceptor &lt;|-- MethodInterceptor
+BeanFactoryAware &lt;|.. TransactionAspectSupport
+InitializingBean &lt;|.. TransactionAspectSupport
+TransactionAspectSupport &lt;|-- TransactionInterceptor
+MethodInterceptor &lt;|.. TransactionInterceptor
+Serializable &lt;|.. TransactionInterceptor
 TransactionAspectSupport ..&gt; PlatformTransactionManager : delegates to
 TransactionAspectSupport ..&gt; TransactionSynchronizationManager : accesses
 DataSourceTransactionManager ..&gt; TransactionSynchronizationManager : binds connections

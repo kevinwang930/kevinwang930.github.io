@@ -267,10 +267,248 @@ class ProxyProcessorSupport {
 # boolean isInternalLanguageInterface(Class&lt;?&gt;)
 }
 
-interface AopProxy
+interface AopProxy {
++ Object getProxy(ClassLoader)
+}
+
+&#39; advisor lookup
+class BeanFactoryAdvisorRetrievalHelper {
++ List&lt;Advisor&gt; findAdvisorBeans()
+}
+class BeanFactoryAspectJAdvisorsBuilder {
+- Map&lt;String,List&lt;Advisor&gt;&gt; advisorsCache
+- Map&lt;String,MetadataAwareAspectInstanceFactory&gt; aspectFactoryCache
++ List&lt;Advisor&gt; buildAspectJAdvisors()
+}
+interface AspectJAdvisorFactory {
++ boolean isAspect(Class&lt;?&gt;)
++ List&lt;Advisor&gt; getAdvisors(MetadataAwareAspectInstanceFactory)
++ Advisor getAdvisor(Method,MetadataAwareAspectInstanceFactory,int,String)
++ Advice getAdvice(Method,AspectJExpressionPointcut,MetadataAwareAspectInstanceFactory,int,String)
+}
+abstract class AbstractAspectJAdvisorFactory implements AspectJAdvisorFactory
+class ReflectiveAspectJAdvisorFactory extends AbstractAspectJAdvisorFactory
+interface MetadataAwareAspectInstanceFactory
+class BeanFactoryAspectInstanceFactory implements MetadataAwareAspectInstanceFactory
+
+&#39; advisors and advice built from @Aspect methods
+interface Advisor
+interface PointcutAdvisor extends Advisor
+interface InstantiationModelAwarePointcutAdvisor extends PointcutAdvisor
+class InstantiationModelAwarePointcutAdvisorImpl implements InstantiationModelAwarePointcutAdvisor {
+- AspectJExpressionPointcut declaredPointcut
+- Method aspectJAdviceMethod
+- Advice instantiatedAdvice
++ Advice getAdvice()
+}
+class AspectJExpressionPointcut {
++ void setExpression(String)
++ boolean matches(Method,Class&lt;?&gt;)
+}
+interface Advice
+interface MethodInterceptor
+interface MethodBeforeAdvice
+interface AfterReturningAdvice
+abstract class AbstractAspectJAdvice implements Advice {
+# Object invokeAdviceMethod(...)
+}
+class AspectJAroundAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+class AspectJMethodBeforeAdvice extends AbstractAspectJAdvice implements MethodBeforeAdvice
+class AspectJAfterAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+class AspectJAfterReturningAdvice extends AbstractAspectJAdvice implements AfterReturningAdvice
+class AspectJAfterThrowingAdvice extends AbstractAspectJAdvice implements MethodInterceptor
+
+&#39; proxy creation and invocation
+class ProxyConfig
+class AdvisedSupport extends ProxyConfig {
+- List&lt;Advisor&gt; advisors
+- AdvisorChainFactory advisorChainFactory
++ void addAdvisors(Advisor...)
++ List&lt;Object&gt; getInterceptorsAndDynamicInterceptionAdvice(Method,Class&lt;?&gt;)
+}
+class ProxyCreatorSupport extends AdvisedSupport {
+- AopProxyFactory aopProxyFactory
+}
+class ProxyFactory extends ProxyCreatorSupport {
++ Object getProxy(ClassLoader)
+}
+interface AopProxyFactory
+class DefaultAopProxyFactory implements AopProxyFactory
+class JdkDynamicAopProxy implements AopProxy {
++ Object invoke(Object,Method,Object[])
+}
+class CglibAopProxy implements AopProxy
+class ObjenesisCglibAopProxy extends CglibAopProxy
+interface AdvisorChainFactory
+class DefaultAdvisorChainFactory implements AdvisorChainFactory
+interface AdvisorAdapterRegistry {
++ MethodInterceptor[] getInterceptors(Advisor)
+}
+class DefaultAdvisorAdapterRegistry implements AdvisorAdapterRegistry
+interface ProxyMethodInvocation
+class ReflectiveMethodInvocation implements ProxyMethodInvocation {
+# List&lt;?&gt; interceptorsAndDynamicMethodMatchers
+- int currentInterceptorIndex
++ Object proceed()
+}
 
 AspectJAutoProxyRegistrar  -right-&gt; AnnotationAwareAspectJAutoProxyCreator:register
-</code></pre><h1 id=target-source>Target Source</h1><p><code>TargetClassAware</code> Minimal interface for exposing the target class behind a proxy</p><p><code>TargetSource</code> is used to obtain the current target of the AOP invocation, which will be invoked via reflection if no around advice chooses to end the interceptor chain itself</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface TargetClassAware {
+AbstractAdvisorAutoProxyCreator *-- BeanFactoryAdvisorRetrievalHelper : advisorRetrievalHelper
+AnnotationAwareAspectJAutoProxyCreator *-- BeanFactoryAspectJAdvisorsBuilder : aspectJAdvisorsBuilder
+AnnotationAwareAspectJAutoProxyCreator o-- AspectJAdvisorFactory : aspectJAdvisorFactory
+BeanFactoryAspectJAdvisorsBuilder --&gt; AspectJAdvisorFactory : getAdvisors
+BeanFactoryAspectJAdvisorsBuilder --&gt; BeanFactoryAspectInstanceFactory : new
+ReflectiveAspectJAdvisorFactory --&gt; InstantiationModelAwarePointcutAdvisorImpl : new
+ReflectiveAspectJAdvisorFactory --&gt; AbstractAspectJAdvice : getAdvice
+InstantiationModelAwarePointcutAdvisorImpl *-- AspectJExpressionPointcut
+InstantiationModelAwarePointcutAdvisorImpl o-- AbstractAspectJAdvice
+AbstractAspectJAdvice o-- MetadataAwareAspectInstanceFactory : aspect bean
+AbstractAutoProxyCreator --&gt; ProxyFactory : createProxy
+ProxyCreatorSupport o-- AopProxyFactory
+DefaultAopProxyFactory --&gt; JdkDynamicAopProxy : interfaces
+DefaultAopProxyFactory --&gt; ObjenesisCglibAopProxy : target class
+AdvisedSupport o-- AdvisorChainFactory
+DefaultAdvisorChainFactory --&gt; AdvisorAdapterRegistry : getInterceptors
+JdkDynamicAopProxy --&gt; ReflectiveMethodInvocation : proceed
+</code></pre><h2 id=advisor-resolution-and-interceptor-chain>Advisor resolution and interceptor chain</h2><p>A <code>MethodInterceptor</code> is not injected into the target bean. It is carried by an <code>Advisor</code>, copied into the proxy&rsquo;s <code>ProxyFactory</code>, and called by the proxy on each method invocation. An <code>@Aspect</code> class implements no advisor or advice interface; the auto-proxy creator builds <code>Advisor</code> objects from its annotated methods, and from then on they follow the same path.</p><ol><li><strong>Register the auto-proxy creator.</strong> <code>@EnableAspectJAutoProxy</code> imports <code>AspectJAutoProxyRegistrar</code>, which registers <code>AnnotationAwareAspectJAutoProxyCreator</code> as a <code>BeanPostProcessor</code>.</li><li><strong>Find the advisors.</strong> After a bean is initialized, <code>postProcessAfterInitialization</code> calls <code>wrapIfNecessary</code>. <code>findCandidateAdvisors</code> returns two lists. <code>findAdvisorsThatCanApply</code> then keeps those whose pointcut matches some method of the bean class.<ul><li><strong><code>Advisor</code> beans:</strong> <code>BeanFactoryAdvisorRetrievalHelper</code> collects every bean of type <code>Advisor</code>.</li><li><strong><code>@Aspect</code> beans:</strong> <code>BeanFactoryAspectJAdvisorsBuilder.buildAspectJAdvisors</code> lists every bean name, reads each bean type without creating the bean, and keeps types annotated with <code>@Aspect</code>. The class must already be a bean (for example <code>@Component</code>); <code>@Aspect</code> alone registers nothing. For each advice method (<code>@Before</code>, <code>@AfterReturning</code>, <code>@AfterThrowing</code>, <code>@After</code>, <code>@Around</code>; <code>@Pointcut</code> methods are skipped), <code>ReflectiveAspectJAdvisorFactory.getAdvisor</code> builds an <code>AspectJExpressionPointcut</code> from the annotation value and an <code>InstantiationModelAwarePointcutAdvisorImpl</code> holding that pointcut and the method. Its advice is created by <code>getAdvice</code>, which picks <code>AspectJMethodBeforeAdvice</code>, <code>AspectJAroundAdvice</code>, and so on by annotation type; each calls the method on the aspect bean by reflection. The result is cached per aspect bean, so this reflection runs once.</li></ul></li><li><strong>Build the proxy.</strong> <code>createProxy</code> adds those advisors to a <code>ProxyFactory</code>, which returns a JDK or CGLIB proxy. The proxy replaces the bean in the container.</li><li><strong>Build the chain per method.</strong> On a call, the proxy asks <code>DefaultAdvisorChainFactory</code> for the interceptors of that method. <code>DefaultAdvisorAdapterRegistry.getInterceptors</code> uses a <code>MethodInterceptor</code> as-is and adapts <code>MethodBeforeAdvice</code>, <code>AfterReturningAdvice</code>, and <code>ThrowsAdvice</code> into one.</li><li><strong>Run the chain.</strong> <code>ReflectiveMethodInvocation.proceed</code> calls each interceptor in turn. Each one calls <code>invocation.proceed()</code>, and the last call invokes the target method.</li></ol><p>A <code>MethodInterceptor</code> bean that is not wrapped in an <code>Advisor</code> is ignored by the advisor lookup. It must be wrapped (for example in <code>DefaultPointcutAdvisor</code>), named in <code>setInterceptorNames</code> on an auto-proxy creator, or added with <code>ProxyFactory.addAdvice</code>, which wraps it in a <code>DefaultPointcutAdvisor</code> with <code>Pointcut.TRUE</code>.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+    participant C as Container
+    participant A as AnnotationAwareAspectJAutoProxyCreator
+    participant F as ProxyFactory
+    participant P as Proxy
+    participant I as ReflectiveMethodInvocation
+    participant T as Target bean
+
+    C-&gt;&gt;A: postProcessAfterInitialization(bean)
+    A-&gt;&gt;A: findCandidateAdvisors / findAdvisorsThatCanApply
+    A-&gt;&gt;F: addAdvisors(advisors)
+    F--&gt;&gt;C: proxy replaces bean
+    P-&gt;&gt;P: getInterceptorsAndDynamicInterceptionAdvice(method)
+    P-&gt;&gt;I: proceed()
+    I-&gt;&gt;I: MethodInterceptor.invoke(this) per interceptor
+    I-&gt;&gt;T: invokeJoinpoint()
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractAutoProxyCreator.wrapIfNecessary</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> Object <span style=color:#a6e22e>wrapIfNecessary</span>(Object bean, String beanName, Object cacheKey) {
+</span></span><span style=display:flex><span>    Object<span style=color:#f92672>[]</span> specificInterceptors <span style=color:#f92672>=</span> getAdvicesAndAdvisorsForBean(bean.<span style=color:#a6e22e>getClass</span>(), beanName, <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (specificInterceptors <span style=color:#f92672>!=</span> DO_NOT_PROXY) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> createProxy(bean.<span style=color:#a6e22e>getClass</span>(), beanName, specificInterceptors, <span style=color:#66d9ef>new</span> SingletonTargetSource(bean));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> bean;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractAdvisorAutoProxyCreator.findEligibleAdvisors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>findEligibleAdvisors</span>(Class<span style=color:#f92672>&lt;?&gt;</span> beanClass, String beanName) {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> candidateAdvisors <span style=color:#f92672>=</span> findCandidateAdvisors(); <span style=color:#75715e>// Advisor beans + @Aspect advisors</span>
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> eligibleAdvisors <span style=color:#f92672>=</span> findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+</span></span><span style=display:flex><span>    extendAdvisors(eligibleAdvisors);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> sortAdvisors(eligibleAdvisors); <span style=color:#75715e>// @Order / Ordered</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// BeanFactoryAdvisorRetrievalHelper.findAdvisorBeans</span>
+</span></span><span style=display:flex><span>advisorNames <span style=color:#f92672>=</span> BeanFactoryUtils.<span style=color:#a6e22e>beanNamesForTypeIncludingAncestors</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>beanFactory</span>, Advisor.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>true</span>, <span style=color:#66d9ef>false</span>);
+</span></span><span style=display:flex><span>advisors.<span style=color:#a6e22e>add</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>beanFactory</span>.<span style=color:#a6e22e>getBean</span>(name, Advisor.<span style=color:#a6e22e>class</span>));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AnnotationAwareAspectJAutoProxyCreator.findCandidateAdvisors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>findCandidateAdvisors</span>() {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> advisors <span style=color:#f92672>=</span> <span style=color:#66d9ef>super</span>.<span style=color:#a6e22e>findCandidateAdvisors</span>(); <span style=color:#75715e>// Advisor beans</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>aspectJAdvisorsBuilder</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        advisors.<span style=color:#a6e22e>addAll</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>aspectJAdvisorsBuilder</span>.<span style=color:#a6e22e>buildAspectJAdvisors</span>()); <span style=color:#75715e>// @Aspect beans</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> advisors;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// BeanFactoryAspectJAdvisorsBuilder.buildAspectJAdvisors</span>
+</span></span><span style=display:flex><span>String<span style=color:#f92672>[]</span> beanNames <span style=color:#f92672>=</span> BeanFactoryUtils.<span style=color:#a6e22e>beanNamesForTypeIncludingAncestors</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>beanFactory</span>, Object.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>true</span>, <span style=color:#66d9ef>false</span>);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (String beanName : beanNames) {
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;</span> beanType <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>beanFactory</span>.<span style=color:#a6e22e>getType</span>(beanName, <span style=color:#66d9ef>false</span>); <span style=color:#75715e>// do not create the bean</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>advisorFactory</span>.<span style=color:#a6e22e>isAspect</span>(beanType)) {                 <span style=color:#75715e>// @Aspect on the class</span>
+</span></span><span style=display:flex><span>        MetadataAwareAspectInstanceFactory factory <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> BeanFactoryAspectInstanceFactory(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>beanFactory</span>, beanName);
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>Advisor<span style=color:#f92672>&gt;</span> classAdvisors <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>advisorFactory</span>.<span style=color:#a6e22e>getAdvisors</span>(factory); <span style=color:#75715e>// one per advice method</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>advisorsCache</span>.<span style=color:#a6e22e>put</span>(beanName, classAdvisors);
+</span></span><span style=display:flex><span>        advisors.<span style=color:#a6e22e>addAll</span>(classAdvisors);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ReflectiveAspectJAdvisorFactory.getAdvisor</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Advisor <span style=color:#a6e22e>getAdvisor</span>(Method candidateAdviceMethod, MetadataAwareAspectInstanceFactory aspectInstanceFactory,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> declarationOrderInAspect, String aspectName) {
+</span></span><span style=display:flex><span>    AspectJExpressionPointcut expressionPointcut <span style=color:#f92672>=</span> getPointcut(
+</span></span><span style=display:flex><span>            candidateAdviceMethod, aspectInstanceFactory.<span style=color:#a6e22e>getAspectMetadata</span>().<span style=color:#a6e22e>getAspectClass</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (expressionPointcut <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>; <span style=color:#75715e>// not an advice method</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> InstantiationModelAwarePointcutAdvisorImpl(expressionPointcut, candidateAdviceMethod,
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>, aspectInstanceFactory, declarationOrderInAspect, aspectName);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ReflectiveAspectJAdvisorFactory.getPointcut</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> AspectJExpressionPointcut <span style=color:#a6e22e>getPointcut</span>(Method candidateAdviceMethod, Class<span style=color:#f92672>&lt;?&gt;</span> candidateAspectClass) {
+</span></span><span style=display:flex><span>    AspectJAnnotation aspectJAnnotation <span style=color:#f92672>=</span> findAspectJAnnotationOnMethod(candidateAdviceMethod);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (aspectJAnnotation <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    AspectJExpressionPointcut ajexp <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJExpressionPointcut(candidateAspectClass, <span style=color:#66d9ef>new</span> String<span style=color:#f92672>[</span>0<span style=color:#f92672>]</span>, <span style=color:#66d9ef>new</span> Class<span style=color:#f92672>&lt;?&gt;[</span>0<span style=color:#f92672>]</span>);
+</span></span><span style=display:flex><span>    ajexp.<span style=color:#a6e22e>setExpression</span>(aspectJAnnotation.<span style=color:#a6e22e>getPointcutExpression</span>()); <span style=color:#75715e>// e.g. &#34;serviceMethods()&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> ajexp;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ReflectiveAspectJAdvisorFactory.getAdvice</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>switch</span> (aspectJAnnotation.<span style=color:#a6e22e>getAnnotationType</span>()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> AtAround <span style=color:#f92672>-&gt;</span> springAdvice <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJAroundAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> AtBefore <span style=color:#f92672>-&gt;</span> springAdvice <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJMethodBeforeAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> AtAfter <span style=color:#f92672>-&gt;</span> springAdvice <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJAfterAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> AtAfterReturning <span style=color:#f92672>-&gt;</span> springAdvice <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJAfterReturningAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>case</span> AtAfterThrowing <span style=color:#f92672>-&gt;</span> springAdvice <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AspectJAfterThrowingAdvice(candidateAdviceMethod, expressionPointcut, aspectInstanceFactory);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractAutoProxyCreator.buildProxy</span>
+</span></span><span style=display:flex><span>Advisor<span style=color:#f92672>[]</span> advisors <span style=color:#f92672>=</span> buildAdvisors(beanName, specificInterceptors);
+</span></span><span style=display:flex><span>proxyFactory.<span style=color:#a6e22e>addAdvisors</span>(advisors);
+</span></span><span style=display:flex><span>proxyFactory.<span style=color:#a6e22e>setTargetSource</span>(targetSource);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> proxyFactory.<span style=color:#a6e22e>getProxy</span>(classLoader);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// JdkDynamicAopProxy.invoke</span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>Object<span style=color:#f92672>&gt;</span> chain <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>advised</span>.<span style=color:#a6e22e>getInterceptorsAndDynamicInterceptionAdvice</span>(method, targetClass);
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (chain.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>    retVal <span style=color:#f92672>=</span> AopUtils.<span style=color:#a6e22e>invokeJoinpointUsingReflection</span>(target, method, argsToUse);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    MethodInvocation invocation <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ReflectiveMethodInvocation(proxy, target, method, args, targetClass, chain);
+</span></span><span style=display:flex><span>    retVal <span style=color:#f92672>=</span> invocation.<span style=color:#a6e22e>proceed</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// DefaultAdvisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (Advisor advisor : config.<span style=color:#a6e22e>getAdvisors</span>()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (advisor <span style=color:#66d9ef>instanceof</span> PointcutAdvisor pointcutAdvisor
+</span></span><span style=display:flex><span>            <span style=color:#f92672>&amp;&amp;</span> pointcutAdvisor.<span style=color:#a6e22e>getPointcut</span>().<span style=color:#a6e22e>getClassFilter</span>().<span style=color:#a6e22e>matches</span>(actualClass)
+</span></span><span style=display:flex><span>            <span style=color:#f92672>&amp;&amp;</span> pointcutAdvisor.<span style=color:#a6e22e>getPointcut</span>().<span style=color:#a6e22e>getMethodMatcher</span>().<span style=color:#a6e22e>matches</span>(method, actualClass)) {
+</span></span><span style=display:flex><span>        interceptorList.<span style=color:#a6e22e>addAll</span>(Arrays.<span style=color:#a6e22e>asList</span>(registry.<span style=color:#a6e22e>getInterceptors</span>(advisor)));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// DefaultAdvisorAdapterRegistry.getInterceptors</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> MethodInterceptor<span style=color:#f92672>[]</span> <span style=color:#a6e22e>getInterceptors</span>(Advisor advisor) {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>MethodInterceptor<span style=color:#f92672>&gt;</span> interceptors <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(3);
+</span></span><span style=display:flex><span>    Advice advice <span style=color:#f92672>=</span> advisor.<span style=color:#a6e22e>getAdvice</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (advice <span style=color:#66d9ef>instanceof</span> MethodInterceptor methodInterceptor) {
+</span></span><span style=display:flex><span>        interceptors.<span style=color:#a6e22e>add</span>(methodInterceptor); <span style=color:#75715e>// used as-is</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (AdvisorAdapter adapter : <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>adapters</span>) { <span style=color:#75715e>// before / after-returning / throws</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (adapter.<span style=color:#a6e22e>supportsAdvice</span>(advice)) {
+</span></span><span style=display:flex><span>            interceptors.<span style=color:#a6e22e>add</span>(adapter.<span style=color:#a6e22e>getInterceptor</span>(advisor));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> interceptors.<span style=color:#a6e22e>toArray</span>(<span style=color:#66d9ef>new</span> MethodInterceptor<span style=color:#f92672>[</span>0<span style=color:#f92672>]</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ReflectiveMethodInvocation.proceed</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Object <span style=color:#a6e22e>proceed</span>() <span style=color:#66d9ef>throws</span> Throwable {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>currentInterceptorIndex</span> <span style=color:#f92672>==</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorsAndDynamicMethodMatchers</span>.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>-</span> 1) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> invokeJoinpoint(); <span style=color:#75715e>// target method</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Object interceptor <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>interceptorsAndDynamicMethodMatchers</span>.<span style=color:#a6e22e>get</span>(<span style=color:#f92672>++</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>currentInterceptorIndex</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> ((MethodInterceptor) interceptor).<span style=color:#a6e22e>invoke</span>(<span style=color:#66d9ef>this</span>); <span style=color:#75715e>// interceptor calls proceed() again</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h1 id=target-source>Target Source</h1><p><code>TargetClassAware</code> Minimal interface for exposing the target class behind a proxy</p><p><code>TargetSource</code> is used to obtain the current target of the AOP invocation, which will be invoked via reflection if no around advice chooses to end the interceptor chain itself</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>interface TargetClassAware {
     Class&lt;?&gt; getTargetClass()
 }
 
@@ -337,7 +575,39 @@ BeanFactoryTransactionAttributeSourceAdvisor *-- TransactionInterceptor
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="PREVIOUS: go Syntax"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
 <i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div><div id=disqus_thread><noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript></div><script type=text/javascript>var disqus_config=function(){this.page.url="https://kevinwang930.github.io/post/java/spring/aop/",this.page.identifier="/post/java/spring/aop/"};(function(){if(["localhost","127.0.0.1"].indexOf(window.location.hostname)!=-1){document.getElementById("disqus_thread").innerHTML="Disqus comments not available by default when the website is previewed locally.";return}var t,e=document.createElement("script");e.type="text/javascript",e.async=!0,t="blog-kevinwang930",e.src="//"+t+".disqus.com/embed.js",(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(e)})()</script></div></article><footer id=footer class=main-content-wrap><span class=copyrights>&copy; 2026 Kevin Wang. All Rights Reserved</span></footer></div><div id=bottom-bar class=post-bottom-bar data-behavior><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring/security/ data-tooltip="Spring Security" aria-label="NEXT: Spring Security"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/go/syntax/ data-tooltip="go Syntax" aria-label="PREVIOUS: go Syntax"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
-<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
+<i class="fa fa-angle-right"></i></a></li></ul></nav><ul class="post-actions post-action-share"><li class="post-action hide-lg hide-md hide-sm"><a class="post-action-btn btn btn--default btn-open-shareoptions" href=#btn-open-shareoptions aria-label="Share this post"><i class="fa fa-share-alt" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.facebook.com/sharer/sharer.php?u=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Facebook" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://twitter.com/intent/tweet?text=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Twitter" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i></a></li><li class="post-action hide-xs"><a class="post-action-btn btn btn--default" target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https://kevinwang930.github.io/post/java/spring/aop/" title="Share on Linkedin" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#disqus_thread aria-label="Leave a comment"><i class="far fa-comment"></i></a></li><li class=post-action><a class="post-action-btn btn btn--default" href=#top aria-label="Back to top"><i class="fa fa-arrow-up" aria-hidden=true></i></a></li></ul></div></div><div id=share-options-bar class=share-options-bar data-behavior=4><i id=btn-close-shareoptions class="fa fa-times"></i><ul class=share-options><li class=share-option><a class=share-option-btn target=new href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Facebook"><i class="fab fa-facebook-square" aria-hidden=true></i><span>Share on Facebook</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://twitter.com/intent/tweet?text=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Twitter"><i class="fab fa-twitter" aria-hidden=true></i><span>Share on Twitter</span></a></li><li class=share-option><a class=share-option-btn target=new href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fkevinwang930.github.io%2Fpost%2Fjava%2Fspring%2Faop%2F" aria-label="Share on Linkedin"><i class="fab fa-linkedin" aria-hidden=true></i><span>Share on Linkedin</span></a></li></ul></div><div id=share-options-mask class=share-options-mask></div></div><script type=module>
+    
+    const elements = Array.from(document.getElementsByClassName("language-mermaid"));
+    elements.forEach((el) => {
+        const pre = el.parentElement;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = el.textContent;
+        if (pre && pre.parentElement) {
+            pre.parentElement.replaceChild(div, pre);
+        }
+    });
+
+    
+    
+    
+    const getMermaidTheme = () =>
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
+
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: getMermaidTheme(),
+    });
+
+    try {
+        await mermaid.run({
+            nodes: document.querySelectorAll(".mermaid"),
+        });
+    } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+    }
+</script><style>.mermaid svg{display:block;margin:auto}</style><script>const loadScript=(e,t)=>{var n=document.createElement("script");n.onerror=e=>{throw new URIError("The script "+e.target.src+" didn't load correctly.")},t&&(n.onload=t),document.head.insertAdjacentElement("beforeend",n),n.src=e},loadPlantUMLOnNeed=()=>{let e="language-plantuml";document.querySelectorAll("[class^="+e+"]").length>0&&loadScript("https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js",()=>{(function(){Array.prototype.forEach.call(document.querySelectorAll("[class^="+e+"]"),function(e){let t=document.createElement("IMG");t.loading="lazy",t.src="http://www.plantuml.com/plantuml/svg/~1"+plantumlEncoder.encode(e.innerText),e.parentNode.insertBefore(t,e),e.style.display="none"})})(),console.log("PlantUML init done")})};window.addEventListener("load",function(){loadPlantUMLOnNeed()})</script><div id=about><div id=about-card><div id=about-btn-close><i class="fa fa-times"></i></div><img id=about-card-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt="Author's picture"><h4 id=about-card-name>Kevin Wang</h4><div id=about-card-bio>Email: <a href=mailto:kevinwang930@hotmail.com>kevinwang930@hotmail.com</a></div><div id=about-card-job><i class="fa fa-briefcase"></i><br>software developer</div><div id=about-card-location><i class="fa fa-map-marker-alt"></i><br>Asia</div></div></div><div id=cover style=background-image:url(https://kevinwang930.github.io/images/cover.jpg)></div><script src=https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/highlight.min.js integrity="sha512-z+/WWfyD5tccCukM4VvONpEtLmbAm5LDu7eKiyMQJ9m7OfPEDL7gENyDRL3Yfe8XAuGsS2fS4xSMnl6d30kqGQ==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js integrity="sha512-uURl+ZXMBrF4AwGaWmEetzrd+J5/8NRkWAvJx5sbPSSuOb0bZLqf+tOzniObO00BjHa/dD7gub9oCGMLPQHtQA==" crossorigin=anonymous referrerpolicy=no-referrer></script><script src=https://kevinwang930.github.io/js/script-yqzy9wdlzix4lbbwdnzvwx3egsne77earqmn73v9uno8aupuph8wfguccut.min.js></script><script async crossorigin=anonymous defer integrity="sha512-gE8KAQyFIzV1C9+GZ8TKJHZS2s+n7EjNtC+IMRn1l5+WYJTHOODUM6JSjZhFhqXmc7bG8Av6XXpckA4tYhflnw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/apache.min.js></script><script async crossorigin=anonymous defer integrity="sha512-EWROca+bote+7Oaaar1F6y74iZj1r1F9rm/ly7o+/FwJopbBaWtsFDmaKoZDd3QiGU2pGacBirHJNivmGLYrow==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/go.min.js></script><script async crossorigin=anonymous defer integrity="sha512-GDVzAn0wpx1yVtQsRWmFc6PhJiLBPdUic+h4GWgljBh904O3JU10fk9EKNpVyIoPqkFn54rgL2QBG4BmUTMpiQ==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/http.min.js></script><script async crossorigin=anonymous defer integrity="sha512-UgZlma8NzkrDb/NWgmLIcTrH7i/CSnLLDRFqCSNF5NGPpjKmzyM25qcoXGOup8+cDakKyaiTDd7N4dyH4YT+IA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/less.min.js></script><script async crossorigin=anonymous defer integrity="sha512-lot9koe73sfXIrUvIPM/UEhuMciN56RPyBdOyZgfO53P2lkWyyXN7J+njcxIIBRV+nVDQeiWtiXg+bLAJZDTfg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/nginx.min.js></script><script async crossorigin=anonymous defer integrity="sha512-Zd3e7XxHP00TD0Imr0PIfeM0fl0v95kMWuhyAS3Wn1UTSXTkz0OhtRgBAr4JlmADRgiXr4x7lpeUdqaGN8xIog==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/puppet.min.js></script><script async crossorigin=anonymous defer integrity="sha512-qtqDO052iXMSP+5d/aE/jMtL9vIIGvONgTJziC2K/ZIB1yEGa55WVxGE9/08rSQ62EoDifS9SWVGZ7ihSLhzMA==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/scss.min.js></script><script async crossorigin=anonymous defer integrity="sha512-1NmkjnEDnwwwcu28KoQF8vs3oaPFokQHbmbtwGhFfeDsQZtVFI8zW2aE9O8yMYdpdyKV/5blE4pSWw4Z/Sv97w==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/stylus.min.js></script><script async crossorigin=anonymous defer integrity="sha512-B2wSfruPjr8EJL6IIzQr1eAuDwrsfIfccNf/LCEdxELCgC/S/ZMt/Uvk80aD79m7IqOqW+Sw8nbkvha20yZpzg==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/swift.min.js></script><script async crossorigin=anonymous defer integrity="sha512-28oDiQZGKUVN6wQ7PSLPNipOcmkCALXKwOi7bnkyFf8QiMZQxG9EQoy/iiNx6Zxj2cG2SbVa4dXKigQhu7GiFw==" src=https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.1.0/languages/yaml.min.js></script><script>$(document).ready(function(){hljs.configure({classPrefix:"",useBR:!1}),$("pre.code-highlight > code, pre > code").each(function(e,t){$(this).hasClass("codeblock")||$(this).addClass("codeblock"),hljs.highlightBlock(t)})})</script><script type=text/x-mathjax-config>
     MathJax.Hub.Config({
       CommonHTML: { linebreaks: { automatic: true } },
       tex2jax: {
