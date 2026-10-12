@@ -296,13 +296,13 @@ final int acquire(Node node, int arg, boolean shared,
 
 #### Release
 
-Release runs the hook and, if it allows progress, wakes the first waiter. It dequeues nothing; the woken thread dequeues itself in step 3 of the loop.
+Release runs the hook and, if it allows progress, wakes the first waiter. It dequeues nothing; the woken thread dequeues itself when its hook succeeds (step 3 in the `acquire` loop above).
 
 ```java
 // AbstractQueuedSynchronizer.release
 public final boolean release(int arg) {
-    if (tryRelease(arg)) {          // e.g. hold count reached 0
-        signalNext(head);           // wake the first waiter
+    if (tryRelease(arg)) {          // 1. hook: e.g. hold count reached 0
+        signalNext(head);           // 2. wake the first waiter; it dequeues itself
         return true;
     }
     return false;
@@ -310,8 +310,8 @@ public final boolean release(int arg) {
 
 // AbstractQueuedSynchronizer.releaseShared
 public final boolean releaseShared(int arg) {
-    if (tryReleaseShared(arg)) {    // e.g. permits returned, latch reached 0
-        signalNext(head);
+    if (tryReleaseShared(arg)) {    // 1. hook: e.g. permits returned, latch reached 0
+        signalNext(head);           // 2. wake the first waiter; it propagates to shared successors
         return true;
     }
     return false;
@@ -320,29 +320,78 @@ public final boolean releaseShared(int arg) {
 // AbstractQueuedSynchronizer.signalNext
 private static void signalNext(Node h) {
     Node s;
-    // status == 0: the waiter has not announced WAITING, so it has not parked
-    // and will see the released state on its next hook attempt
+    // 1. Find the first waiter. status == 0 means it has not announced WAITING,
+    //    so it has not parked and will see the released state on its next hook attempt.
     if (h != null && (s = h.next) != null && s.status != 0) {
-        s.getAndUnsetStatus(WAITING);
-        LockSupport.unpark(s.waiter);
+        s.getAndUnsetStatus(WAITING);   // 2. clear WAITING
+        LockSupport.unpark(s.waiter);   // 3. wake it; it resumes at step 1 of acquire
     }
 }
 ```
 
 #### Exclusive and shared mode
 
-Both modes share the queue and the loop. The node type (`ExclusiveNode` or `SharedNode`) selects the hook in step 2, and a shared node that acquires also wakes its successor in step 3:
+Both modes use the same queue and the same `acquire` loop. The snippet lists all seven steps of the loop; the `shared` flag changes steps 2, 3 and 4:
+
+```java
+// AbstractQueuedSynchronizer.acquire (all steps; real code where the mode matters)
+for (;;) {
+    // 1. Am I the first waiter? Clean up if the predecessor was cancelled.
+    ...                                        // same for both modes
+
+    // 2. First waiter (or not yet queued) calls the hook of its mode.
+    if (first || pred == null) {
+        boolean acquired;
+        if (shared)
+            acquired = (tryAcquireShared(arg) >= 0);   // >= 0 acquired; > 0 others may acquire too
+        else
+            acquired = tryAcquire(arg);                 // true: I am the only holder
+        if (acquired) {
+            if (first) {
+                // 3. Dequeue myself: my node becomes the new head.
+                node.prev = null;
+                head = node;
+                pred.next = null;
+                node.waiter = null;
+                if (shared)
+                    signalNextIfShared(node);   // shared: wake the next shared waiter
+                                                // exclusive: wake nobody
+                ...
+            }
+            return 1;
+        }
+    }
+    // 4. Lazy setup: queue, then a node of my mode, then link it at tail.
+    ...
+    } else if (node == null) {
+        node = (shared) ? new SharedNode() : new ExclusiveNode();   // the node records the mode
+    } else if (pred == null) {
+        ...                                    // CAS onto tail
+    // 5. Woken first waiter spins briefly.
+    } else if (first && spins != 0) {
+        ...
+    // 6. Announce WAITING.
+    } else if (node.status == 0) {
+        ...
+    // 7. Park; on wake-up go back to step 1.
+    } else {
+        ...                                    // same for both modes
+    }
+}
+```
+
+In exclusive mode one release lets exactly one waiter through. In shared mode several threads may hold at once, so the waiter that just acquired wakes its successor if that successor is also shared:
 
 ```java
 // AbstractQueuedSynchronizer.signalNextIfShared
 private static void signalNextIfShared(Node h) {
     Node s;
-    // wake only a shared successor: readers pass one after another,
-    // a queued writer (ExclusiveNode) stops the chain
+    // 1. Find the successor; only a SharedNode qualifies. A queued writer
+    //    (ExclusiveNode) stops the chain.
     if (h != null && (s = h.next) != null &&
         (s instanceof SharedNode) && s.status != 0) {
-        s.getAndUnsetStatus(WAITING);
-        LockSupport.unpark(s.waiter);
+        s.getAndUnsetStatus(WAITING);   // 2. clear WAITING
+        LockSupport.unpark(s.waiter);   // 3. wake it; it tries its own hook and may pass the wake-up on
     }
 }
 ```
@@ -351,14 +400,49 @@ A release wakes one thread, so shared mode relies on this **propagation**. When 
 
 #### Interrupts
 
-An interrupt makes `park` return just like `unpark` does; it does not grant the synchronizer. Step 7 records it and step 3 or `cancelAcquire` acts on it:
+An interrupt makes `park` return just like `unpark` does; it does not grant the synchronizer. The steps below show where an interrupt is checked, recorded, and acted on:
 
 ```java
-// AbstractQueuedSynchronizer.acquire (after park returns)
-node.clearStatus();
-if ((interrupted |= Thread.interrupted()) && interruptible)  // Thread.interrupted() clears the flag
-    break;              // lockInterruptibly, tryLock(timeout): cancel -> InterruptedException
-                        // lock(): keep waiting; flag restored by current.interrupt() on success
+// AbstractQueuedSynchronizer.acquireInterruptibly (before the loop)
+if (Thread.interrupted() ||                    // 0. already interrupted: fail without trying
+    (!tryAcquire(arg) && acquire(null, arg, false, true, false, 0L) < 0))
+    throw new InterruptedException();          // 8. loop returned CANCELLED
+
+// AbstractQueuedSynchronizer.acquire (all steps; real code where interrupts matter)
+for (;;) {
+    // 1. Am I the first waiter? Clean up if the predecessor was cancelled.
+    ...
+    // 2. First waiter (or not yet queued) calls the hook.
+    if (first || pred == null) {
+        ...
+        if (acquired) {
+            if (first) {
+                // 3. Dequeue myself; an uninterruptible caller gets its interrupt back.
+                ...
+                if (interrupted)
+                    current.interrupt();       // lock(): restore the flag cleared in step 7
+            }
+            return 1;
+        }
+    }
+    // 4. Lazy setup: queue, node, link at tail.
+    ...
+    // 5. Woken first waiter spins briefly.
+    ...
+    // 6. Announce WAITING.
+    ...
+    // 7. Park. An interrupt makes park return just like unpark does.
+    } else {
+        ...
+        LockSupport.park(this);
+        ...
+        node.clearStatus();
+        if ((interrupted |= Thread.interrupted()) && interruptible)  // read and clear the flag
+            break;                             // interruptible: leave the loop
+                                               // lock(): fall through, back to step 1
+    }
+}
+return cancelAcquire(node, interrupted, interruptible);   // 8. CANCELLED (< 0) -> InterruptedException
 ```
 
 Because `lock()` restores the flag after acquiring, a caller can still react to an interrupt that arrived while it waited:
@@ -383,18 +467,18 @@ A waiter leaves the queue through `cancelAcquire` when it is interrupted on an i
 private int cancelAcquire(Node node, boolean interrupted,
                           boolean interruptible) {
     if (node != null) {
-        node.waiter = null;
-        node.status = CANCELLED;    // mark only; other threads may be linking to it
+        node.waiter = null;         // 1. nobody should unpark me any more
+        node.status = CANCELLED;    // 2. mark only; other threads may be linking to it
         if (node.prev != null)
-            cleanQueue();           // unlink cancelled nodes
+            cleanQueue();           // 3. unlink cancelled nodes, wake a new first waiter
     }
-    if (interrupted) {
+    if (interrupted) {              // 4. report the outcome
         if (interruptible)
-            return CANCELLED;       // negative -> InterruptedException
+            return CANCELLED;       //    negative -> InterruptedException
         else
             Thread.currentThread().interrupt();   // keep the flag for the caller
     }
-    return 0;                       // timeout -> tryAcquireNanos returns false
+    return 0;                       //    timeout -> tryAcquireNanos returns false
 }
 ```
 
@@ -405,10 +489,13 @@ private int cancelAcquire(Node node, boolean interrupted,
 private void cleanQueue() {
     for (;;) {                               // restart point
         for (Node q = tail, s = null, p, n;;) { // (p, q, s) triples
+            // 1. Walk from tail toward head: q is the current node, p its predecessor, s its successor.
             if (q == null || (p = q.prev) == null)
                 return;                      // end of list
+            // 2. Links changed under me: restart from tail.
             if (s == null ? tail != q : (s.prev != q || s.status < 0))
                 break;                       // inconsistent
+            // 3. q is cancelled: unlink it by pointing s (or tail) at p.
             if (q.status < 0) {              // cancelled
                 if ((s == null ? casTail(q, p) : s.casPrev(q, p)) &&
                     q.prev == p) {
@@ -419,6 +506,7 @@ private void cleanQueue() {
                 }
                 break;
             }
+            // 4. p.next is stale: repair it so signalNext can find q.
             if ((n = p.next) != q) {         // help finish
                 if (n != null && q.prev == p) {
                     p.casNext(n, q);
@@ -427,6 +515,7 @@ private void cleanQueue() {
                 }
                 break;
             }
+            // 5. Move one node toward head.
             s = q;
             q = q.prev;
         }
@@ -434,7 +523,7 @@ private void cleanQueue() {
 }
 ```
 
-Waiters also clean up for themselves: step 1 of the loop calls `cleanQueue` when the predecessor's `status < 0`.
+Waiters also clean up for themselves: at the start of each `acquire` iteration (step 1 in the loop above), a waiter whose predecessor has `status < 0` calls `cleanQueue`.
 
 ### 1.3 ConditionObject
 
