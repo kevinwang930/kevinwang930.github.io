@@ -213,10 +213,10 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> cancelAcquire(node, interrupted, interruptible);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h4 id=release>Release</h4><p>Release runs the hook and, if it allows progress, wakes the first waiter. It dequeues nothing; the woken thread dequeues itself in step 3 of the loop.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.release</span>
+</span></span></code></pre></div><h4 id=release>Release</h4><p>Release runs the hook and, if it allows progress, wakes the first waiter. It dequeues nothing; the woken thread dequeues itself when its hook succeeds (step 3 in the <code>acquire</code> loop above).</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.release</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>release</span>(<span style=color:#66d9ef>int</span> arg) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryRelease(arg)) {          <span style=color:#75715e>// e.g. hold count reached 0</span>
-</span></span><span style=display:flex><span>        signalNext(head);           <span style=color:#75715e>// wake the first waiter</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryRelease(arg)) {          <span style=color:#75715e>// 1. hook: e.g. hold count reached 0</span>
+</span></span><span style=display:flex><span>        signalNext(head);           <span style=color:#75715e>// 2. wake the first waiter; it dequeues itself</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
@@ -224,8 +224,8 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.releaseShared</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>releaseShared</span>(<span style=color:#66d9ef>int</span> arg) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryReleaseShared(arg)) {    <span style=color:#75715e>// e.g. permits returned, latch reached 0</span>
-</span></span><span style=display:flex><span>        signalNext(head);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (tryReleaseShared(arg)) {    <span style=color:#75715e>// 1. hook: e.g. permits returned, latch reached 0</span>
+</span></span><span style=display:flex><span>        signalNext(head);           <span style=color:#75715e>// 2. wake the first waiter; it propagates to shared successors</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
@@ -234,29 +234,108 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.signalNext</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNext</span>(Node h) {
 </span></span><span style=display:flex><span>    Node s;
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// status == 0: the waiter has not announced WAITING, so it has not parked</span>
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// and will see the released state on its next hook attempt</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Find the first waiter. status == 0 means it has not announced WAITING,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//    so it has not parked and will see the released state on its next hook attempt.</span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (h <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> (s <span style=color:#f92672>=</span> h.<span style=color:#a6e22e>next</span>) <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> s.<span style=color:#a6e22e>status</span> <span style=color:#f92672>!=</span> 0) {
-</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);
-</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);
+</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);   <span style=color:#75715e>// 2. clear WAITING</span>
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);   <span style=color:#75715e>// 3. wake it; it resumes at step 1 of acquire</span>
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h4 id=exclusive-and-shared-mode>Exclusive and shared mode</h4><p>Both modes share the queue and the loop. The node type (<code>ExclusiveNode</code> or <code>SharedNode</code>) selects the hook in step 2, and a shared node that acquires also wakes its successor in step 3:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.signalNextIfShared</span>
+</span></span></code></pre></div><h4 id=exclusive-and-shared-mode>Exclusive and shared mode</h4><p>Both modes use the same queue and the same <code>acquire</code> loop. The snippet lists all seven steps of the loop; the <code>shared</code> flag changes steps 2, 3 and 4:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.acquire (all steps; real code where the mode matters)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Am I the first waiter? Clean up if the predecessor was cancelled.</span>
+</span></span><span style=display:flex><span>    ...                                        <span style=color:#75715e>// same for both modes</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. First waiter (or not yet queued) calls the hook of its mode.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (first <span style=color:#f92672>||</span> pred <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> acquired;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (shared)
+</span></span><span style=display:flex><span>            acquired <span style=color:#f92672>=</span> (tryAcquireShared(arg) <span style=color:#f92672>&gt;=</span> 0);   <span style=color:#75715e>// &gt;= 0 acquired; &gt; 0 others may acquire too</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>else</span>
+</span></span><span style=display:flex><span>            acquired <span style=color:#f92672>=</span> tryAcquire(arg);                 <span style=color:#75715e>// true: I am the only holder</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (acquired) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (first) {
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// 3. Dequeue myself: my node becomes the new head.</span>
+</span></span><span style=display:flex><span>                node.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>                head <span style=color:#f92672>=</span> node;
+</span></span><span style=display:flex><span>                pred.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>                node.<span style=color:#a6e22e>waiter</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (shared)
+</span></span><span style=display:flex><span>                    signalNextIfShared(node);   <span style=color:#75715e>// shared: wake the next shared waiter</span>
+</span></span><span style=display:flex><span>                                                <span style=color:#75715e>// exclusive: wake nobody</span>
+</span></span><span style=display:flex><span>                ...
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> 1;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 4. Lazy setup: queue, then a node of my mode, then link it at tail.</span>
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (node <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        node <span style=color:#f92672>=</span> (shared) <span style=color:#f92672>?</span> <span style=color:#66d9ef>new</span> SharedNode() : <span style=color:#66d9ef>new</span> ExclusiveNode();   <span style=color:#75715e>// the node records the mode</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (pred <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        ...                                    <span style=color:#75715e>// CAS onto tail</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 5. Woken first waiter spins briefly.</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (first <span style=color:#f92672>&amp;&amp;</span> spins <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 6. Announce WAITING.</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (node.<span style=color:#a6e22e>status</span> <span style=color:#f92672>==</span> 0) {
+</span></span><span style=display:flex><span>        ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 7. Park; on wake-up go back to step 1.</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        ...                                    <span style=color:#75715e>// same for both modes</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>In exclusive mode one release lets exactly one waiter through. In shared mode several threads may hold at once, so the waiter that just acquired wakes its successor if that successor is also shared:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.signalNextIfShared</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNextIfShared</span>(Node h) {
 </span></span><span style=display:flex><span>    Node s;
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// wake only a shared successor: readers pass one after another,</span>
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// a queued writer (ExclusiveNode) stops the chain</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Find the successor; only a SharedNode qualifies. A queued writer</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//    (ExclusiveNode) stops the chain.</span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (h <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> (s <span style=color:#f92672>=</span> h.<span style=color:#a6e22e>next</span>) <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span>
 </span></span><span style=display:flex><span>        (s <span style=color:#66d9ef>instanceof</span> SharedNode) <span style=color:#f92672>&amp;&amp;</span> s.<span style=color:#a6e22e>status</span> <span style=color:#f92672>!=</span> 0) {
-</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);
-</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);
+</span></span><span style=display:flex><span>        s.<span style=color:#a6e22e>getAndUnsetStatus</span>(WAITING);   <span style=color:#75715e>// 2. clear WAITING</span>
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>unpark</span>(s.<span style=color:#a6e22e>waiter</span>);   <span style=color:#75715e>// 3. wake it; it tries its own hook and may pass the wake-up on</span>
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>A release wakes one thread, so shared mode relies on this <strong>propagation</strong>. When <code>CountDownLatch.countDown</code> brings the count to zero, each <code>await</code> caller that succeeds wakes the next, until every waiter has passed or a hook fails.</p><h4 id=interrupts>Interrupts</h4><p>An interrupt makes <code>park</code> return just like <code>unpark</code> does; it does not grant the synchronizer. Step 7 records it and step 3 or <code>cancelAcquire</code> acts on it:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.acquire (after park returns)</span>
-</span></span><span style=display:flex><span>node.<span style=color:#a6e22e>clearStatus</span>();
-</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> ((interrupted <span style=color:#f92672>|=</span> Thread.<span style=color:#a6e22e>interrupted</span>()) <span style=color:#f92672>&amp;&amp;</span> interruptible)  <span style=color:#75715e>// Thread.interrupted() clears the flag</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>break</span>;              <span style=color:#75715e>// lockInterruptibly, tryLock(timeout): cancel -&gt; InterruptedException</span>
-</span></span><span style=display:flex><span>                        <span style=color:#75715e>// lock(): keep waiting; flag restored by current.interrupt() on success</span>
+</span></span></code></pre></div><p>A release wakes one thread, so shared mode relies on this <strong>propagation</strong>. When <code>CountDownLatch.countDown</code> brings the count to zero, each <code>await</code> caller that succeeds wakes the next, until every waiter has passed or a hook fails.</p><h4 id=interrupts>Interrupts</h4><p>An interrupt makes <code>park</code> return just like <code>unpark</code> does; it does not grant the synchronizer. The steps below show where an interrupt is checked, recorded, and acted on:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.acquireInterruptibly (before the loop)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (Thread.<span style=color:#a6e22e>interrupted</span>() <span style=color:#f92672>||</span>                    <span style=color:#75715e>// 0. already interrupted: fail without trying</span>
+</span></span><span style=display:flex><span>    (<span style=color:#f92672>!</span>tryAcquire(arg) <span style=color:#f92672>&amp;&amp;</span> acquire(<span style=color:#66d9ef>null</span>, arg, <span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>true</span>, <span style=color:#66d9ef>false</span>, 0L) <span style=color:#f92672>&lt;</span> 0))
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> InterruptedException();          <span style=color:#75715e>// 8. loop returned CANCELLED</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.acquire (all steps; real code where interrupts matter)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (;;) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. Am I the first waiter? Clean up if the predecessor was cancelled.</span>
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. First waiter (or not yet queued) calls the hook.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (first <span style=color:#f92672>||</span> pred <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        ...
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (acquired) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (first) {
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// 3. Dequeue myself; an uninterruptible caller gets its interrupt back.</span>
+</span></span><span style=display:flex><span>                ...
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (interrupted)
+</span></span><span style=display:flex><span>                    current.<span style=color:#a6e22e>interrupt</span>();       <span style=color:#75715e>// lock(): restore the flag cleared in step 7</span>
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> 1;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 4. Lazy setup: queue, node, link at tail.</span>
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 5. Woken first waiter spins briefly.</span>
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 6. Announce WAITING.</span>
+</span></span><span style=display:flex><span>    ...
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// 7. Park. An interrupt makes park return just like unpark does.</span>
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        ...
+</span></span><span style=display:flex><span>        LockSupport.<span style=color:#a6e22e>park</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>        ...
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>clearStatus</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> ((interrupted <span style=color:#f92672>|=</span> Thread.<span style=color:#a6e22e>interrupted</span>()) <span style=color:#f92672>&amp;&amp;</span> interruptible)  <span style=color:#75715e>// read and clear the flag</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>break</span>;                             <span style=color:#75715e>// interruptible: leave the loop</span>
+</span></span><span style=display:flex><span>                                               <span style=color:#75715e>// lock(): fall through, back to step 1</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> cancelAcquire(node, interrupted, interruptible);   <span style=color:#75715e>// 8. CANCELLED (&lt; 0) -&gt; InterruptedException</span>
 </span></span></code></pre></div><p>Because <code>lock()</code> restores the flag after acquiring, a caller can still react to an interrupt that arrived while it waited:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>lock.<span style=color:#a6e22e>lock</span>();                                      <span style=color:#75715e>// never throws InterruptedException</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>try</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (Thread.<span style=color:#a6e22e>currentThread</span>().<span style=color:#a6e22e>isInterrupted</span>())   <span style=color:#75715e>// interrupt received while waiting</span>
@@ -269,27 +348,30 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>cancelAcquire</span>(Node node, <span style=color:#66d9ef>boolean</span> interrupted,
 </span></span><span style=display:flex><span>                          <span style=color:#66d9ef>boolean</span> interruptible) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (node <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
-</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>waiter</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
-</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>status</span> <span style=color:#f92672>=</span> CANCELLED;    <span style=color:#75715e>// mark only; other threads may be linking to it</span>
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>waiter</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;         <span style=color:#75715e>// 1. nobody should unpark me any more</span>
+</span></span><span style=display:flex><span>        node.<span style=color:#a6e22e>status</span> <span style=color:#f92672>=</span> CANCELLED;    <span style=color:#75715e>// 2. mark only; other threads may be linking to it</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (node.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>)
-</span></span><span style=display:flex><span>            cleanQueue();           <span style=color:#75715e>// unlink cancelled nodes</span>
+</span></span><span style=display:flex><span>            cleanQueue();           <span style=color:#75715e>// 3. unlink cancelled nodes, wake a new first waiter</span>
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (interrupted) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (interrupted) {              <span style=color:#75715e>// 4. report the outcome</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (interruptible)
-</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> CANCELLED;       <span style=color:#75715e>// negative -&gt; InterruptedException</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> CANCELLED;       <span style=color:#75715e>//    negative -&gt; InterruptedException</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>else</span>
 </span></span><span style=display:flex><span>            Thread.<span style=color:#a6e22e>currentThread</span>().<span style=color:#a6e22e>interrupt</span>();   <span style=color:#75715e>// keep the flag for the caller</span>
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> 0;                       <span style=color:#75715e>// timeout -&gt; tryAcquireNanos returns false</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> 0;                       <span style=color:#75715e>//    timeout -&gt; tryAcquireNanos returns false</span>
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p><code>cleanQueue</code> walks from <code>tail</code> toward <code>head</code> and unsplices cancelled nodes by CAS:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AbstractQueuedSynchronizer.cleanQueue</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>cleanQueue</span>() {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (;;) {                               <span style=color:#75715e>// restart point</span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Node q <span style=color:#f92672>=</span> tail, s <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>, p, n;;) { <span style=color:#75715e>// (p, q, s) triples</span>
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 1. Walk from tail toward head: q is the current node, p its predecessor, s its successor.</span>
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (q <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>||</span> (p <span style=color:#f92672>=</span> q.<span style=color:#a6e22e>prev</span>) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span>;                      <span style=color:#75715e>// end of list</span>
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 2. Links changed under me: restart from tail.</span>
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (s <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> tail <span style=color:#f92672>!=</span> q : (s.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>!=</span> q <span style=color:#f92672>||</span> s.<span style=color:#a6e22e>status</span> <span style=color:#f92672>&lt;</span> 0))
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>break</span>;                       <span style=color:#75715e>// inconsistent</span>
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 3. q is cancelled: unlink it by pointing s (or tail) at p.</span>
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (q.<span style=color:#a6e22e>status</span> <span style=color:#f92672>&lt;</span> 0) {              <span style=color:#75715e>// cancelled</span>
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> ((s <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> casTail(q, p) : s.<span style=color:#a6e22e>casPrev</span>(q, p)) <span style=color:#f92672>&amp;&amp;</span>
 </span></span><span style=display:flex><span>                    q.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>==</span> p) {
@@ -300,6 +382,7 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span>                }
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>break</span>;
 </span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 4. p.next is stale: repair it so signalNext can find q.</span>
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> ((n <span style=color:#f92672>=</span> p.<span style=color:#a6e22e>next</span>) <span style=color:#f92672>!=</span> q) {         <span style=color:#75715e>// help finish</span>
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (n <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> q.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>==</span> p) {
 </span></span><span style=display:flex><span>                    p.<span style=color:#a6e22e>casNext</span>(n, q);
@@ -308,12 +391,13 @@ AbstractQueuedSynchronizer &#34;1&#34; o-- &#34;*&#34; Node : sync queue
 </span></span><span style=display:flex><span>                }
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>break</span>;
 </span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// 5. Move one node toward head.</span>
 </span></span><span style=display:flex><span>            s <span style=color:#f92672>=</span> q;
 </span></span><span style=display:flex><span>            q <span style=color:#f92672>=</span> q.<span style=color:#a6e22e>prev</span>;
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Waiters also clean up for themselves: step 1 of the loop calls <code>cleanQueue</code> when the predecessor&rsquo;s <code>status &lt; 0</code>.</p><h3 id=13-conditionobject>1.3 ConditionObject</h3><p><code>ConditionObject</code> is nested inside AQS and backs <code>Lock.newCondition()</code>. It reuses <code>ConditionNode</code> but maintains a <strong>separate condition queue</strong> (<code>firstWaiter</code> / <code>lastWaiter</code>), distinct from the CLH sync queue:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Waiters also clean up for themselves: at the start of each <code>acquire</code> iteration (step 1 in the loop above), a waiter whose predecessor has <code>status &lt; 0</code> calls <code>cleanQueue</code>.</p><h3 id=13-conditionobject>1.3 ConditionObject</h3><p><code>ConditionObject</code> is nested inside AQS and backs <code>Lock.newCondition()</code>. It reuses <code>ConditionNode</code> but maintains a <strong>separate condition queue</strong> (<code>firstWaiter</code> / <code>lastWaiter</code>), distinct from the CLH sync queue:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface Condition {
     + await()
     + awaitUninterruptibly()
