@@ -1,7 +1,6 @@
 ---
 title: "Apache Flink internals"
 date: 2026-10-06T19:00:00+02:00
-draft: true
 categories:
 - data
 - stream
