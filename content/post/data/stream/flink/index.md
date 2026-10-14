@@ -1,10 +1,11 @@
 ---
-title: "Apache Flink: runtime, state, and event time"
+title: "Apache Flink internals"
 date: 2026-10-06T19:00:00+02:00
 draft: true
 categories:
 - data
 - stream
+- flink
 tags:
 - data
 - stream
@@ -12,8 +13,6 @@ tags:
 keywords:
 - flink
 - streaming
-- checkpoint
-- watermark
 #thumbnailImage: //example.com/image.jpg
 ---
 
@@ -25,90 +24,425 @@ keywords:
 
 ## 1. Overview
 
-A Flink application builds a logical pipeline—sources, transforms, sinks—usually through the DataStream API (`StreamExecutionEnvironment`) or the Table / SQL API. Calling `execute` (or submitting a JAR to a cluster) turns that pipeline into a physical job that runs until cancelled, fails past recovery, or finishes when all bounded inputs end.
 
-The cluster has two process roles:
+**Apache Flink** is a distributed engine for continuous (and bounded) **dataflow** programs. A job is a graph of operators. The runtime places parallel **tasks** on workers, keeps operator **state** local to those tasks, and advances **event time** with **watermarks** so windows and timers close at well-defined points.
+
+![Flink overview: client, sources, cluster, sinks](images/flink-overview-usage.svg)
+
+Default execution is **streaming**: records flow continuously and checkpoints snapshot state for recovery. The same operators can run in **batch** style (`RuntimeExecutionMode.BATCH`) when every input is bounded. Parallelism is per operator (or a job default): a logical operator with parallelism `p` becomes `p` **subtasks** that share no mutable state. Keyed state is partitioned by key group so rescale can move groups without rewriting every key.
+
+### Usage example
+
+You build a pipeline with the DataStream API (`StreamExecutionEnvironment`) or the Table / SQL API—sources in, transforms, sinks out—then call `execute` (or submit a JAR) so the cluster runs the job until it is cancelled, fails past recovery, or finishes when all bounded inputs end. A typical job:
+
+```java
+StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+env.enableCheckpointing(10_000);
+
+env.fromSource(ordersSource, watermarkStrategy, "orders")
+    .map(new ParseOrder())
+    .keyBy(Order::getUserId)
+    .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
+    .aggregate(new CountPerUser())
+    .sinkTo(kafkaSink);
+
+env.execute("orders-per-minute");
+```
+
+Here Kafka (or another connector) is the source, keyed windows hold per-user counts in operator state, and another connector is the sink.
+
+### Cluster roles
+
+That job is scheduled onto a Flink cluster with two process roles:
 
 | Role | Responsibility |
 |------|----------------|
 | **JobManager** | Accepts jobs, builds the scheduling plan, coordinates checkpoints, recovers failures |
 | **TaskManager** | Hosts **task slots**; runs one or more subtasks; holds keyed/operator state locally |
 
-One JobManager is the leader for a given high-availability setup. TaskManagers register slots with the ResourceManager; the JobMaster claims slots and deploys tasks into them.
-
-```mermaid
-flowchart LR
-  Client["Client / SQL gateway"] --> JM["JobManager\nDispatcher + JobMaster"]
-  JM --> TM1["TaskManager\nslots + StreamTasks"]
-  JM --> TM2["TaskManager"]
-  TM1 <-->|"shuffle / pipelined buffers"| TM2
-  JM -->|"checkpoint trigger / ack"| TM1
-  JM -->|"checkpoint trigger / ack"| TM2
-```
-
-Default execution is **streaming**: records flow indefinitely, checkpoints capture consistent state snapshots, and recovery restores the last completed checkpoint. The same operators can run in **batch** style (`RuntimeExecutionMode.BATCH`) when all inputs are bounded; the scheduler then prefers blocking shuffles and can skip continuous checkpointing.
-
-Parallelism is per operator (or a job default). A logical operator with parallelism `p` becomes `p` **subtasks**. Subtasks of the same operator share no mutable state; keyed state is partitioned by key group so that after a rescale Flink can redistribute groups without rewriting every key.
+One JobManager is the leader for a given high-availability setup. The client submits to the JobManager. TaskManagers register slots with the ResourceManager; the JobMaster claims slots and deploys tasks into them. Source and sink connectors run inside those tasks—the JobManager never sees individual records. When operators repartition (for example after `keyBy`), TaskManagers exchange records over pipelined network buffers (shuffle). Checkpoints are triggered by the JobManager and acknowledged by the tasks.
 
 ---
 
 ## 2. Job graph translation
 
-User code does not schedule threads directly. Flink lowers the API graph in stages until each TaskManager runs concrete `StreamTask` instances.
+User code does not schedule threads directly. Flink lowers the API graph in stages until each TaskManager runs concrete `StreamTask` instances:
 
-**Transformations → StreamGraph.** Each DataStream operator call adds a `Transformation`. `StreamGraphGenerator` builds a `StreamGraph`: vertices are `StreamNode`s (operator factories, parallelism, state keys), edges are `StreamEdge`s (partitioner, exchange mode).
+1. **API `Transformation`s** — each DataStream call appends a node to a list on the environment.
+2. **`StreamGraph`** — `StreamGraphGenerator` turns that list into `StreamNode` / `StreamEdge` (partitioners, exchange mode).
+3. **`JobGraph`** — `StreamingJobGraphGenerator` collapses chainable sequences into `JobVertex` units and places network edges where repartition is required.
+4. **`ExecutionGraph`** — the JobMaster expands each vertex to `parallelism` execution vertices and deploys `StreamTask`s onto slots.
 
-**StreamGraph → JobGraph.** `StreamingJobGraphGenerator.createJobGraph` collapses **chainable** operator sequences into one `JobVertex`. Chaining is allowed when the edge is forward (same parallelism, no re-partition), chaining is enabled, and the operators are compatible. Everything inside a chain runs in one thread and one mailbox, so there is no network hop between chained `map`/`filter` steps.
+![orders-per-minute job graph translation](images/flink-graph-translation.svg)
 
-**JobGraph → ExecutionGraph.** The JobMaster expands each `JobVertex` into `parallelism` execution vertices, wires intermediate result partitions, and asks the scheduler to deploy them onto slots.
-
-```plantuml
-@startuml
-class StreamExecutionEnvironment {
-  +fromSource()
-  +execute()
-}
-
-class StreamGraph {
-  -streamNodes
-  -streamEdges
-  +getJobGraph()
-}
-
-class StreamingJobGraphGenerator {
-  +createJobGraph()
-  +isChainable()
-}
-
-class JobGraph {
-  -taskVertices
-  -checkpointingSettings
-}
-
-class ExecutionGraph {
-  -verticesById
-  +scheduleForExecution()
-}
-
-class StreamTask {
-  +invoke()
-}
-
-StreamExecutionEnvironment ..> StreamGraph : StreamGraphGenerator
-StreamGraph ..> JobGraph : StreamingJobGraphGenerator
-JobGraph ..> ExecutionGraph : JobMaster
-ExecutionGraph ..> StreamTask : deploy to slots
-@enduml
-```
+The stages below reuse the §1 **orders-per-minute** example:
 
 ```text
-API:     source -> map -> keyBy -> window -> sink
-Stream:  [src] --fwd--> [map] --hash--> [window] --fwd--> [sink]
-Job:     JobVertex_A(src+map)  ==network==>  JobVertex_B(window+sink)
+API:     orders -> ParseOrder -> keyBy(userId) -> window -> aggregate -> kafkaSink
+Stream:  [orders] --fwd--> [ParseOrder] --hash--> [window+agg] --fwd--> [kafkaSink]
+Job:     JobVertex_A(orders+ParseOrder)  ==network==>  JobVertex_B(window+agg+kafkaSink)
 Exec:    A.0 A.1 ...     shuffle      B.0 B.1 ...
 ```
 
 `StreamGraph.getJobGraph` is the bridge the client (or Application Mode cluster entrypoint) uses before the JobMaster materializes the `ExecutionGraph`. Failures restart from the last completed checkpoint by resetting tasks and restoring state handles recorded in that checkpoint.
+
+### 2.1 StreamGraph generation
+
+Building a `StreamGraph` is a two-phase procedure on the client. User code first accumulates API metadata; only an explicit `getStreamGraph` / `execute` turns that metadata into a graph. Nothing processes records yet—operator factories create runtime **`StreamOperator`s** later, when tasks deploy on workers.
+
+Procedures:
+
+1. **API call** (§2.1.1) — each `fromSource` / `map` / `keyBy` / … returns a **`DataStream`** (or related) handle and appends a **`Transformation`** to `StreamExecutionEnvironment`’s list.
+2. **Client job execution** (§2.1.2) — `getStreamGraph` / `execute` hands that list to **`StreamGraphGenerator`**, which builds **`StreamNode`s** and **`StreamEdge`s** (partitioner + exchange mode: `fwd`, `hash`, …).
+
+#### 2.1.1 API call
+
+When user code writes a DataStream job, each call like `fromSource`, `map`, or `keyBy` looks like it builds a pipeline—but at this stage Flink only records what was requested. Every call returns a **`DataStream`** (or a close relative such as `KeyedStream`) for further chaining, and behind the scenes it adds a **`Transformation`** to a list on **`StreamExecutionEnvironment`**. That list is the real program so far; the `DataStream` objects are just convenient handles. No tasks run and no records move until the code later asks for a graph or calls `execute`.
+
+```plantuml
+@startuml
+
+class StreamExecutionEnvironment {
+  - transformations : List
+  - parallelism : int
+  + fromSource(Source, WatermarkStrategy, String) : DataStreamSource
+  + addOperator(Transformation) : void
+  + getParallelism() : int
+  + getStreamGraph() : StreamGraph
+}
+
+class DataStream {
+  # environment : StreamExecutionEnvironment
+  # transformation : Transformation
+  + getExecutionEnvironment() : StreamExecutionEnvironment
+  + getTransformation() : Transformation
+  + map(MapFunction) : SingleOutputStreamOperator
+  + keyBy(KeySelector) : KeyedStream
+  + transform(String, TypeInformation, StreamOperatorFactory) : SingleOutputStreamOperator
+  + sinkTo(Sink) : DataStreamSink
+}
+
+class SingleOutputStreamOperator {
+  + name(String) : SingleOutputStreamOperator
+  + uid(String) : SingleOutputStreamOperator
+  + setParallelism(int) : SingleOutputStreamOperator
+}
+
+class DataStreamSource
+
+class KeyedStream {
+  - keyType : TypeInformation
+  + window(WindowAssigner) : WindowedStream
+}
+
+class WindowedStream {
+  - input : KeyedStream
+  - windowAssigner : WindowAssigner
+  + aggregate(AggregateFunction) : SingleOutputStreamOperator
+}
+
+class Transformation {
+  # id : int
+  # name : String
+  # uid : String
+  # parallelism : int
+  # outputType : TypeInformation
+  + getId() : int
+  + getName() : String
+  + getInputs() : List
+  + getOutputType() : TypeInformation
+  + getParallelism() : int
+}
+
+class OneInputTransformation {
+  - input : Transformation
+  - operatorFactory : StreamOperatorFactory
+  + getOperatorFactory() : StreamOperatorFactory
+  + getInputs() : List
+}
+
+class PartitionTransformation {
+  - partitioner : StreamPartitioner
+  - exchangeMode : StreamExchangeMode
+  + getPartitioner() : StreamPartitioner
+  + getExchangeMode() : StreamExchangeMode
+  + getInputs() : List
+}
+
+DataStream <|-- SingleOutputStreamOperator
+DataStream <|-- KeyedStream
+SingleOutputStreamOperator <|-- DataStreamSource
+
+WindowedStream --> KeyedStream : holds
+
+StreamExecutionEnvironment --> DataStream : fromSource / transforms
+StreamExecutionEnvironment --> Transformation : owns list
+DataStream --> Transformation : wraps
+Transformation <|-- OneInputTransformation
+Transformation <|-- PartitionTransformation
+@enduml
+```
+
+```java
+// DataStream.map: create a Transformation and register it on the env (no task yet)
+public <R> SingleOutputStreamOperator<R> map(MapFunction<T, R> mapper) {
+    return transform(
+        "Map",
+        getType().getTypeClass() /* simplified */,
+        new OneInputTransformation<>(
+            this.transformation,
+            "Map",
+            new MapOperatorFactory<>(mapper),
+            TypeExtractor.getMapReturnTypes(mapper, getType()),
+            parallelism));
+}
+
+protected <R> SingleOutputStreamOperator<R> transform(
+        String operatorName,
+        TypeInformation<R> outTypeInfo,
+        OneInputTransformation<T, R> transformation) {
+    // registers on StreamExecutionEnvironment.transformations
+    getExecutionEnvironment().addOperator(transformation);
+    return new SingleOutputStreamOperator<>(getExecutionEnvironment(), transformation);
+}
+```
+
+For **orders-per-minute**, after the fluent chain the environment’s list holds transforms for `orders`, `ParseOrder`, `keyBy(userId)`, window+aggregate, and `kafkaSink`—still only metadata.
+
+#### 2.1.2 Client job execution
+
+When user code calls `execute` (or `getStreamGraph`), the client finally turns the environment’s **`Transformation`** list into a **`StreamGraph`**. **`StreamGraphGenerator`** walks that list: each physical transform becomes a **`StreamNode`** (name, parallelism, operator factory); connections become **`StreamEdge`s** carrying a partitioner and exchange mode (`fwd`, `hash`, …). A `PartitionTransformation` from `keyBy` does not become its own node—it only configures the edge. Runtime **`StreamOperator`** instances are still not created here; factories on the nodes create them later when tasks deploy on workers.
+
+```plantuml
+@startuml
+
+class StreamExecutionEnvironment {
+  - transformations : List
+  + getStreamGraph() : StreamGraph
+  + execute(String) : JobClient
+}
+
+class StreamGraphGenerator {
+  + generate(StreamExecutionEnvironment, List) : StreamGraph
+}
+
+class StreamGraph {
+  - streamNodes : Map
+  - streamEdges : List
+  + addOperator(int, String, StreamOperatorFactory, int) : void
+  + addEdge(int, int, StreamPartitioner, StreamExchangeMode) : void
+  + getJobGraph() : JobGraph
+}
+
+class StreamNode {
+  - id : int
+  - operatorName : String
+  - parallelism : int
+  - operatorFactory : StreamOperatorFactory
+}
+
+class StreamEdge {
+  - sourceId : int
+  - targetId : int
+  - partitioner : StreamPartitioner
+  - exchangeMode : StreamExchangeMode
+}
+
+StreamExecutionEnvironment ..> StreamGraphGenerator : getStreamGraph()
+StreamGraphGenerator ..> StreamGraph : generate
+StreamGraph --> StreamNode : streamNodes
+StreamGraph --> StreamEdge : streamEdges
+@enduml
+```
+
+```java
+// Client entry: execute builds the StreamGraph, then continues toward JobGraph / cluster
+public JobClient execute(String jobName) throws Exception {
+    StreamGraph streamGraph = getStreamGraph();
+    streamGraph.setJobName(jobName);
+    return execute(streamGraph);
+}
+
+public StreamGraph getStreamGraph() {
+    return StreamGraphGenerator.generate(this, transformations);
+}
+
+// Simplified StreamGraphGenerator: Transformation list -> nodes + edges
+StreamGraph generate(List<Transformation<?>> transforms) {
+    StreamGraph graph = new StreamGraph(/* config */);
+    for (Transformation<?> t : transforms) {
+        if (t instanceof PartitionTransformation) {
+            // keyBy / rebalance / ... : no StreamNode, only edge wiring
+            PartitionTransformation<?> p = (PartitionTransformation<?>) t;
+            // edge source = p.getInputs().get(0), target = downstream physical node
+            graph.addEdge(sourceId, targetId, p.getPartitioner(), p.getExchangeMode());
+        } else {
+            // source / map / window+agg / sink : one StreamNode with an operator factory
+            graph.addOperator(
+                t.getId(),
+                t.getName(),
+                ((OneInputTransformation<?, ?>) t).getOperatorFactory(),
+                t.getParallelism());
+            for (Transformation<?> input : t.getInputs()) {
+                graph.addEdge(input.getId(), t.getId(), /* default fwd unless overridden */, FORWARD);
+            }
+        }
+    }
+    return graph;
+}
+```
+
+For **orders-per-minute**, the resulting `StreamGraph` content is:
+
+```text
+StreamNodes:
+  orders              SourceOperatorFactory
+  ParseOrder          MapOperatorFactory
+  window+aggregate    WindowOperatorFactory   // window + aggregate → one node
+  kafkaSink           SinkOperatorFactory
+
+StreamEdges:
+  orders           --fwd-->              ParseOrder
+  ParseOrder       --hash(userId)-->     window+aggregate
+  window+aggregate --fwd-->              kafkaSink
+```
+
+`keyBy(Order::getUserId)` is only the **hash** edge between `ParseOrder` and `window+aggregate`, not a separate node.
+
+### 2.2 StreamGraph → JobGraph
+
+**`StreamingJobGraphGenerator.createJobGraph`** walks the `StreamGraph` and builds a **`JobGraph`**: one **`JobVertex`** per chain of operators that can run in the same thread. Chaining is allowed when the edge is **forward** (same parallelism, no re-partition), chaining is enabled, and the operators are compatible. Everything inside a chain shares one mailbox—there is no network hop between chained `map` / `filter` steps. Edges that hash or rebalance become **network** intermediate result partitions between vertices.
+
+```plantuml
+@startuml
+skinparam classAttributeIconSize 0
+
+class StreamGraph {
+  + getStreamNodes() : Collection
+  + getStreamEdges() : Collection
+  + getJobGraph() : JobGraph
+}
+
+class StreamingJobGraphGenerator {
+  + createJobGraph(StreamGraph) : JobGraph
+  + isChainable(StreamEdge, StreamNode, StreamNode) : boolean
+}
+
+class JobGraph {
+  List taskVertices
+  ExecutionConfig serializedExecutionConfig
+  CheckpointingOptions checkpointingSettings
+  + addVertex(JobVertex)
+}
+
+class JobVertex {
+  int parallelism
+  Class invokableClass
+  List chainedOperators
+}
+
+class JobEdge {
+  DistributionPattern distributionPattern
+}
+
+StreamGraph ..> StreamingJobGraphGenerator : getJobGraph()
+StreamingJobGraphGenerator ..> JobGraph : createJobGraph
+JobGraph --> JobVertex
+JobVertex --> JobEdge : outgoing
+@enduml
+```
+
+```java
+public static JobGraph createJobGraph(StreamGraph streamGraph) {
+    JobGraph jobGraph = new JobGraph(streamGraph.getJobID(), streamGraph.getJobName());
+    // walk StreamNodes in topological order; start a JobVertex at chain heads
+    for (StreamNode source : streamGraph.getSources()) {
+        createChain(source, jobGraph, streamGraph);
+    }
+    return jobGraph;
+}
+
+static boolean isChainable(StreamEdge edge, StreamNode up, StreamNode down) {
+    return edge.getPartitioner() instanceof ForwardPartitioner
+        && up.getParallelism() == down.getParallelism()
+        && down.isChainingEnabled()
+        && /* same slot-sharing group, compatible operators, ... */ true;
+}
+
+// Chain head becomes one JobVertex; chained bodies become StreamConfig entries
+// inside that vertex. Non-chainable edges create IntermediateDataSet + JobEdge.
+```
+
+In **orders-per-minute**, `orders` and `ParseOrder` chain into **JobVertex A**; `window+agg` and `kafkaSink` chain into **JobVertex B**; the `keyBy(userId)` hash edge is the network boundary between A and B.
+
+### 2.3 JobGraph → ExecutionGraph
+
+On the JobManager, the **JobMaster** turns the submitted `JobGraph` into an **`ExecutionGraph`**: each `JobVertex` expands to `parallelism` **`ExecutionVertex`** instances (subtasks `A.0`, `A.1`, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a **`StreamTask`** (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.
+
+```plantuml
+@startuml
+skinparam classAttributeIconSize 0
+
+class JobMaster {
+  + startJobExecution()
+}
+
+class ExecutionGraph {
+  Map verticesById
+  + scheduleForExecution()
+  + failGlobal(Throwable)
+}
+
+class ExecutionJobVertex {
+  ExecutionVertex[] taskVertices
+  int parallelism
+}
+
+class ExecutionVertex {
+  int subTaskIndex
+  + getCurrentExecutionAttempt() : Execution
+}
+
+class Execution {
+  + deploy()
+  + fail(Throwable)
+}
+
+class TaskDeploymentDescriptor
+class StreamTask {
+  + invoke()
+}
+
+JobMaster ..> ExecutionGraph : build from JobGraph
+ExecutionGraph --> ExecutionJobVertex
+ExecutionJobVertex --> ExecutionVertex : parallelism
+ExecutionVertex --> Execution : attempt
+Execution ..> TaskDeploymentDescriptor : deploy
+TaskDeploymentDescriptor ..> StreamTask : TaskManager runs
+@enduml
+```
+
+```java
+// JobMaster (simplified): JobGraph -> ExecutionGraph -> schedule
+ExecutionGraph executionGraph = DefaultExecutionGraphBuilder.buildGraph(
+    jobGraph,
+    configuration,
+    blobWriter,
+    /* ... */);
+
+executionGraph.scheduleForExecution();
+
+// Each ExecutionVertex gets an Execution attempt that deploys to a slot
+Execution execution = executionVertex.getCurrentExecutionAttempt();
+LogicalSlot slot = slotPool.allocateSlot(/* ... */);
+execution.deploy(slot); // TaskManager receives TaskDeploymentDescriptor
+
+// On the worker: load invokable (e.g. OneInputStreamTask) and run
+StreamTask<?, ?> task = createInvokable(deployment);
+task.invoke(); // mailbox loop: records, timers, checkpoint barriers
+```
+
+After this step the logical pipeline is concrete parallel work: TaskManagers run `StreamTask`s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.
 
 ---
 
