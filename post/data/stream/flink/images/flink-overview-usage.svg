@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="740" viewBox="0 0 900 740" role="img" aria-label="Flink cluster layout top to bottom with source, sink, and client connectors">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arro" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#ea580c"/>
+    </marker>
+    <marker id="arrp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <rect width="900" height="740" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="450" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">Flink overview</text>
+
+  <!-- TOP: sources over TM columns, client over JM -->
+  <text x="100" y="52" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#c2410c">SOURCE CONNECTORS</text>
+  <rect x="70" y="62" width="160" height="64" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="150" y="90" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">Kafka / MQ</text>
+  <text x="150" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">fromSource</text>
+
+  <text x="370" y="52" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#7c3aed">CLIENT CONNECTOR</text>
+  <rect x="350" y="62" width="160" height="64" rx="8" fill="#faf5ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="430" y="90" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">Client</text>
+  <text x="430" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">env.execute()</text>
+
+  <rect x="630" y="62" width="160" height="64" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="710" y="90" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">Files / CDC</text>
+  <text x="710" y="110" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">fromSource</text>
+
+  <!-- CLUSTER -->
+  <rect x="36" y="160" width="828" height="380" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="52" y="182" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#64748b">FLINK CLUSTER</text>
+
+  <!-- JobManager centered (narrow so source corridors stay clear on left/right) -->
+  <rect x="300" y="200" width="260" height="110" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="430" y="226" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0f172a">JobManager</text>
+  <text x="430" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#64748b">leader process</text>
+
+  <rect x="316" y="258" width="70" height="36" rx="5" fill="#ffffff" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="351" y="280" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#1e40af">Dispatcher</text>
+
+  <rect x="396" y="258" width="88" height="36" rx="5" fill="#ffffff" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="440" y="280" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#1e40af">ResourceMgr</text>
+
+  <rect x="494" y="258" width="50" height="36" rx="5" fill="#ffffff" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="519" y="280" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#1e40af">JobMaster</text>
+
+  <!-- Checkpoint to the right of JM, still left of right corridor -->
+  <rect x="580" y="220" width="100" height="70" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="630" y="250" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#0f172a">Checkpoint</text>
+  <text x="630" y="268" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">HDFS / S3</text>
+  <line x1="560" y1="255" x2="580" y2="255" stroke="#64748b" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- Client -> JM (straight vertical, center) -->
+  <line x1="430" y1="126" x2="430" y2="200" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#arrp)"/>
+  <text x="454" y="168" font-family="Consolas, monospace" font-size="9" fill="#7c3aed">submit</text>
+
+  <!-- Source left corridor -> TM1 (x=150, clear of JM which starts at 300) -->
+  <line x1="150" y1="126" x2="150" y2="360" stroke="#ea580c" stroke-width="1.6" marker-end="url(#arro)"/>
+  <text x="112" y="240" font-family="Consolas, monospace" font-size="8" fill="#c2410c">records</text>
+
+  <!-- Source right corridor -> TM2 (x=710, clear of checkpoint ending ~680) -->
+  <line x1="710" y1="126" x2="710" y2="360" stroke="#ea580c" stroke-width="1.6" marker-end="url(#arro)"/>
+  <text x="724" y="240" font-family="Consolas, monospace" font-size="8" fill="#c2410c">records</text>
+
+  <!-- JM -> TMs via gap (orthogonal, no box crossing) -->
+  <path d="M360 310 L360 336 L220 336 L220 360" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#arrb)"/>
+  <path d="M500 310 L500 336 L640 336 L640 360" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#arrb)"/>
+  <text x="430" y="330" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#2563eb">deploy / checkpoint</text>
+
+  <!-- TaskManagers -->
+  <rect x="60" y="360" width="340" height="156" rx="10" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="230" y="384" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">TaskManager 1</text>
+  <text x="230" y="400" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#64748b">worker JVM</text>
+
+  <rect x="80" y="416" width="140" height="80" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="150" y="444" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0f172a">Slot 0</text>
+  <text x="150" y="464" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">StreamTask</text>
+  <text x="150" y="480" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#64748b">source / ops</text>
+
+  <rect x="240" y="416" width="140" height="80" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="310" y="444" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0f172a">Slot 1</text>
+  <text x="310" y="464" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">StreamTask</text>
+  <text x="310" y="480" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#64748b">ops / sink</text>
+
+  <rect x="500" y="360" width="340" height="156" rx="10" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="670" y="384" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">TaskManager 2</text>
+  <text x="670" y="400" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#64748b">worker JVM</text>
+
+  <rect x="520" y="416" width="140" height="80" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="590" y="444" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0f172a">Slot 0</text>
+  <text x="590" y="464" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">StreamTask</text>
+  <text x="590" y="480" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#64748b">ops</text>
+
+  <rect x="680" y="416" width="140" height="80" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="750" y="444" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#0f172a">Slot 1</text>
+  <text x="750" y="464" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">StreamTask</text>
+  <text x="750" y="480" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#64748b">ops / sink</text>
+
+  <!-- Shuffle in the gap between TMs only -->
+  <line x1="400" y1="430" x2="500" y2="430" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="500" y1="450" x2="400" y2="450" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="450" y="422" text-anchor="middle" font-family="Consolas, monospace" font-size="8" fill="#475569">shuffle</text>
+
+  <!-- SINKS: aligned under each TM column -->
+  <text x="36" y="580" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#059669">SINK CONNECTORS</text>
+
+  <rect x="60" y="592" width="160" height="64" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="140" y="620" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">Kafka / DB</text>
+  <text x="140" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">sinkTo</text>
+
+  <rect x="250" y="592" width="160" height="64" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="330" y="620" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">Filesystem</text>
+  <text x="330" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">sinkTo</text>
+
+  <rect x="590" y="592" width="160" height="64" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="670" y="620" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">JDBC / Iceberg</text>
+  <text x="670" y="640" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#475569">sinkTo</text>
+
+  <!-- TM -> sinks straight down (aligned under slots / TMs) -->
+  <line x1="150" y1="516" x2="150" y2="592" stroke="#10b981" stroke-width="1.6" marker-end="url(#arrg)"/>
+  <line x1="310" y1="516" x2="310" y2="592" stroke="#10b981" stroke-width="1.6" marker-end="url(#arrg)"/>
+  <line x1="670" y1="516" x2="670" y2="592" stroke="#10b981" stroke-width="1.6" marker-end="url(#arrg)"/>
+  <text x="330" y="560" font-family="Consolas, monospace" font-size="9" fill="#059669">write</text>
+</svg>
