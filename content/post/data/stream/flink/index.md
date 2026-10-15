@@ -92,7 +92,7 @@ Building a `StreamGraph` is a two-phase procedure on the client. User code first
 Procedures:
 
 1. **API call** (§2.1.1) — each `fromSource` / `map` / `keyBy` / … returns a **`DataStream`** (or related) handle and appends a **`Transformation`** to `StreamExecutionEnvironment`’s list.
-2. **Client job execution** (§2.1.2) — `getStreamGraph` / `execute` hands that list to **`StreamGraphGenerator`**, which builds **`StreamNode`s** and **`StreamEdge`s** (partitioner + exchange mode: `fwd`, `hash`, …).
+2. **StreamGraph translation** (§2.1.2) — `getStreamGraph` / `execute` hands that list to **`StreamGraphGenerator`**, which dispatches each **`Transformation`** to a **`TransformationTranslator`** that writes **`StreamNode`s** / **`StreamEdge`s** (`fwd`, `hash`, …).
 
 #### 2.1.1 API call
 
@@ -130,14 +130,17 @@ class SingleOutputStreamOperator {
 class DataStreamSource
 
 class KeyedStream {
+  - keySelector : KeySelector
   - keyType : TypeInformation
   + window(WindowAssigner) : WindowedStream
+  + reduce(ReduceFunction) : SingleOutputStreamOperator
 }
 
 class WindowedStream {
   - input : KeyedStream
   - windowAssigner : WindowAssigner
   + aggregate(AggregateFunction) : SingleOutputStreamOperator
+  + reduce(ReduceFunction) : SingleOutputStreamOperator
 }
 
 class Transformation {
@@ -168,6 +171,16 @@ class PartitionTransformation {
   + getInputs() : List
 }
 
+class ReduceTransformation {
+  - input : Transformation
+  - reducer : ReduceFunction
+  - keySelector : KeySelector
+  - keyTypeInfo : TypeInformation
+  + getReducer() : ReduceFunction
+  + getKeySelector() : KeySelector
+  + getInputs() : List
+}
+
 DataStream <|-- SingleOutputStreamOperator
 DataStream <|-- KeyedStream
 SingleOutputStreamOperator <|-- DataStreamSource
@@ -179,6 +192,8 @@ StreamExecutionEnvironment --> Transformation : owns list
 DataStream --> Transformation : wraps
 Transformation <|-- OneInputTransformation
 Transformation <|-- PartitionTransformation
+Transformation <|-- ReduceTransformation
+KeyedStream ..> ReduceTransformation : reduce
 @enduml
 ```
 
@@ -208,9 +223,9 @@ protected <R> SingleOutputStreamOperator<R> transform(
 
 For **orders-per-minute**, after the fluent chain the environment’s list holds transforms for `orders`, `ParseOrder`, `keyBy(userId)`, window+aggregate, and `kafkaSink`—still only metadata.
 
-#### 2.1.2 Client job execution
+#### 2.1.2 StreamGraph translation
 
-When user code calls `execute` (or `getStreamGraph`), the client finally turns the environment’s **`Transformation`** list into a **`StreamGraph`**. **`StreamGraphGenerator`** walks that list: each physical transform becomes a **`StreamNode`** (name, parallelism, operator factory); connections become **`StreamEdge`s** carrying a partitioner and exchange mode (`fwd`, `hash`, …). A `PartitionTransformation` from `keyBy` does not become its own node—it only configures the edge. Runtime **`StreamOperator`** instances are still not created here; factories on the nodes create them later when tasks deploy on workers.
+When user code calls `execute` (or `getStreamGraph`), the client turns the environment’s **`Transformation`** list into a **`StreamGraph`**. **`StreamGraphGenerator`** does not hard-code per-type `instanceof` logic for the common operators; it looks up a **`TransformationTranslator`** in `translatorMap` and delegates with a **`TransformationTranslator.Context`** (`ContextImpl`) that exposes the in-progress `StreamGraph`, already-translated parent node ids, and recursive `transform(...)`. Each translator writes **`StreamNode`s** / **`StreamEdge`s** (or a virtual partition node for `keyBy`) into the graph. Runtime **`StreamOperator`** instances are still not created here; factories on the nodes create them later when tasks deploy on workers.
 
 ```plantuml
 @startuml
@@ -222,14 +237,47 @@ class StreamExecutionEnvironment {
 }
 
 class StreamGraphGenerator {
-  + generate(StreamExecutionEnvironment, List) : StreamGraph
+  - transformations : List
+  - translatorMap : Map
+  + generate() : StreamGraph
+  - transform(Transformation) : Collection
 }
+
+interface TransformationTranslator {
+  + translateForStreaming(Transformation, Context) : Collection
+  + translateForBatch(Transformation, Context) : Collection
+}
+
+interface "TransformationTranslator.Context" as Context {
+  + getStreamGraph() : StreamGraph
+  + getStreamNodeIds(Transformation) : Collection
+  + getSlotSharingGroup() : String
+  + transform(Transformation) : Collection
+}
+
+class ContextImpl {
+  - streamGraphGenerator : StreamGraphGenerator
+  - streamGraph : StreamGraph
+  - slotSharingGroup : String
+}
+
+class SourceTransformationTranslator
+class OneInputTransformationTranslator
+class PartitionTransformationTranslator
+class ReduceTransformationTranslator
+class SinkTransformationTranslator
 
 class StreamGraph {
   - streamNodes : Map
-  - streamEdges : List
+  - sources : Set
+  - sinks : Set
+  - virtualPartitionNodes : Map
+  - virtualSideOutputNodes : Map
   + addOperator(int, String, StreamOperatorFactory, int) : void
   + addEdge(int, int, StreamPartitioner, StreamExchangeMode) : void
+  + addVirtualPartitionNode(int, int, StreamPartitioner, StreamExchangeMode) : void
+  + getSourceIDs() : Collection
+  + getSinkIDs() : Collection
   + getJobGraph() : JobGraph
 }
 
@@ -238,7 +286,38 @@ class StreamNode {
   - operatorName : String
   - parallelism : int
   - operatorFactory : StreamOperatorFactory
+  - inEdges : List
+  - outEdges : List
+  - statePartitioners : KeySelector[]
+  - stateKeySerializer : TypeSerializer
+  + getOperatorFactory() : StreamOperatorFactory
+  + getInEdges() : List
+  + getOutEdges() : List
+  + getStatePartitioners() : KeySelector[]
+  + setStatePartitioners(KeySelector...) : void
 }
+
+interface StreamOperatorFactory {
+  + createStreamOperator(Context) : StreamOperator
+  + getStreamOperatorClass(ClassLoader) : Class
+}
+
+class SourceOperatorFactory
+class SimpleOperatorFactory {
+  - operator : StreamOperator
+}
+class SimpleUdfStreamOperatorFactory
+class WindowOperatorFactory {
+  - windowAssigner : WindowAssigner
+  - trigger : Trigger
+  - windowFunction : InternalWindowFunction
+  - keySelector : KeySelector
+}
+class SinkWriterOperatorFactory
+
+class StreamOperator
+class StreamMap
+class WindowOperator
 
 class StreamEdge {
   - sourceId : int
@@ -248,56 +327,93 @@ class StreamEdge {
 }
 
 StreamExecutionEnvironment ..> StreamGraphGenerator : getStreamGraph()
+StreamGraphGenerator --> TransformationTranslator : translatorMap
 StreamGraphGenerator ..> StreamGraph : generate
+StreamGraphGenerator ..> ContextImpl : creates per transform
+Context <|.. ContextImpl
+ContextImpl --> StreamGraphGenerator
+ContextImpl --> StreamGraph
+TransformationTranslator ..> Context : translate*(..., context)
+TransformationTranslator <|.. SourceTransformationTranslator
+TransformationTranslator <|.. OneInputTransformationTranslator
+TransformationTranslator <|.. PartitionTransformationTranslator
+TransformationTranslator <|.. ReduceTransformationTranslator
+TransformationTranslator <|.. SinkTransformationTranslator
 StreamGraph --> StreamNode : streamNodes
-StreamGraph --> StreamEdge : streamEdges
+StreamGraph --> StreamNode : sources / sinks
+StreamNode --> StreamOperatorFactory : operatorFactory
+StreamOperatorFactory <|.. SourceOperatorFactory
+StreamOperatorFactory <|.. SimpleOperatorFactory
+StreamOperatorFactory <|.. WindowOperatorFactory
+StreamOperatorFactory <|.. SinkWriterOperatorFactory
+SimpleOperatorFactory <|-- SimpleUdfStreamOperatorFactory
+SimpleUdfStreamOperatorFactory --> StreamMap : ParseOrder
+WindowOperatorFactory --> WindowOperator : window+aggregate
+StreamOperator <|-- StreamMap
+StreamOperator <|-- WindowOperator
+StreamNode --> StreamEdge : inEdges / outEdges
 @enduml
 ```
 
 ```java
-// Client entry: execute builds the StreamGraph, then continues toward JobGraph / cluster
+// Client entry: build StreamGraph, then continue toward JobGraph / cluster
 public JobClient execute(String jobName) throws Exception {
-    StreamGraph streamGraph = getStreamGraph();
+    StreamGraph streamGraph = getStreamGraph(); // clears transformations by default
     streamGraph.setJobName(jobName);
     return execute(streamGraph);
 }
 
 public StreamGraph getStreamGraph() {
-    return StreamGraphGenerator.generate(this, transformations);
+    return getStreamGraph(true);
 }
 
-// Simplified StreamGraphGenerator: Transformation list -> nodes + edges
-StreamGraph generate(List<Transformation<?>> transforms) {
-    StreamGraph graph = new StreamGraph(/* config */);
-    for (Transformation<?> t : transforms) {
-        if (t instanceof PartitionTransformation) {
-            // keyBy / rebalance / ... : no StreamNode, only edge wiring
-            PartitionTransformation<?> p = (PartitionTransformation<?>) t;
-            // edge source = p.getInputs().get(0), target = downstream physical node
-            graph.addEdge(sourceId, targetId, p.getPartitioner(), p.getExchangeMode());
-        } else {
-            // source / map / window+agg / sink : one StreamNode with an operator factory
-            graph.addOperator(
-                t.getId(),
-                t.getName(),
-                ((OneInputTransformation<?, ?>) t).getOperatorFactory(),
-                t.getParallelism());
-            for (Transformation<?> input : t.getInputs()) {
-                graph.addEdge(input.getId(), t.getId(), /* default fwd unless overridden */, FORWARD);
-            }
-        }
+public StreamGraph getStreamGraph(boolean clearTransformations) {
+    StreamGraph graph = new StreamGraphGenerator(transformations, /* config */).generate();
+    if (clearTransformations) {
+        transformations.clear();
     }
     return graph;
 }
+
+// StreamGraphGenerator: recurse from sinks, dispatch by Transformation class
+private Collection<Integer> transform(Transformation<?> transform) {
+    if (alreadyTransformed.containsKey(transform)) {
+        return alreadyTransformed.get(transform);
+    }
+    TransformationTranslator<?, Transformation<?>> translator =
+        translatorMap.get(transform.getClass());
+    // e.g. OneInputTransformation -> OneInputTransformationTranslator
+    //      PartitionTransformation -> PartitionTransformationTranslator
+    Collection<Integer> ids = shouldExecuteInBatchMode
+        ? translator.translateForBatch(transform, context)
+        : translator.translateForStreaming(transform, context);
+    alreadyTransformed.put(transform, ids);
+    return ids;
+}
+
+// translatorMap (excerpt for orders-per-minute)
+translatorMap.put(SourceTransformation.class, new SourceTransformationTranslator<>());
+translatorMap.put(OneInputTransformation.class, new OneInputTransformationTranslator<>());
+translatorMap.put(PartitionTransformation.class, new PartitionTransformationTranslator<>());
+translatorMap.put(ReduceTransformation.class, new ReduceTransformationTranslator<>());
+translatorMap.put(SinkTransformation.class, new SinkTransformationTranslator<>());
 ```
 
-For **orders-per-minute**, the resulting `StreamGraph` content is:
+For **orders-per-minute**, translators produce this `StreamGraph` content:
 
 ```text
+Transformation                     Translator                              Graph effect
+-------------------------------    ------------------------------------    ------------------------------------------
+SourceTransformation(orders)       SourceTransformationTranslator          StreamNode orders
+OneInputTransformation(ParseOrder) OneInputTransformationTranslator        StreamNode ParseOrder + fwd edge
+PartitionTransformation(keyBy)     PartitionTransformationTranslator       virtual partition (no physical node)
+OneInputTransformation(window+agg) OneInputTransformationTranslator        StreamNode window+aggregate + hash edge
+SinkTransformation(kafkaSink)      SinkTransformationTranslator            StreamNode kafkaSink + fwd edge
+
 StreamNodes:
   orders              SourceOperatorFactory
   ParseOrder          MapOperatorFactory
-  window+aggregate    WindowOperatorFactory   // window + aggregate → one node
+  window+aggregate    WindowOperatorFactory
   kafkaSink           SinkOperatorFactory
 
 StreamEdges:
@@ -306,73 +422,208 @@ StreamEdges:
   window+aggregate --fwd-->              kafkaSink
 ```
 
-`keyBy(Order::getUserId)` is only the **hash** edge between `ParseOrder` and `window+aggregate`, not a separate node.
+`keyBy` is handled by **`PartitionTransformationTranslator`**: it registers a virtual node so the downstream edge carries the hash partitioner—not a separate running operator.
 
-### 2.2 StreamGraph → JobGraph
+### 2.2 JobGraph creation
 
-**`StreamingJobGraphGenerator.createJobGraph`** walks the `StreamGraph` and builds a **`JobGraph`**: one **`JobVertex`** per chain of operators that can run in the same thread. Chaining is allowed when the edge is **forward** (same parallelism, no re-partition), chaining is enabled, and the operators are compatible. Everything inside a chain shares one mailbox—there is no network hop between chained `map` / `filter` steps. Edges that hash or rebalance become **network** intermediate result partitions between vertices.
+After the `StreamGraph` exists, the client (or Application Mode entrypoint) builds a **`JobGraph`** via **`StreamingJobGraphGenerator`**. This step does not deploy tasks yet: it decides **operator chaining**—which `StreamNode`s share one thread / mailbox as a single **`JobVertex`**—and where **network** boundaries must remain. Chainable **forward** edges collapse into one vertex; **hash** / rebalance edges become **`JobEdge`s** between vertices (intermediate result partitions).
 
 ```plantuml
 @startuml
-skinparam classAttributeIconSize 0
+
+interface Pipeline {
+  + getJobGraph(ClassLoader) : JobGraph
+}
 
 class StreamGraph {
-  + getStreamNodes() : Collection
-  + getStreamEdges() : Collection
-  + getJobGraph() : JobGraph
+  - streamNodes : Map
+  - sources : Set
+  - sinks : Set
+  + getJobGraph(ClassLoader) : JobGraph
 }
+
+interface PipelineExecutor {
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class LocalExecutor {
+  - configuration : Configuration
+  - miniClusterFactory : Function
+  + {static} create(Configuration) : LocalExecutor
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+  - getJobGraph(Pipeline, Configuration, ClassLoader) : JobGraph
+}
+
+abstract class AbstractSessionClusterExecutor {
+  - clusterClientFactory : ClusterClientFactory
+  - configuration : Configuration
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class RemoteExecutor {
+  + {static} NAME : String
+}
+
+class YarnSessionClusterExecutor
+class KubernetesSessionClusterExecutor
+
+abstract class AbstractJobClusterExecutor {
+  - clusterClientFactory : ClusterClientFactory
+  - configuration : Configuration
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class YarnJobClusterExecutor
 
 class StreamingJobGraphGenerator {
   + createJobGraph(StreamGraph) : JobGraph
+  - createChain(StreamNode) : List
   + isChainable(StreamEdge, StreamNode, StreamNode) : boolean
 }
 
 class JobGraph {
-  List taskVertices
-  ExecutionConfig serializedExecutionConfig
-  CheckpointingOptions checkpointingSettings
-  + addVertex(JobVertex)
+  - taskVertices : List
+  - serializedExecutionConfig : ExecutionConfig
+  + addVertex(JobVertex) : void
 }
 
 class JobVertex {
-  int parallelism
-  Class invokableClass
-  List chainedOperators
+  - parallelism : int
+  - invokableClass : Class
+  - operatorIDs : List
+  + connectNewDataSetAsInput(JobVertex, DistributionPattern) : JobEdge
+}
+
+class StreamConfig {
+  - chainedConfigs : Map
+  - operatorName : String
+  - statePartitioner : KeySelector
+}
+
+class IntermediateDataSet {
+  - producer : JobVertex
 }
 
 class JobEdge {
-  DistributionPattern distributionPattern
+  - distributionPattern : DistributionPattern
+  - source : IntermediateDataSet
 }
 
+Pipeline <|.. StreamGraph
+
+PipelineExecutor <|.. LocalExecutor
+PipelineExecutor <|.. AbstractSessionClusterExecutor
+PipelineExecutor <|.. AbstractJobClusterExecutor
+
+AbstractSessionClusterExecutor <|-- RemoteExecutor
+AbstractSessionClusterExecutor <|-- YarnSessionClusterExecutor
+AbstractSessionClusterExecutor <|-- KubernetesSessionClusterExecutor
+
+AbstractJobClusterExecutor <|-- YarnJobClusterExecutor
+
+PipelineExecutor ..> StreamGraph : execute
 StreamGraph ..> StreamingJobGraphGenerator : getJobGraph()
 StreamingJobGraphGenerator ..> JobGraph : createJobGraph
-JobGraph --> JobVertex
-JobVertex --> JobEdge : outgoing
+JobGraph *-- JobVertex
+JobVertex *-- StreamConfig
+JobVertex *-- IntermediateDataSet
+IntermediateDataSet *-- JobEdge
 @enduml
 ```
 
 ```java
+// --- Step 1: user code / env.execute ---
+// builds StreamGraph (§2.1.2), then submits that pipeline
+public JobClient execute(String jobName) throws Exception {
+    StreamGraph streamGraph = getStreamGraph(); // Transformation list -> StreamGraph
+    streamGraph.setJobName(jobName);
+    return execute(streamGraph);
+}
+
+// --- Step 2: pick a PipelineExecutor (local / remote / yarn / k8s, …) ---
+public JobClient executeAsync(StreamGraph streamGraph) throws Exception {
+    PipelineExecutorFactory factory =
+        executorServiceLoader.getExecutorFactory(configuration);
+    return factory.getExecutor(configuration)
+        .execute(streamGraph, configuration, userClassloader)
+        .get();
+}
+
+// --- Step 3: executor turns Pipeline (StreamGraph) into JobGraph, then submits ---
+// e.g. LocalExecutor / AbstractSessionClusterExecutor
+public CompletableFuture<JobClient> execute(
+        Pipeline pipeline, Configuration configuration, ClassLoader userClassloader)
+        throws Exception {
+    JobGraph jobGraph = PipelineExecutorUtils.getJobGraph(pipeline, configuration);
+    // submit jobGraph to MiniCluster / cluster ...
+    return submit(jobGraph);
+}
+
+// PipelineExecutorUtils / StreamGraph path (simplified)
+static JobGraph getJobGraph(Pipeline pipeline, Configuration configuration) {
+    StreamGraph streamGraph = (StreamGraph) pipeline;
+    return streamGraph.getJobGraph(userClassLoader);
+}
+
+// --- Step 4: StreamGraph -> JobGraph (chaining) ---
+public JobGraph getJobGraph(ClassLoader userClassLoader) {
+    return StreamingJobGraphGenerator.createJobGraph(userClassLoader, this, jobId);
+}
+
 public static JobGraph createJobGraph(StreamGraph streamGraph) {
     JobGraph jobGraph = new JobGraph(streamGraph.getJobID(), streamGraph.getJobName());
-    // walk StreamNodes in topological order; start a JobVertex at chain heads
-    for (StreamNode source : streamGraph.getSources()) {
-        createChain(source, jobGraph, streamGraph);
+    for (Integer sourceId : streamGraph.getSourceIDs()) {
+        createChain(sourceId, streamGraph, jobGraph); // walk edges, merge fwd chains
     }
     return jobGraph;
 }
 
+// Chaining predicate (simplified): only fwd edges with matching parallelism merge
 static boolean isChainable(StreamEdge edge, StreamNode up, StreamNode down) {
     return edge.getPartitioner() instanceof ForwardPartitioner
         && up.getParallelism() == down.getParallelism()
-        && down.isChainingEnabled()
-        && /* same slot-sharing group, compatible operators, ... */ true;
+        && down.getInEdges().size() == 1
+        && up.isSameSlotSharingGroup(down)
+        && down.isChainingEnabled();
 }
-
-// Chain head becomes one JobVertex; chained bodies become StreamConfig entries
-// inside that vertex. Non-chainable edges create IntermediateDataSet + JobEdge.
+// Chain head -> JobVertex + StreamConfig chain
+// Non-chainable edge -> IntermediateDataSet + JobEdge (network shuffle)
 ```
 
-In **orders-per-minute**, `orders` and `ParseOrder` chain into **JobVertex A**; `window+agg` and `kafkaSink` chain into **JobVertex B**; the `keyBy(userId)` hash edge is the network boundary between A and B.
+**Orders-per-minute — from `StreamGraph` to `JobGraph`**
+
+Starting `StreamGraph` (from §2.1.2):
+
+```text
+StreamNodes:  orders --fwd--> ParseOrder --hash(userId)--> window+aggregate --fwd--> kafkaSink
+```
+
+Chaining decisions:
+
+| StreamEdge | Partitioner | `isChainable`? | Result |
+|---|---|---|---|
+| orders → ParseOrder | `fwd` | yes (same parallelism) | same chain |
+| ParseOrder → window+aggregate | `hash(userId)` | **no** | network boundary |
+| window+aggregate → kafkaSink | `fwd` | yes | same chain |
+
+Resulting `JobGraph`:
+
+```text
+JobVertex_A  (chain head = orders)
+  chained operators:  orders , ParseOrder
+  invokable:          SourceStreamTask / StreamTask (serialized StreamConfig chain)
+  parallelism:        p
+       │
+       │  JobEdge  (hash / POINTWISE or ALL_TO_ALL key-group shuffle)
+       │  IntermediateDataSet between A and B
+       ▼
+JobVertex_B  (chain head = window+aggregate)
+  chained operators:  window+aggregate , kafkaSink
+  statePartitioner:   userId KeySelector (on window op StreamConfig)
+  parallelism:        p
+```
+
+So two deployment units, not four: `orders` and `ParseOrder` share one mailbox (no network hop); after the hash shuffle, `window+aggregate` and `kafkaSink` share another. The `keyBy` never becomes its own `JobVertex`—only the **edge** between A and B.
 
 ### 2.3 JobGraph → ExecutionGraph
 
