@@ -17,7 +17,7 @@
 </span></span><span style=display:flex><span>Stream:  [orders] --fwd--&gt; [ParseOrder] --hash--&gt; [window+agg] --fwd--&gt; [kafkaSink]
 </span></span><span style=display:flex><span>Job:     JobVertex_A(orders+ParseOrder)  ==network==&gt;  JobVertex_B(window+agg+kafkaSink)
 </span></span><span style=display:flex><span>Exec:    A.0 A.1 ...     shuffle      B.0 B.1 ...
-</span></span></code></pre></div><p><code>StreamGraph.getJobGraph</code> is the bridge the client (or Application Mode cluster entrypoint) uses before the JobMaster materializes the <code>ExecutionGraph</code>. Failures restart from the last completed checkpoint by resetting tasks and restoring state handles recorded in that checkpoint.</p><h3 id=21-streamgraph-generation>2.1 StreamGraph generation</h3><p>Building a <code>StreamGraph</code> is a two-phase procedure on the client. User code first accumulates API metadata; only an explicit <code>getStreamGraph</code> / <code>execute</code> turns that metadata into a graph. Nothing processes records yet—operator factories create runtime <strong><code>StreamOperator</code>s</strong> later, when tasks deploy on workers.</p><p>Procedures:</p><ol><li><strong>API call</strong> (§2.1.1) — each <code>fromSource</code> / <code>map</code> / <code>keyBy</code> / … returns a <strong><code>DataStream</code></strong> (or related) handle and appends a <strong><code>Transformation</code></strong> to <code>StreamExecutionEnvironment</code>’s list.</li><li><strong>Client job execution</strong> (§2.1.2) — <code>getStreamGraph</code> / <code>execute</code> hands that list to <strong><code>StreamGraphGenerator</code></strong>, which builds <strong><code>StreamNode</code>s</strong> and <strong><code>StreamEdge</code>s</strong> (partitioner + exchange mode: <code>fwd</code>, <code>hash</code>, …).</li></ol><h4 id=211-api-call>2.1.1 API call</h4><p>When user code writes a DataStream job, each call like <code>fromSource</code>, <code>map</code>, or <code>keyBy</code> looks like it builds a pipeline—but at this stage Flink only records what was requested. Every call returns a <strong><code>DataStream</code></strong> (or a close relative such as <code>KeyedStream</code>) for further chaining, and behind the scenes it adds a <strong><code>Transformation</code></strong> to a list on <strong><code>StreamExecutionEnvironment</code></strong>. That list is the real program so far; the <code>DataStream</code> objects are just convenient handles. No tasks run and no records move until the code later asks for a graph or calls <code>execute</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p><code>StreamGraph.getJobGraph</code> is the bridge the client (or Application Mode cluster entrypoint) uses before the JobMaster materializes the <code>ExecutionGraph</code>. Failures restart from the last completed checkpoint by resetting tasks and restoring state handles recorded in that checkpoint.</p><h3 id=21-streamgraph-generation>2.1 StreamGraph generation</h3><p>Building a <code>StreamGraph</code> is a two-phase procedure on the client. User code first accumulates API metadata; only an explicit <code>getStreamGraph</code> / <code>execute</code> turns that metadata into a graph. Nothing processes records yet—operator factories create runtime <strong><code>StreamOperator</code>s</strong> later, when tasks deploy on workers.</p><p>Procedures:</p><ol><li><strong>API call</strong> (§2.1.1) — each <code>fromSource</code> / <code>map</code> / <code>keyBy</code> / … returns a <strong><code>DataStream</code></strong> (or related) handle and appends a <strong><code>Transformation</code></strong> to <code>StreamExecutionEnvironment</code>’s list.</li><li><strong>StreamGraph translation</strong> (§2.1.2) — <code>getStreamGraph</code> / <code>execute</code> hands that list to <strong><code>StreamGraphGenerator</code></strong>, which dispatches each <strong><code>Transformation</code></strong> to a <strong><code>TransformationTranslator</code></strong> that writes <strong><code>StreamNode</code>s</strong> / <strong><code>StreamEdge</code>s</strong> (<code>fwd</code>, <code>hash</code>, …).</li></ol><h4 id=211-api-call>2.1.1 API call</h4><p>When user code writes a DataStream job, each call like <code>fromSource</code>, <code>map</code>, or <code>keyBy</code> looks like it builds a pipeline—but at this stage Flink only records what was requested. Every call returns a <strong><code>DataStream</code></strong> (or a close relative such as <code>KeyedStream</code>) for further chaining, and behind the scenes it adds a <strong><code>Transformation</code></strong> to a list on <strong><code>StreamExecutionEnvironment</code></strong>. That list is the real program so far; the <code>DataStream</code> objects are just convenient handles. No tasks run and no records move until the code later asks for a graph or calls <code>execute</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class StreamExecutionEnvironment {
   - transformations : List
@@ -48,14 +48,17 @@ class SingleOutputStreamOperator {
 class DataStreamSource
 
 class KeyedStream {
+  - keySelector : KeySelector
   - keyType : TypeInformation
   + window(WindowAssigner) : WindowedStream
+  + reduce(ReduceFunction) : SingleOutputStreamOperator
 }
 
 class WindowedStream {
   - input : KeyedStream
   - windowAssigner : WindowAssigner
   + aggregate(AggregateFunction) : SingleOutputStreamOperator
+  + reduce(ReduceFunction) : SingleOutputStreamOperator
 }
 
 class Transformation {
@@ -86,6 +89,16 @@ class PartitionTransformation {
   + getInputs() : List
 }
 
+class ReduceTransformation {
+  - input : Transformation
+  - reducer : ReduceFunction
+  - keySelector : KeySelector
+  - keyTypeInfo : TypeInformation
+  + getReducer() : ReduceFunction
+  + getKeySelector() : KeySelector
+  + getInputs() : List
+}
+
 DataStream &lt;|-- SingleOutputStreamOperator
 DataStream &lt;|-- KeyedStream
 SingleOutputStreamOperator &lt;|-- DataStreamSource
@@ -97,6 +110,8 @@ StreamExecutionEnvironment --&gt; Transformation : owns list
 DataStream --&gt; Transformation : wraps
 Transformation &lt;|-- OneInputTransformation
 Transformation &lt;|-- PartitionTransformation
+Transformation &lt;|-- ReduceTransformation
+KeyedStream ..&gt; ReduceTransformation : reduce
 @enduml
 </code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DataStream.map: create a Transformation and register it on the env (no task yet)</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>R<span style=color:#f92672>&gt;</span> SingleOutputStreamOperator<span style=color:#f92672>&lt;</span>R<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>map</span>(MapFunction<span style=color:#f92672>&lt;</span>T, R<span style=color:#f92672>&gt;</span> mapper) {
@@ -119,7 +134,7 @@ Transformation &lt;|-- PartitionTransformation
 </span></span><span style=display:flex><span>    getExecutionEnvironment().<span style=color:#a6e22e>addOperator</span>(transformation);
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> SingleOutputStreamOperator<span style=color:#f92672>&lt;&gt;</span>(getExecutionEnvironment(), transformation);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, after the fluent chain the environment’s list holds transforms for <code>orders</code>, <code>ParseOrder</code>, <code>keyBy(userId)</code>, window+aggregate, and <code>kafkaSink</code>—still only metadata.</p><h4 id=212-client-job-execution>2.1.2 Client job execution</h4><p>When user code calls <code>execute</code> (or <code>getStreamGraph</code>), the client finally turns the environment’s <strong><code>Transformation</code></strong> list into a <strong><code>StreamGraph</code></strong>. <strong><code>StreamGraphGenerator</code></strong> walks that list: each physical transform becomes a <strong><code>StreamNode</code></strong> (name, parallelism, operator factory); connections become <strong><code>StreamEdge</code>s</strong> carrying a partitioner and exchange mode (<code>fwd</code>, <code>hash</code>, …). A <code>PartitionTransformation</code> from <code>keyBy</code> does not become its own node—it only configures the edge. Runtime <strong><code>StreamOperator</code></strong> instances are still not created here; factories on the nodes create them later when tasks deploy on workers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, after the fluent chain the environment’s list holds transforms for <code>orders</code>, <code>ParseOrder</code>, <code>keyBy(userId)</code>, window+aggregate, and <code>kafkaSink</code>—still only metadata.</p><h4 id=212-streamgraph-translation>2.1.2 StreamGraph translation</h4><p>When user code calls <code>execute</code> (or <code>getStreamGraph</code>), the client turns the environment’s <strong><code>Transformation</code></strong> list into a <strong><code>StreamGraph</code></strong>. <strong><code>StreamGraphGenerator</code></strong> does not hard-code per-type <code>instanceof</code> logic for the common operators; it looks up a <strong><code>TransformationTranslator</code></strong> in <code>translatorMap</code> and delegates with a <strong><code>TransformationTranslator.Context</code></strong> (<code>ContextImpl</code>) that exposes the in-progress <code>StreamGraph</code>, already-translated parent node ids, and recursive <code>transform(...)</code>. Each translator writes <strong><code>StreamNode</code>s</strong> / <strong><code>StreamEdge</code>s</strong> (or a virtual partition node for <code>keyBy</code>) into the graph. Runtime <strong><code>StreamOperator</code></strong> instances are still not created here; factories on the nodes create them later when tasks deploy on workers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class StreamExecutionEnvironment {
   - transformations : List
@@ -128,14 +143,47 @@ class StreamExecutionEnvironment {
 }
 
 class StreamGraphGenerator {
-  + generate(StreamExecutionEnvironment, List) : StreamGraph
+  - transformations : List
+  - translatorMap : Map
+  + generate() : StreamGraph
+  - transform(Transformation) : Collection
 }
+
+interface TransformationTranslator {
+  + translateForStreaming(Transformation, Context) : Collection
+  + translateForBatch(Transformation, Context) : Collection
+}
+
+interface &#34;TransformationTranslator.Context&#34; as Context {
+  + getStreamGraph() : StreamGraph
+  + getStreamNodeIds(Transformation) : Collection
+  + getSlotSharingGroup() : String
+  + transform(Transformation) : Collection
+}
+
+class ContextImpl {
+  - streamGraphGenerator : StreamGraphGenerator
+  - streamGraph : StreamGraph
+  - slotSharingGroup : String
+}
+
+class SourceTransformationTranslator
+class OneInputTransformationTranslator
+class PartitionTransformationTranslator
+class ReduceTransformationTranslator
+class SinkTransformationTranslator
 
 class StreamGraph {
   - streamNodes : Map
-  - streamEdges : List
+  - sources : Set
+  - sinks : Set
+  - virtualPartitionNodes : Map
+  - virtualSideOutputNodes : Map
   + addOperator(int, String, StreamOperatorFactory, int) : void
   + addEdge(int, int, StreamPartitioner, StreamExchangeMode) : void
+  + addVirtualPartitionNode(int, int, StreamPartitioner, StreamExchangeMode) : void
+  + getSourceIDs() : Collection
+  + getSinkIDs() : Collection
   + getJobGraph() : JobGraph
 }
 
@@ -144,7 +192,38 @@ class StreamNode {
   - operatorName : String
   - parallelism : int
   - operatorFactory : StreamOperatorFactory
+  - inEdges : List
+  - outEdges : List
+  - statePartitioners : KeySelector[]
+  - stateKeySerializer : TypeSerializer
+  + getOperatorFactory() : StreamOperatorFactory
+  + getInEdges() : List
+  + getOutEdges() : List
+  + getStatePartitioners() : KeySelector[]
+  + setStatePartitioners(KeySelector...) : void
 }
+
+interface StreamOperatorFactory {
+  + createStreamOperator(Context) : StreamOperator
+  + getStreamOperatorClass(ClassLoader) : Class
+}
+
+class SourceOperatorFactory
+class SimpleOperatorFactory {
+  - operator : StreamOperator
+}
+class SimpleUdfStreamOperatorFactory
+class WindowOperatorFactory {
+  - windowAssigner : WindowAssigner
+  - trigger : Trigger
+  - windowFunction : InternalWindowFunction
+  - keySelector : KeySelector
+}
+class SinkWriterOperatorFactory
+
+class StreamOperator
+class StreamMap
+class WindowOperator
 
 class StreamEdge {
   - sourceId : int
@@ -154,109 +233,261 @@ class StreamEdge {
 }
 
 StreamExecutionEnvironment ..&gt; StreamGraphGenerator : getStreamGraph()
+StreamGraphGenerator --&gt; TransformationTranslator : translatorMap
 StreamGraphGenerator ..&gt; StreamGraph : generate
+StreamGraphGenerator ..&gt; ContextImpl : creates per transform
+Context &lt;|.. ContextImpl
+ContextImpl --&gt; StreamGraphGenerator
+ContextImpl --&gt; StreamGraph
+TransformationTranslator ..&gt; Context : translate*(..., context)
+TransformationTranslator &lt;|.. SourceTransformationTranslator
+TransformationTranslator &lt;|.. OneInputTransformationTranslator
+TransformationTranslator &lt;|.. PartitionTransformationTranslator
+TransformationTranslator &lt;|.. ReduceTransformationTranslator
+TransformationTranslator &lt;|.. SinkTransformationTranslator
 StreamGraph --&gt; StreamNode : streamNodes
-StreamGraph --&gt; StreamEdge : streamEdges
+StreamGraph --&gt; StreamNode : sources / sinks
+StreamNode --&gt; StreamOperatorFactory : operatorFactory
+StreamOperatorFactory &lt;|.. SourceOperatorFactory
+StreamOperatorFactory &lt;|.. SimpleOperatorFactory
+StreamOperatorFactory &lt;|.. WindowOperatorFactory
+StreamOperatorFactory &lt;|.. SinkWriterOperatorFactory
+SimpleOperatorFactory &lt;|-- SimpleUdfStreamOperatorFactory
+SimpleUdfStreamOperatorFactory --&gt; StreamMap : ParseOrder
+WindowOperatorFactory --&gt; WindowOperator : window+aggregate
+StreamOperator &lt;|-- StreamMap
+StreamOperator &lt;|-- WindowOperator
+StreamNode --&gt; StreamEdge : inEdges / outEdges
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Client entry: execute builds the StreamGraph, then continues toward JobGraph / cluster</span>
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Client entry: build StreamGraph, then continue toward JobGraph / cluster</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobClient <span style=color:#a6e22e>execute</span>(String jobName) <span style=color:#66d9ef>throws</span> Exception {
-</span></span><span style=display:flex><span>    StreamGraph streamGraph <span style=color:#f92672>=</span> getStreamGraph();
+</span></span><span style=display:flex><span>    StreamGraph streamGraph <span style=color:#f92672>=</span> getStreamGraph(); <span style=color:#75715e>// clears transformations by default</span>
 </span></span><span style=display:flex><span>    streamGraph.<span style=color:#a6e22e>setJobName</span>(jobName);
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> execute(streamGraph);
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> StreamGraph <span style=color:#a6e22e>getStreamGraph</span>() {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> StreamGraphGenerator.<span style=color:#a6e22e>generate</span>(<span style=color:#66d9ef>this</span>, transformations);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> getStreamGraph(<span style=color:#66d9ef>true</span>);
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Simplified StreamGraphGenerator: Transformation list -&gt; nodes + edges</span>
-</span></span><span style=display:flex><span>StreamGraph <span style=color:#a6e22e>generate</span>(List<span style=color:#f92672>&lt;</span>Transformation<span style=color:#f92672>&lt;?&gt;&gt;</span> transforms) {
-</span></span><span style=display:flex><span>    StreamGraph graph <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> StreamGraph(<span style=color:#75715e>/* config */</span>);
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Transformation<span style=color:#f92672>&lt;?&gt;</span> t : transforms) {
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (t <span style=color:#66d9ef>instanceof</span> PartitionTransformation) {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// keyBy / rebalance / ... : no StreamNode, only edge wiring</span>
-</span></span><span style=display:flex><span>            PartitionTransformation<span style=color:#f92672>&lt;?&gt;</span> p <span style=color:#f92672>=</span> (PartitionTransformation<span style=color:#f92672>&lt;?&gt;</span>) t;
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// edge source = p.getInputs().get(0), target = downstream physical node</span>
-</span></span><span style=display:flex><span>            graph.<span style=color:#a6e22e>addEdge</span>(sourceId, targetId, p.<span style=color:#a6e22e>getPartitioner</span>(), p.<span style=color:#a6e22e>getExchangeMode</span>());
-</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// source / map / window+agg / sink : one StreamNode with an operator factory</span>
-</span></span><span style=display:flex><span>            graph.<span style=color:#a6e22e>addOperator</span>(
-</span></span><span style=display:flex><span>                t.<span style=color:#a6e22e>getId</span>(),
-</span></span><span style=display:flex><span>                t.<span style=color:#a6e22e>getName</span>(),
-</span></span><span style=display:flex><span>                ((OneInputTransformation<span style=color:#f92672>&lt;?</span>, <span style=color:#f92672>?&gt;</span>) t).<span style=color:#a6e22e>getOperatorFactory</span>(),
-</span></span><span style=display:flex><span>                t.<span style=color:#a6e22e>getParallelism</span>());
-</span></span><span style=display:flex><span>            <span style=color:#66d9ef>for</span> (Transformation<span style=color:#f92672>&lt;?&gt;</span> input : t.<span style=color:#a6e22e>getInputs</span>()) {
-</span></span><span style=display:flex><span>                graph.<span style=color:#a6e22e>addEdge</span>(input.<span style=color:#a6e22e>getId</span>(), t.<span style=color:#a6e22e>getId</span>(), <span style=color:#75715e>/* default fwd unless overridden */</span>, FORWARD);
-</span></span><span style=display:flex><span>            }
-</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> StreamGraph <span style=color:#a6e22e>getStreamGraph</span>(<span style=color:#66d9ef>boolean</span> clearTransformations) {
+</span></span><span style=display:flex><span>    StreamGraph graph <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> StreamGraphGenerator(transformations, <span style=color:#75715e>/* config */</span>).<span style=color:#a6e22e>generate</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (clearTransformations) {
+</span></span><span style=display:flex><span>        transformations.<span style=color:#a6e22e>clear</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> graph;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, the resulting <code>StreamGraph</code> content is:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>StreamNodes:
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// StreamGraphGenerator: recurse from sinks, dispatch by Transformation class</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> Collection<span style=color:#f92672>&lt;</span>Integer<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>transform</span>(Transformation<span style=color:#f92672>&lt;?&gt;</span> transform) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (alreadyTransformed.<span style=color:#a6e22e>containsKey</span>(transform)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> alreadyTransformed.<span style=color:#a6e22e>get</span>(transform);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    TransformationTranslator<span style=color:#f92672>&lt;?</span>, Transformation<span style=color:#f92672>&lt;?&gt;&gt;</span> translator <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        translatorMap.<span style=color:#a6e22e>get</span>(transform.<span style=color:#a6e22e>getClass</span>());
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// e.g. OneInputTransformation -&gt; OneInputTransformationTranslator</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//      PartitionTransformation -&gt; PartitionTransformationTranslator</span>
+</span></span><span style=display:flex><span>    Collection<span style=color:#f92672>&lt;</span>Integer<span style=color:#f92672>&gt;</span> ids <span style=color:#f92672>=</span> shouldExecuteInBatchMode
+</span></span><span style=display:flex><span>        <span style=color:#f92672>?</span> translator.<span style=color:#a6e22e>translateForBatch</span>(transform, context)
+</span></span><span style=display:flex><span>        : translator.<span style=color:#a6e22e>translateForStreaming</span>(transform, context);
+</span></span><span style=display:flex><span>    alreadyTransformed.<span style=color:#a6e22e>put</span>(transform, ids);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> ids;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// translatorMap (excerpt for orders-per-minute)</span>
+</span></span><span style=display:flex><span>translatorMap.<span style=color:#a6e22e>put</span>(SourceTransformation.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>new</span> SourceTransformationTranslator<span style=color:#f92672>&lt;&gt;</span>());
+</span></span><span style=display:flex><span>translatorMap.<span style=color:#a6e22e>put</span>(OneInputTransformation.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>new</span> OneInputTransformationTranslator<span style=color:#f92672>&lt;&gt;</span>());
+</span></span><span style=display:flex><span>translatorMap.<span style=color:#a6e22e>put</span>(PartitionTransformation.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>new</span> PartitionTransformationTranslator<span style=color:#f92672>&lt;&gt;</span>());
+</span></span><span style=display:flex><span>translatorMap.<span style=color:#a6e22e>put</span>(ReduceTransformation.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>new</span> ReduceTransformationTranslator<span style=color:#f92672>&lt;&gt;</span>());
+</span></span><span style=display:flex><span>translatorMap.<span style=color:#a6e22e>put</span>(SinkTransformation.<span style=color:#a6e22e>class</span>, <span style=color:#66d9ef>new</span> SinkTransformationTranslator<span style=color:#f92672>&lt;&gt;</span>());
+</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, translators produce this <code>StreamGraph</code> content:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Transformation                     Translator                              Graph effect
+</span></span><span style=display:flex><span>-------------------------------    ------------------------------------    ------------------------------------------
+</span></span><span style=display:flex><span>SourceTransformation(orders)       SourceTransformationTranslator          StreamNode orders
+</span></span><span style=display:flex><span>OneInputTransformation(ParseOrder) OneInputTransformationTranslator        StreamNode ParseOrder + fwd edge
+</span></span><span style=display:flex><span>PartitionTransformation(keyBy)     PartitionTransformationTranslator       virtual partition (no physical node)
+</span></span><span style=display:flex><span>OneInputTransformation(window+agg) OneInputTransformationTranslator        StreamNode window+aggregate + hash edge
+</span></span><span style=display:flex><span>SinkTransformation(kafkaSink)      SinkTransformationTranslator            StreamNode kafkaSink + fwd edge
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>StreamNodes:
 </span></span><span style=display:flex><span>  orders              SourceOperatorFactory
 </span></span><span style=display:flex><span>  ParseOrder          MapOperatorFactory
-</span></span><span style=display:flex><span>  window+aggregate    WindowOperatorFactory   // window + aggregate → one node
+</span></span><span style=display:flex><span>  window+aggregate    WindowOperatorFactory
 </span></span><span style=display:flex><span>  kafkaSink           SinkOperatorFactory
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>StreamEdges:
 </span></span><span style=display:flex><span>  orders           --fwd--&gt;              ParseOrder
 </span></span><span style=display:flex><span>  ParseOrder       --hash(userId)--&gt;     window+aggregate
 </span></span><span style=display:flex><span>  window+aggregate --fwd--&gt;              kafkaSink
-</span></span></code></pre></div><p><code>keyBy(Order::getUserId)</code> is only the <strong>hash</strong> edge between <code>ParseOrder</code> and <code>window+aggregate</code>, not a separate node.</p><h3 id=22-streamgraph--jobgraph>2.2 StreamGraph → JobGraph</h3><p><strong><code>StreamingJobGraphGenerator.createJobGraph</code></strong> walks the <code>StreamGraph</code> and builds a <strong><code>JobGraph</code></strong>: one <strong><code>JobVertex</code></strong> per chain of operators that can run in the same thread. Chaining is allowed when the edge is <strong>forward</strong> (same parallelism, no re-partition), chaining is enabled, and the operators are compatible. Everything inside a chain shares one mailbox—there is no network hop between chained <code>map</code> / <code>filter</code> steps. Edges that hash or rebalance become <strong>network</strong> intermediate result partitions between vertices.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-skinparam classAttributeIconSize 0
+</span></span></code></pre></div><p><code>keyBy</code> is handled by <strong><code>PartitionTransformationTranslator</code></strong>: it registers a virtual node so the downstream edge carries the hash partitioner—not a separate running operator.</p><h3 id=22-jobgraph-creation>2.2 JobGraph creation</h3><p>After the <code>StreamGraph</code> exists, the client (or Application Mode entrypoint) builds a <strong><code>JobGraph</code></strong> via <strong><code>StreamingJobGraphGenerator</code></strong>. This step does not deploy tasks yet: it decides <strong>operator chaining</strong>—which <code>StreamNode</code>s share one thread / mailbox as a single <strong><code>JobVertex</code></strong>—and where <strong>network</strong> boundaries must remain. Chainable <strong>forward</strong> edges collapse into one vertex; <strong>hash</strong> / rebalance edges become <strong><code>JobEdge</code>s</strong> between vertices (intermediate result partitions).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+interface Pipeline {
+  + getJobGraph(ClassLoader) : JobGraph
+}
 
 class StreamGraph {
-  + getStreamNodes() : Collection
-  + getStreamEdges() : Collection
-  + getJobGraph() : JobGraph
+  - streamNodes : Map
+  - sources : Set
+  - sinks : Set
+  + getJobGraph(ClassLoader) : JobGraph
 }
+
+interface PipelineExecutor {
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class LocalExecutor {
+  - configuration : Configuration
+  - miniClusterFactory : Function
+  + {static} create(Configuration) : LocalExecutor
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+  - getJobGraph(Pipeline, Configuration, ClassLoader) : JobGraph
+}
+
+abstract class AbstractSessionClusterExecutor {
+  - clusterClientFactory : ClusterClientFactory
+  - configuration : Configuration
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class RemoteExecutor {
+  + {static} NAME : String
+}
+
+class YarnSessionClusterExecutor
+class KubernetesSessionClusterExecutor
+
+abstract class AbstractJobClusterExecutor {
+  - clusterClientFactory : ClusterClientFactory
+  - configuration : Configuration
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+}
+
+class YarnJobClusterExecutor
 
 class StreamingJobGraphGenerator {
   + createJobGraph(StreamGraph) : JobGraph
+  - createChain(StreamNode) : List
   + isChainable(StreamEdge, StreamNode, StreamNode) : boolean
 }
 
 class JobGraph {
-  List taskVertices
-  ExecutionConfig serializedExecutionConfig
-  CheckpointingOptions checkpointingSettings
-  + addVertex(JobVertex)
+  - taskVertices : List
+  - serializedExecutionConfig : ExecutionConfig
+  + addVertex(JobVertex) : void
 }
 
 class JobVertex {
-  int parallelism
-  Class invokableClass
-  List chainedOperators
+  - parallelism : int
+  - invokableClass : Class
+  - operatorIDs : List
+  + connectNewDataSetAsInput(JobVertex, DistributionPattern) : JobEdge
+}
+
+class StreamConfig {
+  - chainedConfigs : Map
+  - operatorName : String
+  - statePartitioner : KeySelector
+}
+
+class IntermediateDataSet {
+  - producer : JobVertex
 }
 
 class JobEdge {
-  DistributionPattern distributionPattern
+  - distributionPattern : DistributionPattern
+  - source : IntermediateDataSet
 }
 
+Pipeline &lt;|.. StreamGraph
+
+PipelineExecutor &lt;|.. LocalExecutor
+PipelineExecutor &lt;|.. AbstractSessionClusterExecutor
+PipelineExecutor &lt;|.. AbstractJobClusterExecutor
+
+AbstractSessionClusterExecutor &lt;|-- RemoteExecutor
+AbstractSessionClusterExecutor &lt;|-- YarnSessionClusterExecutor
+AbstractSessionClusterExecutor &lt;|-- KubernetesSessionClusterExecutor
+
+AbstractJobClusterExecutor &lt;|-- YarnJobClusterExecutor
+
+PipelineExecutor ..&gt; StreamGraph : execute
 StreamGraph ..&gt; StreamingJobGraphGenerator : getJobGraph()
 StreamingJobGraphGenerator ..&gt; JobGraph : createJobGraph
-JobGraph --&gt; JobVertex
-JobVertex --&gt; JobEdge : outgoing
+JobGraph *-- JobVertex
+JobVertex *-- StreamConfig
+JobVertex *-- IntermediateDataSet
+IntermediateDataSet *-- JobEdge
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> JobGraph <span style=color:#a6e22e>createJobGraph</span>(StreamGraph streamGraph) {
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// --- Step 1: user code / env.execute ---</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// builds StreamGraph (§2.1.2), then submits that pipeline</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobClient <span style=color:#a6e22e>execute</span>(String jobName) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    StreamGraph streamGraph <span style=color:#f92672>=</span> getStreamGraph(); <span style=color:#75715e>// Transformation list -&gt; StreamGraph</span>
+</span></span><span style=display:flex><span>    streamGraph.<span style=color:#a6e22e>setJobName</span>(jobName);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> execute(streamGraph);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- Step 2: pick a PipelineExecutor (local / remote / yarn / k8s, …) ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobClient <span style=color:#a6e22e>executeAsync</span>(StreamGraph streamGraph) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    PipelineExecutorFactory factory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        executorServiceLoader.<span style=color:#a6e22e>getExecutorFactory</span>(configuration);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> factory.<span style=color:#a6e22e>getExecutor</span>(configuration)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>execute</span>(streamGraph, configuration, userClassloader)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>get</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- Step 3: executor turns Pipeline (StreamGraph) into JobGraph, then submits ---</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// e.g. LocalExecutor / AbstractSessionClusterExecutor</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>JobClient<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>execute</span>(
+</span></span><span style=display:flex><span>        Pipeline pipeline, Configuration configuration, ClassLoader userClassloader)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    JobGraph jobGraph <span style=color:#f92672>=</span> PipelineExecutorUtils.<span style=color:#a6e22e>getJobGraph</span>(pipeline, configuration);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// submit jobGraph to MiniCluster / cluster ...</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> submit(jobGraph);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// PipelineExecutorUtils / StreamGraph path (simplified)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> JobGraph <span style=color:#a6e22e>getJobGraph</span>(Pipeline pipeline, Configuration configuration) {
+</span></span><span style=display:flex><span>    StreamGraph streamGraph <span style=color:#f92672>=</span> (StreamGraph) pipeline;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> streamGraph.<span style=color:#a6e22e>getJobGraph</span>(userClassLoader);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// --- Step 4: StreamGraph -&gt; JobGraph (chaining) ---</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobGraph <span style=color:#a6e22e>getJobGraph</span>(ClassLoader userClassLoader) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> StreamingJobGraphGenerator.<span style=color:#a6e22e>createJobGraph</span>(userClassLoader, <span style=color:#66d9ef>this</span>, jobId);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> JobGraph <span style=color:#a6e22e>createJobGraph</span>(StreamGraph streamGraph) {
 </span></span><span style=display:flex><span>    JobGraph jobGraph <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> JobGraph(streamGraph.<span style=color:#a6e22e>getJobID</span>(), streamGraph.<span style=color:#a6e22e>getJobName</span>());
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// walk StreamNodes in topological order; start a JobVertex at chain heads</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (StreamNode source : streamGraph.<span style=color:#a6e22e>getSources</span>()) {
-</span></span><span style=display:flex><span>        createChain(source, jobGraph, streamGraph);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Integer sourceId : streamGraph.<span style=color:#a6e22e>getSourceIDs</span>()) {
+</span></span><span style=display:flex><span>        createChain(sourceId, streamGraph, jobGraph); <span style=color:#75715e>// walk edges, merge fwd chains</span>
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> jobGraph;
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Chaining predicate (simplified): only fwd edges with matching parallelism merge</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>isChainable</span>(StreamEdge edge, StreamNode up, StreamNode down) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> edge.<span style=color:#a6e22e>getPartitioner</span>() <span style=color:#66d9ef>instanceof</span> ForwardPartitioner
 </span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> up.<span style=color:#a6e22e>getParallelism</span>() <span style=color:#f92672>==</span> down.<span style=color:#a6e22e>getParallelism</span>()
-</span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> down.<span style=color:#a6e22e>isChainingEnabled</span>()
-</span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> <span style=color:#75715e>/* same slot-sharing group, compatible operators, ... */</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> down.<span style=color:#a6e22e>getInEdges</span>().<span style=color:#a6e22e>size</span>() <span style=color:#f92672>==</span> 1
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> up.<span style=color:#a6e22e>isSameSlotSharingGroup</span>(down)
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&amp;&amp;</span> down.<span style=color:#a6e22e>isChainingEnabled</span>();
 </span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Chain head becomes one JobVertex; chained bodies become StreamConfig entries</span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// inside that vertex. Non-chainable edges create IntermediateDataSet + JobEdge.</span>
-</span></span></code></pre></div><p>In <strong>orders-per-minute</strong>, <code>orders</code> and <code>ParseOrder</code> chain into <strong>JobVertex A</strong>; <code>window+agg</code> and <code>kafkaSink</code> chain into <strong>JobVertex B</strong>; the <code>keyBy(userId)</code> hash edge is the network boundary between A and B.</p><h3 id=23-jobgraph--executiongraph>2.3 JobGraph → ExecutionGraph</h3><p>On the JobManager, the <strong>JobMaster</strong> turns the submitted <code>JobGraph</code> into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a <strong><code>StreamTask</code></strong> (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span><span style=display:flex><span><span style=color:#75715e>// Chain head -&gt; JobVertex + StreamConfig chain</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Non-chainable edge -&gt; IntermediateDataSet + JobEdge (network shuffle)</span>
+</span></span></code></pre></div><p><strong>Orders-per-minute — from <code>StreamGraph</code> to <code>JobGraph</code></strong></p><p>Starting <code>StreamGraph</code> (from §2.1.2):</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>StreamNodes:  orders --fwd--&gt; ParseOrder --hash(userId)--&gt; window+aggregate --fwd--&gt; kafkaSink
+</span></span></code></pre></div><p>Chaining decisions:</p><table><thead><tr><th>StreamEdge</th><th>Partitioner</th><th><code>isChainable</code>?</th><th>Result</th></tr></thead><tbody><tr><td>orders → ParseOrder</td><td><code>fwd</code></td><td>yes (same parallelism)</td><td>same chain</td></tr><tr><td>ParseOrder → window+aggregate</td><td><code>hash(userId)</code></td><td><strong>no</strong></td><td>network boundary</td></tr><tr><td>window+aggregate → kafkaSink</td><td><code>fwd</code></td><td>yes</td><td>same chain</td></tr></tbody></table><p>Resulting <code>JobGraph</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>JobVertex_A  (chain head = orders)
+</span></span><span style=display:flex><span>  chained operators:  orders , ParseOrder
+</span></span><span style=display:flex><span>  invokable:          SourceStreamTask / StreamTask (serialized StreamConfig chain)
+</span></span><span style=display:flex><span>  parallelism:        p
+</span></span><span style=display:flex><span>       │
+</span></span><span style=display:flex><span>       │  JobEdge  (hash / POINTWISE or ALL_TO_ALL key-group shuffle)
+</span></span><span style=display:flex><span>       │  IntermediateDataSet between A and B
+</span></span><span style=display:flex><span>       ▼
+</span></span><span style=display:flex><span>JobVertex_B  (chain head = window+aggregate)
+</span></span><span style=display:flex><span>  chained operators:  window+aggregate , kafkaSink
+</span></span><span style=display:flex><span>  statePartitioner:   userId KeySelector (on window op StreamConfig)
+</span></span><span style=display:flex><span>  parallelism:        p
+</span></span></code></pre></div><p>So two deployment units, not four: <code>orders</code> and <code>ParseOrder</code> share one mailbox (no network hop); after the hash shuffle, <code>window+aggregate</code> and <code>kafkaSink</code> share another. The <code>keyBy</code> never becomes its own <code>JobVertex</code>—only the <strong>edge</strong> between A and B.</p><h3 id=23-jobgraph--executiongraph>2.3 JobGraph → ExecutionGraph</h3><p>On the JobManager, the <strong>JobMaster</strong> turns the submitted <code>JobGraph</code> into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a <strong><code>StreamTask</code></strong> (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 skinparam classAttributeIconSize 0
 
 class JobMaster {
