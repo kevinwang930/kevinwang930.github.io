@@ -13,7 +13,7 @@
 </span></span><span style=display:flex><span>    .<span style=color:#a6e22e>sinkTo</span>(kafkaSink);
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>env.<span style=color:#a6e22e>execute</span>(<span style=color:#e6db74>&#34;orders-per-minute&#34;</span>);
-</span></span></code></pre></div><p>Here Kafka (or another connector) is the source, keyed windows hold per-user counts in operator state, and another connector is the sink.</p><h3 id=cluster-roles>Cluster roles</h3><p>That job is scheduled onto a Flink cluster with two process roles:</p><table><thead><tr><th>Role</th><th>Responsibility</th></tr></thead><tbody><tr><td><strong>JobManager</strong></td><td>Accepts jobs, builds the scheduling plan, coordinates checkpoints, recovers failures</td></tr><tr><td><strong>TaskManager</strong></td><td>Hosts <strong>task slots</strong>; runs one or more subtasks; holds keyed/operator state locally</td></tr></tbody></table><p>One JobManager is the leader for a given high-availability setup. The client submits to the JobManager. TaskManagers register slots with the ResourceManager; the JobMaster claims slots and deploys tasks into them. Source and sink connectors run inside those tasks—the JobManager never sees individual records. When operators repartition (for example after <code>keyBy</code>), TaskManagers exchange records over pipelined network buffers (shuffle). Checkpoints are triggered by the JobManager and acknowledged by the tasks.</p><hr><h2 id=2-client-job-submission>2. Client job submission</h2><p>User code does not schedule tasks. On the client, Flink records the pipeline and submits that plan:</p><ol><li><strong>API <code>Transformation</code>s</strong> — each DataStream call appends a node to a list on the environment.</li><li><strong><code>StreamGraph</code></strong> — <code>StreamGraphGenerator</code> turns that list into <code>StreamNode</code> / <code>StreamEdge</code> (partitioners, exchange mode).</li><li><strong>Submit</strong> — a <code>PipelineExecutor</code> hands the <code>StreamGraph</code> (<code>ExecutionPlan</code>) to a <code>ClusterClient</code>. <code>RestClusterClient</code> writes that graph and uploads it. It does not build a <code>JobGraph</code>.</li><li><strong>Function serialization</strong> — the mapping function and the hash function are user classes. They are cleaned, then stored as bytes, because the node map and the operator factory are transient.</li></ol><p><code>JobGraph</code> compilation, the <code>ExecutionGraph</code>, and task deployment run on the cluster. That path is <a href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>JobManager</a>.</p><p>The stages below reuse the §1 <strong>orders-per-minute</strong> example, up to the graph the client actually sends:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>API:     orders -&gt; ParseOrder -&gt; keyBy(userId) -&gt; window -&gt; aggregate -&gt; kafkaSink
+</span></span></code></pre></div><p>Here Kafka (or another connector) is the source, keyed windows hold per-user counts in operator state, and another connector is the sink.</p><h3 id=cluster-roles>Cluster roles</h3><p>That job is scheduled onto a Flink cluster with two process roles:</p><table><thead><tr><th>Role</th><th>Responsibility</th></tr></thead><tbody><tr><td><strong>JobManager</strong></td><td>Accepts jobs, builds the scheduling plan, coordinates checkpoints, recovers failures</td></tr><tr><td><strong>TaskManager</strong></td><td>Hosts <strong>task slots</strong>; runs one or more subtasks; holds keyed/operator state locally</td></tr></tbody></table><p>One JobManager is the leader for a given high-availability setup. The client submits to the JobManager. TaskManagers register slots with the ResourceManager; the JobMaster claims slots and deploys tasks into them. Source and sink connectors run inside those tasks—the JobManager never sees individual records. When operators repartition (for example after <code>keyBy</code>), TaskManagers exchange records over pipelined network buffers (shuffle). Checkpoints are triggered by the JobManager and acknowledged by the tasks.</p><hr><h2 id=2-client-job-submission>2. Client job submission</h2><p>User code does not schedule tasks. On the client, Flink records the pipeline and submits that plan:</p><ol><li><strong>API <code>Transformation</code>s</strong> — each DataStream call appends a node to a list on the environment.</li><li><strong><code>StreamGraph</code></strong> — <code>StreamGraphGenerator</code> turns that list into <code>StreamNode</code> / <code>StreamEdge</code> (partitioners, exchange mode).</li><li><strong>Submit</strong> — a <code>PipelineExecutor</code> hands the <code>StreamGraph</code> (<code>ExecutionPlan</code>) to a <code>ClusterClient</code>. <code>RestClusterClient</code> writes that graph and uploads it. It does not build a <code>JobGraph</code>.</li><li><strong>StreamGraph serialization</strong> — the plan is Java-serialized once, with the user JARs alongside. Records and state use Flink&rsquo;s own <code>TypeSerializer</code>s, which the client fixes per stream while building the graph and ships inside it.</li></ol><p><code>JobGraph</code> compilation, the <code>ExecutionGraph</code>, and task deployment run on the cluster. That path is <a href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>JobManager</a>.</p><p>The stages below reuse the §1 <strong>orders-per-minute</strong> example, up to the graph the client actually sends:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>API:     orders -&gt; ParseOrder -&gt; keyBy(userId) -&gt; window -&gt; aggregate -&gt; kafkaSink
 </span></span><span style=display:flex><span>Stream:  [orders] --fwd--&gt; [ParseOrder] --hash--&gt; [window+agg] --fwd--&gt; [kafkaSink]
 </span></span></code></pre></div><h3 id=21-streamgraph-generation>2.1 StreamGraph generation</h3><p>Building a <code>StreamGraph</code> is a two-phase procedure on the client. User code first accumulates API metadata; only an explicit <code>getStreamGraph</code> / <code>execute</code> turns that metadata into a graph. Nothing processes records yet—operator factories create runtime <strong><code>StreamOperator</code>s</strong> later, when tasks deploy on workers.</p><p>Procedures:</p><ol><li><strong>API call</strong> (§2.1.1) — each <code>fromSource</code> / <code>map</code> / <code>keyBy</code> / … returns a <strong><code>DataStream</code></strong> (or related) handle and appends a <strong><code>Transformation</code></strong> to <code>StreamExecutionEnvironment</code>’s list.</li><li><strong>StreamGraph translation</strong> (§2.1.2) — <code>getStreamGraph</code> / <code>execute</code> hands that list to <strong><code>StreamGraphGenerator</code></strong>, which dispatches each <strong><code>Transformation</code></strong> to a <strong><code>TransformationTranslator</code></strong> that writes <strong><code>StreamNode</code>s</strong> / <strong><code>StreamEdge</code>s</strong> (<code>fwd</code>, <code>hash</code>, …).</li></ol><h4 id=211-api-call>2.1.1 API call</h4><p>When user code writes a DataStream job, each call like <code>fromSource</code>, <code>map</code>, or <code>keyBy</code> looks like it builds a pipeline—but at this stage Flink only records what was requested. Every call returns a <strong><code>DataStream</code></strong> (or a close relative such as <code>KeyedStream</code>) for further chaining, and behind the scenes it adds a <strong><code>Transformation</code></strong> to a list on <strong><code>StreamExecutionEnvironment</code></strong>. That list is the real program so far; the <code>DataStream</code> objects are just convenient handles. No tasks run and no records move until the code later asks for a graph or calls <code>execute</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
@@ -420,120 +420,254 @@ RestClusterClient ..&gt; StreamGraph : serialize ExecutionPlan
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> sendRetriableRequest(<span style=color:#75715e>/* ... */</span>).<span style=color:#a6e22e>thenApply</span>(ignored <span style=color:#f92672>-&gt;</span> executionPlan.<span style=color:#a6e22e>getJobID</span>());
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>writeObject</code> writes the non-transient fields: job id, name, <code>sources</code>, <code>sinks</code>, checkpoint settings. Numbers, strings, enums, and Flink <code>TypeSerializer</code>s (the layout of an <code>Order</code> field such as <code>userId</code>) go out as ordinary Java objects. The orders themselves stay in the source.</p><p>The node map, the virtual-partition map, and each <code>operatorFactory</code> are <code>transient</code>. <code>writeObject</code> skips them. Those objects hold the user functions, so they are packed into bytes first (§2.3). The cluster compiles the restored <code>StreamGraph</code> into a <code>JobGraph</code> inside the JobMaster. See <a href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>JobManager</a>.</p><h3 id=23-function-serialization>2.3 Function serialization</h3><p>A user function has to arrive as a live object on a TaskManager, and the class that implements it (<code>ParseOrder</code>, the <code>keyBy</code> lambda) exists only in the user JAR. Java deserialization loads classes with the class loader that is reading the stream. When the cluster first reads <code>flink-executionPlan-….bin</code>, that loader is the system loader, which has Flink and not the job. A <code>MapFunction</code> or <code>KeySelector</code> written as a normal field would fail there with <code>ClassNotFoundException</code>.</p><p>Flink therefore keeps every object that can point at user code <strong>transient</strong>, and ships a <code>byte[]</code> instead. A <code>byte[]</code> deserializes with the system loader. The bytes are turned back into the function later, when the user class loader is available.</p><p>Two steps make that byte array.</p><p><strong>1. Make the function serializable (<code>ClosureCleaner</code>).</strong> <code>map</code> and <code>keyBy</code> call <code>StreamExecutionEnvironment.clean</code> before the function is stored. <code>ClosureCleaner.clean</code> tries <code>InstantiationUtil.serializeObject</code>. When that succeeds, it stops. When it fails, the usual cause is a non-static inner class: the compiler added a <code>this$0</code> field pointing at the enclosing object, and Java would then serialize that whole object. The cleaner reads the function’s bytecode with ASM. If no method reads <code>this$0</code>, it sets that field to <code>null</code> and serializes again. If the bytecode does read the enclosing instance, nulling the field would break the function, so the field stays and the retry throws <code>InvalidProgramException</code> (“The implementation of the MapFunction is not serializable”). Classes that define <code>writeObject</code>, <code>writeReplace</code>, or <code>Externalizable</code> are left alone.</p><p><strong>2. Copy transient user objects into <code>SerializedValue</code> (<code>serializeUserDefinedInstances</code>).</strong> This runs immediately before <code>submitJob</code>. <code>SerializedValue</code> calls <code>InstantiationUtil.serializeObject</code> and keeps only the <code>byte[]</code>. The holder that stores those arrays, <code>UserDefinedObjectsHolder</code>, is a normal field of <code>StreamGraph</code>, so <code>writeObject</code> does write it.</p><p>The copy is ordered, because the factory is transient on the node as well as the node map being transient on the graph:</p><ol><li>Each <code>StreamOperatorFactory</code> is wrapped in its own <code>SerializedValue</code> (this can run in parallel). That is the only copy of the factory.</li><li>The <code>StreamNode</code> map is then wrapped. <code>operatorFactory</code> is already skipped, so those bytes contain the node’s plain fields, its <code>TypeSerializer</code>s, and <code>statePartitioners</code>.</li><li>The virtual-partition map (each entry is parent id, <code>StreamPartitioner</code>, exchange mode) and the execution config are wrapped the same way.</li></ol><p>On the cluster, <code>deserializeUserDefinedInstances(userClassLoader)</code> reverses that: <code>SerializedValue.deserializeValue</code> reads the bytes with the user class loader, restores the transient maps, and calls <code>StreamNode.setOperatorFactory</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-
-class ClosureCleaner {
-  + clean(Object, ClosureCleanerLevel, boolean) : void
-}
+</span></span></code></pre></div><p>The bytes in that file are Java serialization of the <code>StreamGraph</code> (§2.3). After the JobMaster restores the graph, it compiles a <code>JobGraph</code>. See <a href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>JobManager</a>.</p><h3 id=23-streamgraph-serialization>2.3 StreamGraph serialization</h3><p>A submitted job is serialized at two scales. The plan is serialized once: <code>RestClusterClient</code> writes the <code>StreamGraph</code> with <code>ObjectOutputStream</code>, uploads the user JARs beside it, and keeps every field that references user classes as a <code>SerializedValue</code> byte array until the JobMaster has a class loader for those JARs. The data is serialized continuously: every record that crosses a network edge, every entry of keyed state, and every checkpoint. For the data, Flink does not use Java serialization. It uses its own framework, in which a <code>TypeInformation</code> describes a type and creates a <code>TypeSerializer</code> that writes values of exactly that type into Flink&rsquo;s buffers and state.</p><p>The <code>StreamGraph</code> is where the two scales meet. While the client builds the graph, it derives a <code>TypeInformation</code> for each stream and stores the resulting <code>TypeSerializer</code>s in the <code>StreamNode</code>s, so the serializers travel inside the plan. Each advantage of the framework follows from that decision: the type of every stream is fixed on the client, before the job runs. Java serialization discovers the type from each object at runtime and writes a class descriptor into the bytes; a Flink serializer already knows the type, so it writes only field values, produces records that can be decoded one at a time, lets the runtime compare keys as bytes, and records enough about itself in checkpoints to check compatibility when the code changes.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class StreamGraph {
-  - sources : Set
-  - sinks : Set
-  - streamNodes : Map
-  - virtualPartitionNodes : Map
-  - userDefinedObjectsHolder : UserDefinedObjectsHolder
-  + serializeUserDefinedInstances() : void
-  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
+  - executionConfig : ExecutionConfig
+  - streamNodes : Map&lt;Integer, StreamNode&gt;
+  - createSerializer(TypeInformation&lt;T&gt;) : TypeSerializer&lt;T&gt;
+  + setOneInputStateKey(Integer, KeySelector, TypeSerializer) : void
 }
 
 class StreamNode {
-  - id : int
-  - parallelism : int
-  - statePartitioners : KeySelector[]
+  - typeSerializersIn : TypeSerializer[]
+  - typeSerializerOut : TypeSerializer
   - stateKeySerializer : TypeSerializer
-  - operatorFactory : StreamOperatorFactory
+  - statePartitioners : KeySelector[]
 }
 
-class StreamMap {
-  # userFunction : MapFunction
+abstract class &#34;TypeInformation&lt;T&gt;&#34; as TypeInformation {
+  + createSerializer(SerializerConfig) : TypeSerializer&lt;T&gt;
 }
 
-interface MapFunction {
-  + map(T) : R
+class &#34;PojoTypeInfo&lt;T&gt;&#34; as PojoTypeInfo {
+  - fields : PojoField[]
 }
 
-interface KeySelector {
-  + getKey(T) : K
+class &#34;GenericTypeInfo&lt;T&gt;&#34; as GenericTypeInfo {
+  - typeClass : Class&lt;T&gt;
 }
 
-class KeyGroupStreamPartitioner {
-  - keySelector : KeySelector
-  - maxParallelism : int
-  + selectChannel(SerializationDelegate) : int
+class &#34;BasicTypeInfo&lt;T&gt;&#34; as BasicTypeInfo
+
+class SerializerConfig {
+  + hasGenericTypesDisabled() : boolean
 }
 
-class SerializedValue {
-  - serializedData : byte[]
-  + deserializeValue(ClassLoader) : T
+abstract class &#34;TypeSerializer&lt;T&gt;&#34; as TypeSerializer {
+  + serialize(T, DataOutputView) : void
+  + deserialize(DataInputView) : T
+  + deserialize(T reuse, DataInputView) : T
+  + snapshotConfiguration() : TypeSerializerSnapshot&lt;T&gt;
 }
 
-class UserDefinedObjectsHolder {
-  - serializedStreamNodes : SerializedValue
-  - serializedVirtualPartitionNodes : SerializedValue
-  - serializedExecutionConfig : SerializedValue
-  - streamNodeToSerializedOperatorFactories : Collection
-}
+class &#34;PojoSerializer&lt;T&gt;&#34; as PojoSerializer
+class &#34;KryoSerializer&lt;T&gt;&#34; as KryoSerializer
+class StringSerializer
 
-ClosureCleaner ..&gt; MapFunction : clean before store
-ClosureCleaner ..&gt; KeySelector : clean before store
-StreamMap --&gt; MapFunction
-KeyGroupStreamPartitioner --&gt; KeySelector
-StreamNode --&gt; KeySelector : statePartitioners
-StreamGraph --&gt; UserDefinedObjectsHolder
-UserDefinedObjectsHolder --&gt; SerializedValue
-SerializedValue ..&gt; StreamMap : factory bytes
-SerializedValue ..&gt; KeyGroupStreamPartitioner : virtual partition bytes
+StreamGraph &#34;1&#34; *-- &#34;N&#34; StreamNode : streamNodes
+StreamGraph ..&gt; TypeInformation : createSerializer
+StreamGraph --&gt; SerializerConfig : via ExecutionConfig
+StreamNode o-- TypeSerializer : in / out / stateKey
+TypeInformation &lt;|-- PojoTypeInfo
+TypeInformation &lt;|-- GenericTypeInfo
+TypeInformation &lt;|-- BasicTypeInfo
+TypeInformation ..&gt; TypeSerializer : creates
+TypeSerializer &lt;|-- PojoSerializer
+TypeSerializer &lt;|-- KryoSerializer
+TypeSerializer &lt;|-- StringSerializer
+PojoTypeInfo ..&gt; PojoSerializer : creates
+GenericTypeInfo ..&gt; KryoSerializer : creates
+BasicTypeInfo ..&gt; StringSerializer : STRING_TYPE_INFO
+PojoSerializer o-- TypeSerializer : fieldSerializers
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// --- Step 1: map / keyBy. Fail here if the function cannot be serialized. ---</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>F<span style=color:#f92672>&gt;</span> F <span style=color:#a6e22e>clean</span>(F f) {
-</span></span><span style=display:flex><span>    ClosureCleaner.<span style=color:#a6e22e>clean</span>(f, config.<span style=color:#a6e22e>getClosureCleanerLevel</span>(), <span style=color:#66d9ef>true</span>);
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> f;
+</code></pre><h4 id=231-serializers-are-fixed-at-graph-build>2.3.1 Serializers are fixed at graph build</h4><p><code>TypeExtractor</code> derives the output type of each function from its generic signature: <code>ParseOrder implements MapFunction&lt;String, Order></code> gives <code>Order</code>, and <code>returns(...)</code> supplies the type when erasure hides it. A class that is public, has a public no-argument constructor, and exposes every field publicly or through a getter and setter becomes a <code>PojoTypeInfo</code>; other classes become a <code>GenericTypeInfo</code>. Basic types, tuples, rows, and Avro types have their own <code>TypeInformation</code>.</p><p><code>StreamGraph.addOperator</code> turns the input and output types into serializers with the job&rsquo;s <code>SerializerConfig</code>, and <code>keyBy</code> stores the key serializer on the keyed node:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>setSerializers(vertexID, createSerializer(inTypeInfo), <span style=color:#66d9ef>null</span>, createSerializer(outTypeInfo));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> TypeSerializer<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>createSerializer</span>(TypeInformation<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> typeInfo) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> typeInfo <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>(typeInfo <span style=color:#66d9ef>instanceof</span> MissingTypeInfo)
+</span></span><span style=display:flex><span>            <span style=color:#f92672>?</span> typeInfo.<span style=color:#a6e22e>createSerializer</span>(executionConfig.<span style=color:#a6e22e>getSerializerConfig</span>())
+</span></span><span style=display:flex><span>            : <span style=color:#66d9ef>null</span>;
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// ClosureCleaner: already serializable → return.</span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Otherwise, if this$0 is never read, set it to null and try again.</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (canBeSerialized(func)) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>setOneInputStateKey</span>(
+</span></span><span style=display:flex><span>        Integer vertexID, KeySelector<span style=color:#f92672>&lt;?</span>, <span style=color:#f92672>?&gt;</span> keySelector, TypeSerializer<span style=color:#f92672>&lt;?&gt;</span> keySerializer) {
+</span></span><span style=display:flex><span>    StreamNode node <span style=color:#f92672>=</span> getStreamNode(vertexID);
+</span></span><span style=display:flex><span>    node.<span style=color:#a6e22e>setStatePartitioners</span>(keySelector);
+</span></span><span style=display:flex><span>    node.<span style=color:#a6e22e>setStateKeySerializer</span>(keySerializer);
 </span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span><span style=color:#75715e>// ... ASM This0AccessFinder: GETFIELD this$0 ...</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>accessesClosure) {
-</span></span><span style=display:flex><span>    this0.<span style=color:#a6e22e>set</span>(func, <span style=color:#66d9ef>null</span>);
+</span></span></code></pre></div><p>The cluster therefore never inspects a record to learn its type. A task receives its serializers with its configuration and applies them to every element, and the field layout of a POJO is resolved once by reflection when the serializer is created, not once per record.</p><h4 id=232-compact-self-contained-records>2.3.2 Compact, self-contained records</h4><p><code>PojoSerializer</code> writes one flags byte and then each field in name order, each preceded by a null marker. The class name is written only when the runtime object is an unregistered subclass of the declared type:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>serialize</span>(T value, DataOutputView target) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... flags: IS_NULL, NO_SUBCLASS, IS_SUBCLASS, IS_TAGGED_SUBCLASS ...</span>
+</span></span><span style=display:flex><span>    target.<span style=color:#a6e22e>writeByte</span>(flags);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> ((flags <span style=color:#f92672>&amp;</span> IS_SUBCLASS) <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        target.<span style=color:#a6e22e>writeUTF</span>(actualClass.<span style=color:#a6e22e>getName</span>());
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> ((flags <span style=color:#f92672>&amp;</span> IS_TAGGED_SUBCLASS) <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        target.<span style=color:#a6e22e>writeByte</span>(subclassTag);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> ((flags <span style=color:#f92672>&amp;</span> NO_SUBCLASS) <span style=color:#f92672>!=</span> 0) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> numFields; i<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>            Object o <span style=color:#f92672>=</span> (fields<span style=color:#f92672>[</span>i<span style=color:#f92672>]</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) <span style=color:#f92672>?</span> fields<span style=color:#f92672>[</span>i<span style=color:#f92672>]</span>.<span style=color:#a6e22e>get</span>(value) : <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (o <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                target.<span style=color:#a6e22e>writeBoolean</span>(<span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                target.<span style=color:#a6e22e>writeBoolean</span>(<span style=color:#66d9ef>false</span>);
+</span></span><span style=display:flex><span>                fieldSerializers<span style=color:#f92672>[</span>i<span style=color:#f92672>]</span>.<span style=color:#a6e22e>serialize</span>(o, target);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... subclass: delegate to the subclass serializer ...</span>
 </span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>InstantiationUtil.<span style=color:#a6e22e>serializeObject</span>(func); <span style=color:#75715e>// InvalidProgramException if this still fails</span>
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// --- Step 2: before submitJob. Transient fields become byte arrays. ---</span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// factory first (it is transient on StreamNode), then the node map, then partitions</span>
-</span></span><span style=display:flex><span>streamNodeToSerializedOperatorFactories <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>    serializeOperatorFactories(streamNodes.<span style=color:#a6e22e>values</span>(), serializationExecutor);
-</span></span><span style=display:flex><span>serializedStreamNodes <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> SerializedValue<span style=color:#f92672>&lt;&gt;</span>(streamNodes);
-</span></span><span style=display:flex><span>serializedVirtualPartitionNodes <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> SerializedValue<span style=color:#f92672>&lt;&gt;</span>(virtualPartitionNodes);
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#a6e22e>SerializedValue</span>(T value) <span style=color:#66d9ef>throws</span> IOException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serializedData</span> <span style=color:#f92672>=</span> InstantiationUtil.<span style=color:#a6e22e>serializeObject</span>(value);
+</span></span></code></pre></div><p>For an <code>Order</code> with fields <code>userId = "u1"</code> and <code>amount = 12.5</code>, the record is 14 bytes: the flags byte <code>NO_SUBCLASS</code>; for <code>amount</code>, a null marker and the 8-byte IEEE 754 double; for <code>userId</code>, a null marker, the variable-length value length + 1 = 3, and the two characters <code>u</code> and <code>1</code> in one byte each.</p><p>Java serialization of the same object in a fresh <code>ObjectOutputStream</code> produces 86 bytes on JDK 25: a stream header, the class descriptor with the class name, <code>serialVersionUID</code>, and the name and type code of each field, and then the values. Inside one long stream, later objects of the same class refer back to the descriptor; measured over 1,000 objects this drops to about 19 bytes per object. That saving depends on the reader having seen the whole stream. Flink cannot rely on it: <code>RecordWriter</code> routes each record to one of many subpartitions and writes it as a length-prefixed block into network buffers, so there is no single stream whose descriptor table writer and reader share, and every keyed-state value is stored and read on its own. A <code>TypeSerializer</code> record is decodable alone because the metadata lives in the serializer, not in the bytes. On the network path, <code>RecordWriter</code> wraps each record in a <code>SerializationDelegate</code>, whose <code>write</code> calls the edge&rsquo;s <code>TypeSerializer</code>, and prefixes the result with its length:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class RecordWriter {
+  # serializer : DataOutputSerializer
+  + emit(T) : void
+  + {static} serializeRecord(DataOutputSerializer, IOReadableWritable) : ByteBuffer
+}
+
+interface IOReadableWritable {
+  + write(DataOutputView) : void
+  + read(DataInputView) : void
+}
+
+class &#34;SerializationDelegate&lt;T&gt;&#34; as SerializationDelegate {
+  - instance : T
+  - serializer : TypeSerializer&lt;T&gt;
+  + write(DataOutputView) : void
+}
+
+interface DataOutputView
+class DataOutputSerializer
+
+abstract class &#34;TypeSerializer&lt;T&gt;&#34; as TypeSerializer {
+  + serialize(T, DataOutputView) : void
+  + deserialize(T reuse, DataInputView) : T
+}
+
+class &#34;PojoSerializer&lt;T&gt;&#34; as PojoSerializer {
+  - clazz : Class&lt;T&gt;
+  - fields : Field[]
+  - fieldSerializers : TypeSerializer&lt;Object&gt;[]
+  - registeredClasses : LinkedHashMap&lt;Class, Integer&gt;
+  - registeredSerializers : TypeSerializer[]
+  + serialize(T, DataOutputView) : void
+}
+
+IOReadableWritable &lt;|.. SerializationDelegate
+DataOutputView &lt;|.. DataOutputSerializer
+RecordWriter *-- DataOutputSerializer
+RecordWriter ..&gt; SerializationDelegate : serializeRecord
+SerializationDelegate --&gt; TypeSerializer
+TypeSerializer &lt;|-- PojoSerializer
+PojoSerializer o-- TypeSerializer : fieldSerializers
+TypeSerializer ..&gt; DataOutputView : writes to
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> ByteBuffer <span style=color:#a6e22e>serializeRecord</span>(
+</span></span><span style=display:flex><span>        DataOutputSerializer serializer, IOReadableWritable record) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    serializer.<span style=color:#a6e22e>setPositionUnsafe</span>(4);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>record</span><span style=color:#960050;background-color:#1e0010>.</span><span style=color:#a6e22e>write</span>(serializer);
+</span></span><span style=display:flex><span>    serializer.<span style=color:#a6e22e>writeIntUnsafe</span>(serializer.<span style=color:#a6e22e>length</span>() <span style=color:#f92672>-</span> 4, 0);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> serializer.<span style=color:#a6e22e>wrapAsByteBuffer</span>();
 </span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Cluster, once the user class loader exists:</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> T <span style=color:#a6e22e>deserializeValue</span>(ClassLoader loader) <span style=color:#66d9ef>throws</span> IOException, ClassNotFoundException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> InstantiationUtil.<span style=color:#a6e22e>deserializeObject</span>(serializedData, loader);
+</span></span></code></pre></div><p>On the read side, <code>TypeSerializer.deserialize(T reuse, DataInputView source)</code> can fill an existing instance. With <code>pipeline.object-reuse</code> enabled (default <code>false</code>), the runtime passes the same instance for each record, which removes one allocation per element at the cost that a user function must not keep a reference to its input.</p><h4 id=233-work-on-serialized-bytes>2.3.3 Work on serialized bytes</h4><p>Because the key serializer is deterministic for a type, two equal keys produce equal bytes. The RocksDB state backend uses those bytes directly: <code>SerializedCompositeKeyBuilder</code> builds each state key as the key-group id prefix, then the serialized key, then the serialized namespace (for a window operator, the window). RocksDB stores and looks up entries by comparing bytes and never deserializes the key to find a value. The key-group prefix also makes every key group a contiguous byte range, which is the unit that checkpoints and rescaling assign to subtasks.</p><p>The batch runtime applies the same idea to sorting. A <code>TypeComparator</code> that supports normalized keys writes a fixed-length, byte-comparable prefix of each key into a <code>MemorySegment</code> (<code>putNormalizedKey</code>), and <code>NormalizedKeySorter</code> sorts records by comparing those prefixes in managed memory, deserializing only to break ties.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class &#34;SerializedCompositeKeyBuilder&lt;K&gt;&#34; as SerializedCompositeKeyBuilder {
+  - keySerializer : TypeSerializer&lt;K&gt;
+  - keyOutView : DataOutputSerializer
+  - keyGroupPrefixBytes : int
+  - keySerializerTypeVariableSized : boolean
+  + setKeyAndKeyGroup(K, int keyGroupId) : void
+  + buildCompositeKeyNamespace(N, TypeSerializer&lt;N&gt;) : byte[]
+}
+
+class &#34;NormalizedKeySorter&lt;T&gt;&#34; as NormalizedKeySorter {
+  - serializer : TypeSerializer&lt;T&gt;
+  - comparator : TypeComparator&lt;T&gt;
+  - sortIndex : ArrayList&lt;MemorySegment&gt;
+  - recordBufferSegments : ArrayList&lt;MemorySegment&gt;
+  - numKeyBytes : int
+  + write(T) : boolean
+  + compare(int, int) : int
+  + swap(int, int) : void
+}
+
+abstract class &#34;TypeSerializer&lt;T&gt;&#34; as TypeSerializer {
+  + serialize(T, DataOutputView) : void
+}
+
+abstract class &#34;TypeComparator&lt;T&gt;&#34; as TypeComparator {
+  + supportsNormalizedKey() : boolean
+  + getNormalizeKeyLen() : int
+  + putNormalizedKey(T, MemorySegment, int, int) : void
+  + compareSerialized(DataInputView, DataInputView) : int
+}
+
+class DataOutputSerializer
+class MemorySegment
+
+SerializedCompositeKeyBuilder --&gt; TypeSerializer : keySerializer
+SerializedCompositeKeyBuilder *-- DataOutputSerializer : key-group | key | namespace
+NormalizedKeySorter --&gt; TypeSerializer : record bytes
+NormalizedKeySorter --&gt; TypeComparator : normalized keys
+NormalizedKeySorter o-- MemorySegment : sortIndex, records
+TypeComparator ..&gt; MemorySegment : putNormalizedKey
+@enduml
+</code></pre><h4 id=234-schema-evolution-of-state>2.3.4 Schema evolution of state</h4><p>A long-running job is stopped with a savepoint, its code is changed, and it is restarted from that savepoint. The state bytes were written by the old serializer, so the new job must know whether it can still read them. Flink writes a <code>TypeSerializerSnapshot</code> with every piece of state: it records the serializer&rsquo;s configuration, for a POJO the class and the snapshot of each field serializer. On restore, the new serializer&rsquo;s snapshot calls <code>resolveSchemaCompatibility</code> with the old snapshot. The result is one of four types. <code>COMPATIBLE_AS_IS</code> means the new serializer reads the old bytes directly. <code>COMPATIBLE_WITH_RECONFIGURED_SERIALIZER</code> means the result carries a reconfigured serializer that is used instead. <code>COMPATIBLE_AFTER_MIGRATION</code> means the state backend reads every value with the old serializer, obtained from <code>restoreSerializer()</code> on the old snapshot, and writes it again with the new one. <code>INCOMPATIBLE</code> fails the restore.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+abstract class &#34;TypeSerializer&lt;T&gt;&#34; as TypeSerializer {
+  + snapshotConfiguration() : TypeSerializerSnapshot&lt;T&gt;
+}
+
+interface &#34;TypeSerializerSnapshot&lt;T&gt;&#34; as TypeSerializerSnapshot {
+  + getCurrentVersion() : int
+  + writeSnapshot(DataOutputView) : void
+  + readSnapshot(int, DataInputView, ClassLoader) : void
+  + restoreSerializer() : TypeSerializer&lt;T&gt;
+  + resolveSchemaCompatibility(TypeSerializerSnapshot&lt;T&gt; old) : TypeSerializerSchemaCompatibility&lt;T&gt;
+}
+
+class &#34;PojoSerializerSnapshot&lt;T&gt;&#34; as PojoSerializerSnapshot {
+  - snapshotData : PojoSerializerSnapshotData&lt;T&gt;
+  - serializerConfig : SerializerConfig
+}
+
+class &#34;PojoSerializerSnapshotData&lt;T&gt;&#34; as PojoSerializerSnapshotData {
+  - pojoClassName : String
+  - fieldSerializerSnapshots : LinkedOptionalMap&lt;Field, TypeSerializerSnapshot&gt;
+}
+
+class &#34;TypeSerializerSchemaCompatibility&lt;T&gt;&#34; as TypeSerializerSchemaCompatibility {
+  - resultType : Type
+  - reconfiguredNewSerializer : TypeSerializer&lt;T&gt;
+  + isCompatibleAsIs() : boolean
+  + isCompatibleAfterMigration() : boolean
+  + isIncompatible() : boolean
+  + getReconfiguredSerializer() : TypeSerializer&lt;T&gt;
+}
+
+enum Type {
+  COMPATIBLE_AS_IS
+  COMPATIBLE_AFTER_MIGRATION
+  COMPATIBLE_WITH_RECONFIGURED_SERIALIZER
+  INCOMPATIBLE
+}
+
+TypeSerializer ..&gt; TypeSerializerSnapshot : snapshotConfiguration
+TypeSerializerSnapshot ..&gt; TypeSerializer : restoreSerializer
+TypeSerializerSnapshot &lt;|.. PojoSerializerSnapshot
+PojoSerializerSnapshot *-- PojoSerializerSnapshotData
+PojoSerializerSnapshotData o-- TypeSerializerSnapshot : per field
+TypeSerializerSnapshot ..&gt; TypeSerializerSchemaCompatibility : resolveSchemaCompatibility
+TypeSerializerSchemaCompatibility --&gt; Type
+@enduml
+</code></pre><p>For a POJO, adding or removing a field yields <code>COMPATIBLE_AFTER_MIGRATION</code>: the old serializer, restored from its snapshot, reads each value, and the new serializer writes it back; an added field keeps the value set by the no-argument constructor. A different POJO class or an incompatible field serializer, such as a changed field type, yields <code>INCOMPATIBLE</code>, and the job fails at restore time rather than reading corrupt values. Java serialization offers only the <code>serialVersionUID</code> check: without an explicit value, any change to the class changes the computed identifier and reading fails with <code>InvalidClassException</code>.</p><h4 id=235-kryo-fallback-for-generic-types>2.3.5 Kryo fallback for generic types</h4><p>A type that does not qualify for a specialized <code>TypeInformation</code> becomes a <code>GenericTypeInfo</code>, whose serializer is <code>KryoSerializer</code>. Kryo handles arbitrary object graphs, but it writes class identity into the bytes, it is slower than a field-wise serializer, and its state cannot evolve under the snapshot rules above. Setting <code>pipeline.generic-types: false</code> makes <code>GenericTypeInfo.createSerializer</code> throw <code>UnsupportedOperationException</code>. Since <code>createSerializer</code> runs while the <code>StreamGraph</code> is built, the error appears on the client, at submission, naming the type that would have gone through Kryo.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> TypeSerializer<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>createSerializer</span>(SerializerConfig config) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (config.<span style=color:#a6e22e>hasGenericTypesDisabled</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> UnsupportedOperationException(
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;Generic types have been disabled in the ExecutionConfig and type &#34;</span>
+</span></span><span style=display:flex><span>                        <span style=color:#f92672>+</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>typeClass</span>.<span style=color:#a6e22e>getName</span>() <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34; is treated as a generic type.&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> KryoSerializer<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>typeClass</span>, config);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><strong>Mapping function.</strong> <code>ParseOrder</code> is the <code>MapFunction</code> in <code>StreamMap.userFunction</code>. The translator stores that operator inside the node’s <code>StreamOperatorFactory</code>. Because the factory is <code>transient</code>, it appears only in <code>streamNodeToSerializedOperatorFactories</code>.</p><p><strong>Hashing function.</strong> <code>keyBy(Order::getUserId)</code> is a <code>KeySelector</code>. <code>PartitionTransformationTranslator</code> puts it on a <code>KeyGroupStreamPartitioner</code> in the virtual-partition map, and the window node also stores it in <code>statePartitioners</code>. The partitioner therefore rides inside <code>serializedVirtualPartitionNodes</code>. <code>statePartitioners</code> is a normal field of <code>StreamNode</code>, so the same selector also rides inside <code>serializedStreamNodes</code>. After restore, <code>selectChannel</code> calls <code>keySelector.getKey(record)</code> and <code>KeyGroupRangeAssignment.assignKeyToParallelOperator</code>, which is <code>murmurHash(key.hashCode())</code> modulo max parallelism. <code>stateKeySerializer</code> is the <code>TypeSerializer</code> for the key bytes; that object is one of the plain fields inside the node bytes.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>selectChannel</span>(SerializationDelegate<span style=color:#f92672>&lt;</span>StreamRecord<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;&gt;</span> record) {
-</span></span><span style=display:flex><span>    K key <span style=color:#f92672>=</span> keySelector.<span style=color:#a6e22e>getKey</span>(record.<span style=color:#a6e22e>getInstance</span>().<span style=color:#a6e22e>getValue</span>());
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> KeyGroupRangeAssignment.<span style=color:#a6e22e>assignKeyToParallelOperator</span>(
-</span></span><span style=display:flex><span>            key, maxParallelism, numberOfChannels);
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> <span style=color:#66d9ef>int</span> <span style=color:#a6e22e>assignToKeyGroup</span>(Object key, <span style=color:#66d9ef>int</span> maxParallelism) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> MathUtils.<span style=color:#a6e22e>murmurHash</span>(key.<span style=color:#a6e22e>hashCode</span>()) <span style=color:#f92672>%</span> maxParallelism;
-</span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Piece              Lives in                         Serialized as
-</span></span><span style=display:flex><span>-----------------  -------------------------------  -----------------------------------------
-</span></span><span style=display:flex><span>ParseOrder         StreamMap.userFunction           SerializedValue of the operator factory
-</span></span><span style=display:flex><span>                   inside operatorFactory           (factory is transient)
-</span></span><span style=display:flex><span>keyBy(userId)      KeyGroupStreamPartitioner        SerializedValue of virtualPartitionNodes
-</span></span><span style=display:flex><span>                   and statePartitioners            and of the StreamNode map
-</span></span><span style=display:flex><span>userId layout      stateKeySerializer               inside the StreamNode bytes
-</span></span><span style=display:flex><span>node id, edges     StreamNode fields                inside the StreamNode bytes
-</span></span></code></pre></div></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, the client places three kinds of serializer on the <code>StreamGraph</code>. The forward edge from <code>orders</code> to <code>ParseOrder</code> carries <code>String</code> with a <code>StringSerializer</code>; the two operators are usually chained, so those records are handed over as objects. The hash edge from <code>ParseOrder</code> to the window carries <code>Order</code> with a <code>PojoSerializer</code>, which writes every record into network buffers. The window-and-aggregate node has a <code>StringSerializer</code> as <code>stateKeySerializer</code> for <code>userId</code>, which forms the key bytes in RocksDB, and a serializer for the aggregate&rsquo;s accumulator, derived from its <code>TypeInformation</code>, which writes the state values and their checkpoints.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/stream/>stream</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/flink/>flink</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/jvm/gc/ data-tooltip="JVM Internals - G1 garbage collector" aria-label="NEXT: JVM Internals - G1 garbage collector"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/java/spring-cloud/sentinel/ data-tooltip="Sentinel: flow control internals" aria-label="PREVIOUS: Sentinel: flow control internals"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
