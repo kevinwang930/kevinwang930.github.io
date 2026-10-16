@@ -17,12 +17,13 @@
 </a><a class="tag tag--primary tag--small" href=#network-list data-tag=network>network
 </a><a class="tag tag--primary tag--small" href=#security-list data-tag=security>security
 </a><a class="tag tag--primary tag--small" href=#spring-cloud-list data-tag=spring-cloud>spring-cloud
+</a><a class="tag tag--primary tag--small" href=#stream-list data-tag=stream>stream
 </a><a class="tag tag--primary tag--small" href=#video-list data-tag=video>video
 </a><a class="tag tag--primary tag--small" href=#event-list data-tag=event>event
+</a><a class="tag tag--primary tag--small" href=#flink-list data-tag=flink>flink
 </a><a class="tag tag--primary tag--small" href=#nio-list data-tag=nio>nio
 </a><a class="tag tag--primary tag--small" href=#rocketmq-list data-tag=rocketmq>rocketmq
 </a><a class="tag tag--primary tag--small" href=#starrocks-list data-tag=starrocks>starrocks
-</a><a class="tag tag--primary tag--small" href=#stream-list data-tag=stream>stream
 </a><a class="tag tag--primary tag--small" href=#ai-list data-tag=ai>ai
 </a><a class="tag tag--primary tag--small" href=#annotation-list data-tag=annotation>annotation
 </a><a class="tag tag--primary tag--small" href=#aop-list data-tag=aop>aop
@@ -33,7 +34,6 @@
 </a><a class="tag tag--primary tag--small" href=#elasticsearch-list data-tag=elasticsearch>elasticsearch
 </a><a class="tag tag--primary tag--small" href=#encryption-list data-tag=encryption>encryption
 </a><a class="tag tag--primary tag--small" href=#ffmpeg-list data-tag=ffmpeg>ffmpeg
-</a><a class="tag tag--primary tag--small" href=#flink-list data-tag=flink>flink
 </a><a class="tag tag--primary tag--small" href=#flow-control-list data-tag=flow-control>flow-control
 </a><a class="tag tag--primary tag--small" href=#forkjoin-list data-tag=forkjoin>forkjoin
 </a><a class="tag tag--primary tag--small" href=#go-list data-tag=go>go
@@ -68,7 +68,7 @@
 </a><a class="tag tag--primary tag--small" href=#tomcat-list data-tag=tomcat>tomcat
 </a><a class="tag tag--primary tag--small" href=#transaction-list data-tag=transaction>transaction
 </a><a class="tag tag--primary tag--small" href=#tree-list data-tag=tree>tree
-</a><a class="tag tag--primary tag--small" href=#webflux-list data-tag=webflux>webflux</a></section><section class=boxes><div id=data-list class="archive box" data-tag=data><h4 class=archive-title><a class=link-unstyled href=data>data (24)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
+</a><a class="tag tag--primary tag--small" href=#webflux-list data-tag=webflux>webflux</a></section><section class=boxes><div id=data-list class="archive box" data-tag=data><h4 class=archive-title><a class=link-unstyled href=data>data (25)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/query/>MySQL Query Processing Internals
 </a><span class=archive-post-date>-
 September 13, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/mysql/metadata/>Mysql internals - Metadata
 </a><span class=archive-post-date>-
@@ -114,9 +114,11 @@ August 16, 2026</span></li><li class=archive-post><a class=archive-post-title hr
 </a><span class=archive-post-date>-
 August 22, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/starrocks/backend/>StarRocks: Backend and Compute Node
 </a><span class=archive-post-date>-
-August 22, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/>Apache Flink internals
+August 22, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/client/>Apache Flink internals - client job submission
 </a><span class=archive-post-date>-
-October 6, 2026</span></li></ul></div><div id=java-list class="archive box" data-tag=java><h4 class=archive-title><a class=link-unstyled href=java>java (16)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
+October 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>Apache Flink internals - JobManager
+</a><span class=archive-post-date>-
+October 16, 2026</span></li></ul></div><div id=java-list class="archive box" data-tag=java><h4 class=archive-title><a class=link-unstyled href=java>java (16)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
 </a><span class=archive-post-date>-
 February 24, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/scheduling/>Java Concurrency - Task Scheduling
 </a><span class=archive-post-date>-
@@ -312,7 +314,13 @@ May 29, 2024</span></li><li class=archive-post><a class=archive-post-title href=
 </a><span class=archive-post-date>-
 June 10, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring-cloud/sentinel/>Sentinel: flow control internals
 </a><span class=archive-post-date>-
-August 24, 2026</span></li></ul></div><div id=video-list class="archive box" data-tag=video><h4 class=archive-title><a class=link-unstyled href=video>video (3)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/video/ffmpeg/>FFMPEG And It's Java Binding JavaCV
+August 24, 2026</span></li></ul></div><div id=stream-list class="archive box" data-tag=stream><h4 class=archive-title><a class=link-unstyled href=stream>stream (3)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/stream/>Java Stream internals
+</a><span class=archive-post-date>-
+June 27, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/client/>Apache Flink internals - client job submission
+</a><span class=archive-post-date>-
+October 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>Apache Flink internals - JobManager
+</a><span class=archive-post-date>-
+October 16, 2026</span></li></ul></div><div id=video-list class="archive box" data-tag=video><h4 class=archive-title><a class=link-unstyled href=video>video (3)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/video/ffmpeg/>FFMPEG And It's Java Binding JavaCV
 </a><span class=archive-post-date>-
 April 22, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/video/hls/>HLS- HTTP live streaming
 </a><span class=archive-post-date>-
@@ -322,7 +330,11 @@ July 7, 2024</span></li></ul></div><div id=event-list class="archive box" data-t
 </a><span class=archive-post-date>-
 June 27, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/event/rocketmq/server/>RocketMq Server Implementation
 </a><span class=archive-post-date>-
-December 21, 2025</span></li></ul></div><div id=nio-list class="archive box" data-tag=nio><h4 class=archive-title><a class=link-unstyled href=nio>nio (2)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
+December 21, 2025</span></li></ul></div><div id=flink-list class="archive box" data-tag=flink><h4 class=archive-title><a class=link-unstyled href=flink>flink (2)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/client/>Apache Flink internals - client job submission
+</a><span class=archive-post-date>-
+October 6, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/>Apache Flink internals - JobManager
+</a><span class=archive-post-date>-
+October 16, 2026</span></li></ul></div><div id=nio-list class="archive box" data-tag=nio><h4 class=archive-title><a class=link-unstyled href=nio>nio (2)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/java-nio/>Java Nio
 </a><span class=archive-post-date>-
 February 24, 2024</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/reactor/>Reactor Project in Java
 </a><span class=archive-post-date>-
@@ -334,11 +346,7 @@ December 21, 2025</span></li></ul></div><div id=starrocks-list class="archive bo
 </a><span class=archive-post-date>-
 August 22, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/db/starrocks/backend/>StarRocks: Backend and Compute Node
 </a><span class=archive-post-date>-
-August 22, 2026</span></li></ul></div><div id=stream-list class="archive box" data-tag=stream><h4 class=archive-title><a class=link-unstyled href=stream>stream (2)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/stream/>Java Stream internals
-</a><span class=archive-post-date>-
-June 27, 2026</span></li><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/>Apache Flink internals
-</a><span class=archive-post-date>-
-October 6, 2026</span></li></ul></div><div id=ai-list class="archive box" data-tag=ai><h4 class=archive-title><a class=link-unstyled href=ai>ai (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/ai/mcp/>Model Context Protocol (MCP)
+August 22, 2026</span></li></ul></div><div id=ai-list class="archive box" data-tag=ai><h4 class=archive-title><a class=link-unstyled href=ai>ai (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/ai/mcp/>Model Context Protocol (MCP)
 </a><span class=archive-post-date>-
 June 23, 2026</span></li></ul></div><div id=annotation-list class="archive box" data-tag=annotation><h4 class=archive-title><a class=link-unstyled href=annotation>annotation (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/annotation/>JAVA Annotation
 </a><span class=archive-post-date>-
@@ -358,9 +366,7 @@ August 1, 2026</span></li></ul></div><div id=encryption-list class="archive box"
 </a><span class=archive-post-date>-
 July 23, 2026</span></li></ul></div><div id=ffmpeg-list class="archive box" data-tag=ffmpeg><h4 class=archive-title><a class=link-unstyled href=ffmpeg>ffmpeg (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/video/ffmpeg/>FFMPEG And It's Java Binding JavaCV
 </a><span class=archive-post-date>-
-April 22, 2024</span></li></ul></div><div id=flink-list class="archive box" data-tag=flink><h4 class=archive-title><a class=link-unstyled href=flink>flink (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/data/stream/flink/>Apache Flink internals
-</a><span class=archive-post-date>-
-October 6, 2026</span></li></ul></div><div id=flow-control-list class="archive box" data-tag=flow-control><h4 class=archive-title><a class=link-unstyled href=flow-control>flow-control (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring-cloud/sentinel/>Sentinel: flow control internals
+April 22, 2024</span></li></ul></div><div id=flow-control-list class="archive box" data-tag=flow-control><h4 class=archive-title><a class=link-unstyled href=flow-control>flow-control (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/spring-cloud/sentinel/>Sentinel: flow control internals
 </a><span class=archive-post-date>-
 August 24, 2026</span></li></ul></div><div id=forkjoin-list class="archive box" data-tag=forkjoin><h4 class=archive-title><a class=link-unstyled href=forkjoin>forkjoin (1)</a></h4><ul class=archive-posts><li class=archive-post><a class=archive-post-title href=https://kevinwang930.github.io/post/java/concurrency/fork-join-framework/>Java Fork/Join Framework
 </a><span class=archive-post-date>-
