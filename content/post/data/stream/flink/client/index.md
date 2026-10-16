@@ -1,5 +1,5 @@
 ---
-title: "Apache Flink internals"
+title: "Apache Flink internals - client job submission"
 date: 2026-10-06T19:00:00+02:00
 categories:
 - data
@@ -63,27 +63,23 @@ One JobManager is the leader for a given high-availability setup. The client sub
 
 ---
 
-## 2. Job graph translation
+## 2. Client job submission
 
-User code does not schedule threads directly. Flink lowers the API graph in stages until each TaskManager runs concrete `StreamTask` instances:
+User code does not schedule tasks. On the client, Flink records the pipeline and submits that plan:
 
 1. **API `Transformation`s** — each DataStream call appends a node to a list on the environment.
 2. **`StreamGraph`** — `StreamGraphGenerator` turns that list into `StreamNode` / `StreamEdge` (partitioners, exchange mode).
-3. **`JobGraph`** — `StreamingJobGraphGenerator` collapses chainable sequences into `JobVertex` units and places network edges where repartition is required.
-4. **`ExecutionGraph`** — the JobMaster expands each vertex to `parallelism` execution vertices and deploys `StreamTask`s onto slots.
+3. **Submit** — a `PipelineExecutor` hands the `StreamGraph` (`ExecutionPlan`) to a `ClusterClient`. `RestClusterClient` writes that graph and uploads it. It does not build a `JobGraph`.
+4. **Function serialization** — the mapping function and the hash function are user classes. They are cleaned, then stored as bytes, because the node map and the operator factory are transient.
 
-![orders-per-minute job graph translation](images/flink-graph-translation.svg)
+`JobGraph` compilation, the `ExecutionGraph`, and task deployment run on the cluster. That path is [JobManager](/post/data/stream/flink/jobmanager/).
 
-The stages below reuse the §1 **orders-per-minute** example:
+The stages below reuse the §1 **orders-per-minute** example, up to the graph the client actually sends:
 
 ```text
 API:     orders -> ParseOrder -> keyBy(userId) -> window -> aggregate -> kafkaSink
 Stream:  [orders] --fwd--> [ParseOrder] --hash--> [window+agg] --fwd--> [kafkaSink]
-Job:     JobVertex_A(orders+ParseOrder)  ==network==>  JobVertex_B(window+agg+kafkaSink)
-Exec:    A.0 A.1 ...     shuffle      B.0 B.1 ...
 ```
-
-`StreamGraph.getJobGraph` is the bridge the client (or Application Mode cluster entrypoint) uses before the JobMaster materializes the `ExecutionGraph`. Failures restart from the last completed checkpoint by resetting tasks and restoring state handles recorded in that checkpoint.
 
 ### 2.1 StreamGraph generation
 
@@ -261,11 +257,13 @@ class ContextImpl {
   - slotSharingGroup : String
 }
 
-class SourceTransformationTranslator
-class OneInputTransformationTranslator
-class PartitionTransformationTranslator
-class ReduceTransformationTranslator
-class SinkTransformationTranslator
+interface Pipeline
+
+interface ExecutionPlan {
+  + getJobID() : JobID
+  + getName() : String
+  + getJobType() : JobType
+}
 
 class StreamGraph {
   - streamNodes : Map
@@ -334,11 +332,8 @@ Context <|.. ContextImpl
 ContextImpl --> StreamGraphGenerator
 ContextImpl --> StreamGraph
 TransformationTranslator ..> Context : translate*(..., context)
-TransformationTranslator <|.. SourceTransformationTranslator
-TransformationTranslator <|.. OneInputTransformationTranslator
-TransformationTranslator <|.. PartitionTransformationTranslator
-TransformationTranslator <|.. ReduceTransformationTranslator
-TransformationTranslator <|.. SinkTransformationTranslator
+Pipeline <|.. StreamGraph
+ExecutionPlan <|.. StreamGraph
 StreamGraph --> StreamNode : streamNodes
 StreamGraph --> StreamNode : sources / sinks
 StreamNode --> StreamOperatorFactory : operatorFactory
@@ -424,22 +419,24 @@ StreamEdges:
 
 `keyBy` is handled by **`PartitionTransformationTranslator`**: it registers a virtual node so the downstream edge carries the hash partitioner—not a separate running operator.
 
-### 2.2 JobGraph creation
+### 2.2 Submit the StreamGraph
 
-After the `StreamGraph` exists, the client (or Application Mode entrypoint) builds a **`JobGraph`** via **`StreamingJobGraphGenerator`**. This step does not deploy tasks yet: it decides **operator chaining**—which `StreamNode`s share one thread / mailbox as a single **`JobVertex`**—and where **network** boundaries must remain. Chainable **forward** edges collapse into one vertex; **hash** / rebalance edges become **`JobEdge`s** between vertices (intermediate result partitions).
+`execute` builds the `StreamGraph`, then a **`PipelineExecutor`** (chosen by `execution.target`) submits that object. Session and job executors obtain a **`ClusterClient`** and call **`submitJob(ExecutionPlan)`**. **`RestClusterClient`** writes the `StreamGraph` to a temporary file and uploads it with the user jars. **`MiniClusterClient`** does the same hand-off into a local MiniCluster. Neither client compiles a `JobGraph`.
 
 ```plantuml
 @startuml
 
-interface Pipeline {
-  + getJobGraph(ClassLoader) : JobGraph
-}
+interface Pipeline
 
 class StreamGraph {
   - streamNodes : Map
   - sources : Set
   - sinks : Set
-  + getJobGraph(ClassLoader) : JobGraph
+}
+
+interface ExecutionPlan {
+  + getJobID() : JobID
+  + getName() : String
 }
 
 interface PipelineExecutor {
@@ -449,9 +446,7 @@ interface PipelineExecutor {
 class LocalExecutor {
   - configuration : Configuration
   - miniClusterFactory : Function
-  + {static} create(Configuration) : LocalExecutor
   + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
-  - getJobGraph(Pipeline, Configuration, ClassLoader) : JobGraph
 }
 
 abstract class AbstractSessionClusterExecutor {
@@ -460,10 +455,7 @@ abstract class AbstractSessionClusterExecutor {
   + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
 }
 
-class RemoteExecutor {
-  + {static} NAME : String
-}
-
+class RemoteExecutor
 class YarnSessionClusterExecutor
 class KubernetesSessionClusterExecutor
 
@@ -475,41 +467,17 @@ abstract class AbstractJobClusterExecutor {
 
 class YarnJobClusterExecutor
 
-class StreamingJobGraphGenerator {
-  + createJobGraph(StreamGraph) : JobGraph
-  - createChain(StreamNode) : List
-  + isChainable(StreamEdge, StreamNode, StreamNode) : boolean
+interface ClusterClient {
+  + submitJob(ExecutionPlan) : CompletableFuture
+  + getClusterId() : ClusterID
+  + cancel(JobID) : CompletableFuture
 }
 
-class JobGraph {
-  - taskVertices : List
-  - serializedExecutionConfig : ExecutionConfig
-  + addVertex(JobVertex) : void
-}
-
-class JobVertex {
-  - parallelism : int
-  - invokableClass : Class
-  - operatorIDs : List
-  + connectNewDataSetAsInput(JobVertex, DistributionPattern) : JobEdge
-}
-
-class StreamConfig {
-  - chainedConfigs : Map
-  - operatorName : String
-  - statePartitioner : KeySelector
-}
-
-class IntermediateDataSet {
-  - producer : JobVertex
-}
-
-class JobEdge {
-  - distributionPattern : DistributionPattern
-  - source : IntermediateDataSet
-}
+class MiniClusterClient
+class RestClusterClient
 
 Pipeline <|.. StreamGraph
+ExecutionPlan <|.. StreamGraph
 
 PipelineExecutor <|.. LocalExecutor
 PipelineExecutor <|.. AbstractSessionClusterExecutor
@@ -518,24 +486,25 @@ PipelineExecutor <|.. AbstractJobClusterExecutor
 AbstractSessionClusterExecutor <|-- RemoteExecutor
 AbstractSessionClusterExecutor <|-- YarnSessionClusterExecutor
 AbstractSessionClusterExecutor <|-- KubernetesSessionClusterExecutor
-
 AbstractJobClusterExecutor <|-- YarnJobClusterExecutor
 
+ClusterClient <|.. MiniClusterClient
+ClusterClient <|.. RestClusterClient
+
 PipelineExecutor ..> StreamGraph : execute
-StreamGraph ..> StreamingJobGraphGenerator : getJobGraph()
-StreamingJobGraphGenerator ..> JobGraph : createJobGraph
-JobGraph *-- JobVertex
-JobVertex *-- StreamConfig
-JobVertex *-- IntermediateDataSet
-IntermediateDataSet *-- JobEdge
+LocalExecutor ..> MiniClusterClient : submitJob(StreamGraph)
+RemoteExecutor ..> RestClusterClient : submitJob(StreamGraph)
+YarnSessionClusterExecutor ..> RestClusterClient : submitJob(StreamGraph)
+KubernetesSessionClusterExecutor ..> RestClusterClient : submitJob(StreamGraph)
+YarnJobClusterExecutor ..> RestClusterClient : submitJob(StreamGraph)
+RestClusterClient ..> StreamGraph : serialize ExecutionPlan
 @enduml
 ```
 
 ```java
 // --- Step 1: user code / env.execute ---
-// builds StreamGraph (§2.1.2), then submits that pipeline
 public JobClient execute(String jobName) throws Exception {
-    StreamGraph streamGraph = getStreamGraph(); // Transformation list -> StreamGraph
+    StreamGraph streamGraph = getStreamGraph();
     streamGraph.setJobName(jobName);
     return execute(streamGraph);
 }
@@ -549,280 +518,173 @@ public JobClient executeAsync(StreamGraph streamGraph) throws Exception {
         .get();
 }
 
-// --- Step 3: executor turns Pipeline (StreamGraph) into JobGraph, then submits ---
-// e.g. LocalExecutor / AbstractSessionClusterExecutor
-public CompletableFuture<JobClient> execute(
-        Pipeline pipeline, Configuration configuration, ClassLoader userClassloader)
-        throws Exception {
-    JobGraph jobGraph = PipelineExecutorUtils.getJobGraph(pipeline, configuration);
-    // submit jobGraph to MiniCluster / cluster ...
-    return submit(jobGraph);
-}
+// --- Step 3: submit the StreamGraph; no JobGraph on the client ---
+StreamGraph streamGraph = PipelineExecutorUtils.getStreamGraph(pipeline, configuration);
+streamGraph.serializeUserDefinedInstances();
+return clusterClient.submitJob(streamGraph);
 
-// PipelineExecutorUtils / StreamGraph path (simplified)
-static JobGraph getJobGraph(Pipeline pipeline, Configuration configuration) {
-    StreamGraph streamGraph = (StreamGraph) pipeline;
-    return streamGraph.getJobGraph(userClassLoader);
-}
-
-// --- Step 4: StreamGraph -> JobGraph (chaining) ---
-public JobGraph getJobGraph(ClassLoader userClassLoader) {
-    return StreamingJobGraphGenerator.createJobGraph(userClassLoader, this, jobId);
-}
-
-public static JobGraph createJobGraph(StreamGraph streamGraph) {
-    JobGraph jobGraph = new JobGraph(streamGraph.getJobID(), streamGraph.getJobName());
-    for (Integer sourceId : streamGraph.getSourceIDs()) {
-        createChain(sourceId, streamGraph, jobGraph); // walk edges, merge fwd chains
+// RestClusterClient: write the StreamGraph bytes and POST them
+public CompletableFuture<JobID> submitJob(ExecutionPlan executionPlan) {
+    Path executionPlanFile = Files.createTempFile(
+        "flink-executionPlan-" + executionPlan.getJobID(), ".bin");
+    try (ObjectOutputStream out = new ObjectOutputStream(Files.newOutputStream(executionPlanFile))) {
+        out.writeObject(executionPlan); // StreamGraph, not JobGraph
     }
-    return jobGraph;
+    return sendRetriableRequest(/* ... */).thenApply(ignored -> executionPlan.getJobID());
 }
-
-// Chaining predicate (simplified): only fwd edges with matching parallelism merge
-static boolean isChainable(StreamEdge edge, StreamNode up, StreamNode down) {
-    return edge.getPartitioner() instanceof ForwardPartitioner
-        && up.getParallelism() == down.getParallelism()
-        && down.getInEdges().size() == 1
-        && up.isSameSlotSharingGroup(down)
-        && down.isChainingEnabled();
-}
-// Chain head -> JobVertex + StreamConfig chain
-// Non-chainable edge -> IntermediateDataSet + JobEdge (network shuffle)
 ```
 
-**Orders-per-minute — from `StreamGraph` to `JobGraph`**
+`writeObject` writes the non-transient fields: job id, name, `sources`, `sinks`, checkpoint settings. Numbers, strings, enums, and Flink `TypeSerializer`s (the layout of an `Order` field such as `userId`) go out as ordinary Java objects. The orders themselves stay in the source.
 
-Starting `StreamGraph` (from §2.1.2):
+The node map, the virtual-partition map, and each `operatorFactory` are `transient`. `writeObject` skips them. Those objects hold the user functions, so they are packed into bytes first (§2.3). The cluster compiles the restored `StreamGraph` into a `JobGraph` inside the JobMaster. See [JobManager](/post/data/stream/flink/jobmanager/).
 
-```text
-StreamNodes:  orders --fwd--> ParseOrder --hash(userId)--> window+aggregate --fwd--> kafkaSink
-```
+### 2.3 Function serialization
 
-Chaining decisions:
+A user function has to arrive as a live object on a TaskManager, and the class that implements it (`ParseOrder`, the `keyBy` lambda) exists only in the user JAR. Java deserialization loads classes with the class loader that is reading the stream. When the cluster first reads `flink-executionPlan-….bin`, that loader is the system loader, which has Flink and not the job. A `MapFunction` or `KeySelector` written as a normal field would fail there with `ClassNotFoundException`.
 
-| StreamEdge | Partitioner | `isChainable`? | Result |
-|---|---|---|---|
-| orders → ParseOrder | `fwd` | yes (same parallelism) | same chain |
-| ParseOrder → window+aggregate | `hash(userId)` | **no** | network boundary |
-| window+aggregate → kafkaSink | `fwd` | yes | same chain |
+Flink therefore keeps every object that can point at user code **transient**, and ships a `byte[]` instead. A `byte[]` deserializes with the system loader. The bytes are turned back into the function later, when the user class loader is available.
 
-Resulting `JobGraph`:
+Two steps make that byte array.
 
-```text
-JobVertex_A  (chain head = orders)
-  chained operators:  orders , ParseOrder
-  invokable:          SourceStreamTask / StreamTask (serialized StreamConfig chain)
-  parallelism:        p
-       │
-       │  JobEdge  (hash / POINTWISE or ALL_TO_ALL key-group shuffle)
-       │  IntermediateDataSet between A and B
-       ▼
-JobVertex_B  (chain head = window+aggregate)
-  chained operators:  window+aggregate , kafkaSink
-  statePartitioner:   userId KeySelector (on window op StreamConfig)
-  parallelism:        p
-```
+**1. Make the function serializable (`ClosureCleaner`).** `map` and `keyBy` call `StreamExecutionEnvironment.clean` before the function is stored. `ClosureCleaner.clean` tries `InstantiationUtil.serializeObject`. When that succeeds, it stops. When it fails, the usual cause is a non-static inner class: the compiler added a `this$0` field pointing at the enclosing object, and Java would then serialize that whole object. The cleaner reads the function’s bytecode with ASM. If no method reads `this$0`, it sets that field to `null` and serializes again. If the bytecode does read the enclosing instance, nulling the field would break the function, so the field stays and the retry throws `InvalidProgramException` (“The implementation of the MapFunction is not serializable”). Classes that define `writeObject`, `writeReplace`, or `Externalizable` are left alone.
 
-So two deployment units, not four: `orders` and `ParseOrder` share one mailbox (no network hop); after the hash shuffle, `window+aggregate` and `kafkaSink` share another. The `keyBy` never becomes its own `JobVertex`—only the **edge** between A and B.
+**2. Copy transient user objects into `SerializedValue` (`serializeUserDefinedInstances`).** This runs immediately before `submitJob`. `SerializedValue` calls `InstantiationUtil.serializeObject` and keeps only the `byte[]`. The holder that stores those arrays, `UserDefinedObjectsHolder`, is a normal field of `StreamGraph`, so `writeObject` does write it.
 
-### 2.3 JobGraph → ExecutionGraph
+The copy is ordered, because the factory is transient on the node as well as the node map being transient on the graph:
 
-On the JobManager, the **JobMaster** turns the submitted `JobGraph` into an **`ExecutionGraph`**: each `JobVertex` expands to `parallelism` **`ExecutionVertex`** instances (subtasks `A.0`, `A.1`, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a **`StreamTask`** (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.
+1. Each `StreamOperatorFactory` is wrapped in its own `SerializedValue` (this can run in parallel). That is the only copy of the factory.
+2. The `StreamNode` map is then wrapped. `operatorFactory` is already skipped, so those bytes contain the node’s plain fields, its `TypeSerializer`s, and `statePartitioners`.
+3. The virtual-partition map (each entry is parent id, `StreamPartitioner`, exchange mode) and the execution config are wrapped the same way.
+
+On the cluster, `deserializeUserDefinedInstances(userClassLoader)` reverses that: `SerializedValue.deserializeValue` reads the bytes with the user class loader, restores the transient maps, and calls `StreamNode.setOperatorFactory`.
 
 ```plantuml
 @startuml
-skinparam classAttributeIconSize 0
 
-class JobMaster {
-  + startJobExecution()
+class ClosureCleaner {
+  + clean(Object, ClosureCleanerLevel, boolean) : void
 }
 
-class ExecutionGraph {
-  Map verticesById
-  + scheduleForExecution()
-  + failGlobal(Throwable)
+class StreamGraph {
+  - sources : Set
+  - sinks : Set
+  - streamNodes : Map
+  - virtualPartitionNodes : Map
+  - userDefinedObjectsHolder : UserDefinedObjectsHolder
+  + serializeUserDefinedInstances() : void
+  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
 }
 
-class ExecutionJobVertex {
-  ExecutionVertex[] taskVertices
-  int parallelism
+class StreamNode {
+  - id : int
+  - parallelism : int
+  - statePartitioners : KeySelector[]
+  - stateKeySerializer : TypeSerializer
+  - operatorFactory : StreamOperatorFactory
 }
 
-class ExecutionVertex {
-  int subTaskIndex
-  + getCurrentExecutionAttempt() : Execution
+class StreamMap {
+  # userFunction : MapFunction
 }
 
-class Execution {
-  + deploy()
-  + fail(Throwable)
+interface MapFunction {
+  + map(T) : R
 }
 
-class TaskDeploymentDescriptor
-class StreamTask {
-  + invoke()
+interface KeySelector {
+  + getKey(T) : K
 }
 
-JobMaster ..> ExecutionGraph : build from JobGraph
-ExecutionGraph --> ExecutionJobVertex
-ExecutionJobVertex --> ExecutionVertex : parallelism
-ExecutionVertex --> Execution : attempt
-Execution ..> TaskDeploymentDescriptor : deploy
-TaskDeploymentDescriptor ..> StreamTask : TaskManager runs
+class KeyGroupStreamPartitioner {
+  - keySelector : KeySelector
+  - maxParallelism : int
+  + selectChannel(SerializationDelegate) : int
+}
+
+class SerializedValue {
+  - serializedData : byte[]
+  + deserializeValue(ClassLoader) : T
+}
+
+class UserDefinedObjectsHolder {
+  - serializedStreamNodes : SerializedValue
+  - serializedVirtualPartitionNodes : SerializedValue
+  - serializedExecutionConfig : SerializedValue
+  - streamNodeToSerializedOperatorFactories : Collection
+}
+
+ClosureCleaner ..> MapFunction : clean before store
+ClosureCleaner ..> KeySelector : clean before store
+StreamMap --> MapFunction
+KeyGroupStreamPartitioner --> KeySelector
+StreamNode --> KeySelector : statePartitioners
+StreamGraph --> UserDefinedObjectsHolder
+UserDefinedObjectsHolder --> SerializedValue
+SerializedValue ..> StreamMap : factory bytes
+SerializedValue ..> KeyGroupStreamPartitioner : virtual partition bytes
 @enduml
 ```
 
 ```java
-// JobMaster (simplified): JobGraph -> ExecutionGraph -> schedule
-ExecutionGraph executionGraph = DefaultExecutionGraphBuilder.buildGraph(
-    jobGraph,
-    configuration,
-    blobWriter,
-    /* ... */);
+// --- Step 1: map / keyBy. Fail here if the function cannot be serialized. ---
+public <F> F clean(F f) {
+    ClosureCleaner.clean(f, config.getClosureCleanerLevel(), true);
+    return f;
+}
 
-executionGraph.scheduleForExecution();
+// ClosureCleaner: already serializable → return.
+// Otherwise, if this$0 is never read, set it to null and try again.
+if (canBeSerialized(func)) {
+    return;
+}
+// ... ASM This0AccessFinder: GETFIELD this$0 ...
+if (!accessesClosure) {
+    this0.set(func, null);
+}
+InstantiationUtil.serializeObject(func); // InvalidProgramException if this still fails
 
-// Each ExecutionVertex gets an Execution attempt that deploys to a slot
-Execution execution = executionVertex.getCurrentExecutionAttempt();
-LogicalSlot slot = slotPool.allocateSlot(/* ... */);
-execution.deploy(slot); // TaskManager receives TaskDeploymentDescriptor
+// --- Step 2: before submitJob. Transient fields become byte arrays. ---
+// factory first (it is transient on StreamNode), then the node map, then partitions
+streamNodeToSerializedOperatorFactories =
+    serializeOperatorFactories(streamNodes.values(), serializationExecutor);
+serializedStreamNodes = new SerializedValue<>(streamNodes);
+serializedVirtualPartitionNodes = new SerializedValue<>(virtualPartitionNodes);
 
-// On the worker: load invokable (e.g. OneInputStreamTask) and run
-StreamTask<?, ?> task = createInvokable(deployment);
-task.invoke(); // mailbox loop: records, timers, checkpoint barriers
+public SerializedValue(T value) throws IOException {
+    this.serializedData = InstantiationUtil.serializeObject(value);
+}
+
+// Cluster, once the user class loader exists:
+public T deserializeValue(ClassLoader loader) throws IOException, ClassNotFoundException {
+    return InstantiationUtil.deserializeObject(serializedData, loader);
+}
 ```
 
-After this step the logical pipeline is concrete parallel work: TaskManagers run `StreamTask`s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.
+**Mapping function.** `ParseOrder` is the `MapFunction` in `StreamMap.userFunction`. The translator stores that operator inside the node’s `StreamOperatorFactory`. Because the factory is `transient`, it appears only in `streamNodeToSerializedOperatorFactories`.
 
----
-
-## 3. TaskManagers, slots, and data exchange
-
-A TaskManager is a JVM worker. It advertises a fixed number of **slots**; each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.
-
-Records leave a chain through a **result partition** and enter the downstream chain through an **input gate**. Exchange modes matter:
-
-| Mode | Behavior |
-|------|----------|
-| **Pipelined** | Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming) |
-| **Blocking** | Producer finishes a partition before the consumer reads (common in batch) |
-
-Partitioners on `StreamEdge` decide routing: `ForwardPartitioner` keeps data local to the same subtask index, `KeyGroupStreamPartitioner` (after `keyBy`) hashes keys into key groups, `RebalancePartitioner` round-robins for load balance.
-
-```mermaid
-flowchart TB
-  subgraph TM1["TaskManager 1"]
-    S0["Slot 0\nStreamTask A.0"]
-    S1["Slot 1\nStreamTask A.1"]
-  end
-  subgraph TM2["TaskManager 2"]
-    S2["Slot 0\nStreamTask B.0"]
-    S3["Slot 1\nStreamTask B.1"]
-  end
-  S0 -->|"hash(key) buffers"| S2
-  S0 -->|"hash(key) buffers"| S3
-  S1 -->|"hash(key) buffers"| S2
-  S1 -->|"hash(key) buffers"| S3
-```
-
-Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.
-
----
-
-## 4. State and checkpoints
-
-Stateful operators store values in a **state backend** (heap, RocksDB, or others). After `keyBy`, state is **keyed**: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.
-
-Consistency across the distributed graph uses **checkpoints**. The JobMaster’s `CheckpointCoordinator` periodically triggers a checkpoint:
-
-1. Allocate a checkpoint id and storage location.
-2. Send a trigger to source tasks (and notify operator coordinators when present).
-3. Sources inject a **checkpoint barrier** into each outgoing stream.
-4. Barriers flow with the data. On alignment (exactly-once), a task waits until the barrier arrives on all input channels for that checkpoint, then snapshots its state and forwards the barrier downstream.
-5. Tasks acknowledge the coordinator with state handles. When all acknowledge, the checkpoint is marked **completed** and becomes the recovery baseline.
-
-```mermaid
-sequenceDiagram
-  participant CC as CheckpointCoordinator
-  participant Src as Source StreamTask
-  participant Op as Downstream StreamTask
-  participant Store as Checkpoint storage
-  CC->>Src: trigger checkpoint n
-  Src->>Store: snapshot source state
-  Src->>Op: CheckpointBarrier(n)
-  Note over Op: align inputs, then snapshot
-  Op->>Store: snapshot keyed/operator state
-  Op->>CC: AcknowledgeCheckpoint(n)
-  Src->>CC: AcknowledgeCheckpoint(n)
-  CC->>CC: mark checkpoint n complete
-```
-
-Exactly-once end-to-end additionally requires transactional sinks (or two-phase commit operators) that commit only after the checkpoint that includes their side effects completes. At-least-once can skip full barrier alignment so barriers overtake buffered data; recovery may replay more records.
-
-Savepoints are user-triggered checkpoints with a stable format used for stop-with-savepoint, deploy upgrades, and rescaling. Externalized checkpoints keep metadata after job termination when retention is configured.
-
-On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.
-
----
-
-## 5. Event time and watermarks
-
-Flink distinguishes **processing time** (wall clock on the machine) from **event time** (timestamps carried by records). Event-time windows and timers fire from the progress of **watermarks**, not from wall-clock ticks.
-
-A `WatermarkStrategy` supplies:
-
-- a `TimestampAssigner` that stamps each record;
-- a `WatermarkGenerator` that emits watermark values (periodically or on records).
-
-`WatermarkStrategy.forBoundedOutOfOrderness(Duration)` is the common generator: it tracks the max observed event timestamp and emits `maxEventTs - outOfOrderness` (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.
+**Hashing function.** `keyBy(Order::getUserId)` is a `KeySelector`. `PartitionTransformationTranslator` puts it on a `KeyGroupStreamPartitioner` in the virtual-partition map, and the window node also stores it in `statePartitioners`. The partitioner therefore rides inside `serializedVirtualPartitionNodes`. `statePartitioners` is a normal field of `StreamNode`, so the same selector also rides inside `serializedStreamNodes`. After restore, `selectChannel` calls `keySelector.getKey(record)` and `KeyGroupRangeAssignment.assignKeyToParallelOperator`, which is `murmurHash(key.hashCode())` modulo max parallelism. `stateKeySerializer` is the `TypeSerializer` for the key bytes; that object is one of the plain fields inside the node bytes.
 
 ```java
-DataStream<Event> events = env.fromSource(
-    source,
-    WatermarkStrategy
-        .<Event>forBoundedOutOfOrderness(Duration.ofSeconds(5))
-        .withTimestampAssigner((e, ts) -> e.getEventTimeMillis()),
-    "events");
+public int selectChannel(SerializationDelegate<StreamRecord<T>> record) {
+    K key = keySelector.getKey(record.getInstance().getValue());
+    return KeyGroupRangeAssignment.assignKeyToParallelOperator(
+            key, maxParallelism, numberOfChannels);
+}
 
-events
-    .keyBy(Event::getKey)
-    .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
-    .aggregate(new CountAggregate())
-    .sinkTo(sink);
+public static int assignToKeyGroup(Object key, int maxParallelism) {
+    return MathUtils.murmurHash(key.hashCode()) % maxParallelism;
+}
 ```
 
-Watermarks propagate downstream. At a multi-input operator, the effective watermark is the **minimum** across inputs (and channels): the operator must not advance event time past data that might still arrive on a slower channel. Idle sources can be marked idle so they do not hold the minimum forever.
+For **orders-per-minute**:
 
 ```text
-records:   t=10  t=12  t=11  t=18  t=20
-watermark:              ....  W=13       W=15
-bound = 5s  =>  W ≈ maxEventTs - 5s
-
-window [0,60s): closes when watermark >= 60s
+Piece              Lives in                         Serialized as
+-----------------  -------------------------------  -----------------------------------------
+ParseOrder         StreamMap.userFunction           SerializedValue of the operator factory
+                   inside operatorFactory           (factory is transient)
+keyBy(userId)      KeyGroupStreamPartitioner        SerializedValue of virtualPartitionNodes
+                   and statePartitioners            and of the StreamNode map
+userId layout      stateKeySerializer               inside the StreamNode bytes
+node id, edges     StreamNode fields                inside the StreamNode bytes
 ```
-
-Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if `allowedLateness` extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.
-
----
-
-## 6. Minimal job shape
-
-A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.
-
-```java
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-env.enableCheckpointing(10_000); // ms
-env.getCheckpointConfig().setCheckpointingConsistencyMode(CheckpointingMode.EXACTLY_ONCE);
-
-env.fromSource(source, watermarkStrategy, "src")
-    .map(new ParseFn())
-    .keyBy(Event::getKey)
-    .process(new StatefulCountFn())
-    .sinkTo(sink);
-
-env.execute("order-count");
-```
-
-`StatefulCountFn` would hold a `ValueState<Long>` (or `MapState`) under the current key; after every checkpoint that state is part of the acknowledged snapshot. With RocksDB, large keyed state stays on local disk and is uploaded incrementally according to the configured checkpoint storage (JobManager + durable filesystem, or a fully remote incremental scheme).
-
-The JobManager never sees individual records. It only schedules tasks, triggers checkpoints, and restores state handles. Throughput and latency are determined by slot count, chain boundaries, network buffers, state backend, and watermark delay—not by a central broker inside Flink itself.
