@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="640" viewBox="0 0 980 640" role="img" aria-label="G1 garbage collection cycle: Young-Only through Concurrent Start, Remark, Cleanup, then Mixed Space-Reclamation, with Full GC as a backup">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c62828"/>
+    </marker>
+  </defs>
+  <rect width="980" height="640" fill="#ffffff"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">G1 garbage collection cycle</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">Ring after Oracle GC Tuning Guide Figure 7-2. Full GC is the backup off the ring.</text>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <circle cx="430" cy="355" r="168" fill="none" stroke="#455a64" stroke-width="3"/>
+    <line x1="230" y1="355" x2="630" y2="355" stroke="#90a4ae" stroke-width="1.5" stroke-dasharray="5 4"/>
+
+    <text x="430" y="300" text-anchor="middle" font-size="18" font-weight="700" fill="#1565c0">Young-Only</text>
+    <text x="430" y="430" text-anchor="middle" font-size="16" font-weight="700" fill="#ad1457">Space-Reclamation</text>
+    <text x="430" y="450" text-anchor="middle" font-size="11" fill="#ad1457">young + selected old regions</text>
+
+    <!-- normal young collections, upper left -->
+    <circle cx="267.7" cy="311.5" r="7" fill="#1e88e5"/>
+    <circle cx="292.4" cy="258.6" r="7" fill="#1e88e5"/>
+    <circle cx="326.6" cy="222.6" r="7" fill="#1e88e5"/>
+    <!-- Concurrent Start -->
+    <circle cx="412.4" cy="187.9" r="16" fill="#1565c0" stroke="#0d47a1" stroke-width="2"/>
+    <!-- young collections may continue during concurrent mark -->
+    <circle cx="464.9" cy="190.7" r="7" fill="#1e88e5"/>
+    <circle cx="508.9" cy="206.7" r="7" fill="#1e88e5"/>
+    <!-- Remark, Cleanup -->
+    <circle cx="546.7" cy="234.2" r="11" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
+    <circle cx="578.3" cy="276.1" r="11" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
+
+    <!-- mixed collections -->
+    <circle cx="591.5" cy="401.3" r="7" fill="#ec407a"/>
+    <circle cx="554.8" cy="467.4" r="7" fill="#ec407a"/>
+    <circle cx="487.5" cy="512.9" r="7" fill="#ec407a"/>
+    <circle cx="406.6" cy="521.4" r="7" fill="#ec407a"/>
+    <circle cx="331.3" cy="490.9" r="7" fill="#ec407a"/>
+    <circle cx="281.7" cy="433.9" r="7" fill="#ec407a"/>
+
+    <!-- direction: enter Space-Reclamation, return to Young-Only -->
+    <polygon points="590,340 606,340 598,358" fill="#455a64"/>
+    <polygon points="254,370 270,370 262,352" fill="#455a64"/>
+
+    <text x="70" y="250" font-size="12" font-weight="700" fill="#1565c0">Normal young</text>
+    <text x="70" y="266" font-size="11" fill="#546e7a">promote to old</text>
+    <line x1="160" y1="258" x2="250" y2="280" stroke="#90a4ae" stroke-width="1"/>
+
+    <text x="70" y="130" font-size="12" font-weight="700" fill="#0d47a1">Old gen occupancy</text>
+    <text x="70" y="146" font-size="12" font-weight="700" fill="#0d47a1">exceeds threshold</text>
+    <text x="70" y="162" font-size="11" fill="#546e7a">InitiatingHeapOccupancyPercent</text>
+    <line x1="356.6" y1="173.2" x2="375.3" y2="219.6" stroke="#0d47a1" stroke-width="1.5"/>
+    <line x1="230" y1="150" x2="356.6" y2="173.2" stroke="#0d47a1" stroke-width="1.2"/>
+
+    <text x="430" y="150" text-anchor="middle" font-size="13" font-weight="700" fill="#0d47a1">Concurrent Start</text>
+    <text x="430" y="166" text-anchor="middle" font-size="11" fill="#546e7a">young + start mark</text>
+
+    <text x="560" y="150" text-anchor="middle" font-size="12" font-weight="700" fill="#1565c0">Concurrent Mark</text>
+    <text x="560" y="166" text-anchor="middle" font-size="11" fill="#546e7a">application still running</text>
+
+    <text x="680" y="230" font-size="13" font-weight="700" fill="#e65100">Remark</text>
+    <text x="680" y="272" font-size="13" font-weight="700" fill="#e65100">Cleanup</text>
+    <text x="680" y="292" font-size="11" fill="#546e7a">short stop-the-world pauses</text>
+    <line x1="560" y1="234" x2="672" y2="226" stroke="#fb8c00" stroke-width="1"/>
+    <line x1="592" y1="276" x2="672" y2="268" stroke="#fb8c00" stroke-width="1"/>
+
+    <text x="680" y="340" font-size="12" font-weight="700" fill="#455a64">Prepare Mixed</text>
+    <text x="680" y="356" font-size="11" fill="#546e7a">if old candidates exist</text>
+    <line x1="610" y1="348" x2="672" y2="348" stroke="#90a4ae" stroke-width="1"/>
+
+    <text x="70" y="430" font-size="12" font-weight="700" fill="#ad1457">Mixed</text>
+    <text x="70" y="446" font-size="11" fill="#546e7a">young + old collection set</text>
+    <line x1="175" y1="436" x2="270" y2="436" stroke="#ec407a" stroke-width="1"/>
+
+    <text x="70" y="500" font-size="12" font-weight="700" fill="#455a64">Reclaim no longer</text>
+    <text x="70" y="516" font-size="12" font-weight="700" fill="#455a64">worth the pause</text>
+    <text x="70" y="534" font-size="11" fill="#546e7a">restart Young-Only</text>
+    <line x1="175" y1="508" x2="250" y2="400" stroke="#90a4ae" stroke-width="1"/>
+
+    <rect x="650" y="430" width="300" height="96" rx="8" fill="#ffebee" stroke="#c62828" stroke-width="1.5"/>
+    <text x="800" y="458" text-anchor="middle" font-size="14" font-weight="700" fill="#b71c1c">Full GC backup</text>
+    <text x="800" y="478" text-anchor="middle" font-size="12" fill="#c62828">whole-heap compaction</text>
+    <text x="800" y="498" text-anchor="middle" font-size="11" fill="#546e7a">when evacuation cannot free space</text>
+    <path d="M 610 380 C 640 380, 640 430, 638 468" fill="none" stroke="#c62828" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)"/>
+    <text x="700" y="414" font-size="11" fill="#c62828">allocation failure</text>
+
+    <text x="490" y="610" text-anchor="middle" font-size="11" fill="#78909c">Normal young collections may continue while concurrent mark runs. Full GC is not a step of the ring.</text>
+  </g>
+</svg>
