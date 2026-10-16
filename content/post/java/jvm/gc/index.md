@@ -11,9 +11,6 @@ tags:
 - g1
 keywords:
 - G1
-- Garbage-First
-- HotSpot
-- MaxGCPauseMillis
 #thumbnailImage: //example.com/image.jpg
 ---
 
