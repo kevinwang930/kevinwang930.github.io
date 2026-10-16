@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-label="G1 allocation: equal heap regions of HeapWords, with bottom, top and end, and a TLAB inside an Eden region">
+  <rect width="960" height="560" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">G1 allocation storage</text>
+  <text x="480" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#546e7a">G1CollectedHeap is a sequence of equal G1HeapRegions. Each region is GrainWords HeapWords.</text>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="36" y="74" font-size="11" fill="#607d8b">hrm_index</text>
+
+    <rect x="36" y="82" width="104" height="48" rx="3" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="88" y="110" text-anchor="middle" font-size="12" fill="#455a64">Free</text>
+    <text x="88" y="146" text-anchor="middle" font-size="11" fill="#78909c">0</text>
+
+    <rect x="148" y="82" width="104" height="48" rx="3" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="200" y="110" text-anchor="middle" font-size="12" font-weight="700" fill="#1b5e20">Eden</text>
+    <text x="200" y="146" text-anchor="middle" font-size="11" fill="#2e7d32">1</text>
+
+    <rect x="260" y="82" width="104" height="48" rx="3" fill="#a5d6a7" stroke="#388e3c"/>
+    <text x="312" y="110" text-anchor="middle" font-size="12" fill="#1b5e20">Eden</text>
+    <text x="312" y="146" text-anchor="middle" font-size="11" fill="#78909c">2</text>
+
+    <rect x="372" y="82" width="104" height="48" rx="3" fill="#ffe0b2" stroke="#ef6c00"/>
+    <text x="424" y="110" text-anchor="middle" font-size="12" fill="#e65100">Survivor</text>
+    <text x="424" y="146" text-anchor="middle" font-size="11" fill="#78909c">3</text>
+
+    <rect x="484" y="82" width="104" height="48" rx="3" fill="#bbdefb" stroke="#1565c0"/>
+    <text x="536" y="110" text-anchor="middle" font-size="12" fill="#0d47a1">Old</text>
+    <text x="536" y="146" text-anchor="middle" font-size="11" fill="#78909c">4</text>
+
+    <rect x="596" y="82" width="216" height="48" rx="3" fill="#e1bee7" stroke="#6a1b9a"/>
+    <line x1="704" y1="82" x2="704" y2="130" stroke="#6a1b9a" stroke-dasharray="3 3"/>
+    <text x="704" y="110" text-anchor="middle" font-size="12" fill="#4a148c">Humongous</text>
+    <text x="650" y="146" text-anchor="middle" font-size="11" fill="#78909c">5</text>
+    <text x="758" y="146" text-anchor="middle" font-size="11" fill="#78909c">6</text>
+
+    <rect x="820" y="82" width="104" height="48" rx="3" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="872" y="110" text-anchor="middle" font-size="12" fill="#455a64">Free</text>
+    <text x="872" y="146" text-anchor="middle" font-size="11" fill="#78909c">7</text>
+
+    <text x="704" y="168" text-anchor="middle" font-size="11" fill="#6a1b9a">StartsHumongous + ContinuesHumongous, one object larger than half a region</text>
+
+    <line x1="240" y1="132" x2="240" y2="188" stroke="#2e7d32" stroke-width="1.5"/>
+    <polygon points="234,184 240,196 246,184" fill="#2e7d32"/>
+    <text x="252" y="186" font-size="11" fill="#2e7d32">current Eden, MutatorAllocRegion</text>
+
+    <text x="36" y="222" font-size="13" font-weight="700" fill="#1b5e20">Eden G1HeapRegion</text>
+    <text x="188" y="222" font-size="12" fill="#546e7a">GrainBytes from _bottom to _end. Objects occupy [_bottom, _top). Free space is [_top, _end).</text>
+
+    <rect x="36" y="248" width="264" height="72" fill="#81c784" stroke="#2e7d32"/>
+    <rect x="48" y="260" width="70" height="48" rx="2" fill="#43a047" stroke="#1b5e20"/>
+    <text x="83" y="288" text-anchor="middle" font-size="11" fill="#ffffff">object</text>
+    <rect x="126" y="260" width="52" height="48" rx="2" fill="#43a047" stroke="#1b5e20"/>
+    <text x="152" y="288" text-anchor="middle" font-size="11" fill="#ffffff">object</text>
+    <rect x="186" y="260" width="100" height="48" rx="2" fill="#43a047" stroke="#1b5e20"/>
+    <text x="236" y="288" text-anchor="middle" font-size="11" fill="#ffffff">object</text>
+
+    <rect x="300" y="248" width="340" height="72" fill="#fff59d" stroke="#f9a825" stroke-width="1.5"/>
+    <rect x="312" y="260" width="150" height="48" rx="2" fill="#c0ca33" stroke="#827717"/>
+    <text x="387" y="288" text-anchor="middle" font-size="11" fill="#333300">allocated</text>
+    <rect x="470" y="260" width="154" height="48" rx="2" fill="#fffde7" stroke="#f9a825" stroke-dasharray="4 3"/>
+    <text x="547" y="288" text-anchor="middle" font-size="11" fill="#f57f17">unused</text>
+    <text x="470" y="236" text-anchor="middle" font-size="11" font-weight="700" fill="#f57f17">TLAB</text>
+
+    <rect x="640" y="248" width="284" height="72" fill="#fafafa" stroke="#b0bec5"/>
+    <text x="782" y="288" text-anchor="middle" font-size="12" fill="#78909c">free</text>
+
+    <line x1="36" y1="248" x2="36" y2="336" stroke="#263238" stroke-width="1.5"/>
+    <text x="36" y="354" text-anchor="middle" font-size="11" font-weight="700" fill="#263238">_bottom</text>
+
+    <line x1="300" y1="236" x2="300" y2="248" stroke="#827717"/>
+    <text x="300" y="368" text-anchor="middle" font-size="11" fill="#827717">_start</text>
+
+    <line x1="462" y1="248" x2="462" y2="336" stroke="#f57f17" stroke-width="1.5"/>
+    <text x="462" y="382" text-anchor="middle" font-size="11" font-weight="700" fill="#f57f17">TLAB _top</text>
+
+    <line x1="640" y1="232" x2="640" y2="336" stroke="#1565c0" stroke-width="1.5"/>
+    <text x="640" y="354" text-anchor="middle" font-size="11" font-weight="700" fill="#1565c0">_top</text>
+    <text x="640" y="396" text-anchor="middle" font-size="11" fill="#827717">TLAB _end</text>
+
+    <line x1="924" y1="248" x2="924" y2="336" stroke="#263238" stroke-width="1.5"/>
+    <text x="924" y="354" text-anchor="middle" font-size="11" font-weight="700" fill="#263238">_end</text>
+
+    <text x="338" y="418" text-anchor="middle" font-size="11" fill="#2e7d32">used: byte_size(_bottom, _top)</text>
+    <text x="782" y="418" text-anchor="middle" font-size="11" fill="#78909c">free: byte_size(_top, _end)</text>
+
+    <text x="36" y="456" font-size="13" font-weight="700" fill="#263238">HeapWord</text>
+    <text x="120" y="456" font-size="12" fill="#546e7a">opaque pointer. HeapWordSize is 8 bytes on 64-bit. An object is word_size HeapWords; allocate() advances the bump pointer by that count.</text>
+
+    <rect x="36" y="472" width="56" height="36" fill="#43a047" stroke="#1b5e20"/>
+    <rect x="92" y="472" width="56" height="36" fill="#66bb6a" stroke="#1b5e20"/>
+    <rect x="148" y="472" width="56" height="36" fill="#43a047" stroke="#1b5e20"/>
+    <rect x="204" y="472" width="56" height="36" fill="#66bb6a" stroke="#1b5e20"/>
+    <rect x="260" y="472" width="56" height="36" fill="#43a047" stroke="#1b5e20"/>
+    <text x="64" y="494" text-anchor="middle" font-size="10" fill="#ffffff">word</text>
+    <text x="120" y="494" text-anchor="middle" font-size="10" fill="#ffffff">word</text>
+    <text x="176" y="494" text-anchor="middle" font-size="10" fill="#ffffff">word</text>
+    <text x="232" y="494" text-anchor="middle" font-size="10" fill="#ffffff">word</text>
+    <text x="288" y="494" text-anchor="middle" font-size="10" fill="#ffffff">word</text>
+    <text x="346" y="494" font-size="12" fill="#455a64">one object</text>
+
+    <text x="36" y="536" font-size="12" fill="#546e7a">ThreadLocalAllocBuffer is a subrange of the Eden region: the thread bumps its own _top, and the region _top moves only when a new TLAB or a direct allocation is taken.</text>
+  </g>
+</svg>

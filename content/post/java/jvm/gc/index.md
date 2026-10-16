@@ -1,7 +1,6 @@
 ---
 title: "JVM Internals - G1 garbage collector"
 date: 2026-10-08T22:30:00+02:00
-draft: true
 categories:
 - java
 - jvm
@@ -44,7 +43,22 @@ G1 meets a pause-time goal (default **200 ms**, `MaxGCPauseMillis`) by evacuatin
 
 ## 2. Memory allocation
 
-HotSpot routes mutator allocation through a small set of types. `MemAllocator` is the runtime entry when constructing a new object, but it is a **`StackObj` for one allocation on the current thread**—not a shared, thread-agnostic allocator. It stores `Thread* _thread` (must be `Thread::current()`) so the fast path can reach that thread’s TLAB without repeatedly calling `Thread::current()`, and so slow-path bookkeeping (bytes allocated, sampling) stays on the right thread. Each `Thread` owns a `ThreadLocalAllocBuffer` (`_tlab`). Under G1, heap entry points land on `G1CollectedHeap`, which owns the region table (`G1HeapRegionManager`) and the current allocating regions (`G1Allocator`). Mutator traffic goes through `MutatorAllocRegion` into a live Eden `G1HeapRegion`; GC evacuation uses sibling alloc regions for Survivor and Old.
+A mutator thread allocates objects and writes references, so it mutates the object graph. The collector traces that graph and reclaims storage. A Java `new` is mutator allocation: the thread asks `MutatorAllocRegion` for Eden space for an object that did not exist before. During evacuation the collector copies an existing object into a `SurvivorGCAllocRegion` or an `OldGCAllocRegion` while the mutator is stopped at a safepoint.
+
+The heap is a sequence of equal `G1HeapRegion`s. Each region is a range of `HeapWord`s from `_bottom` to `_end`, and `_top` is its bump pointer. A thread's TLAB is a subrange of the current Eden region: the thread bumps the TLAB `_top`, and the region `_top` moves only when a new TLAB, or an allocation outside any TLAB, is taken from the region.
+
+![G1 allocation: equal heap regions of HeapWords, with bottom, top and end, and a TLAB inside an Eden region](images/g1-allocation.svg)
+
+HotSpot routes mutator allocation through `MemAllocator`, a `StackObj` that lives for one allocation on the current thread. It stores `Thread* _thread` (must be `Thread::current()`) so the fast path can reach that thread's TLAB without repeatedly calling `Thread::current()`, and so slow-path bookkeeping (bytes allocated, sampling) stays on the right thread. `allocate()` reserves the raw words through the three paths below, then calls the subclass `initialize` to finish the object. `CollectedHeap` selects the subclass from the kind of object:
+
+- `ObjAllocator`, from `obj_allocate`, zeroes the body and installs the header. This constructs an ordinary instance.
+- `ObjArrayAllocator`, from `array_allocate`, stores `_length` before the class identity, so a concurrent collector can parse the array as soon as the header is published. It covers object arrays and type arrays. `_do_zero` selects whether the elements are cleared.
+- `ClassAllocator`, from `class_allocate`, stores the `java.lang.Class` mirror's `oop_size` before the class identity.
+- `StackChunkAllocator`, used when freezing a virtual-thread stack, installs the chunk's size, bottom, and sp, and leaves the stack payload unzeroed.
+
+G1 uses these classes directly. ZGC and Shenandoah substitute `ZObjArrayAllocator` and `ShenandoahObjArrayAllocator` for `ObjArrayAllocator`.
+
+Each `Thread` owns a `ThreadLocalAllocBuffer` (`_tlab`). Under G1, heap entry points land on `G1CollectedHeap`, which owns the region table (`G1HeapRegionManager`) and the current allocating regions (`G1Allocator`). Mutator traffic goes through `MutatorAllocRegion` into a live Eden `G1HeapRegion`; GC evacuation uses sibling alloc regions for Survivor and Old.
 
 ```plantuml
 @startuml
@@ -69,6 +83,24 @@ class MemAllocator <<StackObj>> {
   mem_allocate_inside_tlab_fast()
   mem_allocate_inside_tlab_slow()
   mem_allocate_outside_tlab()
+  {abstract} initialize(HeapWord* mem)
+  allocate()
+}
+class ObjAllocator {
+  initialize(HeapWord* mem)
+}
+class ObjArrayAllocator {
+  int _length
+  bool _do_zero
+  initialize(HeapWord* mem)
+}
+class ClassAllocator {
+  initialize(HeapWord* mem)
+}
+class StackChunkAllocator {
+  size_t _stack_size
+  initialize(HeapWord* mem)
+  allocate()
 }
 
 abstract class CollectedHeap {
@@ -117,6 +149,10 @@ class G1HeapRegion {
   HeapWord* _end
 }
 
+MemAllocator <|-- ObjAllocator
+MemAllocator <|-- ObjArrayAllocator
+MemAllocator <|-- ClassAllocator
+MemAllocator <|-- StackChunkAllocator
 Thread *-down- ThreadLocalAllocBuffer : _tlab
 ThreadLocalAllocBuffer -down- MemAllocator : used by\n(Thread::current)
 MemAllocator ..> ThreadLocalAllocBuffer : fast / refill
@@ -138,10 +174,13 @@ MutatorAllocRegion ..> G1HeapRegionManager : new Eden region
 @enduml
 ```
 
-`MemAllocator::mem_allocate` dispatches the three paths:
+`MemAllocator::mem_allocate` tries the TLAB, then a refill, then one object from the heap. A null result from either TLAB step falls through; `-XX:-UseTLAB` skips both TLAB steps.
 
 ```cpp
+// MemAllocator.mem_allocate
 HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
+  // 1. UseTLAB: bump the current TLAB. Success returns the object.
+  //    The object does not fit, or UseTLAB is false: continue.
   if (UseTLAB) {
     HeapWord* mem = mem_allocate_inside_tlab_fast();
     if (mem != nullptr) {
@@ -149,8 +188,11 @@ HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
     }
   }
 
+  // 2. Anything after this point may block at a safepoint. Checked in debug builds.
   DEBUG_ONLY(allocation._thread->check_for_valid_safepoint_state());
 
+  // 3. UseTLAB: refill the TLAB and place the object in the new buffer.
+  //    A null return means "do not use a TLAB for this object": continue.
   if (UseTLAB) {
     HeapWord* mem = mem_allocate_inside_tlab_slow(allocation);
     if (mem != nullptr) {
@@ -158,81 +200,124 @@ HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
     }
   }
 
+  // 4. One object from the shared heap. The thread's TLAB, if any, is left as it is.
   return mem_allocate_outside_tlab(allocation);
 }
 ```
 
-**TLAB fast path** — bump `_top` if the object fits:
+**TLAB fast path.** `allocate` returns the old `_top` when the object fits, and null when it does not.
 
 ```cpp
+// MemAllocator.mem_allocate_inside_tlab_fast
 HeapWord* MemAllocator::mem_allocate_inside_tlab_fast() const {
   return _thread->tlab().allocate(_word_size);
 }
 
+// ThreadLocalAllocBuffer.allocate
 inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
   HeapWord* obj = top();
+  // 1. end() - top() is large enough: publish the new top and return the old one.
   if (pointer_delta(end(), obj) >= size) {
     set_top(obj + size);
     return obj;
   }
+  // 2. The object does not fit. The TLAB is unchanged.
   return nullptr;
 }
 ```
 
-**TLAB refill** — if free space is small enough to discard, retire the TLAB and take a new one via `allocate_new_tlab`; otherwise keep the TLAB and fall through (returns `nullptr`):
+**TLAB refill.** Four exits: the sampling retry succeeds, the leftover space is too large to discard, no legal TLAB can hold the object, or the heap cannot give a new TLAB. The last three return null so `mem_allocate` uses the outside-TLAB path. `allocate_new_tlab` does not run a GC.
 
 ```cpp
+// MemAllocator.mem_allocate_inside_tlab_slow
 HeapWord* MemAllocator::mem_allocate_inside_tlab_slow(Allocation& allocation) const {
+  HeapWord* mem = nullptr;
   ThreadLocalAllocBuffer& tlab = _thread->tlab();
 
-  // Retain tlab and allocate object in shared space if
-  // the amount free in the tlab is too large to discard.
+  // 1. JVMTI allocation sampling pulls end() back to the sample point, so the fast path
+  //    can fail while the real TLAB still has room. Restore that end and retry once.
+  if (JvmtiExport::should_post_sampled_object_alloc()) {
+    tlab.set_back_allocation_end();
+    mem = tlab.allocate(_word_size);
+    if (mem != nullptr) {
+      return mem;
+    }
+  }
+
+  // 2. Leftover space is above the waste limit (initially desired_size / TLABRefillWasteFraction).
+  //    Keep this TLAB. record_slow_allocation raises the limit so the same size does not
+  //    take this branch on every later call. Caller allocates this object outside the TLAB.
   if (tlab.free() > tlab.refill_waste_limit()) {
     tlab.record_slow_allocation(_word_size);
     return nullptr;
   }
 
+  // 3. The remainder is small enough to discard. Record it and retire the TLAB,
+  //    which fills the gap with a dummy object.
   tlab.record_refill_waste();
   _thread->retire_tlab();
 
+  // 4. compute_size returns 0 when the object plus the alignment reserve is larger than
+  //    the maximum TLAB. A humongous object, larger than half a G1 region, takes this branch.
   size_t new_tlab_size = tlab.compute_size(_word_size);
   if (new_tlab_size == 0) {
     return nullptr;
   }
 
+  // 5. Ask the heap for a new TLAB of any size between min_tlab_size and new_tlab_size.
+  //    Failure does not collect; the caller retries through mem_allocate_outside_tlab,
+  //    which is allowed to stop for a GC.
   size_t min_tlab_size = ThreadLocalAllocBuffer::compute_min_size(_word_size);
-  HeapWord* mem = Universe::heap()->allocate_new_tlab(
+  mem = Universe::heap()->allocate_new_tlab(
       min_tlab_size, new_tlab_size, &allocation._allocated_tlab_size);
   if (mem == nullptr) {
     return nullptr;
   }
 
+  // 6. ZeroTLAB clears the new buffer. ZapTLAB fills it with badHeapWordVal except the
+  //    header, so a concurrent collector does not parse the unallocated tail as an object.
+  //    Neither flag: the buffer is left uninitialized.
+  if (ZeroTLAB) {
+    Copy::zero_to_words(mem, allocation._allocated_tlab_size);
+  } else if (ZapTLAB) {
+    size_t hdr_size = oopDesc::header_size();
+    Copy::fill_to_words(mem + hdr_size, allocation._allocated_tlab_size - hdr_size, badHeapWordVal);
+  }
+
+  // 7. Install the buffer as this thread's TLAB and bump its top past this object.
   _thread->fill_tlab(mem, _word_size, allocation._allocated_tlab_size);
   return mem;
 }
 ```
 
-Under G1, refill asks the mutator alloc region for Eden space and does **not** allow a GC:
+Under G1 the refill asks the mutator alloc region for Eden space and passes `allow_gc` as false:
 
 ```cpp
+// G1CollectedHeap.allocate_new_tlab
 HeapWord* G1CollectedHeap::allocate_new_tlab(size_t min_size,
                                              size_t requested_size,
                                              size_t* actual_size) {
+  // A humongous request never reaches here; mem_allocate_inside_tlab_slow returned null at step 4.
   assert(!is_humongous(requested_size), "we do not allow humongous TLABs");
+  // No collection. Null means the Eden region could not supply the TLAB.
   return attempt_allocation(min_size, requested_size, actual_size, false /* allow_gc */);
 }
 ```
 
-**Non-TLAB request** — one object from the shared heap; the thread’s TLAB is left as-is:
+**Outside the TLAB.** This is step 4 of `mem_allocate`: `-XX:-UseTLAB`, a TLAB kept because its remainder is too large to discard, an object that cannot fit in any TLAB, or a refill that the heap refused. The current TLAB is not retired here.
 
 ```cpp
+// MemAllocator.mem_allocate_outside_tlab
 HeapWord* MemAllocator::mem_allocate_outside_tlab(Allocation& allocation) const {
   allocation._allocated_outside_tlab = true;
+  // 1. One object from the heap. G1 may stop for a GC on this call.
   HeapWord* mem = Universe::heap()->mem_allocate(_word_size);
+  // 2. Still no space: the caller reports allocation failure.
   if (mem == nullptr) {
     return mem;
   }
 
+  // 3. Count the bytes on the thread and on the heap sampler. The TLAB statistics are unchanged.
   size_t size_in_bytes = _word_size * HeapWordSize;
   _thread->incr_allocated_bytes(size_in_bytes);
   _thread->heap_sampler().inc_outside_tlab_bytes(size_in_bytes);
@@ -240,19 +325,23 @@ HeapWord* MemAllocator::mem_allocate_outside_tlab(Allocation& allocation) const 
 }
 ```
 
-G1’s `mem_allocate` either takes a humongous path or allocates a single block from the mutator region (GC allowed on failure):
+G1's `mem_allocate` splits that request. A humongous object takes whole regions. Anything smaller is one block from the mutator region, and this call is allowed to collect:
 
 ```cpp
+// G1CollectedHeap.mem_allocate
 HeapWord* G1CollectedHeap::mem_allocate(size_t word_size) {
+  // 1. Larger than half a region: one or more free regions, not the current Eden region.
   if (is_humongous(word_size)) {
     return attempt_allocation_humongous(word_size);
   }
+  // 2. Otherwise a single block, min size equal to the object. allow_gc is true,
+  //    so a failed attempt can run an evacuation pause and retry.
   size_t dummy = 0;
   return attempt_allocation(word_size, word_size, &dummy, true /* allow_gc */);
 }
 
+// G1CollectedHeap.is_humongous
 static bool is_humongous(size_t word_size) {
-  // Strictly greater than half a region; TLABs are capped at this threshold.
   return word_size > _humongous_object_threshold_in_words;
 }
 ```
@@ -263,7 +352,115 @@ static bool is_humongous(size_t word_size) {
 
 G1 alternates a **Young-Only** phase with a **Space-Reclamation** phase. Young-Only starts with normal young collections that promote into Old. When old occupancy warrants it, a Concurrent Start young collection begins marking; Remark and Cleanup finish that analysis; Prepare Mixed (if candidates exist) leads into mixed collections that also evacuate selected old regions. When further old reclaim is not worth the pause, the cycle returns to Young-Only. Full GC is the backup when evacuation cannot free space.
 
-![G1 garbage collection cycle: Young-Only through Concurrent Start, Remark, Cleanup, then Mixed Space-Reclamation](images/g1-gc-cycle.svg)
+![G1 garbage collection cycle: Young-Only through Concurrent Start, Remark and Cleanup, then Mixed Space-Reclamation, with Full GC as a backup when evacuation cannot free space](images/g1-gc-cycle.svg)
+
+Each part of the ring runs on a known thread. A mutator that needs a collection only posts a VM operation and waits. The parallel copy inside a pause is done by the **GC Thread** pool (`ParallelGCThreads`).
+
+**Young and mixed pauses** run on the **VM thread**. Mutators are at the safepoint. The same operation covers a normal young collection and a mixed collection; the collection set is what differs.
+
+```cpp
+// VM_G1CollectForAllocation.doit
+void VM_G1CollectForAllocation::doit() {
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  GCCauseSetter x(g1h, _gc_cause);
+  // 1. VM thread: evacuate the collection set (young, or young plus old candidates)
+  g1h->do_collection_pause_at_safepoint(_word_size);
+
+  if (_word_size > 0) {
+    // 2. the allocation that triggered the pause retries, and may escalate
+    _result = g1h->satisfy_failed_allocation(_word_size);
+  } else if (g1h->should_upgrade_to_full_gc()) {
+    // 3. no regions left: this same VM thread continues into a full collection
+    g1h->upgrade_to_full_collection();
+  }
+}
+```
+
+**Concurrent Start** is that same VM-thread pause, taken when old occupancy crosses the threshold. At the end of the pause the VM thread wakes the dedicated **`G1ConcurrentMarkThread`**.
+
+```cpp
+// G1ConcurrentMark.start_full_concurrent_cycle
+void G1ConcurrentMark::start_full_concurrent_cycle() {
+  // 1. VM thread, still in the safepoint: begin weak-reference discovery for this cycle
+  ReferenceProcessor* rp = _g1h->ref_processor_cm();
+  rp->start_discovery(false /* always_clear */);
+
+  // 2. turn on SATB queue recording on every thread
+  SATBMarkQueueSet& satb_mq_set = G1BarrierSet::satb_mark_queue_set();
+  satb_mq_set.set_active_all_threads(true, /* new active value */ false /* expected_active */);
+
+  // 3. wake G1ConcurrentMarkThread; it waits on G1CGC_lock
+  cm_thread()->start_full_cycle();
+}
+```
+
+**Concurrent mark** runs on **`G1ConcurrentMarkThread`** while mutators run. The graph walk itself is a parallel task on the **G1 Conc** worker pool (`ConcGCThreads`). Remark and Cleanup are not done on this thread.
+
+```cpp
+// G1ConcurrentMarkThread.concurrent_mark_cycle_do
+void G1ConcurrentMarkThread::concurrent_mark_cycle_do() {
+  // 1. this thread: scan roots of regions evacuated during Concurrent Start
+  if (phase_scan_root_regions()) return;
+  // 2. this thread drives the loop; G1 Conc workers run mark_from_roots
+  if (phase_mark_loop()) return;
+  // 3. this thread: rebuild remembered sets and scrub dead objects
+  if (phase_rebuild_and_scrub()) return;
+  if (phase_delay_to_keep_mmu_before_cleanup()) return;
+  // 4. hand Cleanup to the VM thread
+  if (phase_cleanup()) return;
+  if (phase_clear_cld_claimed_marks()) return;
+  // 5. this thread: clear the bitmap for the next cycle
+  phase_clear_bitmap_for_next_mark();
+}
+```
+
+**Remark and Cleanup** are stop-the-world pauses. `G1ConcurrentMarkThread` only requests them. The **VM thread** runs them, with the GC Thread workers.
+
+```cpp
+// G1ConcurrentMarkThread.subphase_remark
+bool G1ConcurrentMarkThread::subphase_remark() {
+  // mark thread blocks here until the VM thread finishes the pause
+  VM_G1PauseRemark op;
+  VMThread::execute(&op);
+  return _cm->has_aborted();
+}
+
+// G1ConcurrentMarkThread.phase_cleanup
+bool G1ConcurrentMarkThread::phase_cleanup() {
+  VM_G1PauseCleanup op;
+  VMThread::execute(&op);
+  return _cm->has_aborted();
+}
+```
+
+**Full GC** is off the ring. It also runs on the **VM thread**, when evacuation cannot free enough space for the allocation that requested the pause.
+
+```cpp
+// VM_G1CollectFull.doit
+void VM_G1CollectFull::doit() {
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  GCCauseSetter x(g1h, _gc_cause);
+  bool clear_all_soft_refs = _gc_cause == GCCause::_metadata_GC_clear_soft_refs ||
+                             _gc_cause == GCCause::_wb_full_gc;
+  // VM thread: compact the whole heap
+  g1h->do_full_collection(size_t(0) /* allocation_word_size */,
+                          clear_all_soft_refs,
+                          false /* do_maximal_compaction */);
+}
+```
+
+Card refinement is not a dot on the ring. The **`G1ConcurrentRefineThread`** (`G1 Refine Control`) runs it concurrently, on its own workers, so a later evacuation pause can use remembered sets that are already built.
+
+```cpp
+// G1ConcurrentRefineThread.run_service
+void G1ConcurrentRefineThread::run_service() {
+  // 1. this thread sleeps until dirty cards need a sweep
+  while (wait_for_work()) {
+    // 2. yield at a safepoint, then sweep; its workers update remembered sets
+    do_refinement();
+  }
+}
+```
 
 Inside that cycle, three mechanisms work together: concurrent mark decides which old regions are candidates; evacuation copies live objects out of the collection set; freeing returns empty regions to the allocator.
 
@@ -271,7 +468,7 @@ Inside that cycle, three mechanisms work together: concurrent mark decides which
 
 Young collections alone promote survivors into Old and do not compact the old generation. When old occupancy crosses **InitiatingHeapOccupancyPercent** (default **45%** of current old capacity, usually adapted by **adaptive IHOP**), G1 schedules a **Concurrent Start** young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.
 
-Marking uses **snapshot-at-the-beginning (SATB)**. At Concurrent Start, G1 takes a virtual snapshot of liveness; a mutator pre-barrier logs the previous referent of a reference field into a thread-local SATB buffer before the store so objects live at mark start stay in the snapshot. Concurrent mark threads walk the object graph with the marking bitmap and drain SATB buffers while the application runs. Normal young collections may continue until marking finishes.
+Marking uses **snapshot-at-the-beginning (SATB)**. At Concurrent Start, G1 takes a virtual snapshot of liveness; a mutator pre-barrier logs the previous referent of a reference field into a thread-local SATB buffer before the store so objects live at mark start stay in the snapshot. The G1 Conc workers, driven by `G1ConcurrentMarkThread`, walk the object graph with the marking bitmap and drain those buffers while the application runs. Normal young collections, which are still VM-thread pauses, may continue until marking finishes.
 
 ![Write barriers: card dirtying feeds remembered sets; SATB buffers feed concurrent mark](images/barriers-rset.svg)
 
@@ -284,9 +481,9 @@ Marking answers which old regions are sparse (or poorly connected) enough to be 
 
 ### 3.2 Evacuation
 
-G1 reclaims by **evacuation**: live objects in a **collection set (CSet)** are copied into free regions, and references (from roots and remembered sets) are updated to the new locations. A young or mixed STW pause roughly: disconnect TLABs and select the CSet; merge heap roots / remembered sets for that CSet; copy objects; then post-evacuate cleanup.
+G1 reclaims by **evacuation**: live objects in a **collection set (CSet)** are copied into free regions, and references (from roots and remembered sets) are updated to the new locations. The VM thread runs the pause. The GC Thread workers do the parallel copy. A young or mixed pause roughly: disconnect TLABs and select the CSet; merge heap roots and remembered sets for that CSet; copy objects; then post-evacuate cleanup.
 
-**Remembered sets (RSets)** record approximate locations outside a region that may point into it (cards, by default 512-byte granules). Mutators dirty cards on reference stores; concurrent refinement turns dirty cards into RSet entries so the pause need not scan the entire old generation for pointers into the CSet.
+**Remembered sets (RSets)** record approximate locations outside a region that may point into it (cards, by default 512-byte granules). Mutators dirty cards on reference stores. `G1ConcurrentRefineThread` and its workers turn those dirty cards into RSet entries, so the pause need not scan the entire old generation for pointers into the CSet.
 
 **Young-only** collections put every Eden and Survivor region into the CSet. Surviving objects go to Survivor or, when aged out, to Old. No old region is evacuated—the common case while the Young-Only phase fills Old.
 
