@@ -538,9 +538,16 @@ The bytes in that file are Java serialization of the `StreamGraph` (§2.3). Afte
 
 ### 2.3 StreamGraph serialization
 
-A submitted job is serialized at two scales. The plan is serialized once: `RestClusterClient` writes the `StreamGraph` with `ObjectOutputStream`, uploads the user JARs beside it, and keeps every field that references user classes as a `SerializedValue` byte array until the JobMaster has a class loader for those JARs. The data is serialized continuously: every record that crosses a network edge, every entry of keyed state, and every checkpoint. For the data, Flink does not use Java serialization. It uses its own framework, in which a `TypeInformation` describes a type and creates a `TypeSerializer` that writes values of exactly that type into Flink's buffers and state.
+Serialization turns a Java object into bytes and back. A Flink job needs it in two places:
 
-The `StreamGraph` is where the two scales meet. While the client builds the graph, it derives a `TypeInformation` for each stream and stores the resulting `TypeSerializer`s in the `StreamNode`s, so the serializers travel inside the plan. Each advantage of the framework follows from that decision: the type of every stream is fixed on the client, before the job runs. Java serialization discovers the type from each object at runtime and writes a class descriptor into the bytes; a Flink serializer already knows the type, so it writes only field values, produces records that can be decoded one at a time, lets the runtime compare keys as bytes, and records enough about itself in checkpoints to check compatibility when the code changes.
+- **The plan**, once per submission. The client writes the `StreamGraph` with ordinary Java serialization and uploads the user JARs beside it.
+- **The data**, all the time. Every record sent between tasks, every value in keyed state, and every checkpoint is bytes.
+
+For the data, Flink does not use Java serialization. It uses its own framework, built on two types. A `TypeInformation` describes the type of a stream, for example "`Order`, a POJO with fields `amount` and `userId`". A `TypeSerializer`, created from that `TypeInformation`, reads and writes values of exactly that type.
+
+The difference from Java serialization is *when the type is known*. Java serialization learns the type from each object at runtime, so it writes the class name and field descriptions into the bytes. Flink learns the type on the client, while building the `StreamGraph`, and stores the serializers in the `StreamNode`s. The bytes then hold only field values. Records become smaller and can be decoded one at a time, the runtime can compare keys without deserializing them, and checkpoints record which serializer wrote the state, so a changed job can check whether it can still read it.
+
+The diagram shows how the graph holds the serializers and which `TypeInformation` creates which `TypeSerializer`:
 
 ```plantuml
 @startuml
@@ -608,7 +615,9 @@ PojoSerializer o-- TypeSerializer : fieldSerializers
 
 #### 2.3.1 Serializers are fixed at graph build
 
-`TypeExtractor` derives the output type of each function from its generic signature: `ParseOrder implements MapFunction<String, Order>` gives `Order`, and `returns(...)` supplies the type when erasure hides it. A class that is public, has a public no-argument constructor, and exposes every field publicly or through a getter and setter becomes a `PojoTypeInfo`; other classes become a `GenericTypeInfo`. Basic types, tuples, rows, and Avro types have their own `TypeInformation`.
+Flink chooses a serializer for every stream on the client, before the job starts. The cluster receives these serializers inside the plan and never has to work out a record's type at runtime.
+
+The choice starts from the user function. `TypeExtractor` derives the output type of each function from its generic signature: `ParseOrder implements MapFunction<String, Order>` gives `Order`, and `returns(...)` supplies the type when erasure hides it. A class that is public, has a public no-argument constructor, and exposes every field publicly or through a getter and setter becomes a `PojoTypeInfo`; other classes become a `GenericTypeInfo`. Basic types, tuples, rows, and Avro types have their own `TypeInformation`.
 
 `StreamGraph.addOperator` turns the input and output types into serializers with the job's `SerializerConfig`, and `keyBy` stores the key serializer on the keyed node:
 
@@ -629,9 +638,13 @@ public void setOneInputStateKey(
 }
 ```
 
-The cluster therefore never inspects a record to learn its type. A task receives its serializers with its configuration and applies them to every element, and the field layout of a POJO is resolved once by reflection when the serializer is created, not once per record.
+A task receives its serializers with its configuration and applies them to every element. The field layout of a POJO is resolved once by reflection when the serializer is created, not once per record.
+
+For **orders-per-minute**, the client places three kinds of serializer on the `StreamGraph`. The forward edge from `orders` to `ParseOrder` carries `String` with a `StringSerializer`; the two operators are usually chained, so those records are handed over as objects. The hash edge from `ParseOrder` to the window carries `Order` with a `PojoSerializer`, which writes every record into network buffers. The window-and-aggregate node has a `StringSerializer` as `stateKeySerializer` for `userId`, which forms the key bytes in RocksDB, and a serializer for the aggregate's accumulator, derived from its `TypeInformation`, which writes the state values and their checkpoints.
 
 #### 2.3.2 Compact, self-contained records
+
+Because the serializer already knows the type, a record's bytes contain only its field values, with no class name or field descriptions. Each record is also complete on its own: it can be decoded without the bytes that came before it.
 
 `PojoSerializer` writes one flags byte and then each field in name order, each preceded by a null marker. The class name is written only when the runtime object is an unregistered subclass of the declared type:
 
@@ -661,7 +674,9 @@ public void serialize(T value, DataOutputView target) throws IOException {
 
 For an `Order` with fields `userId = "u1"` and `amount = 12.5`, the record is 14 bytes: the flags byte `NO_SUBCLASS`; for `amount`, a null marker and the 8-byte IEEE 754 double; for `userId`, a null marker, the variable-length value length + 1 = 3, and the two characters `u` and `1` in one byte each.
 
-Java serialization of the same object in a fresh `ObjectOutputStream` produces 86 bytes on JDK 25: a stream header, the class descriptor with the class name, `serialVersionUID`, and the name and type code of each field, and then the values. Inside one long stream, later objects of the same class refer back to the descriptor; measured over 1,000 objects this drops to about 19 bytes per object. That saving depends on the reader having seen the whole stream. Flink cannot rely on it: `RecordWriter` routes each record to one of many subpartitions and writes it as a length-prefixed block into network buffers, so there is no single stream whose descriptor table writer and reader share, and every keyed-state value is stored and read on its own. A `TypeSerializer` record is decodable alone because the metadata lives in the serializer, not in the bytes. On the network path, `RecordWriter` wraps each record in a `SerializationDelegate`, whose `write` calls the edge's `TypeSerializer`, and prefixes the result with its length:
+Java serialization of the same object in a fresh `ObjectOutputStream` produces 86 bytes on JDK 25: a stream header, the class descriptor with the class name, `serialVersionUID`, and the name and type code of each field, and then the values. Inside one long stream, later objects of the same class refer back to the descriptor; measured over 1,000 objects this drops to about 19 bytes per object. That saving depends on the reader having seen the whole stream.
+
+Flink cannot rely on such a shared stream. `RecordWriter` routes each record to one of many subpartitions, and every keyed-state value is stored and read on its own. A `TypeSerializer` record is decodable alone because the metadata lives in the serializer, not in the bytes. On the network path, `RecordWriter` wraps each record in a `SerializationDelegate`, whose `write` calls the edge's `TypeSerializer`, and prefixes the result with its length:
 
 ```plantuml
 @startuml
@@ -725,7 +740,9 @@ On the read side, `TypeSerializer.deserialize(T reuse, DataInputView source)` ca
 
 #### 2.3.3 Work on serialized bytes
 
-Because the key serializer is deterministic for a type, two equal keys produce equal bytes. The RocksDB state backend uses those bytes directly: `SerializedCompositeKeyBuilder` builds each state key as the key-group id prefix, then the serialized key, then the serialized namespace (for a window operator, the window). RocksDB stores and looks up entries by comparing bytes and never deserializes the key to find a value. The key-group prefix also makes every key group a contiguous byte range, which is the unit that checkpoints and rescaling assign to subtasks.
+A Flink serializer always writes equal values as equal bytes. The runtime can therefore store, look up, and sort by key using the bytes alone, without turning them back into objects.
+
+The RocksDB state backend uses this for keyed state: `SerializedCompositeKeyBuilder` builds each state key as the key-group id prefix, then the serialized key, then the serialized namespace (for a window operator, the window). RocksDB stores and looks up entries by comparing bytes and never deserializes the key to find a value. The key-group prefix also makes every key group a contiguous byte range, which is the unit that checkpoints and rescaling assign to subtasks.
 
 The batch runtime applies the same idea to sorting. A `TypeComparator` that supports normalized keys writes a fixed-length, byte-comparable prefix of each key into a `MemorySegment` (`putNormalizedKey`), and `NormalizedKeySorter` sorts records by comparing those prefixes in managed memory, deserializing only to break ties.
 
@@ -777,7 +794,9 @@ TypeComparator ..> MemorySegment : putNormalizedKey
 
 #### 2.3.4 Schema evolution of state
 
-A long-running job is stopped with a savepoint, its code is changed, and it is restarted from that savepoint. The state bytes were written by the old serializer, so the new job must know whether it can still read them. Flink writes a `TypeSerializerSnapshot` with every piece of state: it records the serializer's configuration, for a POJO the class and the snapshot of each field serializer. On restore, the new serializer's snapshot calls `resolveSchemaCompatibility` with the old snapshot. The result is one of four types. `COMPATIBLE_AS_IS` means the new serializer reads the old bytes directly. `COMPATIBLE_WITH_RECONFIGURED_SERIALIZER` means the result carries a reconfigured serializer that is used instead. `COMPATIBLE_AFTER_MIGRATION` means the state backend reads every value with the old serializer, obtained from `restoreSerializer()` on the old snapshot, and writes it again with the new one. `INCOMPATIBLE` fails the restore.
+State outlives code. A job is stopped with a savepoint, its classes are changed, and it is restarted from that savepoint. Flink stores a description of the old serializer next to the state, so the new job can decide whether to read the old bytes as they are, convert them, or refuse to start.
+
+That description is a `TypeSerializerSnapshot`. It records the serializer's configuration: for a POJO, the class and the snapshot of each field serializer. On restore, the new serializer's snapshot calls `resolveSchemaCompatibility` with the old snapshot. The result is one of four types. `COMPATIBLE_AS_IS` means the new serializer reads the old bytes directly. `COMPATIBLE_WITH_RECONFIGURED_SERIALIZER` means the result carries a reconfigured serializer that is used instead. `COMPATIBLE_AFTER_MIGRATION` means the state backend reads every value with the old serializer, obtained from `restoreSerializer()` on the old snapshot, and writes it again with the new one. `INCOMPATIBLE` fails the restore.
 
 ```plantuml
 @startuml
@@ -834,6 +853,8 @@ For a POJO, adding or removing a field yields `COMPATIBLE_AFTER_MIGRATION`: the 
 
 #### 2.3.5 Kryo fallback for generic types
 
+Not every class can be analyzed field by field. For those, Flink falls back to the general-purpose Kryo library. The fallback keeps the job running but gives up most of the advantages above, so Flink lets a job forbid it.
+
 A type that does not qualify for a specialized `TypeInformation` becomes a `GenericTypeInfo`, whose serializer is `KryoSerializer`. Kryo handles arbitrary object graphs, but it writes class identity into the bytes, it is slower than a field-wise serializer, and its state cannot evolve under the snapshot rules above. Setting `pipeline.generic-types: false` makes `GenericTypeInfo.createSerializer` throw `UnsupportedOperationException`. Since `createSerializer` runs while the `StreamGraph` is built, the error appears on the client, at submission, naming the type that would have gone through Kryo.
 
 ```java
@@ -846,5 +867,3 @@ public TypeSerializer<T> createSerializer(SerializerConfig config) {
     return new KryoSerializer<T>(this.typeClass, config);
 }
 ```
-
-For **orders-per-minute**, the client places three kinds of serializer on the `StreamGraph`. The forward edge from `orders` to `ParseOrder` carries `String` with a `StringSerializer`; the two operators are usually chained, so those records are handed over as objects. The hash edge from `ParseOrder` to the window carries `Order` with a `PojoSerializer`, which writes every record into network buffers. The window-and-aggregate node has a `StringSerializer` as `stateKeySerializer` for `userId`, which forms the key bytes in RocksDB, and a serializer for the aggregate's accumulator, derived from its `TypeInformation`, which writes the state values and their checkpoints.
