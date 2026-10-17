@@ -177,7 +177,7 @@ MutatorAllocRegion ..> G1HeapRegionManager : new Eden region
 `MemAllocator::mem_allocate` tries the TLAB, then a refill, then one object from the heap. A null result from either TLAB step falls through; `-XX:-UseTLAB` skips both TLAB steps.
 
 ```cpp
-// MemAllocator.mem_allocate
+// memAllocator.cpp
 HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
   // 1. UseTLAB: bump the current TLAB. Success returns the object.
   //    The object does not fit, or UseTLAB is false: continue.
@@ -208,12 +208,12 @@ HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
 **TLAB fast path.** `allocate` returns the old `_top` when the object fits, and null when it does not.
 
 ```cpp
-// MemAllocator.mem_allocate_inside_tlab_fast
+// memAllocator.cpp
 HeapWord* MemAllocator::mem_allocate_inside_tlab_fast() const {
   return _thread->tlab().allocate(_word_size);
 }
 
-// ThreadLocalAllocBuffer.allocate
+// threadLocalAllocBuffer.inline.hpp
 inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
   HeapWord* obj = top();
   // 1. end() - top() is large enough: publish the new top and return the old one.
@@ -229,7 +229,7 @@ inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
 **TLAB refill.** Four exits: the sampling retry succeeds, the leftover space is too large to discard, no legal TLAB can hold the object, or the heap cannot give a new TLAB. The last three return null so `mem_allocate` uses the outside-TLAB path. `allocate_new_tlab` does not run a GC.
 
 ```cpp
-// MemAllocator.mem_allocate_inside_tlab_slow
+// memAllocator.cpp
 HeapWord* MemAllocator::mem_allocate_inside_tlab_slow(Allocation& allocation) const {
   HeapWord* mem = nullptr;
   ThreadLocalAllocBuffer& tlab = _thread->tlab();
@@ -293,7 +293,7 @@ HeapWord* MemAllocator::mem_allocate_inside_tlab_slow(Allocation& allocation) co
 Under G1 the refill asks the mutator alloc region for Eden space and passes `allow_gc` as false:
 
 ```cpp
-// G1CollectedHeap.allocate_new_tlab
+// g1CollectedHeap.cpp
 HeapWord* G1CollectedHeap::allocate_new_tlab(size_t min_size,
                                              size_t requested_size,
                                              size_t* actual_size) {
@@ -307,7 +307,7 @@ HeapWord* G1CollectedHeap::allocate_new_tlab(size_t min_size,
 **Outside the TLAB.** This is step 4 of `mem_allocate`: `-XX:-UseTLAB`, a TLAB kept because its remainder is too large to discard, an object that cannot fit in any TLAB, or a refill that the heap refused. The current TLAB is not retired here.
 
 ```cpp
-// MemAllocator.mem_allocate_outside_tlab
+// memAllocator.cpp
 HeapWord* MemAllocator::mem_allocate_outside_tlab(Allocation& allocation) const {
   allocation._allocated_outside_tlab = true;
   // 1. One object from the heap. G1 may stop for a GC on this call.
@@ -328,7 +328,7 @@ HeapWord* MemAllocator::mem_allocate_outside_tlab(Allocation& allocation) const 
 G1's `mem_allocate` splits that request. A humongous object takes whole regions. Anything smaller is one block from the mutator region, and this call is allowed to collect:
 
 ```cpp
-// G1CollectedHeap.mem_allocate
+// g1CollectedHeap.cpp
 HeapWord* G1CollectedHeap::mem_allocate(size_t word_size) {
   // 1. Larger than half a region: one or more free regions, not the current Eden region.
   if (is_humongous(word_size)) {
@@ -340,8 +340,8 @@ HeapWord* G1CollectedHeap::mem_allocate(size_t word_size) {
   return attempt_allocation(word_size, word_size, &dummy, true /* allow_gc */);
 }
 
-// G1CollectedHeap.is_humongous
-static bool is_humongous(size_t word_size) {
+// g1CollectedHeap.hpp
+static bool G1CollectedHeap::is_humongous(size_t word_size) {
   return word_size > _humongous_object_threshold_in_words;
 }
 ```
@@ -356,18 +356,105 @@ G1 alternates a **Young-Only** phase with a **Space-Reclamation** phase, cycling
 
 Every step of the cycle runs on dedicated GC threads. A mutator that needs a collection never collects by itself: it posts a VM operation and blocks. Every pause runs on the **VM thread** together with the **GC Thread** pool (`ParallelGCThreads`); between pauses, the **marker** and **refinement** threads drive their own worker pools through marking and card refinement.
 
-The cycle, phase by phase, as the figure shows:
+Collection is event-driven. When an ordinary allocation cannot find space in Eden, `attempt_allocation_slow` asks for a collection pause with the cause `_g1_inc_collection_pause`:
 
-1. **Young-Only** — normal young collections evacuate Eden and Survivor regions and promote aged objects into Old; they repeat until non-young occupancy crosses the initiating threshold (`G1IHOP`).
-2. **Concurrent Start** — the young pause in which marking of the old generation begins.
+```cpp
+// g1CollectedHeap.cpp — the mutator cannot refill Eden
+HeapWord* G1CollectedHeap::attempt_allocation_slow(uint node_index, size_t word_size, bool allow_gc) {
+  uint gc_count_before;
+  {
+    MutexLocker x(Heap_lock);
+    // Retry under the lock in case another thread changed the region while we waited.
+    result = _allocator->attempt_allocation_locked(node_index, word_size);
+    if (result != nullptr) {
+      return result;
+    }
+    gc_count_before = total_collections();   // remember the GC count for the pause
+  }
+
+  bool succeeded;
+  result = do_collection_pause(word_size, gc_count_before, &succeeded,
+                               GCCause::_g1_inc_collection_pause);
+  if (succeeded) {
+    return result;   // the pause freed space; the mutator allocates from it
+  }
+}
+```
+
+`do_collection_pause` does not collect: it posts a VM operation and the mutator blocks until it completes:
+
+```cpp
+// g1CollectedHeap.cpp — on the allocating mutator
+HeapWord* G1CollectedHeap::do_collection_pause(size_t word_size,
+                                               uint gc_count_before,
+                                               bool* succeeded,
+                                               GCCause::Cause gc_cause) {
+  VM_G1CollectForAllocation op(word_size, gc_count_before, gc_cause);
+  VMThread::execute(&op);   // the allocating mutator blocks here
+}
+```
+
+On the VM thread, the operation performs the pause and then settles the allocation that requested it:
+
+```cpp
+// g1VMOperations.cpp — on the VM thread
+void VM_G1CollectForAllocation::doit() {
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  GCCauseSetter x(g1h, _gc_cause);
+  // Try a partial collection of some kind.
+  g1h->do_collection_pause_at_safepoint(_word_size);
+
+  if (_word_size > 0) {
+    // An allocation had been requested. Do it, eventually trying a stronger kind of GC.
+    _result = g1h->satisfy_failed_allocation(_word_size);
+  }
+}
+```
+
+Inside the pause, the VM thread decides the kind of pause, runs the collection, and schedules the next step of the cycle when the collector state calls for it:
+
+```cpp
+// g1CollectedHeap.cpp — on the VM thread
+void G1CollectedHeap::do_collection_pause_at_safepoint(size_t allocation_word_size) {
+  policy()->decide_on_concurrent_start_pause();
+  bool should_start_concurrent_mark_operation = collector_state()->is_in_concurrent_start_gc();
+
+  G1YoungCollector collector(gc_cause(), allocation_word_size);
+  collector.collect();
+  _collector_state = collector.next_state();   // the state the next pause reads
+
+  if (should_start_concurrent_mark_operation) {
+    // This pause is the Concurrent Start: start the marking cycle.
+    start_concurrent_cycle(collector.concurrent_operation_is_full_mark());
+  }
+}
+```
+
+The steps divide into two parts, following the two halves of the cycle:
+
+**Young-Only (upper half)**
+
+Normal young collections repeat in this half, promoting survivors into Old, and the marking work that later enables old evacuation runs between them. No old region is evacuated here.
+
+1. **Young promotion** — normal young collections evacuate Eden and Survivor regions and promote aged objects into Old; they repeat until non-young occupancy crosses the initiating threshold (`G1IHOP`).
+2. **Concurrent Start** — a young pause that snapshots the roots and starts marking the old generation.
 3. **Concurrent Mark** — marking runs beside the mutators; normal young collections may continue.
 4. **Remark** — a short stop-the-world pause that drains the remaining marking work.
 5. **Cleanup** — a short stop-the-world pause that accounts live data and selects the old regions worth evacuating.
-6. **Prepare Mixed** — if old candidates exist, the Space-Reclamation phase prepares the mixed collection set.
+
+**Space-Reclamation (lower half)**
+
+Mixed collections repeat in this half, each evacuating young regions plus some of the old regions marking identified. When further old reclaim is no longer worth the pause, the cycle restarts Young-Only.
+
+6. **Prepare Mixed** — if Cleanup found old candidates, the entry step from the upper half; the mixed collection set is prepared.
 7. **Mixed** — mixed pauses evacuate young regions plus selected old regions, and the emptied regions return to the free list.
-8. **Restart Young-Only** — once further old reclaim is no longer worth the pause, the cycle starts over.
+8. **Restart Young-Only** — back to the upper half: the cycle starts over.
 
 Full GC is not a step of the cycle: it is the backup that compacts the whole heap when evacuation cannot free enough space.
+
+Each step is triggered either by an allocation that failed or by the step before it. The figure groups the steps in the pool that executes them and draws the calls between the pools as a state machine:
+
+![State machine of the G1 cycle grouped by thread pool: the VM thread and GC Thread pool package holds every stop-the-world step (Young promotion to Concurrent Start, then Remark, Cleanup, Prepare Mixed, Mixed, and back to Young promotion); the G1 Main Marker and G1 Conc pool package holds Concurrent Mark; an arrow labeled start_concurrent_cycle() and notify() goes from the end of the Concurrent Start pause to wake the marker thread, and an arrow labeled marker posts VM_G1PauseRemark returns from the marker to the Remark pause; the marker also posts Cleanup; the G1 Refine Control and G1 Refinement Workers package runs between pauses and starts no step of its own](images/g1-cycle-triggers.svg)
 
 The cycle trades one long pause for many short ones. Every young and mixed collection is a stop-the-world pause, so the cycle contains many of them, but each is kept short: the pause-time target (`MaxGCPauseMillis`, **200 ms** by default) steers how much work a pause may take, while the expensive graph work—marking and remembered-set maintenance—runs concurrently between pauses.
 
@@ -399,17 +486,24 @@ The architecture follows one rule: **one pool, one driver**. A pool runs at most
 These are ceilings, not thread counts. With `UseDynamicNumberOfGCThreads` (default true) each pool creates **one** worker at startup and grows up to the ceiling on demand:
 
 ```cpp
-// WorkerThreads.initialize_workers
-const uint initial_active_workers = UseDynamicNumberOfGCThreads ? 1 : _max_workers;
-
-// WorkerThreads.set_active_workers — create the missing workers on demand
-while (_created_workers < num_workers) {
-  WorkerThread* const worker = create_worker(_created_workers);
-  ...
-  _workers[_created_workers] = worker;
-  _created_workers++;
+// workerThread.cpp
+void WorkerThreads::initialize_workers() {
+  const uint initial_active_workers = UseDynamicNumberOfGCThreads ? 1 : _max_workers;
+  if (set_active_workers(initial_active_workers) != initial_active_workers) {
+    vm_exit_during_initialization();
+  }
 }
-_active_workers = MIN2(_created_workers, num_workers);
+
+uint WorkerThreads::set_active_workers(uint num_workers) {
+  // Create the missing workers on demand.
+  while (_created_workers < num_workers) {
+    WorkerThread* const worker = create_worker(_created_workers);
+    ...
+    _workers[_created_workers] = worker;
+    _created_workers++;
+  }
+  _active_workers = MIN2(_created_workers, num_workers);
+}
 ```
 
 The number used for a given phase is chosen from the number of Java threads and the heap size (`WorkerPolicy::calc_default_active_workers`) and is logged, for example as `Using 4 workers of 13 for evacuation`.
@@ -478,12 +572,12 @@ G1ConcurrentRefineThread ..> G1ConcurrentRefine : run_task during refinement
 **The driver-to-pool handoff.** `WorkerThreads::run_task` is a synchronous call: the driver returns from it only after every worker has finished the task. The protocol lives in `WorkerTaskDispatcher`.
 
 ```cpp
-// WorkerThreads.run_task — called on the driver; returns when the task is done
+// workerThread.cpp — called on the driver; returns when the task is done
 void WorkerThreads::run_task(WorkerTask* task) {
   _dispatcher.coordinator_distribute_task(task, _active_workers);
 }
 
-// WorkerTaskDispatcher.coordinator_distribute_task — driver side
+// workerThread.cpp — driver side
 void WorkerTaskDispatcher::coordinator_distribute_task(WorkerTask* task, uint num_workers) {
   // 1. Publish the task and how many workers must report done.
   _task = task;
@@ -495,7 +589,7 @@ void WorkerTaskDispatcher::coordinator_distribute_task(WorkerTask* task, uint nu
   ...
 }
 
-// WorkerTaskDispatcher.worker_run_task — worker side, called in a loop
+// workerThread.cpp — worker side, called in a loop
 void WorkerTaskDispatcher::worker_run_task() {
   // 1. Park until a task is dispatched. This is what idle workers do.
   _start_semaphore.wait();
@@ -512,7 +606,7 @@ void WorkerTaskDispatcher::worker_run_task() {
   }
 }
 
-// WorkerThread.run — the entire life of a worker
+// workerThread.cpp — the entire life of a worker
 void WorkerThread::run() {
   while (true) {
     _dispatcher->worker_run_task();
@@ -548,34 +642,42 @@ Three properties follow from this protocol:
 
 The GC Thread pool does the stop-the-world work of a collection. Its workers evacuate live objects out of the collection set during young and mixed pauses, and run the passes around the copy: preparing the regions before evacuation and cleaning up after it.
 
+**Scheduling.** The pool is idle between pauses and never starts a phase on its own. Its trigger is always a GC VM operation: a mutator whose allocation failed posts `VM_G1CollectForAllocation`; the marker thread posts `VM_G1PauseRemark` or `VM_G1PauseCleanup` for the concurrent cycle's stop-the-world parts; explicit and periodic collection requests post theirs. The poster blocks until the operation has run.
+
 G1 creates this pool once, during heap initialization, with the parallel GC thread count as its ceiling:
 
 ```cpp
-// G1CollectedHeap.initialize
-_workers = new WorkerThreads("GC Thread", ParallelGCThreads);
-_workers->initialize_workers();
+// g1CollectedHeap.cpp
+jint G1CollectedHeap::initialize() {
+  _workers = new WorkerThreads("GC Thread", ParallelGCThreads);
+  _workers->initialize_workers();
+}
 ```
 
 The VM thread is the pool's only driver: the serial logic of a pause runs on it, and the copies run on the pool. A Java thread that cannot satisfy an allocation does not collect by itself. It builds a VM operation, hands it to the VM thread, and blocks:
 
 ```cpp
-// VMThread.execute — the calling thread's path
-op->set_calling_thread(t);
-wait_until_executed(op);   // the caller sleeps here ...
-op->doit_epilogue();       // ... until the operation has run
+// vmThread.cpp — the calling thread's path
+void VMThread::execute(VM_Operation* op) {
+  op->set_calling_thread(t);
+  wait_until_executed(op);   // the caller sleeps here ...
+  op->doit_epilogue();       // ... until the operation has run
+}
 ```
 
 The VM thread loops in `wait_for_operation`, and `inner_execute` posts a full safepoint when the operation is a GC, so every Java thread stops at the next polling point. Only then does the operation's `doit` run, on the VM thread:
 
 ```cpp
-// VMThread.inner_execute
-if (_cur_vm_operation->evaluate_at_safepoint() &&
-    !SafepointSynchronize::is_at_safepoint()) {
-  SafepointSynchronize::begin();   // all Java threads stop here
-  end_safepoint = true;
+// vmThread.cpp
+void VMThread::inner_execute(VM_Operation* op) {
+  if (_cur_vm_operation->evaluate_at_safepoint() &&
+      !SafepointSynchronize::is_at_safepoint()) {
+    SafepointSynchronize::begin();   // all Java threads stop here
+    end_safepoint = true;
+  }
+  evaluate_operation(_cur_vm_operation);   // op->evaluate() -> doit()
+  ...
 }
-evaluate_operation(_cur_vm_operation);   // op->evaluate() -> doit()
-...
 ```
 
 For an allocation failure the operation is `VM_G1CollectForAllocation`: it runs one young (or mixed) pause, and then lets the blocked allocation retry (§3.4 shows its full `doit`).
@@ -583,7 +685,7 @@ For an allocation failure the operation is `VM_G1CollectForAllocation`: it runs 
 `do_collection_pause_at_safepoint` builds a `G1YoungCollector` and calls `collect()`. Everything up to here has been serial, and it stays serial wherever it can: selecting the collection set, fixing up the allocation regions, deciding the next collector state. Only the heavy phases are dispatched, each through one `run_task` call—`G1PrepareEvacuationTask`, `G1EvacuateRegionsTask`, the optional `G1EvacuateOptionalRegionsTask`, and the post-evacuate batch tasks. The driver side of every one of them is the same three lines:
 
 ```cpp
-// G1YoungCollector.run_task_timed — driver side; blocks for the whole phase
+// g1YoungCollector.cpp — driver side; blocks for the whole phase
 Tickspan G1YoungCollector::run_task_timed(WorkerTask* task) {
   Ticks start = Ticks::now();
   workers()->run_task(task);
@@ -644,8 +746,8 @@ G1ParScanThreadState *-- G1PLABAllocator : _plab_allocator
 The worker side of the main task shows what each worker does—the same three steps for all of them, with no shared mutable state except the work queues:
 
 ```cpp
-// G1EvacuateRegionsBaseTask.work — worker side
-void work(uint worker_id) {
+// g1YoungCollector.cpp — worker side
+void G1EvacuateRegionsBaseTask::work(uint worker_id) {
   start_work(worker_id);
   {
     ResourceMark rm;
@@ -689,28 +791,49 @@ A mixed collection uses the same machine; only the collection set is bigger. Rem
 
 The G1 Conc pool walks the object graph beside the mutators. Its workers start from the roots captured at Concurrent Start and mark every live object in the old generation while the application keeps allocating and storing references.
 
+**Scheduling.** The pool runs only during a concurrent cycle, which the VM thread starts at the end of a Concurrent Start pause:
+
+```cpp
+// g1CollectedHeap.cpp — the VM thread schedules a cycle
+void G1CollectedHeap::start_concurrent_cycle(bool concurrent_operation_is_full_mark) {
+  MutexLocker x(G1CGC_lock, Mutex::_no_safepoint_check_flag);
+  if (concurrent_operation_is_full_mark) {
+    _cm->start_full_concurrent_cycle();   // prepare the cycle (§3.3)
+  } else {
+    _cm->start_undo_concurrent_cycle();
+  }
+  G1CGC_lock->notify();   // wake the marker thread
+}
+```
+
+The marker thread sleeps on `G1CGC_lock`, so the notify is what wakes it to run the cycle and dispatch the parallel phases to this pool.
+
 The pool is created together with the marker thread, capped by `ConcGCThreads`:
 
 ```cpp
-// G1ConcurrentMark.fully_initialize
-_cm_thread = new G1ConcurrentMarkThread(this);
-_max_concurrent_workers = ConcGCThreads;
-_concurrent_workers = new WorkerThreads("G1 Conc", _max_concurrent_workers);
-_concurrent_workers->initialize_workers();
+// g1ConcurrentMark.cpp
+void G1ConcurrentMark::fully_initialize() {
+  _cm_thread = new G1ConcurrentMarkThread(this);
+  _max_concurrent_workers = ConcGCThreads;
+  _concurrent_workers = new WorkerThreads("G1 Conc", _max_concurrent_workers);
+  _concurrent_workers->initialize_workers();
+}
 ```
 
-The marker thread is the pool's only driver: it owns the cycle's control flow and dispatches every parallel phase. It spends most of its time asleep on `G1CGC_lock`, until a Concurrent Start wakes it:
+The marker thread is the pool's only driver: it owns the cycle's control flow and dispatches every parallel phase. It spends most of its time asleep on `G1CGC_lock`, and wakes from the notify that starts a cycle:
 
 ```cpp
-// G1ConcurrentMarkThread.run_service
-while (wait_for_next_cycle()) {
-  ...
-  if (state() == FullCycleMarking) {
-    concurrent_mark_cycle_do();
-  } else {
-    concurrent_undo_cycle_do();
+// g1ConcurrentMarkThread.cpp
+void G1ConcurrentMarkThread::run_service() {
+  while (wait_for_next_cycle()) {
+    ...
+    if (state() == FullCycleMarking) {
+      concurrent_mark_cycle_do();
+    } else {
+      concurrent_undo_cycle_do();
+    }
+    ...
   }
-  ...
 }
 ```
 
@@ -756,9 +879,11 @@ G1CMTask ..> G1CMBitMap : marks live objects
 The core is the root walk:
 
 ```cpp
-// G1ConcurrentMark.mark_from_roots, called by the marker thread
-G1CMConcurrentMarkingTask marking_task(this);
-_concurrent_workers->run_task(&marking_task);   // marker thread blocks here
+// g1ConcurrentMark.cpp — called by the marker thread
+void G1ConcurrentMark::mark_from_roots() {
+  G1CMConcurrentMarkingTask marking_task(this);
+  _concurrent_workers->run_task(&marking_task);   // marker thread blocks here
+}
 ```
 
 Each `G1 Conc` worker owns a `G1CMTask` with a private mark stack and follows references concurrently with the mutators. Workers join the suspendible thread set, so a pause can suspend them at a safe point and resume them afterwards (`G1CMConcurrentMarkingTask::work`).
@@ -766,9 +891,11 @@ Each `G1 Conc` worker owns a `G1CMTask` with a private mark stack and follows re
 Remark and Cleanup are the exception: the marker thread does not run them. It submits a VM operation and waits, which hands the pause to the other driver/pool pair:
 
 ```cpp
-// G1ConcurrentMarkThread.subphase_remark
-VM_G1PauseRemark op;
-VMThread::execute(&op);   // marker thread blocks; VM thread runs the pause
+// g1ConcurrentMarkThread.cpp
+bool G1ConcurrentMarkThread::subphase_remark() {
+  VM_G1PauseRemark op;
+  VMThread::execute(&op);   // marker thread blocks; VM thread runs the pause
+}
 ```
 
 So a concurrent cycle uses both pairs: `G1 Main Marker` + `G1 Conc` for everything that runs beside the mutators, and the `VM thread` + `GC Thread` for the two stop-the-world phases. When Cleanup is done the marker thread clears the bitmap, ends the cycle, and goes back to sleep.
@@ -777,31 +904,58 @@ So a concurrent cycle uses both pairs: `G1 Main Marker` + `G1 Conc` for everythi
 
 The G1 Refinement Workers turn dirty cards into remembered-set entries. Each worker sweeps a slice of the dirty card table and records the references it finds into the remembered sets of the target regions, so a later evacuation pause can use them.
 
+**Scheduling.** Refinement is demand-driven: there is no wake-up per dirty card, and a sweep runs only while enough cards are pending. The control thread sleeps on a timed wait and re-evaluates when it wakes; the end of every collection also activates it, so refinement resumes right after a pause:
+
+```cpp
+// g1ConcurrentRefineThread.cpp — the control thread's idle wait
+bool G1ConcurrentRefineThread::wait_for_work() {
+  MonitorLocker ml(notifier(), Mutex::_no_safepoint_check_flag);
+  if (!requested_active() && !should_terminate()) {
+    ml.wait(cr()->adjust_threads_wait_ms());   // timed: wake up and re-check
+  }
+  cr()->record_thread_adjustment_needed();
+  return !should_terminate();
+}
+
+// g1ConcurrentRefineThread.cpp — explicit wake-up, called after a collection
+void G1ConcurrentRefineThread::activate() {
+  MonitorLocker ml(&_notifier, Mutex::_no_safepoint_check_flag);
+  if (!_requested_active || should_terminate()) {
+    _requested_active = true;
+    ml.notify();
+  }
+}
+```
+
 Refinement has its own pool as well, created next to the control thread when refinement is enabled:
 
 ```cpp
-// G1ConcurrentRefineThreadControl.initialize
-_control_thread = create_refinement_thread();
-_workers = new WorkerThreads("G1 Refinement Workers", max_num_threads());
-_workers->initialize_workers();
+// g1ConcurrentRefine.cpp
+jint G1ConcurrentRefineThreadControl::initialize(G1ConcurrentRefine* cr) {
+  _control_thread = create_refinement_thread();
+  _workers = new WorkerThreads("G1 Refinement Workers", max_num_threads());
+  _workers->initialize_workers();
+}
 ```
 
-The control thread is the pool's only driver: it does the serial work of a cycle and dispatches the sweeps. It wakes periodically and checks whether work is pending:
+The control thread is the pool's only driver: it does the serial work of a cycle and dispatches the sweeps. Its main loop alternates between waiting for work and refining:
 
 ```cpp
-// G1ConcurrentRefineThread.run_service
-while (wait_for_work()) {                       // timed wait while idle
-  ...
-  if (cr()->adjust_num_threads_periodically()) {
-    do_refinement();
-  } ...
+// g1ConcurrentRefineThread.cpp
+void G1ConcurrentRefineThread::run_service() {
+  while (wait_for_work()) {                       // timed wait while idle
+    ...
+    if (cr()->adjust_num_threads_periodically()) {
+      do_refinement();
+    } ...
+  }
 }
 ```
 
 `do_refinement` does the serial part on the control thread—swap the global, Java, and GC card tables, snapshot the heap—then hands the sweep to the pool:
 
 ```cpp
-// G1ConcurrentRefine.run_with_refinement_workers
+// g1ConcurrentRefine.cpp
 void G1ConcurrentRefine::run_with_refinement_workers(WorkerTask* task) {
   _thread_control.run_task(task, num_threads_wanted());
 }
@@ -847,8 +1001,8 @@ G1RefineRegionClosure ..> G1RemSet : refine_card_concurrently
 Each refinement worker claims whole regions from a shared claim table and scans their dirty cards:
 
 ```cpp
-// G1ConcurrentRefineSweepTask.work — worker side
-void work(uint worker_id) {
+// g1ConcurrentRefineSweepTask.cpp — worker side
+void G1ConcurrentRefineSweepTask::work(uint worker_id) {
   G1RefineRegionClosure sweep_cl(worker_id, _scan_state);
   _scan_state->heap_region_iterate_from_worker_offset(&sweep_cl, worker_id, _max_workers);
   ...
@@ -917,7 +1071,7 @@ G1ParScanThreadState ..> G1HeapRegionAttr : Survivor or Old
 **Where the copy goes.** `next_region_attr` reads the age from the mark word already loaded for the copy (or from the displaced mark, when the header is inflated). A young object younger than the threshold keeps a young destination, which for a successful copy is a Survivor region. Anything else, including an object already in Old, is destined for Old.
 
 ```cpp
-// G1ParScanThreadState.next_region_attr
+// g1ParScanThreadState.cpp
 G1HeapRegionAttr G1ParScanThreadState::next_region_attr(G1HeapRegionAttr const region_attr, markWord const m, uint& age) {
   if (region_attr.is_young()) {
     age = !m.has_displaced_mark_helper() ? m.age()
@@ -935,27 +1089,31 @@ G1HeapRegionAttr G1ParScanThreadState::next_region_attr(G1HeapRegionAttr const r
 `do_copy_to_survivor_space` asks the PLAB allocator for that destination. If the PLAB is full, `allocate_copy_slow` refills it or allocates this one object directly. The words are then copied and the old object is forwarded to the copy. Only the worker that wins that race ages the copy. A copy that stayed young has its age incremented, capped at `markWord::max_age` (15), written back with `incr_age`, and added to the worker's age table. A promotion does not age the object; it updates the old region's block offset table instead, so the old region can be parsed.
 
 ```cpp
-// G1ParScanThreadState.do_copy_to_survivor_space
-uint age = 0;
-G1HeapRegionAttr dest_attr = next_region_attr(region_attr, old_mark, age);
-HeapWord* obj_ptr = _plab_allocator->plab_allocate(dest_attr, word_sz, node_index);
-// PLAB full: refill, or allocate this one object directly. Both can fail.
-if (obj_ptr == nullptr) {
-  obj_ptr = allocate_copy_slow(&dest_attr, klass, word_sz, age, node_index);
-}
-Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(old), obj_ptr, word_sz);
-const oop obj = cast_to_oop(obj_ptr);
-const oop forward_ptr = old->forward_to_atomic(obj, old_mark, memory_order_relaxed);
-// This worker installed the forwarding pointer. Another worker already did: undo and return theirs.
-if (forward_ptr == nullptr) {
-  if (dest_attr.is_young()) {
-    if (age < markWord::max_age) {
-      age++;
-      obj->incr_age();
+// g1ParScanThreadState.cpp
+oop G1ParScanThreadState::do_copy_to_survivor_space(G1HeapRegionAttr const region_attr,
+                                                    oop const old,
+                                                    markWord const old_mark) {
+  uint age = 0;
+  G1HeapRegionAttr dest_attr = next_region_attr(region_attr, old_mark, age);
+  HeapWord* obj_ptr = _plab_allocator->plab_allocate(dest_attr, word_sz, node_index);
+  // PLAB full: refill, or allocate this one object directly. Both can fail.
+  if (obj_ptr == nullptr) {
+    obj_ptr = allocate_copy_slow(&dest_attr, klass, word_sz, age, node_index);
+  }
+  Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(old), obj_ptr, word_sz);
+  const oop obj = cast_to_oop(obj_ptr);
+  const oop forward_ptr = old->forward_to_atomic(obj, old_mark, memory_order_relaxed);
+  // This worker installed the forwarding pointer. Another worker already did: undo and return theirs.
+  if (forward_ptr == nullptr) {
+    if (dest_attr.is_young()) {
+      if (age < markWord::max_age) {
+        age++;
+        obj->incr_age();
+      }
+      _age_table.add(age, word_sz);
+    } else {
+      update_bot_after_copying(obj, word_sz);
     }
-    _age_table.add(age, word_sz);
-  } else {
-    update_bot_after_copying(obj, word_sz);
   }
 }
 ```
@@ -965,41 +1123,63 @@ An Eden object is allocated at age 0. The first time it survives, the test sees 
 **Survivor space exhausted.** If the object does not fit in the Survivor PLAB, the worker tries to refill that PLAB and, failing that, allocates the one object directly in Survivor. When the refill itself failed and the direct allocation also fails, `allocate_in_next_plab` places this object in Old and sets the worker's threshold to 0. Every later young object on that worker then fails `age < _tenuring_threshold` and is promoted, so the worker stops asking for a new Survivor region per object. An object that was simply too large for a PLAB does not change the threshold: the refill is never attempted, and only that object falls through to Old.
 
 ```cpp
-// G1ParScanThreadState.allocate_in_next_plab
-if (dest->is_young()) {
-  HeapWord* const obj_ptr = _plab_allocator->allocate(G1HeapRegionAttr::Old, word_sz,
-                                                      &plab_refill_in_old_failed, node_index);
-  // A failed Survivor refill means Survivor has no room. Promote from here on.
-  if (previous_plab_refill_failed) {
-    _tenuring_threshold = 0;
+// g1ParScanThreadState.cpp
+HeapWord* G1ParScanThreadState::allocate_in_next_plab(G1HeapRegionAttr* dest,
+                                                      size_t word_sz,
+                                                      bool previous_plab_refill_failed,
+                                                      uint node_index) {
+  if (dest->is_young()) {
+    HeapWord* const obj_ptr = _plab_allocator->allocate(G1HeapRegionAttr::Old, word_sz,
+                                                        &plab_refill_in_old_failed, node_index);
+    // A failed Survivor refill means Survivor has no room. Promote from here on.
+    if (previous_plab_refill_failed) {
+      _tenuring_threshold = 0;
+    }
+    if (obj_ptr != nullptr) {
+      dest->set_old();
+    }
+    return obj_ptr;
   }
-  if (obj_ptr != nullptr) {
-    dest->set_old();
-  }
-  return obj_ptr;
+}
+```
+
+**Worker cleanup.** One code step remains at the end of the pause: as each worker finishes its share, `flush_stats` retires its PLAB allocator and merges its age table into the policy's table:
+
+```cpp
+// g1ParScanThreadState.cpp — each worker, at the end of the pause
+size_t G1ParScanThreadState::flush_stats(size_t* surviving_young_words, uint num_workers) {
+  flush_numa_stats();
+  _plab_allocator->flush_and_retire_stats(num_workers);
+  // Merge this worker's AgeTable into the global one.
+  _g1h->policy()->record_age_table(&_age_table);
+  ...
 }
 ```
 
 **The next threshold.** At the start of the pause, before any copying, `record_young_collection_start` calls `update_survivors_policy` and then clears the age table. The desired Survivor space is `TargetSurvivorRatio` (default **50%**) of the Survivor capacity, and that capacity is the young-list target divided by `SurvivorRatio` (default **8**). `compute_tenuring_threshold` walks the age table from age 1 and stops at the first age whose running total exceeds that size. The threshold is that age, capped by `MaxTenuringThreshold` (default **15**). `AlwaysTenure` forces the threshold to 0, so every young object is promoted immediately; `NeverTenure` sets it above the maximum age, so age alone never promotes.
 
 ```cpp
-// G1Policy.update_survivors_policy, called from record_young_collection_start
-double max_survivor_regions_d = (double)young_list_target_length() / (double)SurvivorRatio;
-uint const desired_max_survivor_regions = ceil(max_survivor_regions_d);
-size_t const survivor_size = desired_survivor_size(desired_max_survivor_regions);
-_tenuring_threshold = _survivors_age_table.compute_tenuring_threshold(survivor_size);
-
-// AgeTable.compute_tenuring_threshold. AlwaysTenure and NeverTenure return
-// MaxTenuringThreshold immediately. Otherwise sizes[] and the desired size are in words.
-size_t total = 0;
-uint age = 1;
-while (age < table_size) {
-  total += sizes[age];
-  // Including this age overflowed the desired Survivor space: this age promotes.
-  if (total > desired_survivor_size) break;
-  age++;
+// g1Policy.cpp — called from record_young_collection_start
+void G1Policy::update_survivors_policy() {
+  double max_survivor_regions_d = (double)young_list_target_length() / (double)SurvivorRatio;
+  uint const desired_max_survivor_regions = ceil(max_survivor_regions_d);
+  size_t const survivor_size = desired_survivor_size(desired_max_survivor_regions);
+  _tenuring_threshold = _survivors_age_table.compute_tenuring_threshold(survivor_size);
 }
-result = age < MaxTenuringThreshold ? age : MaxTenuringThreshold;
+
+// ageTable.cpp — AlwaysTenure and NeverTenure return
+// MaxTenuringThreshold immediately. Otherwise sizes[] and the desired size are in words.
+uint AgeTable::compute_tenuring_threshold(size_t desired_survivor_size) {
+  size_t total = 0;
+  uint age = 1;
+  while (age < table_size) {
+    total += sizes[age];
+    // Including this age overflowed the desired Survivor space: this age promotes.
+    if (total > desired_survivor_size) break;
+    age++;
+  }
+  return age < MaxTenuringThreshold ? age : MaxTenuringThreshold;
+}
 ```
 
 Workers are constructed with that threshold. As each worker finishes, `flush_stats` merges its age table into `G1Policy`'s table through `record_age_table`. The pause that just ran recorded who survived; the next pause tenures against that record.
@@ -1008,10 +1188,67 @@ Workers are constructed with that threshold. As each worker finishes, `flush_sta
 
 Young collections promote into Old and do not compact it. When non-young occupancy crosses the initiating threshold (`G1IHOP`, default **45%** of the current heap, adapted while `G1UseAdaptiveIHOP` is on; §3.6), G1 schedules a **Concurrent Start** young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.
 
-The pause is the same VM-thread pause as any other young collection; at its end, still inside the safepoint, the VM thread wakes the dedicated marker thread:
+Concurrent Start is still an ordinary young collection—the same pause as Young-Only. Its root scan serves two purposes at once: it fixes up references for evacuation, and it feeds the marking bitmap the roots marking starts from. The pause also exists for the roots themselves: a running thread's stack and registers change with every instruction, so only a stop-the-world point can take a consistent snapshot of them. Riding that snapshot on a pause that has to stop anyway is why the step is called Concurrent Start instead of a separate initial-mark pause. The same safepoint resets what the previous cycle left behind:
 
 ```cpp
-// G1ConcurrentMark.start_full_concurrent_cycle
+// g1ConcurrentMark.cpp — before evacuation, at the same safepoint
+void G1ConcurrentMark::pre_concurrent_start(GCCause::Cause cause) {
+  assert_at_safepoint_on_vm_thread();
+
+  G1CollectedHeap::start_codecache_marking_cycle_if_inactive(true /* concurrent_mark_start */);
+  ClassLoaderDataGraph::verify_claimed_marks_cleared(ClassLoaderData::_claim_strong);
+
+  // serial: reset the marking state left by the previous cycle
+  // parallel: per old region, take the top-at-mark-start (TAMS) boundary
+  G1PreConcurrentStartTask cl(cause, this);
+  G1CollectedHeap::heap()->run_batch_task(&cl);
+}
+```
+
+The root scan runs with marking closures. `create_root_closures` checks the collector state and swaps the plain evacuation closures for marking ones:
+
+```cpp
+// g1RootClosures.cpp — closure set for the pause's root scan
+G1EvacuationRootClosures* G1EvacuationRootClosures::create_root_closures(G1CollectedHeap* g1h,
+                                                                         G1ParScanThreadState* pss,
+                                                                         bool process_only_dirty_klasses) {
+  if (g1h->collector_state()->is_in_concurrent_start_gc()) {
+    ...
+    res = new G1ConcurrentStartMarkClosures<...>(g1h, pss);   // should_mark == true
+  } else {
+    res = new G1EvacuationClosures(g1h, pss, process_only_dirty_klasses);
+  }
+}
+```
+
+A reference into the collection set is evacuated as usual; a reference to a non-moving old object is marked in place, right there in the pause:
+
+```cpp
+// g1OopClosures.inline.hpp — one root during the Concurrent Start pause
+void G1ParCopyClosure<barrier, should_mark>::do_oop_work(T* p) {
+  const G1HeapRegionAttr state = _g1h->region_attr(obj);
+  if (state.is_in_cset()) {
+    oop forwardee;
+    markWord m = obj->mark();
+    if (m.is_forwarded()) {
+      forwardee = obj->forwardee(m);
+    } else {
+      forwardee = _par_scan_state->copy_to_survivor_space(state, obj, m);
+    }
+    RawAccess<IS_NOT_NULL>::oop_store(p, forwardee);   // into young: evacuate
+  } else {
+    ...
+    if (should_mark) {
+      mark_object(obj);   // into old: _cm->mark_in_bitmap(_worker_id, obj)
+    }
+  }
+}
+```
+
+At the end of the pause, still inside the safepoint, the VM thread wakes the dedicated marker thread:
+
+```cpp
+// g1ConcurrentMark.cpp
 void G1ConcurrentMark::start_full_concurrent_cycle() {
   // 1. VM thread, still in the safepoint: begin weak-reference discovery for this cycle
   ReferenceProcessor* rp = _g1h->ref_processor_cm();
@@ -1021,19 +1258,39 @@ void G1ConcurrentMark::start_full_concurrent_cycle() {
   SATBMarkQueueSet& satb_mq_set = G1BarrierSet::satb_mark_queue_set();
   satb_mq_set.set_active_all_threads(true, /* new active value */ false /* expected_active */);
 
-  // 3. wake G1ConcurrentMarkThread; it waits on G1CGC_lock
+  // 3. mark the cycle in progress; start_concurrent_cycle (§3.1.2) then
+  //    notifies G1CGC_lock to wake the marker thread
   cm_thread()->start_full_cycle();
 }
 ```
 
 Marking uses **snapshot-at-the-beginning (SATB)**. At Concurrent Start, G1 takes a virtual snapshot of liveness; a mutator pre-barrier logs the previous referent of a reference field into a thread-local SATB buffer before the store so objects live at mark start stay in the snapshot. The G1 Conc workers, driven by `G1ConcurrentMarkThread`, walk the object graph with the marking bitmap and drain those buffers while the application runs. Normal young collections, which are still VM-thread pauses, may continue until marking finishes.
 
+Each `G1 Conc` worker takes its own `G1CMTask`, with a private mark stack, and steps the graph walk until the work is done:
+
+```cpp
+// g1ConcurrentMark.cpp — one G1 Conc worker
+void G1CMConcurrentMarkingTask::work(uint worker_id) {
+  ResourceMark rm;
+  SuspendibleThreadSetJoiner sts_join;   // a pause can suspend this worker
+  G1CMTask* task = _cm->task(worker_id);
+  task->record_start_time();
+  do {
+    task->do_marking_step(G1ConcMarkStepDurationMillis,
+                          true  /* do_termination */,
+                          false /* is_serial */);
+    _cm->do_yield_check();               // yield if a pause was requested
+  } while (!_cm->has_aborted() && task->has_aborted());
+  task->record_end_time();
+}
+```
+
 ![Write barriers: card dirtying feeds remembered sets; SATB buffers feed concurrent mark](images/barriers-rset.svg)
 
 The marker thread then runs `concurrent_mark_cycle_do`, a fixed list of phases:
 
 ```cpp
-// G1ConcurrentMarkThread.concurrent_mark_cycle_do
+// g1ConcurrentMarkThread.cpp
 void G1ConcurrentMarkThread::concurrent_mark_cycle_do() {
   // 1. this thread: scan roots of regions evacuated during Concurrent Start
   if (phase_scan_root_regions()) return;
@@ -1064,7 +1321,7 @@ G1 reclaims by **evacuation**: live objects in a **collection set (CSet)** are c
 The pause itself is one VM operation, run with every mutator stopped at the safepoint; the same operation covers a normal young collection and a mixed one, and only the collection set differs:
 
 ```cpp
-// VM_G1CollectForAllocation.doit — runs on the VM thread
+// g1VMOperations.cpp — runs on the VM thread
 void VM_G1CollectForAllocation::doit() {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
   GCCauseSetter x(g1h, _gc_cause);
@@ -1081,6 +1338,29 @@ void VM_G1CollectForAllocation::doit() {
 }
 ```
 
+The pause that the operation runs has a fixed shape, beginning to end:
+
+```cpp
+// g1YoungCollector.cpp — one young (or mixed) pause (setup elided)
+void G1YoungCollector::collect() {
+  policy()->record_young_collection_start();   // tenuring threshold, pause timers
+
+  pre_evacuate_collection_set(...);            // retire TLABs, select the collection set
+
+  G1ParScanThreadStateSet per_thread_states(...);
+  bool may_do_optional_evacuation = collection_set()->num_optional_regions() != 0;
+  // The parallel copy: scan roots and remembered sets, copy live objects.
+  evacuate_initial_collection_set(&per_thread_states, may_do_optional_evacuation);
+
+  if (may_do_optional_evacuation) {
+    evacuate_optional_collection_set(&per_thread_states);   // mixed: remaining old candidates
+  }
+  post_evacuate_collection_set(..., &per_thread_states);    // refs, free CSet, free list
+
+  _next_state = policy()->record_young_collection_end(...); // statistics, next state
+}
+```
+
 **Remembered sets (RSets)** record approximate locations outside a region that may point into it (cards, by default 512-byte granules). Mutators dirty cards on reference stores. `G1ConcurrentRefineThread` and its workers turn those dirty cards into RSet entries, so the pause need not scan the entire old generation for pointers into the CSet.
 
 **Young-only** collections put every Eden and Survivor region into the CSet. Surviving objects go to Survivor or, when aged out, to Old. No old region is evacuated—the common case while the Young-Only phase fills Old.
@@ -1092,7 +1372,7 @@ void VM_G1CollectForAllocation::doit() {
 If destination space is insufficient, **evacuation failure** leaves objects in place and schedules those regions for later collection. Sustained failure may escalate to a **Full GC**—a whole-heap compacting STW that is not part of the cycle, but runs on the same VM thread:
 
 ```cpp
-// VM_G1CollectFull.doit
+// g1VMOperations.cpp
 void VM_G1CollectFull::doit() {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
   GCCauseSetter x(g1h, _gc_cause);
@@ -1108,6 +1388,41 @@ void VM_G1CollectFull::doit() {
 ### 3.5 Free
 
 After a successful evacuation, source regions in the CSet contain no live objects. G1 returns them to the **free** list: their type becomes Free, and the memory manager may later hand them out again as Eden, Survivor, Old, or Humongous destinations. That is the step that makes the gray cells in the heap layout reusable.
+
+Freeing is the last parallel step of the pause. The free-set task has workers claim and clear the CSet regions:
+
+```cpp
+// g1YoungGCPostEvacuateTasks.cpp
+void G1PostEvacuateCollectionSetCleanupTask2::FreeCollectionSetTask::do_work(uint worker_id) override {
+  FreeCSetClosure cl(_surviving_young_words, worker_id,
+                     worker_stats(worker_id), _evac_failure_regions);
+  _g1h->collection_set_par_iterate_all(&cl, &_claimer, worker_id);
+  ...
+}
+```
+
+Clearing a region resets its metadata, so nothing reads stale contents after reuse:
+
+```cpp
+// g1CollectedHeap.cpp
+void G1CollectedHeap::free_region(G1HeapRegion* hr, G1FreeRegionList* free_list) {
+  // Reset region metadata to allow reuse.
+  hr->hr_clear(true /* clear_space */);
+  _policy->remset_tracker()->update_at_free(hr);
+  if (free_list != nullptr) {
+    free_list->add_ordered(hr);
+  }
+}
+```
+
+At the end of the pause, `rebuild_free_region_list` gathers every free region into the list the allocator draws from:
+
+```cpp
+// g1CollectedHeap.cpp — end of the pause
+void G1CollectedHeap::rebuild_free_region_list() {
+  _hrm.rebuild_free_list(workers());
+}
+```
 
 Completely empty regions can also appear without a full CSet evacuation—for example after Remark/Cleanup when marking finds a region with no live data, or when a dead humongous object is reclaimed. Those regions likewise become Free.
 
@@ -1172,29 +1487,31 @@ G1Policy ..> G1CollectedHeap : occupancy and collector state
 **The threshold.** With adaptive IHOP off, or before `G1AdaptiveIHOPNumInitialSamples` (default **3**) completed cycles, the threshold is `G1IHOP` percent of the current heap. `record_new_heap_size` stores that heap size as `_target_occupancy`. With adaptive IHOP on and enough samples, the threshold is pulled earlier: the effective target (current heap, reduced by `G1ReservePercent` and `G1HeapWastePercent`) minus the space the cycle is predicted to consume before the first mixed collection. That prediction is three terms: old-generation allocation over the predicted cycle length, the peak extra humongous occupancy seen in past cycles, and the young generation expected to be alive at the first mixed collection.
 
 ```cpp
-// G1IHOPControl.old_gen_threshold_for_conc_mark_start
-if (!_is_adaptive || !have_enough_data_for_prediction()) {
-  return (size_t)(_initial_ihop_percent * _target_occupancy / 100.0);
+// g1IHOPControl.cpp
+size_t G1IHOPControl::old_gen_threshold_for_conc_mark_start() const {
+  if (!_is_adaptive || !have_enough_data_for_prediction()) {
+    return (size_t)(_initial_ihop_percent * _target_occupancy / 100.0);
+  }
+
+  size_t old_non_humongous_alloc_bytes =
+      (size_t)(predict(&_marking_start_to_mixed_time_s) * predict(&_old_non_humongous_alloc_rate));
+  size_t predicted_peak_extra_humongous_occupancy =
+      predict(&_peak_extra_humongous_occupancy_in_mark_cycle);
+  size_t needed_for_concurrent_cycle = _expected_young_gen_at_first_mixed_gc
+                                     + old_non_humongous_alloc_bytes
+                                     + predicted_peak_extra_humongous_occupancy;
+
+  size_t target_heap_occupancy = effective_target_occupancy();
+  return needed_for_concurrent_cycle < target_heap_occupancy
+           ? target_heap_occupancy - needed_for_concurrent_cycle
+           : 0;
 }
-
-size_t old_non_humongous_alloc_bytes =
-    (size_t)(predict(&_marking_start_to_mixed_time_s) * predict(&_old_non_humongous_alloc_rate));
-size_t predicted_peak_extra_humongous_occupancy =
-    predict(&_peak_extra_humongous_occupancy_in_mark_cycle);
-size_t needed_for_concurrent_cycle = _expected_young_gen_at_first_mixed_gc
-                                   + old_non_humongous_alloc_bytes
-                                   + predicted_peak_extra_humongous_occupancy;
-
-size_t target_heap_occupancy = effective_target_occupancy();
-return needed_for_concurrent_cycle < target_heap_occupancy
-         ? target_heap_occupancy - needed_for_concurrent_cycle
-         : 0;
 ```
 
 **The comparison.** Non-young occupancy is the bytes in old and humongous regions, minus free space in the retained old allocation region. A humongous request is added, because that object will land in non-young regions; an ordinary allocation is not, because it lands in Eden. The check returns true only when occupancy is strictly above the threshold and the collector is still in the young-only phase. A cycle already in progress, or a mixed phase about to start, suppresses it.
 
 ```cpp
-// G1Policy.need_to_start_conc_mark. The outer overload refuses during a concurrent
+// g1Policy.cpp — the outer overload refuses during a concurrent
 // cycle or when a mixed phase is about to start, then calls this one.
 bool G1Policy::need_to_start_conc_mark(const char* source,
                                        const G1CollectorState& state,
@@ -1211,14 +1528,33 @@ bool G1Policy::need_to_start_conc_mark(const char* source,
 }
 ```
 
-**When it runs.** At the end of a young collection, `record_young_collection_end` makes this check and sets `_initiate_conc_mark_if_possible` on the state the next pause will see. The marking does not start in that pause. At the beginning of the next pause, `do_collection_pause_at_safepoint` calls `decide_on_concurrent_start_pause`, which turns the flag into a Concurrent Start when the collector is still young-only and not about to start mixed collections. A user or metadata request sets the same flag through `force_concurrent_start_if_outside_cycle`, and only when no concurrent cycle is already running.
+**When it runs.** At the end of a young collection, `record_young_collection_end` makes this check and sets `_initiate_conc_mark_if_possible` on the state the next pause will see. The marking does not start in that pause:
 
 ```cpp
-// G1Policy.decide_on_concurrent_start_pause
-if (collector_state()->initiate_conc_mark_if_possible()) {
-  if (!about_to_start_mixed_phase() && collector_state()->is_in_young_only_phase()) {
-    // This pause evacuates the young generation and then starts marking.
-    collector_state()->set_in_concurrent_start_gc();
+// g1Policy.cpp — end of the young pause
+G1CollectorState G1Policy::record_young_collection_end(bool concurrent_operation_is_full_mark,
+                                                       bool allocation_failure,
+                                                       size_t allocation_word_size) {
+  if (collector_state()->is_in_concurrent_start_gc()) {
+    next_state.set_in_normal_young_gc();
+  } else if (!about_to_start_mixed_phase() &&
+             need_to_start_conc_mark("end of GC", next_state, allocation_word_size)) {
+    // The flag the next pause reads.
+    next_state.set_initiate_conc_mark_if_possible(true);
+  }
+}
+```
+
+At the beginning of the next pause, `do_collection_pause_at_safepoint` calls `decide_on_concurrent_start_pause`, which turns the flag into a Concurrent Start when the collector is still young-only and not about to start mixed collections. A user or metadata request sets the same flag through `force_concurrent_start_if_outside_cycle`, and only when no concurrent cycle is already running.
+
+```cpp
+// g1Policy.cpp
+void G1Policy::decide_on_concurrent_start_pause() {
+  if (collector_state()->initiate_conc_mark_if_possible()) {
+    if (!about_to_start_mixed_phase() && collector_state()->is_in_young_only_phase()) {
+      // This pause evacuates the young generation and then starts marking.
+      collector_state()->set_in_concurrent_start_gc();
+    }
   }
 }
 ```
@@ -1226,10 +1562,12 @@ if (collector_state()->initiate_conc_mark_if_possible()) {
 A humongous allocation can cross the threshold between pauses. `attempt_allocation_humongous` runs the same check before allocating, and a true result requests a collection immediately, because one humongous object can consume many regions.
 
 ```cpp
-// G1CollectedHeap.attempt_allocation_humongous
-if (is_init_completed() &&
-    policy()->need_to_start_conc_mark("concurrent humongous allocation", word_size)) {
-  try_collect(word_size, GCCause::_g1_humongous_allocation, collection_counters(this));
+// g1CollectedHeap.cpp
+HeapWord* G1CollectedHeap::attempt_allocation_humongous(size_t word_size) {
+  if (is_init_completed() &&
+      policy()->need_to_start_conc_mark("concurrent humongous allocation", word_size)) {
+    try_collect(word_size, GCCause::_g1_humongous_allocation, collection_counters(this));
+  }
 }
 ```
 
