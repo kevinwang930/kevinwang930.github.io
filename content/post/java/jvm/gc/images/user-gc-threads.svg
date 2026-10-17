@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="Which threads are working. A fitting new uses only the user thread. A pause runs the VM thread and the GC Thread pool while every other thread is stopped. Concurrent mark and refinement run beside the user threads.">
+  <rect width="980" height="360" fill="#ffffff"/>
+  <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Which threads are working</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#546e7a">Green is working. Red is stopped for the safepoint. A blank cell is not part of that step.</text>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">
+    <text x="196" y="84" text-anchor="middle" font-weight="700" fill="#1b5e20">User threads</text>
+    <text x="326" y="84" text-anchor="middle" font-weight="700" fill="#0d47a1">VM thread</text>
+    <text x="456" y="78" text-anchor="middle" font-weight="700" fill="#e65100">GC Thread</text>
+    <text x="456" y="94" text-anchor="middle" font-size="10" fill="#e65100">#0 .. #N</text>
+    <text x="586" y="84" text-anchor="middle" font-weight="700" fill="#4a148c">G1 Main Marker</text>
+    <text x="716" y="84" text-anchor="middle" font-weight="700" fill="#4a148c">G1 Conc</text>
+    <text x="846" y="84" text-anchor="middle" font-weight="700" fill="#4a148c">Refine</text>
+
+    <!-- new fits -->
+    <text x="16" y="138" font-size="13" font-weight="700" fill="#263238">new fits</text>
+    <rect x="136" y="110" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="196" y="140" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="266" y="110" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="396" y="110" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="526" y="110" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="656" y="110" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="786" y="110" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+
+    <!-- pause -->
+    <text x="16" y="208" font-size="13" font-weight="700" fill="#263238">pause</text>
+    <rect x="136" y="180" width="120" height="52" rx="4" fill="#ffcdd2" stroke="#c62828"/>
+    <text x="196" y="210" text-anchor="middle" font-weight="700" fill="#b71c1c">stopped</text>
+    <rect x="266" y="180" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="326" y="210" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="396" y="180" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="456" y="210" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="526" y="180" width="120" height="52" rx="4" fill="#ffcdd2" stroke="#c62828"/>
+    <text x="586" y="210" text-anchor="middle" font-weight="700" fill="#b71c1c">stopped</text>
+    <rect x="656" y="180" width="120" height="52" rx="4" fill="#ffcdd2" stroke="#c62828"/>
+    <text x="716" y="210" text-anchor="middle" font-weight="700" fill="#b71c1c">stopped</text>
+    <rect x="786" y="180" width="120" height="52" rx="4" fill="#ffcdd2" stroke="#c62828"/>
+    <text x="846" y="210" text-anchor="middle" font-weight="700" fill="#b71c1c">stopped</text>
+
+    <!-- concurrent -->
+    <text x="16" y="278" font-size="13" font-weight="700" fill="#263238">concurrent</text>
+    <rect x="136" y="250" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="196" y="280" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="266" y="250" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="396" y="250" width="120" height="52" rx="4" fill="#fafafa" stroke="#cfd8dc"/>
+    <rect x="526" y="250" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="586" y="280" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="656" y="250" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="716" y="280" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+    <rect x="786" y="250" width="120" height="52" rx="4" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="846" y="280" text-anchor="middle" font-weight="700" fill="#1b5e20">runs</text>
+
+    <text x="490" y="332" text-anchor="middle" font-size="12" fill="#455a64">Pause call: user thread to VMThread::execute, then VM thread to run_task on GC Thread. new does not call the other groups.</text>
+  </g>
+</svg>

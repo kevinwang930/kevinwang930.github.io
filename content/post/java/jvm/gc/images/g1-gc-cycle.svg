@@ -7,7 +7,7 @@
   </defs>
   <rect width="980" height="640" fill="#ffffff"/>
   <text x="490" y="28" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">G1 garbage collection cycle</text>
-  <text x="490" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">Ring after Oracle GC Tuning Guide Figure 7-2. Full GC is the backup off the ring.</text>
+  <text x="490" y="48" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#78909c">Cycle modeled after Oracle GC Tuning Guide Figure 7-2. Full GC is the backup, outside the cycle.</text>
 
   <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
     <circle cx="430" cy="355" r="168" fill="none" stroke="#455a64" stroke-width="3"/>
@@ -84,6 +84,6 @@
     <path d="M 610 380 C 640 380, 640 430, 638 468" fill="none" stroke="#c62828" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)"/>
     <text x="700" y="414" font-size="11" fill="#c62828">allocation failure</text>
 
-    <text x="490" y="610" text-anchor="middle" font-size="11" fill="#78909c">Normal young collections may continue while concurrent mark runs. Full GC is not a step of the ring.</text>
+    <text x="490" y="610" text-anchor="middle" font-size="11" fill="#78909c">Normal young collections may continue while concurrent mark runs. Full GC is not a step of the cycle.</text>
   </g>
 </svg>
