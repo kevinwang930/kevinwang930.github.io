@@ -348,7 +348,381 @@ static bool G1CollectedHeap::is_humongous(size_t word_size) {
 
 ---
 
-## 3. GC cycle
+## 3. Safepoint
+
+A safepoint is a stretch of time in which every Java thread is stopped in a state the VM can account for. Its stack can be walked, and it is not changing the heap. The VM thread is the only thread that opens and closes a safepoint. While the safepoint is held, that thread runs one VM operation.
+
+G1 uses a safepoint for every stop-the-world pause: a young collection, a mixed collection, Remark, Cleanup, and a full collection. Concurrent marking and card refinement are not safepoints. Those threads keep running beside the mutators and only yield for as long as a safepoint is open.
+
+A Java thread is not halted at an arbitrary instruction. It notices an armed poll at a method return, a loop back-edge, or a return from native code, and then blocks. A thread already blocked on a monitor, or still inside native code, is left there; it is not allowed back into Java until the safepoint ends. An allocation that fits in the TLAB or the current Eden region does not request a safepoint. The slow path of allocation does: it posts a VM operation and waits, and that operation is what opens the safepoint.
+
+### 3.1 Mechanism
+
+The caller posts a `VM_Operation` and waits. The VM thread opens the safepoint, runs that operation, and closes the safepoint. Opening it stops the threads that must yield, then arms every Java thread's poll and waits until they are safe.
+
+```cpp
+// The caller blocks in wait_until_executed until the VM thread finishes the operation.
+void VMThread::execute(VM_Operation* op) {
+  Thread* t = Thread::current();
+  if (t->is_VM_thread()) {
+    op->set_calling_thread(t);
+    ((VMThread*)t)->inner_execute(op);
+    return;
+  }
+  if (!op->doit_prologue()) {
+    return;
+  }
+  op->set_calling_thread(t);
+  wait_until_executed(op);
+  op->doit_epilogue();
+}
+
+// VM thread only: open a safepoint, run the operation, then close it.
+void VMThread::inner_execute(VM_Operation* op) {
+  assert(Thread::current()->is_VM_thread(), "Must be the VM thread");
+  _cur_vm_operation = op;
+
+  bool end_safepoint = false;
+  if (_cur_vm_operation->evaluate_at_safepoint() &&
+      !SafepointSynchronize::is_at_safepoint()) {
+    SafepointSynchronize::begin();
+    end_safepoint = true;
+  }
+
+  evaluate_operation(_cur_vm_operation);
+
+  if (end_safepoint) {
+    SafepointSynchronize::end();
+  }
+  _cur_vm_operation = nullptr;
+}
+```
+
+```cpp
+// VM thread: yield suspendible GC threads, arm every poll, wait until no Java thread is running.
+void SafepointSynchronize::begin() {
+  assert(Thread::current()->is_VM_thread(), "Only VM thread may execute a safepoint");
+
+  Universe::heap()->safepoint_synchronize_begin();
+  Threads_lock->lock();
+
+  int nof_threads = Threads::number_of_threads();
+  _waiting_to_block = nof_threads;
+
+  jlong safepoint_limit_time = 0;
+  int initial_running = 0;
+  arm_safepoint();
+  synchronize_threads(safepoint_limit_time, nof_threads, &initial_running);
+  assert(_waiting_to_block == 0, "No thread should be running");
+
+  _state = _synchronized;
+}
+
+// G1: the marker and refinement threads wait out this safepoint.
+void G1CollectedHeap::safepoint_synchronize_begin() {
+  SuspendibleThreadSet::synchronize();
+}
+
+// Publish this safepoint and arm the local poll of every Java thread.
+void SafepointSynchronize::arm_safepoint() {
+  _wait_barrier->arm(static_cast<int>(_safepoint_counter + 1));
+  AtomicAccess::release_store(&_safepoint_counter, _safepoint_counter + 1);
+
+  OrderAccess::storestore();
+  _state = _synchronizing;
+
+  OrderAccess::storestore();
+  for (JavaThreadIteratorWithHandle jtiwh; JavaThread* cur = jtiwh.next(); ) {
+    SafepointMechanism::arm_local_poll(cur);
+  }
+  OrderAccess::fence();
+}
+
+// Armed polling word (low bit) and armed polling page for one thread.
+void SafepointMechanism::arm_local_poll(JavaThread* thread) {
+  thread->poll_data()->set_polling_word(_poll_word_armed_value);
+  thread->poll_data()->set_polling_page(_poll_page_armed_value);
+}
+```
+
+```plantuml
+@startuml
+skinparam classAttributeIconSize 0
+
+class VMThread {
+  execute(VM_Operation)
+  inner_execute(VM_Operation)
+}
+
+class VM_Operation {
+  doit()
+  evaluate_at_safepoint()
+}
+
+class SafepointSynchronize {
+  {static} _state : SynchronizeState
+  {static} _waiting_to_block : int
+  {static} begin()
+  {static} end()
+  {static} block(JavaThread)
+}
+
+class SafepointMechanism {
+  arm_local_poll(JavaThread)
+  should_process(JavaThread)
+}
+
+class JavaThread {
+  poll_data()
+}
+
+VMThread ..> VM_Operation : evaluate_operation
+VMThread ..> SafepointSynchronize : begin / end
+SafepointSynchronize ..> SafepointMechanism : arm each local poll
+SafepointMechanism ..> JavaThread : polling word and page
+JavaThread ..> SafepointSynchronize : block
+@enduml
+```
+
+### 3.2 Blocking user threads
+
+The VM thread does not preempt a user thread, and the user thread does not call `SafepointSynchronize` by name. Between checks it keeps running, even after the poll is armed. It looks only at these points, all on its own thread:
+
+- A loop back-edge or a return in the interpreter or in compiled code. The interpreter return is `TemplateTable::_return`: it reads this thread's polling word and, if the poll bit is set, calls `InterpreterRuntime::at_safepoint` on this thread.
+- The return from that slow path into Java. `transition_from_vm` calls `process_if_requested_with_exit_check`.
+- The return from native code. `transition_from_native` and `JavaThread::check_special_condition_for_native_trans` make the same call.
+
+`process_if_requested` calls `SafepointSynchronize::block` only when that local poll is armed.
+
+```cpp
+// User-thread entry. A return bytecode on this thread tests the poll.
+// The armed poll calls InterpreterRuntime::at_safepoint before the frame is removed.
+void TemplateTable::_return(TosState state) {
+  transition(state, state);
+
+  Label no_safepoint;
+  __ testb(Address(r15_thread, JavaThread::polling_word_offset()), SafepointMechanism::poll_bit());
+  __ jcc(Assembler::zero, no_safepoint);
+  __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::at_safepoint));
+  __ bind(no_safepoint);
+}
+
+// JRT_ENTRY. The destructor runs on this same thread as the call returns to Java.
+class ThreadInVMfromJava : public ThreadStateTransition {
+  ThreadInVMfromJava(JavaThread* thread, bool check_asyncs = true) : ThreadStateTransition(thread), _check_asyncs(check_asyncs) {
+    transition_from_java(thread, _thread_in_vm);
+  }
+  ~ThreadInVMfromJava() {
+    transition_from_vm(_thread, _thread_in_Java, _check_asyncs);
+  }
+};
+
+// Interpreter back-edge or return. The x86 poll tests this thread's polling word.
+// A set poll bit jumps to the slow path, which calls InterpreterRuntime::at_safepoint.
+void MacroAssembler::safepoint_poll(Label& slow_path, bool at_return, bool in_nmethod) {
+  if (at_return) {
+    cmpptr(in_nmethod ? rsp : rbp, Address(r15_thread, JavaThread::polling_word_offset()));
+    jcc(Assembler::above, slow_path);
+    return;
+  }
+  testb(Address(r15_thread, JavaThread::polling_word_offset()), SafepointMechanism::poll_bit());
+  jcc(Assembler::notZero, slow_path);
+}
+
+// JRT_ENTRY wraps the call in ThreadInVMfromJava. Its destructor returns to Java.
+JRT_ENTRY(void, InterpreterRuntime::at_safepoint(JavaThread* current))
+JRT_END
+
+// ~ThreadInVMfromJava calls this. This is the user thread's safepoint check.
+static inline void transition_from_vm(JavaThread* thread, JavaThreadState to, bool check_asyncs = true) {
+  assert(thread->thread_state() == _thread_in_vm, "coming from wrong thread state");
+  if (to == _thread_in_Java) {
+    SafepointMechanism::process_if_requested_with_exit_check(thread, check_asyncs);
+    thread->set_thread_state(to);
+  }
+}
+
+// Returning from native code takes the same check on this thread.
+static inline void transition_from_native(JavaThread* thread, JavaThreadState to, bool check_asyncs = true) {
+  assert(thread->thread_state() == _thread_in_native, "coming from wrong thread state");
+  thread->set_thread_state_fence(_thread_in_vm);
+  SafepointMechanism::process_if_requested_with_exit_check(thread, to != _thread_in_Java ? false : check_asyncs);
+  thread->set_thread_state(to);
+}
+
+void JavaThread::check_special_condition_for_native_trans(JavaThread* thread) {
+  assert(thread->thread_state() == _thread_in_native_trans, "wrong state");
+  thread->set_thread_state(_thread_in_vm);
+  SafepointMechanism::process_if_requested_with_exit_check(thread, true /* check asyncs */);
+}
+
+// Armed local poll: this is the call that reaches SafepointSynchronize::block.
+void SafepointMechanism::process_if_requested(JavaThread* thread, bool allow_suspend, bool check_async_exception) {
+  thread->check_possible_safepoint();
+  if (local_poll_armed(thread)) {
+    process(thread, allow_suspend, check_async_exception);
+  }
+}
+
+// User thread: a global safepoint is open, so block until it ends.
+void SafepointMechanism::process(JavaThread* thread, bool allow_suspend, bool check_async_exception) {
+  bool need_rechecking;
+  do {
+    if (global_poll()) {
+      OrderAccess::loadload();
+      SafepointSynchronize::block(thread);
+    }
+    StackWatermarkSet::on_safepoint(thread);
+    need_rechecking = thread->handshake_state()->has_operation() &&
+                      thread->handshake_state()->process_by_self(allow_suspend, check_async_exception);
+  } while (need_rechecking);
+  update_poll_values(thread);
+}
+
+// Compiled poll fault. Enter the VM, handle the poll, return to Java.
+void SafepointSynchronize::handle_polling_page_exception(JavaThread* thread) {
+  assert(thread->thread_state() == _thread_in_Java, "should come from Java code");
+  thread->set_thread_state(_thread_in_vm);
+  thread->safepoint_state()->handle_polling_page_exception();
+  thread->set_thread_state(_thread_in_Java);
+}
+
+// Return poll and loop-backedge poll both reach process, which calls block.
+void ThreadSafepointState::handle_polling_page_exception() {
+  JavaThread* self = thread();
+  address real_return_addr = self->saved_exception_pc();
+  nmethod* nm = CodeCache::find_blob(real_return_addr)->as_nmethod();
+
+  if (nm->is_at_poll_return(real_return_addr)) {
+    SafepointMechanism::process_if_requested_with_exit_check(self, true /* check asyncs */);
+  } else {
+    set_at_poll_safepoint(true);
+    SafepointMechanism::process_if_requested_with_exit_check(self, false /* check asyncs */);
+    set_at_poll_safepoint(false);
+  }
+}
+
+// The stop: stack is walkable, state is _thread_blocked, wait on the barrier.
+void SafepointSynchronize::block(JavaThread* thread) {
+  JavaThreadState state = thread->thread_state();
+  thread->frame_anchor()->make_walkable();
+
+  uint64_t safepoint_id = SafepointSynchronize::safepoint_counter();
+  thread->safepoint_state()->set_safepoint_id(safepoint_id);
+  OrderAccess::storestore();
+  thread->set_thread_state_fence(_thread_blocked);
+
+  _wait_barrier->wait(static_cast<int>(safepoint_id));
+
+  OrderAccess::loadstore();
+  thread->set_thread_state(state);
+  thread->safepoint_state()->reset_safepoint_id();
+}
+```
+
+```cpp
+// VM thread spins until every Java thread is safepoint-safe.
+int SafepointSynchronize::synchronize_threads(jlong safepoint_limit_time, int nof_threads, int* initial_running) {
+  int still_running = nof_threads;
+  ThreadSafepointState* tss_head = nullptr;
+  ThreadSafepointState** p_prev = &tss_head;
+  for (JavaThreadIteratorWithHandle jtiwh; JavaThread* cur = jtiwh.next(); ) {
+    ThreadSafepointState* cur_tss = cur->safepoint_state();
+    if (thread_not_running(cur_tss)) {
+      --still_running;
+    } else {
+      *p_prev = cur_tss;
+      p_prev = cur_tss->next_ptr();
+    }
+  }
+  *p_prev = nullptr;
+  *initial_running = still_running;
+  if (still_running <= 0) {
+    return 1;
+  }
+
+  int iterations = 1;
+  int64_t start_time = os::javaTimeNanos();
+  do {
+    p_prev = &tss_head;
+    ThreadSafepointState* cur_tss = tss_head;
+    while (cur_tss != nullptr) {
+      if (thread_not_running(cur_tss)) {
+        --still_running;
+        *p_prev = nullptr;
+        ThreadSafepointState* tmp = cur_tss;
+        cur_tss = cur_tss->get_next();
+        tmp->set_next(nullptr);
+      } else {
+        *p_prev = cur_tss;
+        p_prev = cur_tss->next_ptr();
+        cur_tss = cur_tss->get_next();
+      }
+    }
+    if (still_running > 0) {
+      back_off(start_time);
+    }
+    iterations++;
+  } while (still_running > 0);
+  return iterations;
+}
+
+// True once this thread has left the running state, or was already safe.
+bool SafepointSynchronize::thread_not_running(ThreadSafepointState* cur_state) {
+  if (!cur_state->is_running()) {
+    return true;
+  }
+  cur_state->examine_state_of_thread(SafepointSynchronize::safepoint_counter());
+  return !cur_state->is_running();
+}
+
+// A stable safepoint-safe state (blocked, or in native) counts the thread stopped.
+void ThreadSafepointState::examine_state_of_thread(uint64_t safepoint_count) {
+  JavaThreadState stable_state;
+  if (!SafepointSynchronize::try_stable_load_state(&stable_state, _thread, safepoint_count)) {
+    return;
+  }
+  if (safepoint_safe_with(_thread, stable_state)) {
+    account_safe_thread();
+  }
+}
+
+// One fewer thread for begin to wait on.
+void ThreadSafepointState::account_safe_thread() {
+  SafepointSynchronize::decrement_waiting_to_block();
+  _safepoint_safe = true;
+}
+```
+
+```cpp
+// VM thread: disarm polls and let yielding GC threads resume.
+void SafepointSynchronize::end() {
+  assert(Thread::current()->is_VM_thread(), "Only VM thread can execute a safepoint");
+  disarm_safepoint();
+  Universe::heap()->safepoint_synchronize_end();
+}
+
+// Clear the global state, mark each thread running again, wake the barrier.
+void SafepointSynchronize::disarm_safepoint() {
+  _state = _not_synchronized;
+  AtomicAccess::release_store(&_safepoint_counter, _safepoint_counter + 1);
+
+  for (JavaThreadIteratorWithHandle jtiwh; JavaThread* current = jtiwh.next(); ) {
+    current->safepoint_state()->restart();
+  }
+  Threads_lock->unlock();
+  _wait_barrier->disarm();
+}
+
+// G1: the marker and refinement threads may run again.
+void G1CollectedHeap::safepoint_synchronize_end() {
+  SuspendibleThreadSet::desynchronize();
+}
+```
+
+---
+
+## 4. GC cycle
 
 G1 alternates a **Young-Only** phase with a **Space-Reclamation** phase, cycling through the same sequence of phases. Full GC is the backup when evacuation cannot free enough space.
 
@@ -458,9 +832,9 @@ Each step is triggered either by an allocation that failed or by the step before
 
 The cycle trades one long pause for many short ones. Every young and mixed collection is a stop-the-world pause, so the cycle contains many of them, but each is kept short: the pause-time target (`MaxGCPauseMillis`, **200 ms** by default) steers how much work a pause may take, while the expensive graph work—marking and remembered-set maintenance—runs concurrently between pauses.
 
-The sections below cover the mechanisms in turn: young promotion (§3.2), concurrent marking with its Remark and Cleanup pauses (§3.3), evacuation (§3.4), freeing emptied regions (§3.5), and the old threshold check that decides when the cycle restarts (§3.6).
+The sections below cover the mechanisms in turn: young promotion (§4.2), concurrent marking with its Remark and Cleanup pauses (§4.3), evacuation (§4.4), freeing emptied regions (§4.5), and the old threshold check that decides when the cycle restarts (§4.6).
 
-### 3.1 GC threads
+### 4.1 GC threads
 
 A collection is executed by a small set of native threads with strict roles. HotSpot separates them into **drivers** and **worker pools**:
 
@@ -508,7 +882,7 @@ uint WorkerThreads::set_active_workers(uint num_workers) {
 
 The number used for a given phase is chosen from the number of Java threads and the heap size (`WorkerPolicy::calc_default_active_workers`) and is logged, for example as `Using 4 workers of 13 for evacuation`.
 
-**Class picture.**
+
 
 ```plantuml
 @startuml
@@ -638,7 +1012,7 @@ Three properties follow from this protocol:
 2. **Worker ids are dense and reassigned on every task** (`0..n-1`, in wake-up order). Task code uses the id to index per-worker state, so that state needs no locking. No code assumes that a particular OS thread always gets a particular id.
 3. **A task can run with fewer workers than the ceiling.** `run_task` wakes only `_active_workers`; a driver may also request a specific count for a small job (`run_task(task, num_workers)`), like the root-region scan, which uses one worker per remaining root region.
 
-#### 3.1.1 GC Thread pool: the VM thread's workers
+#### 4.1.1 GC Thread pool: the VM thread's workers
 
 The GC Thread pool does the stop-the-world work of a collection. Its workers evacuate live objects out of the collection set during young and mixed pauses, and run the passes around the copy: preparing the regions before evacuation and cleaning up after it.
 
@@ -657,39 +1031,154 @@ jint G1CollectedHeap::initialize() {
 The VM thread is the pool's only driver: the serial logic of a pause runs on it, and the copies run on the pool. A Java thread that cannot satisfy an allocation does not collect by itself. It builds a VM operation, hands it to the VM thread, and blocks:
 
 ```cpp
-// vmThread.cpp — the calling thread's path
+// The allocating thread blocks until the VM thread has finished the operation.
 void VMThread::execute(VM_Operation* op) {
+  Thread* t = Thread::current();
+  if (t->is_VM_thread()) {
+    op->set_calling_thread(t);
+    ((VMThread*)t)->inner_execute(op);
+    return;
+  }
+  if (!op->doit_prologue()) {
+    return;
+  }
   op->set_calling_thread(t);
-  wait_until_executed(op);   // the caller sleeps here ...
-  op->doit_epilogue();       // ... until the operation has run
+  wait_until_executed(op);
+  op->doit_epilogue();
 }
-```
 
-The VM thread loops in `wait_for_operation`, and `inner_execute` posts a full safepoint when the operation is a GC, so every Java thread stops at the next polling point. Only then does the operation's `doit` run, on the VM thread:
-
-```cpp
-// vmThread.cpp
+// VM thread: stop every Java thread, run doit, then release the safepoint.
 void VMThread::inner_execute(VM_Operation* op) {
+  assert(Thread::current()->is_VM_thread(), "Must be the VM thread");
+  _cur_vm_operation = op;
+
+  bool end_safepoint = false;
   if (_cur_vm_operation->evaluate_at_safepoint() &&
       !SafepointSynchronize::is_at_safepoint()) {
-    SafepointSynchronize::begin();   // all Java threads stop here
+    SafepointSynchronize::begin();
     end_safepoint = true;
   }
-  evaluate_operation(_cur_vm_operation);   // op->evaluate() -> doit()
-  ...
+  evaluate_operation(_cur_vm_operation);
+  if (end_safepoint) {
+    SafepointSynchronize::end();
+  }
+  _cur_vm_operation = nullptr;
 }
-```
 
-For an allocation failure the operation is `VM_G1CollectForAllocation`: it runs one young (or mixed) pause, and then lets the blocked allocation retry (§3.4 shows its full `doit`).
+// One young or mixed pause, then the allocation that requested it retries.
+void VM_G1CollectForAllocation::doit() {
+  G1CollectedHeap* g1h = G1CollectedHeap::heap();
+  GCCauseSetter x(g1h, _gc_cause);
+  g1h->do_collection_pause_at_safepoint(_word_size);
+  if (_word_size > 0) {
+    _result = g1h->satisfy_failed_allocation(_word_size);
+  }
+}
 
-`do_collection_pause_at_safepoint` builds a `G1YoungCollector` and calls `collect()`. Everything up to here has been serial, and it stays serial wherever it can: selecting the collection set, fixing up the allocation regions, deciding the next collector state. Only the heavy phases are dispatched, each through one `run_task` call—`G1PrepareEvacuationTask`, `G1EvacuateRegionsTask`, the optional `G1EvacuateOptionalRegionsTask`, and the post-evacuate batch tasks. The driver side of every one of them is the same three lines:
+// Build the young collector and run it. Start marking only if this pause is a Concurrent Start.
+void G1CollectedHeap::do_collection_pause_at_safepoint(size_t allocation_word_size) {
+  policy()->decide_on_concurrent_start_pause();
+  bool should_start_concurrent_mark_operation = collector_state()->is_in_concurrent_start_gc();
 
-```cpp
-// g1YoungCollector.cpp — driver side; blocks for the whole phase
+  G1YoungCollector collector(gc_cause(), allocation_word_size);
+  collector.collect();
+  _collector_state = collector.next_state();
+
+  if (should_start_concurrent_mark_operation) {
+    start_concurrent_cycle(collector.concurrent_operation_is_full_mark());
+  }
+}
+
+// Serial setup, then one run_task per parallel phase. The VM thread waits inside each run_task.
+void G1YoungCollector::collect() {
+  set_young_collection_default_active_worker_threads();
+  complete_root_region_scan();
+  policy()->record_young_collection_start();
+
+  pre_evacuate_collection_set(evacuation_info);
+  G1ParScanThreadStateSet per_thread_states(_g1h, workers()->active_workers(), collection_set(), &_evac_failure_regions);
+
+  bool may_do_optional_evacuation = collection_set()->num_optional_regions() != 0;
+  evacuate_initial_collection_set(&per_thread_states, may_do_optional_evacuation);
+  if (may_do_optional_evacuation) {
+    evacuate_optional_collection_set(&per_thread_states);
+  }
+  post_evacuate_collection_set(evacuation_info, &per_thread_states);
+
+  _next_state = policy()->record_young_collection_end(_concurrent_operation_is_full_mark, evacuation_alloc_failed(), _allocation_word_size);
+}
+
+// Driver side of every parallel phase: return only after the workers finish.
 Tickspan G1YoungCollector::run_task_timed(WorkerTask* task) {
   Ticks start = Ticks::now();
   workers()->run_task(task);
   return Ticks::now() - start;
+}
+
+// A batched task asks for its own worker count, then the same run_task.
+void G1CollectedHeap::run_batch_task(G1BatchedTask* cl) {
+  uint num_workers = MAX2(1u, MIN2(cl->num_workers_estimate(), workers()->active_workers()));
+  cl->set_max_workers(num_workers);
+  workers()->run_task(cl, num_workers);
+}
+
+// Before the copy: flush thread-local buffers, choose the collection set, then one prepare task.
+void G1YoungCollector::pre_evacuate_collection_set(G1EvacInfo* evacuation_info) {
+  G1PreEvacuateCollectionSetBatchTask cl;
+  G1CollectedHeap::heap()->run_batch_task(&cl);
+
+  calculate_collection_set(evacuation_info, policy()->max_pause_time_ms());
+  if (collector_state()->is_in_concurrent_start_gc()) {
+    concurrent_mark()->pre_concurrent_start(_gc_cause);
+  }
+  ref_processor_stw()->start_discovery(false /* always_clear */);
+  allocator()->init_gc_alloc_regions(evacuation_info);
+  rem_set()->prepare_for_scan_heap_roots();
+  _g1h->collection_set()->prepare_for_scan();
+
+  G1PrepareEvacuationTask g1_prep_task(_g1h);
+  run_task_timed(&g1_prep_task);
+}
+
+// The copy: merge remembered-set roots, then one evacuate task on the pool.
+void G1YoungCollector::evacuate_initial_collection_set(G1ParScanThreadStateSet* per_thread_states,
+                                                      bool has_optional_evacuation_work) {
+  rem_set()->merge_heap_roots(true /* initial_evacuation */);
+  const uint num_workers = workers()->active_workers();
+  G1RootProcessor root_processor(_g1h, num_workers > 1 /* is_parallel */);
+  G1EvacuateRegionsTask g1_par_task(_g1h, per_thread_states, task_queues(), &root_processor,
+                                    num_workers, has_optional_evacuation_work);
+  run_task_timed(&g1_par_task);
+  rem_set()->complete_evac_phase(has_optional_evacuation_work);
+}
+
+// Optional old regions, only while the pause budget remains.
+void G1YoungCollector::evacuate_next_optional_regions(G1ParScanThreadStateSet* per_thread_states) {
+  G1EvacuateOptionalRegionsTask task(per_thread_states, task_queues(), workers()->active_workers());
+  run_task_timed(&task);
+}
+
+// After the copy: references, weak oops, then two cleanup tasks on the pool.
+void G1YoungCollector::post_evacuate_collection_set(G1EvacInfo* evacuation_info,
+                                                    G1ParScanThreadStateSet* per_thread_states) {
+  process_discovered_references(per_thread_states);
+  G1STWIsAliveClosure is_alive(_g1h);
+  G1KeepAliveClosure keep_alive(_g1h);
+  WeakProcessor::weak_oops_do(workers(), &is_alive, &keep_alive, phase_times()->weak_phase_times());
+  allocator()->release_gc_alloc_regions(evacuation_info);
+  post_evacuate_cleanup_1(per_thread_states);
+  post_evacuate_cleanup_2(per_thread_states, evacuation_info);
+}
+
+void G1YoungCollector::post_evacuate_cleanup_1(G1ParScanThreadStateSet* per_thread_states) {
+  G1PostEvacuateCollectionSetCleanupTask1 cl(per_thread_states, &_evac_failure_regions);
+  _g1h->run_batch_task(&cl);
+}
+
+void G1YoungCollector::post_evacuate_cleanup_2(G1ParScanThreadStateSet* per_thread_states,
+                                               G1EvacInfo* evacuation_info) {
+  G1PostEvacuateCollectionSetCleanupTask2 cl(per_thread_states, evacuation_info, &_evac_failure_regions);
+  _g1h->run_batch_task(&cl);
 }
 ```
 
@@ -746,21 +1235,40 @@ G1ParScanThreadState *-- G1PLABAllocator : _plab_allocator
 The worker side of the main task shows what each worker does—the same three steps for all of them, with no shared mutable state except the work queues:
 
 ```cpp
-// g1YoungCollector.cpp — worker side
+// One worker. Private scan state, then roots, then the copy loop.
 void G1EvacuateRegionsBaseTask::work(uint worker_id) {
   start_work(worker_id);
   {
     ResourceMark rm;
-    // 1. This worker's private scan state: PLAB allocator, age table, queues.
     G1ParScanThreadState* pss = _per_thread_states->state_for_worker(worker_id);
     pss->set_ref_discoverer(_g1h->ref_processor_stw());
-    // 2. Entry points into the collection set: roots, remembered sets, code roots.
+    if (_pinned_regions_recorded.compare_set(false, true)) {
+      record_pinned_regions(pss, worker_id);
+    }
     scan_roots(pss, worker_id);
-    // 3. Follow references: drain the own queue, steal from others, until all
-    //    queues are empty and the terminator declares the work finished.
     evacuate_live_objects(pss, worker_id);
   }
   end_work(worker_id);
+}
+
+// Roots of the initial collection set: thread stacks, heap roots, code roots.
+void G1EvacuateRegionsTask::scan_roots(G1ParScanThreadState* pss, uint worker_id) {
+  _root_processor->evacuate_roots(pss, worker_id);
+  _g1h->rem_set()->scan_heap_roots(pss, worker_id, G1GCPhaseTimes::ScanHR, G1GCPhaseTimes::ObjCopy, _has_optional_evacuation_work);
+  _g1h->rem_set()->scan_collection_set_code_roots(pss, worker_id, G1GCPhaseTimes::CodeRoots, G1GCPhaseTimes::ObjCopy);
+}
+
+// Drain this worker's queue, steal from the others, stop when every queue is empty.
+void G1ParEvacuateFollowersClosure::do_void() {
+  G1ParScanThreadState* const pss = par_scan_state();
+  pss->trim_queue();
+  do {
+    pss->steal_and_trim_queue(queues());
+  } while (!offer_termination());
+}
+
+bool G1ParEvacuateFollowersClosure::offer_termination() {
+  return (terminator() == nullptr) ? true : terminator()->offer_termination();
 }
 ```
 
@@ -787,7 +1295,7 @@ VM --> JT : safepoint ends; allocation retried
 
 A mixed collection uses the same machine; only the collection set is bigger. Remark and Cleanup, the two stop-the-world parts of the concurrent cycle, also travel through this pair: the marker thread asks the VM thread for the pause, and `remark()` dispatches its own parallel work—reference processing, region liveness, selection for rebuild—to the GC Thread pool.
 
-#### 3.1.2 G1 Conc pool: G1 Main Marker's workers
+#### 4.1.2 G1 Conc pool: G1 Main Marker's workers
 
 The G1 Conc pool walks the object graph beside the mutators. Its workers start from the roots captured at Concurrent Start and mark every live object in the old generation while the application keeps allocating and storing references.
 
@@ -798,7 +1306,7 @@ The G1 Conc pool walks the object graph beside the mutators. Its workers start f
 void G1CollectedHeap::start_concurrent_cycle(bool concurrent_operation_is_full_mark) {
   MutexLocker x(G1CGC_lock, Mutex::_no_safepoint_check_flag);
   if (concurrent_operation_is_full_mark) {
-    _cm->start_full_concurrent_cycle();   // prepare the cycle (§3.3)
+    _cm->start_full_concurrent_cycle();   // prepare the cycle (§4.3)
   } else {
     _cm->start_undo_concurrent_cycle();
   }
@@ -900,7 +1408,7 @@ bool G1ConcurrentMarkThread::subphase_remark() {
 
 So a concurrent cycle uses both pairs: `G1 Main Marker` + `G1 Conc` for everything that runs beside the mutators, and the `VM thread` + `GC Thread` for the two stop-the-world phases. When Cleanup is done the marker thread clears the bitmap, ends the cycle, and goes back to sleep.
 
-#### 3.1.3 G1 Refinement Workers: G1 Refine Control's workers
+#### 4.1.3 G1 Refinement Workers: G1 Refine Control's workers
 
 The G1 Refinement Workers turn dirty cards into remembered-set entries. Each worker sweeps a slice of the dirty card table and records the references it finds into the remembered sets of the target regions, so a later evacuation pause can use them.
 
@@ -1011,7 +1519,7 @@ void G1ConcurrentRefineSweepTask::work(uint worker_id) {
 
 Unlike the other pools this one usually runs far below its ceiling: `num_threads_wanted()` is computed from how many cards are pending (`G1ConcurrentRefineThreadsNeeded`), and the control thread re-evaluates it every ~50 ms. A sweep is also interruptible: when a safepoint request arrives the workers stop at a card boundary (`SuspendibleThreadSet::should_yield`) and the control thread resumes the sweep afterwards.
 
-### 3.2 Young promotion
+### 4.2 Young promotion
 
 A young collection evacuates every Eden and Survivor region, and a live object is copied either to a Survivor region or into an Old region. Copying it to Old is **promotion**, and repeated promotion is what fills the old generation. The choice is the object's age, stored in its `markWord` (4 bits, so age runs from 0 to 15), compared with the **tenuring threshold** computed at the start of the pause. Promotion is decided per object, not per region: an Eden region is dismantled object by object, and its live objects can split between Survivor and Old. An Eden object (age 0) goes straight to Old whenever the tenuring threshold is 0, and a worker whose Survivor refill failed promotes every object it copies afterwards, Eden objects included.
 
@@ -1184,9 +1692,9 @@ uint AgeTable::compute_tenuring_threshold(size_t desired_survivor_size) {
 
 Workers are constructed with that threshold. As each worker finishes, `flush_stats` merges its age table into `G1Policy`'s table through `record_age_table`. The pause that just ran recorded who survived; the next pause tenures against that record.
 
-### 3.3 Concurrent mark
+### 4.3 Concurrent mark
 
-Young collections promote into Old and do not compact it. When non-young occupancy crosses the initiating threshold (`G1IHOP`, default **45%** of the current heap, adapted while `G1UseAdaptiveIHOP` is on; §3.6), G1 schedules a **Concurrent Start** young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.
+Young collections promote into Old and do not compact it. When non-young occupancy crosses the initiating threshold (`G1IHOP`, default **45%** of the current heap, adapted while `G1UseAdaptiveIHOP` is on; §4.6), G1 schedules a **Concurrent Start** young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.
 
 Concurrent Start is still an ordinary young collection—the same pause as Young-Only. Its root scan serves two purposes at once: it fixes up references for evacuation, and it feeds the marking bitmap the roots marking starts from. The pause also exists for the roots themselves: a running thread's stack and registers change with every instruction, so only a stop-the-world point can take a consistent snapshot of them. Riding that snapshot on a pause that has to stop anyway is why the step is called Concurrent Start instead of a separate initial-mark pause. The same safepoint resets what the previous cycle left behind:
 
@@ -1258,7 +1766,7 @@ void G1ConcurrentMark::start_full_concurrent_cycle() {
   SATBMarkQueueSet& satb_mq_set = G1BarrierSet::satb_mark_queue_set();
   satb_mq_set.set_active_all_threads(true, /* new active value */ false /* expected_active */);
 
-  // 3. mark the cycle in progress; start_concurrent_cycle (§3.1.2) then
+  // 3. mark the cycle in progress; start_concurrent_cycle (§4.1.2) then
   //    notifies G1CGC_lock to wake the marker thread
   cm_thread()->start_full_cycle();
 }
@@ -1314,7 +1822,7 @@ Two STW pauses complete the analysis (the marker thread only requests them; the 
 
 Marking answers which old regions are sparse (or poorly connected) enough to be worth evacuating later. It does not by itself free those regions for mutator allocation.
 
-### 3.4 Evacuation
+### 4.4 Evacuation
 
 G1 reclaims by **evacuation**: live objects in a **collection set (CSet)** are copied into free regions, and references (from roots and remembered sets) are updated to the new locations. The VM thread runs the pause. The GC Thread workers do the parallel copy. A young or mixed pause roughly: disconnect TLABs and select the CSet; merge heap roots and remembered sets for that CSet; copy objects; then post-evacuate cleanup.
 
@@ -1385,7 +1893,7 @@ void VM_G1CollectFull::doit() {
 }
 ```
 
-### 3.5 Free
+### 4.5 Free
 
 After a successful evacuation, source regions in the CSet contain no live objects. G1 returns them to the **free** list: their type becomes Free, and the memory manager may later hand them out again as Eden, Survivor, Old, or Humongous destinations. That is the step that makes the gray cells in the heap layout reusable.
 
@@ -1439,7 +1947,7 @@ Policy keeps a fraction of the heap in reserve (`G1ReservePercent`) so evacuatio
 
 Logs (`-Xlog:gc*` and `-Xlog:gc+phases=debug`) show pause kind, CSet composition, and whether regions were freed or evacuation failed. Building a debuggable HotSpot for stepping these paths is covered in [JVM build and debug](/post/java/jvm/build-debug/).
 
-### 3.6 Old threshold check
+### 4.6 Old threshold check
 
 Promotion fills Old, and young collections do not compact it. G1 therefore watches **non-young occupancy** (old regions plus humongous regions) and starts a concurrent marking cycle once that occupancy passes a threshold. The check does not start marking itself. It sets a flag, and the next young pause becomes a Concurrent Start.
 
@@ -1573,7 +2081,7 @@ HeapWord* G1CollectedHeap::attempt_allocation_humongous(size_t word_size) {
 
 ---
 
-## 4. References
+## 5. References
 
 - [Garbage-First (G1) Garbage Collector — HotSpot Virtual Machine Garbage Collection Tuning Guide (Java SE 22)](https://docs.oracle.com/en/java/javase/22/gctuning/garbage-first-g1-garbage-collector1.html#GUID-ED3AB6D3-FD9B-4447-9EDF-983ED2F7A573)
 - [JEP 248: Make G1 the Default Garbage Collector](https://openjdk.org/jeps/248)
