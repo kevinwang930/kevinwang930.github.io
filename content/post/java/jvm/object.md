@@ -157,7 +157,7 @@ stateDiagram-v2
 - **Self-forwarding.** If the copy cannot be allocated, the object stays where it is and only bit 2 is set, so hash, age and lock bits are kept. The bit is cleared when the collection finishes.
 - **Full GC.** Compaction overwrites the header of an object that is itself kept. Headers that carry a hash or a lock are saved before the overwrite and restored afterwards; all others are reset to the prototype. The forwarding value keeps the 22 class bits and stores the destination in bits 41..2 as a word offset from the heap base.
 
-See [JVM garbage collection](/post/java/jvm/gc/) for the collectors that apply these steps.
+See [G1 garbage collection](/post/java/jvm/gc/g1/) for the collector that applies these steps, and [inspecting the heap](/post/java/jvm/gc/inspect/) for the commands that read it.
 
 ## 1.3 Object lock
 Every Java object can be used as a lock. The Java language exposes it in two forms:

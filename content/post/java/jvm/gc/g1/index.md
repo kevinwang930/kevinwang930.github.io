@@ -4,6 +4,7 @@ date: 2026-10-08T22:30:00+02:00
 categories:
 - java
 - jvm
+- gc
 tags:
 - jvm
 - gc
@@ -2086,3 +2087,4 @@ HeapWord* G1CollectedHeap::attempt_allocation_humongous(size_t word_size) {
 - [Garbage-First (G1) Garbage Collector — HotSpot Virtual Machine Garbage Collection Tuning Guide (Java SE 22)](https://docs.oracle.com/en/java/javase/22/gctuning/garbage-first-g1-garbage-collector1.html#GUID-ED3AB6D3-FD9B-4447-9EDF-983ED2F7A573)
 - [JEP 248: Make G1 the Default Garbage Collector](https://openjdk.org/jeps/248)
 - [JEP 523: Make G1 the Default Garbage Collector in All Environments](https://openjdk.org/jeps/523)
+- [Inspecting the Java heap](/post/java/jvm/gc/inspect/)
