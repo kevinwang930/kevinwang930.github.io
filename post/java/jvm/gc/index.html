@@ -254,7 +254,339 @@ MutatorAllocRegion ..&gt; G1HeapRegionManager : new Eden region
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>bool</span> G1CollectedHeap<span style=color:#f92672>::</span>is_humongous(size_t word_size) {
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> word_size <span style=color:#f92672>&gt;</span> _humongous_object_threshold_in_words;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><hr><h2 id=3-gc-cycle>3. GC cycle</h2><p>G1 alternates a <strong>Young-Only</strong> phase with a <strong>Space-Reclamation</strong> phase, cycling through the same sequence of phases. Full GC is the backup when evacuation cannot free enough space.</p><p><img src=https://kevinwang930.github.io/post/java/jvm/gc/images/g1-gc-cycle.svg alt="G1 garbage collection cycle: Young-Only through Concurrent Start, Remark and Cleanup, then Mixed Space-Reclamation, with Full GC as a backup when evacuation cannot free space"></p><p>Every step of the cycle runs on dedicated GC threads. A mutator that needs a collection never collects by itself: it posts a VM operation and blocks. Every pause runs on the <strong>VM thread</strong> together with the <strong>GC Thread</strong> pool (<code>ParallelGCThreads</code>); between pauses, the <strong>marker</strong> and <strong>refinement</strong> threads drive their own worker pools through marking and card refinement.</p><p>Collection is event-driven. When an ordinary allocation cannot find space in Eden, <code>attempt_allocation_slow</code> asks for a collection pause with the cause <code>_g1_inc_collection_pause</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp — the mutator cannot refill Eden
+</span></span></code></pre></div><hr><h2 id=3-safepoint>3. Safepoint</h2><p>A safepoint is a stretch of time in which every Java thread is stopped in a state the VM can account for. Its stack can be walked, and it is not changing the heap. The VM thread is the only thread that opens and closes a safepoint. While the safepoint is held, that thread runs one VM operation.</p><p>G1 uses a safepoint for every stop-the-world pause: a young collection, a mixed collection, Remark, Cleanup, and a full collection. Concurrent marking and card refinement are not safepoints. Those threads keep running beside the mutators and only yield for as long as a safepoint is open.</p><p>A Java thread is not halted at an arbitrary instruction. It notices an armed poll at a method return, a loop back-edge, or a return from native code, and then blocks. A thread already blocked on a monitor, or still inside native code, is left there; it is not allowed back into Java until the safepoint ends. An allocation that fits in the TLAB or the current Eden region does not request a safepoint. The slow path of allocation does: it posts a VM operation and waits, and that operation is what opens the safepoint.</p><h3 id=31-mechanism>3.1 Mechanism</h3><p>The caller posts a <code>VM_Operation</code> and waits. The VM thread opens the safepoint, runs that operation, and closes the safepoint. Opening it stops the threads that must yield, then arms every Java thread&rsquo;s poll and waits until they are safe.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// The caller blocks in wait_until_executed until the VM thread finishes the operation.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VMThread<span style=color:#f92672>::</span>execute(VM_Operation<span style=color:#f92672>*</span> op) {
+</span></span><span style=display:flex><span>  Thread<span style=color:#f92672>*</span> t <span style=color:#f92672>=</span> Thread<span style=color:#f92672>::</span>current();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (t<span style=color:#f92672>-&gt;</span>is_VM_thread()) {
+</span></span><span style=display:flex><span>    op<span style=color:#f92672>-&gt;</span>set_calling_thread(t);
+</span></span><span style=display:flex><span>    ((VMThread<span style=color:#f92672>*</span>)t)<span style=color:#f92672>-&gt;</span>inner_execute(op);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>op<span style=color:#f92672>-&gt;</span>doit_prologue()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  op<span style=color:#f92672>-&gt;</span>set_calling_thread(t);
+</span></span><span style=display:flex><span>  wait_until_executed(op);
+</span></span><span style=display:flex><span>  op<span style=color:#f92672>-&gt;</span>doit_epilogue();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// VM thread only: open a safepoint, run the operation, then close it.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VMThread<span style=color:#f92672>::</span>inner_execute(VM_Operation<span style=color:#f92672>*</span> op) {
+</span></span><span style=display:flex><span>  assert(Thread<span style=color:#f92672>::</span>current()<span style=color:#f92672>-&gt;</span>is_VM_thread(), <span style=color:#e6db74>&#34;Must be the VM thread&#34;</span>);
+</span></span><span style=display:flex><span>  _cur_vm_operation <span style=color:#f92672>=</span> op;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> end_safepoint <span style=color:#f92672>=</span> false;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (_cur_vm_operation<span style=color:#f92672>-&gt;</span>evaluate_at_safepoint() <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>!</span>SafepointSynchronize<span style=color:#f92672>::</span>is_at_safepoint()) {
+</span></span><span style=display:flex><span>    SafepointSynchronize<span style=color:#f92672>::</span>begin();
+</span></span><span style=display:flex><span>    end_safepoint <span style=color:#f92672>=</span> true;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  evaluate_operation(_cur_vm_operation);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (end_safepoint) {
+</span></span><span style=display:flex><span>    SafepointSynchronize<span style=color:#f92672>::</span>end();
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  _cur_vm_operation <span style=color:#f92672>=</span> <span style=color:#66d9ef>nullptr</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// VM thread: yield suspendible GC threads, arm every poll, wait until no Java thread is running.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>begin() {
+</span></span><span style=display:flex><span>  assert(Thread<span style=color:#f92672>::</span>current()<span style=color:#f92672>-&gt;</span>is_VM_thread(), <span style=color:#e6db74>&#34;Only VM thread may execute a safepoint&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  Universe<span style=color:#f92672>::</span>heap()<span style=color:#f92672>-&gt;</span>safepoint_synchronize_begin();
+</span></span><span style=display:flex><span>  Threads_lock<span style=color:#f92672>-&gt;</span>lock();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int</span> nof_threads <span style=color:#f92672>=</span> Threads<span style=color:#f92672>::</span>number_of_threads();
+</span></span><span style=display:flex><span>  _waiting_to_block <span style=color:#f92672>=</span> nof_threads;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  jlong safepoint_limit_time <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int</span> initial_running <span style=color:#f92672>=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>  arm_safepoint();
+</span></span><span style=display:flex><span>  synchronize_threads(safepoint_limit_time, nof_threads, <span style=color:#f92672>&amp;</span>initial_running);
+</span></span><span style=display:flex><span>  assert(_waiting_to_block <span style=color:#f92672>==</span> <span style=color:#ae81ff>0</span>, <span style=color:#e6db74>&#34;No thread should be running&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  _state <span style=color:#f92672>=</span> _synchronized;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// G1: the marker and refinement threads wait out this safepoint.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>safepoint_synchronize_begin() {
+</span></span><span style=display:flex><span>  SuspendibleThreadSet<span style=color:#f92672>::</span>synchronize();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Publish this safepoint and arm the local poll of every Java thread.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>arm_safepoint() {
+</span></span><span style=display:flex><span>  _wait_barrier<span style=color:#f92672>-&gt;</span>arm(<span style=color:#66d9ef>static_cast</span><span style=color:#f92672>&lt;</span><span style=color:#66d9ef>int</span><span style=color:#f92672>&gt;</span>(_safepoint_counter <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span>));
+</span></span><span style=display:flex><span>  AtomicAccess<span style=color:#f92672>::</span>release_store(<span style=color:#f92672>&amp;</span>_safepoint_counter, _safepoint_counter <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  OrderAccess<span style=color:#f92672>::</span>storestore();
+</span></span><span style=display:flex><span>  _state <span style=color:#f92672>=</span> _synchronizing;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  OrderAccess<span style=color:#f92672>::</span>storestore();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (JavaThreadIteratorWithHandle jtiwh; JavaThread<span style=color:#f92672>*</span> cur <span style=color:#f92672>=</span> jtiwh.next(); ) {
+</span></span><span style=display:flex><span>    SafepointMechanism<span style=color:#f92672>::</span>arm_local_poll(cur);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  OrderAccess<span style=color:#f92672>::</span>fence();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Armed polling word (low bit) and armed polling page for one thread.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointMechanism<span style=color:#f92672>::</span>arm_local_poll(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>poll_data()<span style=color:#f92672>-&gt;</span>set_polling_word(_poll_word_armed_value);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>poll_data()<span style=color:#f92672>-&gt;</span>set_polling_page(_poll_page_armed_value);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+skinparam classAttributeIconSize 0
+
+class VMThread {
+  execute(VM_Operation)
+  inner_execute(VM_Operation)
+}
+
+class VM_Operation {
+  doit()
+  evaluate_at_safepoint()
+}
+
+class SafepointSynchronize {
+  {static} _state : SynchronizeState
+  {static} _waiting_to_block : int
+  {static} begin()
+  {static} end()
+  {static} block(JavaThread)
+}
+
+class SafepointMechanism {
+  arm_local_poll(JavaThread)
+  should_process(JavaThread)
+}
+
+class JavaThread {
+  poll_data()
+}
+
+VMThread ..&gt; VM_Operation : evaluate_operation
+VMThread ..&gt; SafepointSynchronize : begin / end
+SafepointSynchronize ..&gt; SafepointMechanism : arm each local poll
+SafepointMechanism ..&gt; JavaThread : polling word and page
+JavaThread ..&gt; SafepointSynchronize : block
+@enduml
+</code></pre><h3 id=32-blocking-user-threads>3.2 Blocking user threads</h3><p>The VM thread does not preempt a user thread, and the user thread does not call <code>SafepointSynchronize</code> by name. Between checks it keeps running, even after the poll is armed. It looks only at these points, all on its own thread:</p><ul><li>A loop back-edge or a return in the interpreter or in compiled code. The interpreter return is <code>TemplateTable::_return</code>: it reads this thread&rsquo;s polling word and, if the poll bit is set, calls <code>InterpreterRuntime::at_safepoint</code> on this thread.</li><li>The return from that slow path into Java. <code>transition_from_vm</code> calls <code>process_if_requested_with_exit_check</code>.</li><li>The return from native code. <code>transition_from_native</code> and <code>JavaThread::check_special_condition_for_native_trans</code> make the same call.</li></ul><p><code>process_if_requested</code> calls <code>SafepointSynchronize::block</code> only when that local poll is armed.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// User-thread entry. A return bytecode on this thread tests the poll.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// The armed poll calls InterpreterRuntime::at_safepoint before the frame is removed.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> TemplateTable<span style=color:#f92672>::</span>_return(TosState state) {
+</span></span><span style=display:flex><span>  transition(state, state);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  Label no_safepoint;
+</span></span><span style=display:flex><span>  __ <span style=color:#a6e22e>testb</span>(Address(r15_thread, JavaThread<span style=color:#f92672>::</span>polling_word_offset()), SafepointMechanism<span style=color:#f92672>::</span>poll_bit());
+</span></span><span style=display:flex><span>  __ <span style=color:#a6e22e>jcc</span>(Assembler<span style=color:#f92672>::</span>zero, no_safepoint);
+</span></span><span style=display:flex><span>  __ <span style=color:#a6e22e>call_VM</span>(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime<span style=color:#f92672>::</span>at_safepoint));
+</span></span><span style=display:flex><span>  __ <span style=color:#a6e22e>bind</span>(no_safepoint);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// JRT_ENTRY. The destructor runs on this same thread as the call returns to Java.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>ThreadInVMfromJava</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>public</span> ThreadStateTransition {
+</span></span><span style=display:flex><span>  ThreadInVMfromJava(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>, <span style=color:#66d9ef>bool</span> check_asyncs <span style=color:#f92672>=</span> true) <span style=color:#f92672>:</span> ThreadStateTransition(<span style=color:#66d9ef>thread</span>), _check_asyncs(check_asyncs) {
+</span></span><span style=display:flex><span>    transition_from_java(<span style=color:#66d9ef>thread</span>, _thread_in_vm);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  <span style=color:#f92672>~</span>ThreadInVMfromJava() {
+</span></span><span style=display:flex><span>    transition_from_vm(_thread, _thread_in_Java, _check_asyncs);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>};
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Interpreter back-edge or return. The x86 poll tests this thread&#39;s polling word.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>// A set poll bit jumps to the slow path, which calls InterpreterRuntime::at_safepoint.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> MacroAssembler<span style=color:#f92672>::</span>safepoint_poll(Label<span style=color:#f92672>&amp;</span> slow_path, <span style=color:#66d9ef>bool</span> at_return, <span style=color:#66d9ef>bool</span> in_nmethod) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (at_return) {
+</span></span><span style=display:flex><span>    cmpptr(in_nmethod <span style=color:#f92672>?</span> rsp : rbp, Address(r15_thread, JavaThread<span style=color:#f92672>::</span>polling_word_offset()));
+</span></span><span style=display:flex><span>    jcc(Assembler<span style=color:#f92672>::</span>above, slow_path);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  testb(Address(r15_thread, JavaThread<span style=color:#f92672>::</span>polling_word_offset()), SafepointMechanism<span style=color:#f92672>::</span>poll_bit());
+</span></span><span style=display:flex><span>  jcc(Assembler<span style=color:#f92672>::</span>notZero, slow_path);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// JRT_ENTRY wraps the call in ThreadInVMfromJava. Its destructor returns to Java.
+</span></span></span><span style=display:flex><span>JRT_ENTRY(<span style=color:#66d9ef>void</span>, InterpreterRuntime<span style=color:#f92672>::</span>at_safepoint(JavaThread<span style=color:#f92672>*</span> current))
+</span></span><span style=display:flex><span>JRT_END
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// ~ThreadInVMfromJava calls this. This is the user thread&#39;s safepoint check.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>inline</span> <span style=color:#66d9ef>void</span> transition_from_vm(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>, JavaThreadState to, <span style=color:#66d9ef>bool</span> check_asyncs <span style=color:#f92672>=</span> true) {
+</span></span><span style=display:flex><span>  assert(<span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>thread_state() <span style=color:#f92672>==</span> _thread_in_vm, <span style=color:#e6db74>&#34;coming from wrong thread state&#34;</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (to <span style=color:#f92672>==</span> _thread_in_Java) {
+</span></span><span style=display:flex><span>    SafepointMechanism<span style=color:#f92672>::</span>process_if_requested_with_exit_check(<span style=color:#66d9ef>thread</span>, check_asyncs);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(to);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Returning from native code takes the same check on this thread.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>inline</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>transition_from_native</span>(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>, JavaThreadState to, <span style=color:#66d9ef>bool</span> check_asyncs <span style=color:#f92672>=</span> true) {
+</span></span><span style=display:flex><span>  assert(<span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>thread_state() <span style=color:#f92672>==</span> _thread_in_native, <span style=color:#e6db74>&#34;coming from wrong thread state&#34;</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state_fence(_thread_in_vm);
+</span></span><span style=display:flex><span>  SafepointMechanism<span style=color:#f92672>::</span>process_if_requested_with_exit_check(<span style=color:#66d9ef>thread</span>, to <span style=color:#f92672>!=</span> _thread_in_Java <span style=color:#f92672>?</span> false <span style=color:#f92672>:</span> check_asyncs);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(to);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> JavaThread<span style=color:#f92672>::</span>check_special_condition_for_native_trans(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>) {
+</span></span><span style=display:flex><span>  assert(<span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>thread_state() <span style=color:#f92672>==</span> _thread_in_native_trans, <span style=color:#e6db74>&#34;wrong state&#34;</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(_thread_in_vm);
+</span></span><span style=display:flex><span>  SafepointMechanism<span style=color:#f92672>::</span>process_if_requested_with_exit_check(<span style=color:#66d9ef>thread</span>, true <span style=color:#75715e>/* check asyncs */</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Armed local poll: this is the call that reaches SafepointSynchronize::block.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointMechanism<span style=color:#f92672>::</span>process_if_requested(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>, <span style=color:#66d9ef>bool</span> allow_suspend, <span style=color:#66d9ef>bool</span> check_async_exception) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>check_possible_safepoint();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (local_poll_armed(<span style=color:#66d9ef>thread</span>)) {
+</span></span><span style=display:flex><span>    process(<span style=color:#66d9ef>thread</span>, allow_suspend, check_async_exception);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// User thread: a global safepoint is open, so block until it ends.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointMechanism<span style=color:#f92672>::</span>process(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>, <span style=color:#66d9ef>bool</span> allow_suspend, <span style=color:#66d9ef>bool</span> check_async_exception) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> need_rechecking;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>do</span> {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (global_poll()) {
+</span></span><span style=display:flex><span>      OrderAccess<span style=color:#f92672>::</span>loadload();
+</span></span><span style=display:flex><span>      SafepointSynchronize<span style=color:#f92672>::</span>block(<span style=color:#66d9ef>thread</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    StackWatermarkSet<span style=color:#f92672>::</span>on_safepoint(<span style=color:#66d9ef>thread</span>);
+</span></span><span style=display:flex><span>    need_rechecking <span style=color:#f92672>=</span> <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>handshake_state()<span style=color:#f92672>-&gt;</span>has_operation() <span style=color:#f92672>&amp;&amp;</span>
+</span></span><span style=display:flex><span>                      <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>handshake_state()<span style=color:#f92672>-&gt;</span>process_by_self(allow_suspend, check_async_exception);
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>while</span> (need_rechecking);
+</span></span><span style=display:flex><span>  update_poll_values(<span style=color:#66d9ef>thread</span>);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Compiled poll fault. Enter the VM, handle the poll, return to Java.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>handle_polling_page_exception(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>) {
+</span></span><span style=display:flex><span>  assert(<span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>thread_state() <span style=color:#f92672>==</span> _thread_in_Java, <span style=color:#e6db74>&#34;should come from Java code&#34;</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(_thread_in_vm);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>safepoint_state()<span style=color:#f92672>-&gt;</span>handle_polling_page_exception();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(_thread_in_Java);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Return poll and loop-backedge poll both reach process, which calls block.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> ThreadSafepointState<span style=color:#f92672>::</span>handle_polling_page_exception() {
+</span></span><span style=display:flex><span>  JavaThread<span style=color:#f92672>*</span> self <span style=color:#f92672>=</span> <span style=color:#66d9ef>thread</span>();
+</span></span><span style=display:flex><span>  address real_return_addr <span style=color:#f92672>=</span> self<span style=color:#f92672>-&gt;</span>saved_exception_pc();
+</span></span><span style=display:flex><span>  nmethod<span style=color:#f92672>*</span> nm <span style=color:#f92672>=</span> CodeCache<span style=color:#f92672>::</span>find_blob(real_return_addr)<span style=color:#f92672>-&gt;</span>as_nmethod();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (nm<span style=color:#f92672>-&gt;</span>is_at_poll_return(real_return_addr)) {
+</span></span><span style=display:flex><span>    SafepointMechanism<span style=color:#f92672>::</span>process_if_requested_with_exit_check(self, true <span style=color:#75715e>/* check asyncs */</span>);
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    set_at_poll_safepoint(true);
+</span></span><span style=display:flex><span>    SafepointMechanism<span style=color:#f92672>::</span>process_if_requested_with_exit_check(self, false <span style=color:#75715e>/* check asyncs */</span>);
+</span></span><span style=display:flex><span>    set_at_poll_safepoint(false);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// The stop: stack is walkable, state is _thread_blocked, wait on the barrier.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>block(JavaThread<span style=color:#f92672>*</span> <span style=color:#66d9ef>thread</span>) {
+</span></span><span style=display:flex><span>  JavaThreadState state <span style=color:#f92672>=</span> <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>thread_state();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>frame_anchor()<span style=color:#f92672>-&gt;</span>make_walkable();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>uint64_t</span> safepoint_id <span style=color:#f92672>=</span> SafepointSynchronize<span style=color:#f92672>::</span>safepoint_counter();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>safepoint_state()<span style=color:#f92672>-&gt;</span>set_safepoint_id(safepoint_id);
+</span></span><span style=display:flex><span>  OrderAccess<span style=color:#f92672>::</span>storestore();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state_fence(_thread_blocked);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  _wait_barrier<span style=color:#f92672>-&gt;</span>wait(<span style=color:#66d9ef>static_cast</span><span style=color:#f92672>&lt;</span><span style=color:#66d9ef>int</span><span style=color:#f92672>&gt;</span>(safepoint_id));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  OrderAccess<span style=color:#f92672>::</span>loadstore();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>set_thread_state(state);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>thread</span><span style=color:#f92672>-&gt;</span>safepoint_state()<span style=color:#f92672>-&gt;</span>reset_safepoint_id();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// VM thread spins until every Java thread is safepoint-safe.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> SafepointSynchronize<span style=color:#f92672>::</span>synchronize_threads(jlong safepoint_limit_time, <span style=color:#66d9ef>int</span> nof_threads, <span style=color:#66d9ef>int</span><span style=color:#f92672>*</span> initial_running) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int</span> still_running <span style=color:#f92672>=</span> nof_threads;
+</span></span><span style=display:flex><span>  ThreadSafepointState<span style=color:#f92672>*</span> tss_head <span style=color:#f92672>=</span> <span style=color:#66d9ef>nullptr</span>;
+</span></span><span style=display:flex><span>  ThreadSafepointState<span style=color:#f92672>**</span> p_prev <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span>tss_head;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (JavaThreadIteratorWithHandle jtiwh; JavaThread<span style=color:#f92672>*</span> cur <span style=color:#f92672>=</span> jtiwh.next(); ) {
+</span></span><span style=display:flex><span>    ThreadSafepointState<span style=color:#f92672>*</span> cur_tss <span style=color:#f92672>=</span> cur<span style=color:#f92672>-&gt;</span>safepoint_state();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (thread_not_running(cur_tss)) {
+</span></span><span style=display:flex><span>      <span style=color:#f92672>--</span>still_running;
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>      <span style=color:#f92672>*</span>p_prev <span style=color:#f92672>=</span> cur_tss;
+</span></span><span style=display:flex><span>      p_prev <span style=color:#f92672>=</span> cur_tss<span style=color:#f92672>-&gt;</span>next_ptr();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  <span style=color:#f92672>*</span>p_prev <span style=color:#f92672>=</span> <span style=color:#66d9ef>nullptr</span>;
+</span></span><span style=display:flex><span>  <span style=color:#f92672>*</span>initial_running <span style=color:#f92672>=</span> still_running;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (still_running <span style=color:#f92672>&lt;=</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int</span> iterations <span style=color:#f92672>=</span> <span style=color:#ae81ff>1</span>;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>int64_t</span> start_time <span style=color:#f92672>=</span> os<span style=color:#f92672>::</span>javaTimeNanos();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>do</span> {
+</span></span><span style=display:flex><span>    p_prev <span style=color:#f92672>=</span> <span style=color:#f92672>&amp;</span>tss_head;
+</span></span><span style=display:flex><span>    ThreadSafepointState<span style=color:#f92672>*</span> cur_tss <span style=color:#f92672>=</span> tss_head;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>while</span> (cur_tss <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nullptr</span>) {
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>if</span> (thread_not_running(cur_tss)) {
+</span></span><span style=display:flex><span>        <span style=color:#f92672>--</span>still_running;
+</span></span><span style=display:flex><span>        <span style=color:#f92672>*</span>p_prev <span style=color:#f92672>=</span> <span style=color:#66d9ef>nullptr</span>;
+</span></span><span style=display:flex><span>        ThreadSafepointState<span style=color:#f92672>*</span> tmp <span style=color:#f92672>=</span> cur_tss;
+</span></span><span style=display:flex><span>        cur_tss <span style=color:#f92672>=</span> cur_tss<span style=color:#f92672>-&gt;</span>get_next();
+</span></span><span style=display:flex><span>        tmp<span style=color:#f92672>-&gt;</span>set_next(<span style=color:#66d9ef>nullptr</span>);
+</span></span><span style=display:flex><span>      } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#f92672>*</span>p_prev <span style=color:#f92672>=</span> cur_tss;
+</span></span><span style=display:flex><span>        p_prev <span style=color:#f92672>=</span> cur_tss<span style=color:#f92672>-&gt;</span>next_ptr();
+</span></span><span style=display:flex><span>        cur_tss <span style=color:#f92672>=</span> cur_tss<span style=color:#f92672>-&gt;</span>get_next();
+</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (still_running <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>      back_off(start_time);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    iterations<span style=color:#f92672>++</span>;
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>while</span> (still_running <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>0</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> iterations;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// True once this thread has left the running state, or was already safe.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> SafepointSynchronize<span style=color:#f92672>::</span>thread_not_running(ThreadSafepointState<span style=color:#f92672>*</span> cur_state) {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>cur_state<span style=color:#f92672>-&gt;</span>is_running()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> true;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  cur_state<span style=color:#f92672>-&gt;</span>examine_state_of_thread(SafepointSynchronize<span style=color:#f92672>::</span>safepoint_counter());
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> <span style=color:#f92672>!</span>cur_state<span style=color:#f92672>-&gt;</span>is_running();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// A stable safepoint-safe state (blocked, or in native) counts the thread stopped.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> ThreadSafepointState<span style=color:#f92672>::</span>examine_state_of_thread(<span style=color:#66d9ef>uint64_t</span> safepoint_count) {
+</span></span><span style=display:flex><span>  JavaThreadState stable_state;
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>SafepointSynchronize<span style=color:#f92672>::</span>try_stable_load_state(<span style=color:#f92672>&amp;</span>stable_state, _thread, safepoint_count)) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (safepoint_safe_with(_thread, stable_state)) {
+</span></span><span style=display:flex><span>    account_safe_thread();
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// One fewer thread for begin to wait on.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> ThreadSafepointState<span style=color:#f92672>::</span>account_safe_thread() {
+</span></span><span style=display:flex><span>  SafepointSynchronize<span style=color:#f92672>::</span>decrement_waiting_to_block();
+</span></span><span style=display:flex><span>  _safepoint_safe <span style=color:#f92672>=</span> true;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// VM thread: disarm polls and let yielding GC threads resume.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>end() {
+</span></span><span style=display:flex><span>  assert(Thread<span style=color:#f92672>::</span>current()<span style=color:#f92672>-&gt;</span>is_VM_thread(), <span style=color:#e6db74>&#34;Only VM thread can execute a safepoint&#34;</span>);
+</span></span><span style=display:flex><span>  disarm_safepoint();
+</span></span><span style=display:flex><span>  Universe<span style=color:#f92672>::</span>heap()<span style=color:#f92672>-&gt;</span>safepoint_synchronize_end();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Clear the global state, mark each thread running again, wake the barrier.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> SafepointSynchronize<span style=color:#f92672>::</span>disarm_safepoint() {
+</span></span><span style=display:flex><span>  _state <span style=color:#f92672>=</span> _not_synchronized;
+</span></span><span style=display:flex><span>  AtomicAccess<span style=color:#f92672>::</span>release_store(<span style=color:#f92672>&amp;</span>_safepoint_counter, _safepoint_counter <span style=color:#f92672>+</span> <span style=color:#ae81ff>1</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>for</span> (JavaThreadIteratorWithHandle jtiwh; JavaThread<span style=color:#f92672>*</span> current <span style=color:#f92672>=</span> jtiwh.next(); ) {
+</span></span><span style=display:flex><span>    current<span style=color:#f92672>-&gt;</span>safepoint_state()<span style=color:#f92672>-&gt;</span>restart();
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  Threads_lock<span style=color:#f92672>-&gt;</span>unlock();
+</span></span><span style=display:flex><span>  _wait_barrier<span style=color:#f92672>-&gt;</span>disarm();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// G1: the marker and refinement threads may run again.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>safepoint_synchronize_end() {
+</span></span><span style=display:flex><span>  SuspendibleThreadSet<span style=color:#f92672>::</span>desynchronize();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><hr><h2 id=4-gc-cycle>4. GC cycle</h2><p>G1 alternates a <strong>Young-Only</strong> phase with a <strong>Space-Reclamation</strong> phase, cycling through the same sequence of phases. Full GC is the backup when evacuation cannot free enough space.</p><p><img src=https://kevinwang930.github.io/post/java/jvm/gc/images/g1-gc-cycle.svg alt="G1 garbage collection cycle: Young-Only through Concurrent Start, Remark and Cleanup, then Mixed Space-Reclamation, with Full GC as a backup when evacuation cannot free space"></p><p>Every step of the cycle runs on dedicated GC threads. A mutator that needs a collection never collects by itself: it posts a VM operation and blocks. Every pause runs on the <strong>VM thread</strong> together with the <strong>GC Thread</strong> pool (<code>ParallelGCThreads</code>); between pauses, the <strong>marker</strong> and <strong>refinement</strong> threads drive their own worker pools through marking and card refinement.</p><p>Collection is event-driven. When an ordinary allocation cannot find space in Eden, <code>attempt_allocation_slow</code> asks for a collection pause with the cause <code>_g1_inc_collection_pause</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp — the mutator cannot refill Eden
 </span></span></span><span style=display:flex><span>HeapWord<span style=color:#f92672>*</span> G1CollectedHeap<span style=color:#f92672>::</span>attempt_allocation_slow(uint node_index, size_t word_size, <span style=color:#66d9ef>bool</span> allow_gc) {
 </span></span><span style=display:flex><span>  uint gc_count_before;
 </span></span><span style=display:flex><span>  {
@@ -308,7 +640,7 @@ MutatorAllocRegion ..&gt; G1HeapRegionManager : new Eden region
 </span></span></span><span style=display:flex><span>    start_concurrent_cycle(collector.concurrent_operation_is_full_mark());
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>The steps divide into two parts, following the two halves of the cycle:</p><p><strong>Young-Only (upper half)</strong></p><p>Normal young collections repeat in this half, promoting survivors into Old, and the marking work that later enables old evacuation runs between them. No old region is evacuated here.</p><ol><li><strong>Young promotion</strong> — normal young collections evacuate Eden and Survivor regions and promote aged objects into Old; they repeat until non-young occupancy crosses the initiating threshold (<code>G1IHOP</code>).</li><li><strong>Concurrent Start</strong> — a young pause that snapshots the roots and starts marking the old generation.</li><li><strong>Concurrent Mark</strong> — marking runs beside the mutators; normal young collections may continue.</li><li><strong>Remark</strong> — a short stop-the-world pause that drains the remaining marking work.</li><li><strong>Cleanup</strong> — a short stop-the-world pause that accounts live data and selects the old regions worth evacuating.</li></ol><p><strong>Space-Reclamation (lower half)</strong></p><p>Mixed collections repeat in this half, each evacuating young regions plus some of the old regions marking identified. When further old reclaim is no longer worth the pause, the cycle restarts Young-Only.</p><ol start=6><li><strong>Prepare Mixed</strong> — if Cleanup found old candidates, the entry step from the upper half; the mixed collection set is prepared.</li><li><strong>Mixed</strong> — mixed pauses evacuate young regions plus selected old regions, and the emptied regions return to the free list.</li><li><strong>Restart Young-Only</strong> — back to the upper half: the cycle starts over.</li></ol><p>Full GC is not a step of the cycle: it is the backup that compacts the whole heap when evacuation cannot free enough space.</p><p>Each step is triggered either by an allocation that failed or by the step before it. The figure groups the steps in the pool that executes them and draws the calls between the pools as a state machine:</p><p><img src=https://kevinwang930.github.io/post/java/jvm/gc/images/g1-cycle-triggers.svg alt="State machine of the G1 cycle grouped by thread pool: the VM thread and GC Thread pool package holds every stop-the-world step (Young promotion to Concurrent Start, then Remark, Cleanup, Prepare Mixed, Mixed, and back to Young promotion); the G1 Main Marker and G1 Conc pool package holds Concurrent Mark; an arrow labeled start_concurrent_cycle() and notify() goes from the end of the Concurrent Start pause to wake the marker thread, and an arrow labeled marker posts VM_G1PauseRemark returns from the marker to the Remark pause; the marker also posts Cleanup; the G1 Refine Control and G1 Refinement Workers package runs between pauses and starts no step of its own"></p><p>The cycle trades one long pause for many short ones. Every young and mixed collection is a stop-the-world pause, so the cycle contains many of them, but each is kept short: the pause-time target (<code>MaxGCPauseMillis</code>, <strong>200 ms</strong> by default) steers how much work a pause may take, while the expensive graph work—marking and remembered-set maintenance—runs concurrently between pauses.</p><p>The sections below cover the mechanisms in turn: young promotion (§3.2), concurrent marking with its Remark and Cleanup pauses (§3.3), evacuation (§3.4), freeing emptied regions (§3.5), and the old threshold check that decides when the cycle restarts (§3.6).</p><h3 id=31-gc-threads>3.1 GC threads</h3><p>A collection is executed by a small set of native threads with strict roles. HotSpot separates them into <strong>drivers</strong> and <strong>worker pools</strong>:</p><ul><li>A <strong>driver</strong> is one named thread that owns the control flow of one GC job. It runs the serial parts—deciding, selecting, switching phases—and blocks while the parallel part of a phase runs.</li><li>A <strong>worker</strong> never decides anything. It takes one slice of the task its driver posted, runs <code>work(worker_id)</code>, and goes back to sleep.</li></ul><p>Every pool is a <code>WorkerThreads</code> object and every unit of parallel work is a <code>WorkerTask</code>. G1 has exactly three driver/pool pairs:</p><table><thead><tr><th>Driver (class)</th><th>Its pool</th><th>Worker threads</th><th>Default count</th><th>Parallel work</th></tr></thead><tbody><tr><td><strong>VM thread</strong> (<code>VMThread</code>)</td><td><code>G1CollectedHeap::_workers</code></td><td><code>GC Thread#0…</code></td><td><code>ParallelGCThreads</code></td><td>prepare and evacuate the collection set, post-evacuate cleanup, Remark work</td></tr><tr><td><strong>G1 Main Marker</strong> (<code>G1ConcurrentMarkThread</code>)</td><td><code>G1ConcurrentMark::_concurrent_workers</code></td><td><code>G1 Conc#0…</code></td><td><code>ConcGCThreads</code></td><td>root-region scan, mark the object graph, rebuild and scrub, clear bitmap</td></tr><tr><td><strong>G1 Refine Control</strong> (<code>G1ConcurrentRefineThread</code>)</td><td><code>G1ConcurrentRefineThreadControl::_workers</code></td><td><code>G1 Refinement Workers#0…</code></td><td><code>G1ConcRefinementThreads</code></td><td>sweep dirty card tables into remembered sets</td></tr></tbody></table><p>The architecture follows one rule: <strong>one pool, one driver</strong>. A pool runs at most one task at a time, and only its own driver calls <code>run_task</code> on it. There is no work stealing between pools and no shared queue to arbitrate—which is why the pool code is this small.</p><p><strong>The worker counts.</strong> All three counts are ergonomic and fixed before the pools are created:</p><ul><li><code>ParallelGCThreads</code> — the CPU count up to 8, plus 5/8 of the remaining CPUs (<code>WorkerPolicy::calc_parallel_worker_threads</code>). 16 CPUs give 8 + 8×5/8 = 13.</li><li><code>ConcGCThreads = (ParallelGCThreads + 2) / 4</code> (<code>g1Arguments.cpp</code>).</li><li><code>G1ConcRefinementThreads = MIN2(ParallelGCThreads, flag_max)</code> (<code>g1Arguments.cpp</code>).</li></ul><p>These are ceilings, not thread counts. With <code>UseDynamicNumberOfGCThreads</code> (default true) each pool creates <strong>one</strong> worker at startup and grows up to the ceiling on demand:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// workerThread.cpp
+</span></span></code></pre></div><p>The steps divide into two parts, following the two halves of the cycle:</p><p><strong>Young-Only (upper half)</strong></p><p>Normal young collections repeat in this half, promoting survivors into Old, and the marking work that later enables old evacuation runs between them. No old region is evacuated here.</p><ol><li><strong>Young promotion</strong> — normal young collections evacuate Eden and Survivor regions and promote aged objects into Old; they repeat until non-young occupancy crosses the initiating threshold (<code>G1IHOP</code>).</li><li><strong>Concurrent Start</strong> — a young pause that snapshots the roots and starts marking the old generation.</li><li><strong>Concurrent Mark</strong> — marking runs beside the mutators; normal young collections may continue.</li><li><strong>Remark</strong> — a short stop-the-world pause that drains the remaining marking work.</li><li><strong>Cleanup</strong> — a short stop-the-world pause that accounts live data and selects the old regions worth evacuating.</li></ol><p><strong>Space-Reclamation (lower half)</strong></p><p>Mixed collections repeat in this half, each evacuating young regions plus some of the old regions marking identified. When further old reclaim is no longer worth the pause, the cycle restarts Young-Only.</p><ol start=6><li><strong>Prepare Mixed</strong> — if Cleanup found old candidates, the entry step from the upper half; the mixed collection set is prepared.</li><li><strong>Mixed</strong> — mixed pauses evacuate young regions plus selected old regions, and the emptied regions return to the free list.</li><li><strong>Restart Young-Only</strong> — back to the upper half: the cycle starts over.</li></ol><p>Full GC is not a step of the cycle: it is the backup that compacts the whole heap when evacuation cannot free enough space.</p><p>Each step is triggered either by an allocation that failed or by the step before it. The figure groups the steps in the pool that executes them and draws the calls between the pools as a state machine:</p><p><img src=https://kevinwang930.github.io/post/java/jvm/gc/images/g1-cycle-triggers.svg alt="State machine of the G1 cycle grouped by thread pool: the VM thread and GC Thread pool package holds every stop-the-world step (Young promotion to Concurrent Start, then Remark, Cleanup, Prepare Mixed, Mixed, and back to Young promotion); the G1 Main Marker and G1 Conc pool package holds Concurrent Mark; an arrow labeled start_concurrent_cycle() and notify() goes from the end of the Concurrent Start pause to wake the marker thread, and an arrow labeled marker posts VM_G1PauseRemark returns from the marker to the Remark pause; the marker also posts Cleanup; the G1 Refine Control and G1 Refinement Workers package runs between pauses and starts no step of its own"></p><p>The cycle trades one long pause for many short ones. Every young and mixed collection is a stop-the-world pause, so the cycle contains many of them, but each is kept short: the pause-time target (<code>MaxGCPauseMillis</code>, <strong>200 ms</strong> by default) steers how much work a pause may take, while the expensive graph work—marking and remembered-set maintenance—runs concurrently between pauses.</p><p>The sections below cover the mechanisms in turn: young promotion (§4.2), concurrent marking with its Remark and Cleanup pauses (§4.3), evacuation (§4.4), freeing emptied regions (§4.5), and the old threshold check that decides when the cycle restarts (§4.6).</p><h3 id=41-gc-threads>4.1 GC threads</h3><p>A collection is executed by a small set of native threads with strict roles. HotSpot separates them into <strong>drivers</strong> and <strong>worker pools</strong>:</p><ul><li>A <strong>driver</strong> is one named thread that owns the control flow of one GC job. It runs the serial parts—deciding, selecting, switching phases—and blocks while the parallel part of a phase runs.</li><li>A <strong>worker</strong> never decides anything. It takes one slice of the task its driver posted, runs <code>work(worker_id)</code>, and goes back to sleep.</li></ul><p>Every pool is a <code>WorkerThreads</code> object and every unit of parallel work is a <code>WorkerTask</code>. G1 has exactly three driver/pool pairs:</p><table><thead><tr><th>Driver (class)</th><th>Its pool</th><th>Worker threads</th><th>Default count</th><th>Parallel work</th></tr></thead><tbody><tr><td><strong>VM thread</strong> (<code>VMThread</code>)</td><td><code>G1CollectedHeap::_workers</code></td><td><code>GC Thread#0…</code></td><td><code>ParallelGCThreads</code></td><td>prepare and evacuate the collection set, post-evacuate cleanup, Remark work</td></tr><tr><td><strong>G1 Main Marker</strong> (<code>G1ConcurrentMarkThread</code>)</td><td><code>G1ConcurrentMark::_concurrent_workers</code></td><td><code>G1 Conc#0…</code></td><td><code>ConcGCThreads</code></td><td>root-region scan, mark the object graph, rebuild and scrub, clear bitmap</td></tr><tr><td><strong>G1 Refine Control</strong> (<code>G1ConcurrentRefineThread</code>)</td><td><code>G1ConcurrentRefineThreadControl::_workers</code></td><td><code>G1 Refinement Workers#0…</code></td><td><code>G1ConcRefinementThreads</code></td><td>sweep dirty card tables into remembered sets</td></tr></tbody></table><p>The architecture follows one rule: <strong>one pool, one driver</strong>. A pool runs at most one task at a time, and only its own driver calls <code>run_task</code> on it. There is no work stealing between pools and no shared queue to arbitrate—which is why the pool code is this small.</p><p><strong>The worker counts.</strong> All three counts are ergonomic and fixed before the pools are created:</p><ul><li><code>ParallelGCThreads</code> — the CPU count up to 8, plus 5/8 of the remaining CPUs (<code>WorkerPolicy::calc_parallel_worker_threads</code>). 16 CPUs give 8 + 8×5/8 = 13.</li><li><code>ConcGCThreads = (ParallelGCThreads + 2) / 4</code> (<code>g1Arguments.cpp</code>).</li><li><code>G1ConcRefinementThreads = MIN2(ParallelGCThreads, flag_max)</code> (<code>g1Arguments.cpp</code>).</li></ul><p>These are ceilings, not thread counts. With <code>UseDynamicNumberOfGCThreads</code> (default true) each pool creates <strong>one</strong> worker at startup and grows up to the ceiling on demand:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// workerThread.cpp
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> WorkerThreads<span style=color:#f92672>::</span>initialize_workers() {
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>const</span> uint initial_active_workers <span style=color:#f92672>=</span> UseDynamicNumberOfGCThreads <span style=color:#f92672>?</span> <span style=color:#ae81ff>1</span> <span style=color:#f92672>:</span> _max_workers;
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (set_active_workers(initial_active_workers) <span style=color:#f92672>!=</span> initial_active_workers) {
@@ -326,7 +658,7 @@ MutatorAllocRegion ..&gt; G1HeapRegionManager : new Eden region
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>  _active_workers <span style=color:#f92672>=</span> MIN2(_created_workers, num_workers);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>The number used for a given phase is chosen from the number of Java threads and the heap size (<code>WorkerPolicy::calc_default_active_workers</code>) and is logged, for example as <code>Using 4 workers of 13 for evacuation</code>.</p><p><strong>Class picture.</strong></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>The number used for a given phase is chosen from the number of Java threads and the heap size (<code>WorkerPolicy::calc_default_active_workers</code>) and is logged, for example as <code>Using 4 workers of 13 for evacuation</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 skinparam classAttributeIconSize 0
 
 abstract class NamedThread
@@ -437,32 +769,159 @@ W -&gt; W : worker_id = _started++\nwork(worker_id)
 W -&gt; P : _not_finished--\nlast worker: _end_semaphore.signal()
 P --&gt; D : run_task returns\n(driver continues)
 @enduml
-</code></pre><p>Three properties follow from this protocol:</p><ol><li><strong><code>run_task</code> is a join.</strong> The driver cannot run ahead of the workers, and the next phase cannot start until the driver starts it.</li><li><strong>Worker ids are dense and reassigned on every task</strong> (<code>0..n-1</code>, in wake-up order). Task code uses the id to index per-worker state, so that state needs no locking. No code assumes that a particular OS thread always gets a particular id.</li><li><strong>A task can run with fewer workers than the ceiling.</strong> <code>run_task</code> wakes only <code>_active_workers</code>; a driver may also request a specific count for a small job (<code>run_task(task, num_workers)</code>), like the root-region scan, which uses one worker per remaining root region.</li></ol><h4 id=311-gc-thread-pool-the-vm-threads-workers>3.1.1 GC Thread pool: the VM thread&rsquo;s workers</h4><p>The GC Thread pool does the stop-the-world work of a collection. Its workers evacuate live objects out of the collection set during young and mixed pauses, and run the passes around the copy: preparing the regions before evacuation and cleaning up after it.</p><p><strong>Scheduling.</strong> The pool is idle between pauses and never starts a phase on its own. Its trigger is always a GC VM operation: a mutator whose allocation failed posts <code>VM_G1CollectForAllocation</code>; the marker thread posts <code>VM_G1PauseRemark</code> or <code>VM_G1PauseCleanup</code> for the concurrent cycle&rsquo;s stop-the-world parts; explicit and periodic collection requests post theirs. The poster blocks until the operation has run.</p><p>G1 creates this pool once, during heap initialization, with the parallel GC thread count as its ceiling:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp
+</code></pre><p>Three properties follow from this protocol:</p><ol><li><strong><code>run_task</code> is a join.</strong> The driver cannot run ahead of the workers, and the next phase cannot start until the driver starts it.</li><li><strong>Worker ids are dense and reassigned on every task</strong> (<code>0..n-1</code>, in wake-up order). Task code uses the id to index per-worker state, so that state needs no locking. No code assumes that a particular OS thread always gets a particular id.</li><li><strong>A task can run with fewer workers than the ceiling.</strong> <code>run_task</code> wakes only <code>_active_workers</code>; a driver may also request a specific count for a small job (<code>run_task(task, num_workers)</code>), like the root-region scan, which uses one worker per remaining root region.</li></ol><h4 id=411-gc-thread-pool-the-vm-threads-workers>4.1.1 GC Thread pool: the VM thread&rsquo;s workers</h4><p>The GC Thread pool does the stop-the-world work of a collection. Its workers evacuate live objects out of the collection set during young and mixed pauses, and run the passes around the copy: preparing the regions before evacuation and cleaning up after it.</p><p><strong>Scheduling.</strong> The pool is idle between pauses and never starts a phase on its own. Its trigger is always a GC VM operation: a mutator whose allocation failed posts <code>VM_G1CollectForAllocation</code>; the marker thread posts <code>VM_G1PauseRemark</code> or <code>VM_G1PauseCleanup</code> for the concurrent cycle&rsquo;s stop-the-world parts; explicit and periodic collection requests post theirs. The poster blocks until the operation has run.</p><p>G1 creates this pool once, during heap initialization, with the parallel GC thread count as its ceiling:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp
 </span></span></span><span style=display:flex><span>jint G1CollectedHeap<span style=color:#f92672>::</span>initialize() {
 </span></span><span style=display:flex><span>  _workers <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> WorkerThreads(<span style=color:#e6db74>&#34;GC Thread&#34;</span>, ParallelGCThreads);
 </span></span><span style=display:flex><span>  _workers<span style=color:#f92672>-&gt;</span>initialize_workers();
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>The VM thread is the pool&rsquo;s only driver: the serial logic of a pause runs on it, and the copies run on the pool. A Java thread that cannot satisfy an allocation does not collect by itself. It builds a VM operation, hands it to the VM thread, and blocks:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// vmThread.cpp — the calling thread&#39;s path
+</span></span></code></pre></div><p>The VM thread is the pool&rsquo;s only driver: the serial logic of a pause runs on it, and the copies run on the pool. A Java thread that cannot satisfy an allocation does not collect by itself. It builds a VM operation, hands it to the VM thread, and blocks:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// The allocating thread blocks until the VM thread has finished the operation.
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VMThread<span style=color:#f92672>::</span>execute(VM_Operation<span style=color:#f92672>*</span> op) {
+</span></span><span style=display:flex><span>  Thread<span style=color:#f92672>*</span> t <span style=color:#f92672>=</span> Thread<span style=color:#f92672>::</span>current();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (t<span style=color:#f92672>-&gt;</span>is_VM_thread()) {
+</span></span><span style=display:flex><span>    op<span style=color:#f92672>-&gt;</span>set_calling_thread(t);
+</span></span><span style=display:flex><span>    ((VMThread<span style=color:#f92672>*</span>)t)<span style=color:#f92672>-&gt;</span>inner_execute(op);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>op<span style=color:#f92672>-&gt;</span>doit_prologue()) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>  op<span style=color:#f92672>-&gt;</span>set_calling_thread(t);
-</span></span><span style=display:flex><span>  wait_until_executed(op);   <span style=color:#75715e>// the caller sleeps here ...
-</span></span></span><span style=display:flex><span>  op<span style=color:#f92672>-&gt;</span>doit_epilogue();       <span style=color:#75715e>// ... until the operation has run
-</span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>The VM thread loops in <code>wait_for_operation</code>, and <code>inner_execute</code> posts a full safepoint when the operation is a GC, so every Java thread stops at the next polling point. Only then does the operation&rsquo;s <code>doit</code> run, on the VM thread:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// vmThread.cpp
+</span></span><span style=display:flex><span>  wait_until_executed(op);
+</span></span><span style=display:flex><span>  op<span style=color:#f92672>-&gt;</span>doit_epilogue();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// VM thread: stop every Java thread, run doit, then release the safepoint.
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VMThread<span style=color:#f92672>::</span>inner_execute(VM_Operation<span style=color:#f92672>*</span> op) {
+</span></span><span style=display:flex><span>  assert(Thread<span style=color:#f92672>::</span>current()<span style=color:#f92672>-&gt;</span>is_VM_thread(), <span style=color:#e6db74>&#34;Must be the VM thread&#34;</span>);
+</span></span><span style=display:flex><span>  _cur_vm_operation <span style=color:#f92672>=</span> op;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> end_safepoint <span style=color:#f92672>=</span> false;
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (_cur_vm_operation<span style=color:#f92672>-&gt;</span>evaluate_at_safepoint() <span style=color:#f92672>&amp;&amp;</span>
 </span></span><span style=display:flex><span>      <span style=color:#f92672>!</span>SafepointSynchronize<span style=color:#f92672>::</span>is_at_safepoint()) {
-</span></span><span style=display:flex><span>    SafepointSynchronize<span style=color:#f92672>::</span>begin();   <span style=color:#75715e>// all Java threads stop here
-</span></span></span><span style=display:flex><span>    end_safepoint <span style=color:#f92672>=</span> true;
+</span></span><span style=display:flex><span>    SafepointSynchronize<span style=color:#f92672>::</span>begin();
+</span></span><span style=display:flex><span>    end_safepoint <span style=color:#f92672>=</span> true;
 </span></span><span style=display:flex><span>  }
-</span></span><span style=display:flex><span>  evaluate_operation(_cur_vm_operation);   <span style=color:#75715e>// op-&gt;evaluate() -&gt; doit()
-</span></span></span><span style=display:flex><span>  ...
+</span></span><span style=display:flex><span>  evaluate_operation(_cur_vm_operation);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (end_safepoint) {
+</span></span><span style=display:flex><span>    SafepointSynchronize<span style=color:#f92672>::</span>end();
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  _cur_vm_operation <span style=color:#f92672>=</span> <span style=color:#66d9ef>nullptr</span>;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>For an allocation failure the operation is <code>VM_G1CollectForAllocation</code>: it runs one young (or mixed) pause, and then lets the blocked allocation retry (§3.4 shows its full <code>doit</code>).</p><p><code>do_collection_pause_at_safepoint</code> builds a <code>G1YoungCollector</code> and calls <code>collect()</code>. Everything up to here has been serial, and it stays serial wherever it can: selecting the collection set, fixing up the allocation regions, deciding the next collector state. Only the heavy phases are dispatched, each through one <code>run_task</code> call—<code>G1PrepareEvacuationTask</code>, <code>G1EvacuateRegionsTask</code>, the optional <code>G1EvacuateOptionalRegionsTask</code>, and the post-evacuate batch tasks. The driver side of every one of them is the same three lines:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1YoungCollector.cpp — driver side; blocks for the whole phase
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// One young or mixed pause, then the allocation that requested it retries.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VM_G1CollectForAllocation<span style=color:#f92672>::</span>doit() {
+</span></span><span style=display:flex><span>  G1CollectedHeap<span style=color:#f92672>*</span> g1h <span style=color:#f92672>=</span> G1CollectedHeap<span style=color:#f92672>::</span>heap();
+</span></span><span style=display:flex><span>  GCCauseSetter <span style=color:#a6e22e>x</span>(g1h, _gc_cause);
+</span></span><span style=display:flex><span>  g1h<span style=color:#f92672>-&gt;</span>do_collection_pause_at_safepoint(_word_size);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (_word_size <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>0</span>) {
+</span></span><span style=display:flex><span>    _result <span style=color:#f92672>=</span> g1h<span style=color:#f92672>-&gt;</span>satisfy_failed_allocation(_word_size);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Build the young collector and run it. Start marking only if this pause is a Concurrent Start.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>do_collection_pause_at_safepoint(size_t allocation_word_size) {
+</span></span><span style=display:flex><span>  policy()<span style=color:#f92672>-&gt;</span>decide_on_concurrent_start_pause();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> should_start_concurrent_mark_operation <span style=color:#f92672>=</span> collector_state()<span style=color:#f92672>-&gt;</span>is_in_concurrent_start_gc();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  G1YoungCollector <span style=color:#a6e22e>collector</span>(gc_cause(), allocation_word_size);
+</span></span><span style=display:flex><span>  collector.collect();
+</span></span><span style=display:flex><span>  _collector_state <span style=color:#f92672>=</span> collector.next_state();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (should_start_concurrent_mark_operation) {
+</span></span><span style=display:flex><span>    start_concurrent_cycle(collector.concurrent_operation_is_full_mark());
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Serial setup, then one run_task per parallel phase. The VM thread waits inside each run_task.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>collect() {
+</span></span><span style=display:flex><span>  set_young_collection_default_active_worker_threads();
+</span></span><span style=display:flex><span>  complete_root_region_scan();
+</span></span><span style=display:flex><span>  policy()<span style=color:#f92672>-&gt;</span>record_young_collection_start();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  pre_evacuate_collection_set(evacuation_info);
+</span></span><span style=display:flex><span>  G1ParScanThreadStateSet <span style=color:#a6e22e>per_thread_states</span>(_g1h, workers()<span style=color:#f92672>-&gt;</span>active_workers(), collection_set(), <span style=color:#f92672>&amp;</span>_evac_failure_regions);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>bool</span> may_do_optional_evacuation <span style=color:#f92672>=</span> collection_set()<span style=color:#f92672>-&gt;</span>num_optional_regions() <span style=color:#f92672>!=</span> <span style=color:#ae81ff>0</span>;
+</span></span><span style=display:flex><span>  evacuate_initial_collection_set(<span style=color:#f92672>&amp;</span>per_thread_states, may_do_optional_evacuation);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (may_do_optional_evacuation) {
+</span></span><span style=display:flex><span>    evacuate_optional_collection_set(<span style=color:#f92672>&amp;</span>per_thread_states);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  post_evacuate_collection_set(evacuation_info, <span style=color:#f92672>&amp;</span>per_thread_states);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  _next_state <span style=color:#f92672>=</span> policy()<span style=color:#f92672>-&gt;</span>record_young_collection_end(_concurrent_operation_is_full_mark, evacuation_alloc_failed(), _allocation_word_size);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Driver side of every parallel phase: return only after the workers finish.
 </span></span></span><span style=display:flex><span>Tickspan G1YoungCollector<span style=color:#f92672>::</span>run_task_timed(WorkerTask<span style=color:#f92672>*</span> task) {
 </span></span><span style=display:flex><span>  Ticks start <span style=color:#f92672>=</span> Ticks<span style=color:#f92672>::</span>now();
 </span></span><span style=display:flex><span>  workers()<span style=color:#f92672>-&gt;</span>run_task(task);
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> Ticks<span style=color:#f92672>::</span>now() <span style=color:#f92672>-</span> start;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// A batched task asks for its own worker count, then the same run_task.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>run_batch_task(G1BatchedTask<span style=color:#f92672>*</span> cl) {
+</span></span><span style=display:flex><span>  uint num_workers <span style=color:#f92672>=</span> MAX2(<span style=color:#ae81ff>1u</span>, MIN2(cl<span style=color:#f92672>-&gt;</span>num_workers_estimate(), workers()<span style=color:#f92672>-&gt;</span>active_workers()));
+</span></span><span style=display:flex><span>  cl<span style=color:#f92672>-&gt;</span>set_max_workers(num_workers);
+</span></span><span style=display:flex><span>  workers()<span style=color:#f92672>-&gt;</span>run_task(cl, num_workers);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Before the copy: flush thread-local buffers, choose the collection set, then one prepare task.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>pre_evacuate_collection_set(G1EvacInfo<span style=color:#f92672>*</span> evacuation_info) {
+</span></span><span style=display:flex><span>  G1PreEvacuateCollectionSetBatchTask cl;
+</span></span><span style=display:flex><span>  G1CollectedHeap<span style=color:#f92672>::</span>heap()<span style=color:#f92672>-&gt;</span>run_batch_task(<span style=color:#f92672>&amp;</span>cl);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  calculate_collection_set(evacuation_info, policy()<span style=color:#f92672>-&gt;</span>max_pause_time_ms());
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (collector_state()<span style=color:#f92672>-&gt;</span>is_in_concurrent_start_gc()) {
+</span></span><span style=display:flex><span>    concurrent_mark()<span style=color:#f92672>-&gt;</span>pre_concurrent_start(_gc_cause);
+</span></span><span style=display:flex><span>  }
+</span></span><span style=display:flex><span>  ref_processor_stw()<span style=color:#f92672>-&gt;</span>start_discovery(false <span style=color:#75715e>/* always_clear */</span>);
+</span></span><span style=display:flex><span>  allocator()<span style=color:#f92672>-&gt;</span>init_gc_alloc_regions(evacuation_info);
+</span></span><span style=display:flex><span>  rem_set()<span style=color:#f92672>-&gt;</span>prepare_for_scan_heap_roots();
+</span></span><span style=display:flex><span>  _g1h<span style=color:#f92672>-&gt;</span>collection_set()<span style=color:#f92672>-&gt;</span>prepare_for_scan();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  G1PrepareEvacuationTask <span style=color:#a6e22e>g1_prep_task</span>(_g1h);
+</span></span><span style=display:flex><span>  run_task_timed(<span style=color:#f92672>&amp;</span>g1_prep_task);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// The copy: merge remembered-set roots, then one evacuate task on the pool.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>evacuate_initial_collection_set(G1ParScanThreadStateSet<span style=color:#f92672>*</span> per_thread_states,
+</span></span><span style=display:flex><span>                                                      <span style=color:#66d9ef>bool</span> has_optional_evacuation_work) {
+</span></span><span style=display:flex><span>  rem_set()<span style=color:#f92672>-&gt;</span>merge_heap_roots(true <span style=color:#75715e>/* initial_evacuation */</span>);
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>const</span> uint num_workers <span style=color:#f92672>=</span> workers()<span style=color:#f92672>-&gt;</span>active_workers();
+</span></span><span style=display:flex><span>  G1RootProcessor <span style=color:#a6e22e>root_processor</span>(_g1h, num_workers <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>1</span> <span style=color:#75715e>/* is_parallel */</span>);
+</span></span><span style=display:flex><span>  G1EvacuateRegionsTask <span style=color:#a6e22e>g1_par_task</span>(_g1h, per_thread_states, task_queues(), <span style=color:#f92672>&amp;</span>root_processor,
+</span></span><span style=display:flex><span>                                    num_workers, has_optional_evacuation_work);
+</span></span><span style=display:flex><span>  run_task_timed(<span style=color:#f92672>&amp;</span>g1_par_task);
+</span></span><span style=display:flex><span>  rem_set()<span style=color:#f92672>-&gt;</span>complete_evac_phase(has_optional_evacuation_work);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Optional old regions, only while the pause budget remains.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>evacuate_next_optional_regions(G1ParScanThreadStateSet<span style=color:#f92672>*</span> per_thread_states) {
+</span></span><span style=display:flex><span>  G1EvacuateOptionalRegionsTask <span style=color:#a6e22e>task</span>(per_thread_states, task_queues(), workers()<span style=color:#f92672>-&gt;</span>active_workers());
+</span></span><span style=display:flex><span>  run_task_timed(<span style=color:#f92672>&amp;</span>task);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// After the copy: references, weak oops, then two cleanup tasks on the pool.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>post_evacuate_collection_set(G1EvacInfo<span style=color:#f92672>*</span> evacuation_info,
+</span></span><span style=display:flex><span>                                                    G1ParScanThreadStateSet<span style=color:#f92672>*</span> per_thread_states) {
+</span></span><span style=display:flex><span>  process_discovered_references(per_thread_states);
+</span></span><span style=display:flex><span>  G1STWIsAliveClosure <span style=color:#a6e22e>is_alive</span>(_g1h);
+</span></span><span style=display:flex><span>  G1KeepAliveClosure <span style=color:#a6e22e>keep_alive</span>(_g1h);
+</span></span><span style=display:flex><span>  WeakProcessor<span style=color:#f92672>::</span>weak_oops_do(workers(), <span style=color:#f92672>&amp;</span>is_alive, <span style=color:#f92672>&amp;</span>keep_alive, phase_times()<span style=color:#f92672>-&gt;</span>weak_phase_times());
+</span></span><span style=display:flex><span>  allocator()<span style=color:#f92672>-&gt;</span>release_gc_alloc_regions(evacuation_info);
+</span></span><span style=display:flex><span>  post_evacuate_cleanup_1(per_thread_states);
+</span></span><span style=display:flex><span>  post_evacuate_cleanup_2(per_thread_states, evacuation_info);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>post_evacuate_cleanup_1(G1ParScanThreadStateSet<span style=color:#f92672>*</span> per_thread_states) {
+</span></span><span style=display:flex><span>  G1PostEvacuateCollectionSetCleanupTask1 <span style=color:#a6e22e>cl</span>(per_thread_states, <span style=color:#f92672>&amp;</span>_evac_failure_regions);
+</span></span><span style=display:flex><span>  _g1h<span style=color:#f92672>-&gt;</span>run_batch_task(<span style=color:#f92672>&amp;</span>cl);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1YoungCollector<span style=color:#f92672>::</span>post_evacuate_cleanup_2(G1ParScanThreadStateSet<span style=color:#f92672>*</span> per_thread_states,
+</span></span><span style=display:flex><span>                                               G1EvacInfo<span style=color:#f92672>*</span> evacuation_info) {
+</span></span><span style=display:flex><span>  G1PostEvacuateCollectionSetCleanupTask2 <span style=color:#a6e22e>cl</span>(per_thread_states, evacuation_info, <span style=color:#f92672>&amp;</span>_evac_failure_regions);
+</span></span><span style=display:flex><span>  _g1h<span style=color:#f92672>-&gt;</span>run_batch_task(<span style=color:#f92672>&amp;</span>cl);
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p>The classes behind one evacuation task:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 skinparam classAttributeIconSize 0
@@ -509,21 +968,40 @@ G1EvacuateRegionsTask o-- G1RootProcessor : _root_processor
 G1ParScanThreadStateSet *-- &#34;n&#34; G1ParScanThreadState : per worker
 G1ParScanThreadState *-- G1PLABAllocator : _plab_allocator
 @enduml
-</code></pre><p>The worker side of the main task shows what each worker does—the same three steps for all of them, with no shared mutable state except the work queues:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1YoungCollector.cpp — worker side
+</code></pre><p>The worker side of the main task shows what each worker does—the same three steps for all of them, with no shared mutable state except the work queues:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// One worker. Private scan state, then roots, then the copy loop.
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1EvacuateRegionsBaseTask<span style=color:#f92672>::</span>work(uint worker_id) {
 </span></span><span style=display:flex><span>  start_work(worker_id);
 </span></span><span style=display:flex><span>  {
 </span></span><span style=display:flex><span>    ResourceMark rm;
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// 1. This worker&#39;s private scan state: PLAB allocator, age table, queues.
-</span></span></span><span style=display:flex><span>    G1ParScanThreadState<span style=color:#f92672>*</span> pss <span style=color:#f92672>=</span> _per_thread_states<span style=color:#f92672>-&gt;</span>state_for_worker(worker_id);
+</span></span><span style=display:flex><span>    G1ParScanThreadState<span style=color:#f92672>*</span> pss <span style=color:#f92672>=</span> _per_thread_states<span style=color:#f92672>-&gt;</span>state_for_worker(worker_id);
 </span></span><span style=display:flex><span>    pss<span style=color:#f92672>-&gt;</span>set_ref_discoverer(_g1h<span style=color:#f92672>-&gt;</span>ref_processor_stw());
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// 2. Entry points into the collection set: roots, remembered sets, code roots.
-</span></span></span><span style=display:flex><span>    scan_roots(pss, worker_id);
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// 3. Follow references: drain the own queue, steal from others, until all
-</span></span></span><span style=display:flex><span>    <span style=color:#75715e>//    queues are empty and the terminator declares the work finished.
-</span></span></span><span style=display:flex><span>    evacuate_live_objects(pss, worker_id);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (_pinned_regions_recorded.compare_set(false, true)) {
+</span></span><span style=display:flex><span>      record_pinned_regions(pss, worker_id);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    scan_roots(pss, worker_id);
+</span></span><span style=display:flex><span>    evacuate_live_objects(pss, worker_id);
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>  end_work(worker_id);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Roots of the initial collection set: thread stacks, heap roots, code roots.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1EvacuateRegionsTask<span style=color:#f92672>::</span>scan_roots(G1ParScanThreadState<span style=color:#f92672>*</span> pss, uint worker_id) {
+</span></span><span style=display:flex><span>  _root_processor<span style=color:#f92672>-&gt;</span>evacuate_roots(pss, worker_id);
+</span></span><span style=display:flex><span>  _g1h<span style=color:#f92672>-&gt;</span>rem_set()<span style=color:#f92672>-&gt;</span>scan_heap_roots(pss, worker_id, G1GCPhaseTimes<span style=color:#f92672>::</span>ScanHR, G1GCPhaseTimes<span style=color:#f92672>::</span>ObjCopy, _has_optional_evacuation_work);
+</span></span><span style=display:flex><span>  _g1h<span style=color:#f92672>-&gt;</span>rem_set()<span style=color:#f92672>-&gt;</span>scan_collection_set_code_roots(pss, worker_id, G1GCPhaseTimes<span style=color:#f92672>::</span>CodeRoots, G1GCPhaseTimes<span style=color:#f92672>::</span>ObjCopy);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Drain this worker&#39;s queue, steal from the others, stop when every queue is empty.
+</span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1ParEvacuateFollowersClosure<span style=color:#f92672>::</span>do_void() {
+</span></span><span style=display:flex><span>  G1ParScanThreadState<span style=color:#f92672>*</span> <span style=color:#66d9ef>const</span> pss <span style=color:#f92672>=</span> par_scan_state();
+</span></span><span style=display:flex><span>  pss<span style=color:#f92672>-&gt;</span>trim_queue();
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>do</span> {
+</span></span><span style=display:flex><span>    pss<span style=color:#f92672>-&gt;</span>steal_and_trim_queue(queues());
+</span></span><span style=display:flex><span>  } <span style=color:#66d9ef>while</span> (<span style=color:#f92672>!</span>offer_termination());
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> G1ParEvacuateFollowersClosure<span style=color:#f92672>::</span>offer_termination() {
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> (terminator() <span style=color:#f92672>==</span> <span style=color:#66d9ef>nullptr</span>) <span style=color:#f92672>?</span> true <span style=color:#f92672>:</span> terminator()<span style=color:#f92672>-&gt;</span>offer_termination();
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p>Copying uses the private <code>G1ParScanThreadState</code> (and inside it the <code>G1PLABAllocator</code>), so the allocation path needs no locks; load balancing happens only when a worker exhausts its own queue and steals from a peer (<code>G1ParEvacuateFollowersClosure</code>). The VM thread stays parked in <code>_end_semaphore.wait()</code> and wakes for the next serial decision.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 autonumber
@@ -541,11 +1019,11 @@ W --&gt; VM : all workers finished
 VM -&gt; VM : post-evacuate phases\n(more run_task calls)
 VM --&gt; JT : safepoint ends; allocation retried
 @enduml
-</code></pre><p>A mixed collection uses the same machine; only the collection set is bigger. Remark and Cleanup, the two stop-the-world parts of the concurrent cycle, also travel through this pair: the marker thread asks the VM thread for the pause, and <code>remark()</code> dispatches its own parallel work—reference processing, region liveness, selection for rebuild—to the GC Thread pool.</p><h4 id=312-g1-conc-pool-g1-main-markers-workers>3.1.2 G1 Conc pool: G1 Main Marker&rsquo;s workers</h4><p>The G1 Conc pool walks the object graph beside the mutators. Its workers start from the roots captured at Concurrent Start and mark every live object in the old generation while the application keeps allocating and storing references.</p><p><strong>Scheduling.</strong> The pool runs only during a concurrent cycle, which the VM thread starts at the end of a Concurrent Start pause:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp — the VM thread schedules a cycle
+</code></pre><p>A mixed collection uses the same machine; only the collection set is bigger. Remark and Cleanup, the two stop-the-world parts of the concurrent cycle, also travel through this pair: the marker thread asks the VM thread for the pause, and <code>remark()</code> dispatches its own parallel work—reference processing, region liveness, selection for rebuild—to the GC Thread pool.</p><h4 id=412-g1-conc-pool-g1-main-markers-workers>4.1.2 G1 Conc pool: G1 Main Marker&rsquo;s workers</h4><p>The G1 Conc pool walks the object graph beside the mutators. Its workers start from the roots captured at Concurrent Start and mark every live object in the old generation while the application keeps allocating and storing references.</p><p><strong>Scheduling.</strong> The pool runs only during a concurrent cycle, which the VM thread starts at the end of a Concurrent Start pause:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1CollectedHeap.cpp — the VM thread schedules a cycle
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>start_concurrent_cycle(<span style=color:#66d9ef>bool</span> concurrent_operation_is_full_mark) {
 </span></span><span style=display:flex><span>  MutexLocker <span style=color:#a6e22e>x</span>(G1CGC_lock, Mutex<span style=color:#f92672>::</span>_no_safepoint_check_flag);
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (concurrent_operation_is_full_mark) {
-</span></span><span style=display:flex><span>    _cm<span style=color:#f92672>-&gt;</span>start_full_concurrent_cycle();   <span style=color:#75715e>// prepare the cycle (§3.3)
+</span></span><span style=display:flex><span>    _cm<span style=color:#f92672>-&gt;</span>start_full_concurrent_cycle();   <span style=color:#75715e>// prepare the cycle (§4.3)
 </span></span></span><span style=display:flex><span>  } <span style=color:#66d9ef>else</span> {
 </span></span><span style=display:flex><span>    _cm<span style=color:#f92672>-&gt;</span>start_undo_concurrent_cycle();
 </span></span><span style=display:flex><span>  }
@@ -612,7 +1090,7 @@ G1CMTask ..&gt; G1CMBitMap : marks live objects
 </span></span><span style=display:flex><span>  VM_G1PauseRemark op;
 </span></span><span style=display:flex><span>  VMThread<span style=color:#f92672>::</span>execute(<span style=color:#f92672>&amp;</span>op);   <span style=color:#75715e>// marker thread blocks; VM thread runs the pause
 </span></span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>So a concurrent cycle uses both pairs: <code>G1 Main Marker</code> + <code>G1 Conc</code> for everything that runs beside the mutators, and the <code>VM thread</code> + <code>GC Thread</code> for the two stop-the-world phases. When Cleanup is done the marker thread clears the bitmap, ends the cycle, and goes back to sleep.</p><h4 id=313-g1-refinement-workers-g1-refine-controls-workers>3.1.3 G1 Refinement Workers: G1 Refine Control&rsquo;s workers</h4><p>The G1 Refinement Workers turn dirty cards into remembered-set entries. Each worker sweeps a slice of the dirty card table and records the references it finds into the remembered sets of the target regions, so a later evacuation pause can use them.</p><p><strong>Scheduling.</strong> Refinement is demand-driven: there is no wake-up per dirty card, and a sweep runs only while enough cards are pending. The control thread sleeps on a timed wait and re-evaluates when it wakes; the end of every collection also activates it, so refinement resumes right after a pause:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1ConcurrentRefineThread.cpp — the control thread&#39;s idle wait
+</span></span></code></pre></div><p>So a concurrent cycle uses both pairs: <code>G1 Main Marker</code> + <code>G1 Conc</code> for everything that runs beside the mutators, and the <code>VM thread</code> + <code>GC Thread</code> for the two stop-the-world phases. When Cleanup is done the marker thread clears the bitmap, ends the cycle, and goes back to sleep.</p><h4 id=413-g1-refinement-workers-g1-refine-controls-workers>4.1.3 G1 Refinement Workers: G1 Refine Control&rsquo;s workers</h4><p>The G1 Refinement Workers turn dirty cards into remembered-set entries. Each worker sweeps a slice of the dirty card table and records the references it finds into the remembered sets of the target regions, so a later evacuation pause can use them.</p><p><strong>Scheduling.</strong> Refinement is demand-driven: there is no wake-up per dirty card, and a sweep runs only while enough cards are pending. The control thread sleeps on a timed wait and re-evaluates when it wakes; the end of every collection also activates it, so refinement resumes right after a pause:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1ConcurrentRefineThread.cpp — the control thread&#39;s idle wait
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>bool</span> G1ConcurrentRefineThread<span style=color:#f92672>::</span>wait_for_work() {
 </span></span><span style=display:flex><span>  MonitorLocker <span style=color:#a6e22e>ml</span>(notifier(), Mutex<span style=color:#f92672>::</span>_no_safepoint_check_flag);
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>requested_active() <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>should_terminate()) {
@@ -687,7 +1165,7 @@ G1RefineRegionClosure ..&gt; G1RemSet : refine_card_concurrently
 </span></span><span style=display:flex><span>  _scan_state<span style=color:#f92672>-&gt;</span>heap_region_iterate_from_worker_offset(<span style=color:#f92672>&amp;</span>sweep_cl, worker_id, _max_workers);
 </span></span><span style=display:flex><span>  ...
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Unlike the other pools this one usually runs far below its ceiling: <code>num_threads_wanted()</code> is computed from how many cards are pending (<code>G1ConcurrentRefineThreadsNeeded</code>), and the control thread re-evaluates it every ~50 ms. A sweep is also interruptible: when a safepoint request arrives the workers stop at a card boundary (<code>SuspendibleThreadSet::should_yield</code>) and the control thread resumes the sweep afterwards.</p><h3 id=32-young-promotion>3.2 Young promotion</h3><p>A young collection evacuates every Eden and Survivor region, and a live object is copied either to a Survivor region or into an Old region. Copying it to Old is <strong>promotion</strong>, and repeated promotion is what fills the old generation. The choice is the object&rsquo;s age, stored in its <code>markWord</code> (4 bits, so age runs from 0 to 15), compared with the <strong>tenuring threshold</strong> computed at the start of the pause. Promotion is decided per object, not per region: an Eden region is dismantled object by object, and its live objects can split between Survivor and Old. An Eden object (age 0) goes straight to Old whenever the tenuring threshold is 0, and a worker whose Survivor refill failed promotes every object it copies afterwards, Eden objects included.</p><p><code>G1Policy</code> keeps one <code>AgeTable</code> for the whole heap and one threshold. Each GC worker is a <code>G1ParScanThreadState</code>: it copies that threshold into a local field, copies objects through its own <code>G1PLABAllocator</code> (a per-worker buffer, the GC counterpart of a TLAB), and records the ages of objects it placed in Survivor in a local <code>AgeTable</code>. At the end of the pause those tables are merged, and the next pause&rsquo;s threshold is computed from the merge.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Unlike the other pools this one usually runs far below its ceiling: <code>num_threads_wanted()</code> is computed from how many cards are pending (<code>G1ConcurrentRefineThreadsNeeded</code>), and the control thread re-evaluates it every ~50 ms. A sweep is also interruptible: when a safepoint request arrives the workers stop at a card boundary (<code>SuspendibleThreadSet::should_yield</code>) and the control thread resumes the sweep afterwards.</p><h3 id=42-young-promotion>4.2 Young promotion</h3><p>A young collection evacuates every Eden and Survivor region, and a live object is copied either to a Survivor region or into an Old region. Copying it to Old is <strong>promotion</strong>, and repeated promotion is what fills the old generation. The choice is the object&rsquo;s age, stored in its <code>markWord</code> (4 bits, so age runs from 0 to 15), compared with the <strong>tenuring threshold</strong> computed at the start of the pause. Promotion is decided per object, not per region: an Eden region is dismantled object by object, and its live objects can split between Survivor and Old. An Eden object (age 0) goes straight to Old whenever the tenuring threshold is 0, and a worker whose Survivor refill failed promotes every object it copies afterwards, Eden objects included.</p><p><code>G1Policy</code> keeps one <code>AgeTable</code> for the whole heap and one threshold. Each GC worker is a <code>G1ParScanThreadState</code>: it copies that threshold into a local field, copies objects through its own <code>G1PLABAllocator</code> (a per-worker buffer, the GC counterpart of a TLAB), and records the ages of objects it placed in Survivor in a local <code>AgeTable</code>. At the end of the pause those tables are merged, and the next pause&rsquo;s threshold is computed from the merge.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 skinparam classAttributeIconSize 0
 
 class G1Policy {
@@ -822,7 +1300,7 @@ G1ParScanThreadState ..&gt; G1HeapRegionAttr : Survivor or Old
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>  <span style=color:#66d9ef>return</span> age <span style=color:#f92672>&lt;</span> MaxTenuringThreshold <span style=color:#f92672>?</span> age : MaxTenuringThreshold;
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Workers are constructed with that threshold. As each worker finishes, <code>flush_stats</code> merges its age table into <code>G1Policy</code>&rsquo;s table through <code>record_age_table</code>. The pause that just ran recorded who survived; the next pause tenures against that record.</p><h3 id=33-concurrent-mark>3.3 Concurrent mark</h3><p>Young collections promote into Old and do not compact it. When non-young occupancy crosses the initiating threshold (<code>G1IHOP</code>, default <strong>45%</strong> of the current heap, adapted while <code>G1UseAdaptiveIHOP</code> is on; §3.6), G1 schedules a <strong>Concurrent Start</strong> young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.</p><p>Concurrent Start is still an ordinary young collection—the same pause as Young-Only. Its root scan serves two purposes at once: it fixes up references for evacuation, and it feeds the marking bitmap the roots marking starts from. The pause also exists for the roots themselves: a running thread&rsquo;s stack and registers change with every instruction, so only a stop-the-world point can take a consistent snapshot of them. Riding that snapshot on a pause that has to stop anyway is why the step is called Concurrent Start instead of a separate initial-mark pause. The same safepoint resets what the previous cycle left behind:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1ConcurrentMark.cpp — before evacuation, at the same safepoint
+</span></span></code></pre></div><p>Workers are constructed with that threshold. As each worker finishes, <code>flush_stats</code> merges its age table into <code>G1Policy</code>&rsquo;s table through <code>record_age_table</code>. The pause that just ran recorded who survived; the next pause tenures against that record.</p><h3 id=43-concurrent-mark>4.3 Concurrent mark</h3><p>Young collections promote into Old and do not compact it. When non-young occupancy crosses the initiating threshold (<code>G1IHOP</code>, default <strong>45%</strong> of the current heap, adapted while <code>G1UseAdaptiveIHOP</code> is on; §4.6), G1 schedules a <strong>Concurrent Start</strong> young collection: it still evacuates Eden/Survivor, and it starts concurrent marking of the old generation.</p><p>Concurrent Start is still an ordinary young collection—the same pause as Young-Only. Its root scan serves two purposes at once: it fixes up references for evacuation, and it feeds the marking bitmap the roots marking starts from. The pause also exists for the roots themselves: a running thread&rsquo;s stack and registers change with every instruction, so only a stop-the-world point can take a consistent snapshot of them. Riding that snapshot on a pause that has to stop anyway is why the step is called Concurrent Start instead of a separate initial-mark pause. The same safepoint resets what the previous cycle left behind:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1ConcurrentMark.cpp — before evacuation, at the same safepoint
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1ConcurrentMark<span style=color:#f92672>::</span>pre_concurrent_start(GCCause<span style=color:#f92672>::</span>Cause cause) {
 </span></span><span style=display:flex><span>  assert_at_safepoint_on_vm_thread();
 </span></span><span style=display:flex><span>
@@ -874,7 +1352,7 @@ G1ParScanThreadState ..&gt; G1HeapRegionAttr : Survivor or Old
 </span></span></span><span style=display:flex><span>  SATBMarkQueueSet<span style=color:#f92672>&amp;</span> satb_mq_set <span style=color:#f92672>=</span> G1BarrierSet<span style=color:#f92672>::</span>satb_mark_queue_set();
 </span></span><span style=display:flex><span>  satb_mq_set.set_active_all_threads(true, <span style=color:#75715e>/* new active value */</span> false <span style=color:#75715e>/* expected_active */</span>);
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>  <span style=color:#75715e>// 3. mark the cycle in progress; start_concurrent_cycle (§3.1.2) then
+</span></span><span style=display:flex><span>  <span style=color:#75715e>// 3. mark the cycle in progress; start_concurrent_cycle (§4.1.2) then
 </span></span></span><span style=display:flex><span>  <span style=color:#75715e>//    notifies G1CGC_lock to wake the marker thread
 </span></span></span><span style=display:flex><span>  cm_thread()<span style=color:#f92672>-&gt;</span>start_full_cycle();
 </span></span><span style=display:flex><span>}
@@ -907,7 +1385,7 @@ G1ParScanThreadState ..&gt; G1HeapRegionAttr : Survivor or Old
 </span></span><span style=display:flex><span>  <span style=color:#75715e>// 5. this thread: clear the bitmap for the next cycle
 </span></span></span><span style=display:flex><span>  phase_clear_bitmap_for_next_mark();
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Two STW pauses complete the analysis (the marker thread only requests them; the VM thread runs them, with the GC Thread workers):</p><ol><li><strong>Remark</strong> — drains remaining SATB work, finishes reference processing related to marking, and may reclaim completely empty regions.</li><li><strong>Cleanup</strong> — accounts live data per old region, rebuilds remembered sets for collection-set candidates, and decides whether a Space-Reclamation (mixed) phase should follow.</li></ol><p>Marking answers which old regions are sparse (or poorly connected) enough to be worth evacuating later. It does not by itself free those regions for mutator allocation.</p><h3 id=34-evacuation>3.4 Evacuation</h3><p>G1 reclaims by <strong>evacuation</strong>: live objects in a <strong>collection set (CSet)</strong> are copied into free regions, and references (from roots and remembered sets) are updated to the new locations. The VM thread runs the pause. The GC Thread workers do the parallel copy. A young or mixed pause roughly: disconnect TLABs and select the CSet; merge heap roots and remembered sets for that CSet; copy objects; then post-evacuate cleanup.</p><p>The pause itself is one VM operation, run with every mutator stopped at the safepoint; the same operation covers a normal young collection and a mixed one, and only the collection set differs:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1VMOperations.cpp — runs on the VM thread
+</span></span></code></pre></div><p>Two STW pauses complete the analysis (the marker thread only requests them; the VM thread runs them, with the GC Thread workers):</p><ol><li><strong>Remark</strong> — drains remaining SATB work, finishes reference processing related to marking, and may reclaim completely empty regions.</li><li><strong>Cleanup</strong> — accounts live data per old region, rebuilds remembered sets for collection-set candidates, and decides whether a Space-Reclamation (mixed) phase should follow.</li></ol><p>Marking answers which old regions are sparse (or poorly connected) enough to be worth evacuating later. It does not by itself free those regions for mutator allocation.</p><h3 id=44-evacuation>4.4 Evacuation</h3><p>G1 reclaims by <strong>evacuation</strong>: live objects in a <strong>collection set (CSet)</strong> are copied into free regions, and references (from roots and remembered sets) are updated to the new locations. The VM thread runs the pause. The GC Thread workers do the parallel copy. A young or mixed pause roughly: disconnect TLABs and select the CSet; merge heap roots and remembered sets for that CSet; copy objects; then post-evacuate cleanup.</p><p>The pause itself is one VM operation, run with every mutator stopped at the safepoint; the same operation covers a normal young collection and a mixed one, and only the collection set differs:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1VMOperations.cpp — runs on the VM thread
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> VM_G1CollectForAllocation<span style=color:#f92672>::</span>doit() {
 </span></span><span style=display:flex><span>  G1CollectedHeap<span style=color:#f92672>*</span> g1h <span style=color:#f92672>=</span> G1CollectedHeap<span style=color:#f92672>::</span>heap();
 </span></span><span style=display:flex><span>  GCCauseSetter <span style=color:#a6e22e>x</span>(g1h, _gc_cause);
@@ -951,7 +1429,7 @@ G1ParScanThreadState ..&gt; G1HeapRegionAttr : Survivor or Old
 </span></span><span style=display:flex><span>                          clear_all_soft_refs,
 </span></span><span style=display:flex><span>                          false <span style=color:#75715e>/* do_maximal_compaction */</span>);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=35-free>3.5 Free</h3><p>After a successful evacuation, source regions in the CSet contain no live objects. G1 returns them to the <strong>free</strong> list: their type becomes Free, and the memory manager may later hand them out again as Eden, Survivor, Old, or Humongous destinations. That is the step that makes the gray cells in the heap layout reusable.</p><p>Freeing is the last parallel step of the pause. The free-set task has workers claim and clear the CSet regions:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1YoungGCPostEvacuateTasks.cpp
+</span></span></code></pre></div><h3 id=45-free>4.5 Free</h3><p>After a successful evacuation, source regions in the CSet contain no live objects. G1 returns them to the <strong>free</strong> list: their type becomes Free, and the memory manager may later hand them out again as Eden, Survivor, Old, or Humongous destinations. That is the step that makes the gray cells in the heap layout reusable.</p><p>Freeing is the last parallel step of the pause. The free-set task has workers claim and clear the CSet regions:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-cpp data-lang=cpp><span style=display:flex><span><span style=color:#75715e>// g1YoungGCPostEvacuateTasks.cpp
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1PostEvacuateCollectionSetCleanupTask2<span style=color:#f92672>::</span>FreeCollectionSetTask<span style=color:#f92672>::</span>do_work(uint worker_id) <span style=color:#66d9ef>override</span> {
 </span></span><span style=display:flex><span>  FreeCSetClosure <span style=color:#a6e22e>cl</span>(_surviving_young_words, worker_id,
 </span></span><span style=display:flex><span>                     worker_stats(worker_id), _evac_failure_regions);
@@ -971,7 +1449,7 @@ G1ParScanThreadState ..&gt; G1HeapRegionAttr : Survivor or Old
 </span></span></span><span style=display:flex><span><span style=color:#66d9ef>void</span> G1CollectedHeap<span style=color:#f92672>::</span>rebuild_free_region_list() {
 </span></span><span style=display:flex><span>  _hrm.rebuild_free_list(workers());
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Completely empty regions can also appear without a full CSet evacuation—for example after Remark/Cleanup when marking finds a region with no live data, or when a dead humongous object is reclaimed. Those regions likewise become Free.</p><p>Policy keeps a fraction of the heap in reserve (<code>G1ReservePercent</code>) so evacuation always has destination space. Space-Reclamation (mixed) stops when further old evacuation would not free enough space worth the pause (<code>G1HeapWastePercent</code>, default <strong>5%</strong>), and the cycle returns to Young-Only with a larger free pool for allocation.</p><table><thead><tr><th>Lever</th><th>Default (typical)</th><th>Role in the cycle</th></tr></thead><tbody><tr><td><code>MaxGCPauseMillis</code></td><td>200</td><td>Bounds how large Eden and mixed CSets may be</td></tr><tr><td><code>G1IHOP</code></td><td>45</td><td>Non-young occupancy, as a percent of the current heap, above which the next pause may be a Concurrent Start. Adapted when <code>G1UseAdaptiveIHOP</code> is on</td></tr><tr><td><code>G1ReservePercent</code></td><td>10</td><td>Free regions held back for evacuation destinations</td></tr><tr><td><code>G1MixedGCCountTarget</code></td><td>8</td><td>How many mixed pauses spread old freeing</td></tr><tr><td><code>G1MixedGCLiveThresholdPercent</code></td><td>85</td><td>Skip dense old regions in the CSet</td></tr><tr><td><code>G1HeapWastePercent</code></td><td>5</td><td>Stop mixed reclaim when little free space remains to gain</td></tr></tbody></table><p>Logs (<code>-Xlog:gc*</code> and <code>-Xlog:gc+phases=debug</code>) show pause kind, CSet composition, and whether regions were freed or evacuation failed. Building a debuggable HotSpot for stepping these paths is covered in <a href=https://kevinwang930.github.io/post/java/jvm/build-debug/>JVM build and debug</a>.</p><h3 id=36-old-threshold-check>3.6 Old threshold check</h3><p>Promotion fills Old, and young collections do not compact it. G1 therefore watches <strong>non-young occupancy</strong> (old regions plus humongous regions) and starts a concurrent marking cycle once that occupancy passes a threshold. The check does not start marking itself. It sets a flag, and the next young pause becomes a Concurrent Start.</p><p><code>G1IHOPControl</code> owns the threshold. <code>G1Policy::need_to_start_conc_mark</code> compares the heap&rsquo;s non-young occupancy with it. <code>G1CollectorState</code> carries the result as <code>_initiate_conc_mark_if_possible</code>, and <code>decide_on_concurrent_start_pause</code> reads that flag at the beginning of the next pause.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Completely empty regions can also appear without a full CSet evacuation—for example after Remark/Cleanup when marking finds a region with no live data, or when a dead humongous object is reclaimed. Those regions likewise become Free.</p><p>Policy keeps a fraction of the heap in reserve (<code>G1ReservePercent</code>) so evacuation always has destination space. Space-Reclamation (mixed) stops when further old evacuation would not free enough space worth the pause (<code>G1HeapWastePercent</code>, default <strong>5%</strong>), and the cycle returns to Young-Only with a larger free pool for allocation.</p><table><thead><tr><th>Lever</th><th>Default (typical)</th><th>Role in the cycle</th></tr></thead><tbody><tr><td><code>MaxGCPauseMillis</code></td><td>200</td><td>Bounds how large Eden and mixed CSets may be</td></tr><tr><td><code>G1IHOP</code></td><td>45</td><td>Non-young occupancy, as a percent of the current heap, above which the next pause may be a Concurrent Start. Adapted when <code>G1UseAdaptiveIHOP</code> is on</td></tr><tr><td><code>G1ReservePercent</code></td><td>10</td><td>Free regions held back for evacuation destinations</td></tr><tr><td><code>G1MixedGCCountTarget</code></td><td>8</td><td>How many mixed pauses spread old freeing</td></tr><tr><td><code>G1MixedGCLiveThresholdPercent</code></td><td>85</td><td>Skip dense old regions in the CSet</td></tr><tr><td><code>G1HeapWastePercent</code></td><td>5</td><td>Stop mixed reclaim when little free space remains to gain</td></tr></tbody></table><p>Logs (<code>-Xlog:gc*</code> and <code>-Xlog:gc+phases=debug</code>) show pause kind, CSet composition, and whether regions were freed or evacuation failed. Building a debuggable HotSpot for stepping these paths is covered in <a href=https://kevinwang930.github.io/post/java/jvm/build-debug/>JVM build and debug</a>.</p><h3 id=46-old-threshold-check>4.6 Old threshold check</h3><p>Promotion fills Old, and young collections do not compact it. G1 therefore watches <strong>non-young occupancy</strong> (old regions plus humongous regions) and starts a concurrent marking cycle once that occupancy passes a threshold. The check does not start marking itself. It sets a flag, and the next young pause becomes a Concurrent Start.</p><p><code>G1IHOPControl</code> owns the threshold. <code>G1Policy::need_to_start_conc_mark</code> compares the heap&rsquo;s non-young occupancy with it. <code>G1CollectorState</code> carries the result as <code>_initiate_conc_mark_if_possible</code>, and <code>decide_on_concurrent_start_pause</code> reads that flag at the beginning of the next pause.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 skinparam classAttributeIconSize 0
 
 class G1CollectedHeap {
@@ -1069,7 +1547,7 @@ G1Policy ..&gt; G1CollectedHeap : occupancy and collector state
 </span></span><span style=display:flex><span>    try_collect(word_size, GCCause<span style=color:#f92672>::</span>_g1_humongous_allocation, collection_counters(<span style=color:#66d9ef>this</span>));
 </span></span><span style=display:flex><span>  }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><hr><h2 id=4-references>4. References</h2><ul><li><a href=https://docs.oracle.com/en/java/javase/22/gctuning/garbage-first-g1-garbage-collector1.html#GUID-ED3AB6D3-FD9B-4447-9EDF-983ED2F7A573>Garbage-First (G1) Garbage Collector — HotSpot Virtual Machine Garbage Collection Tuning Guide (Java SE 22)</a></li><li><a href=https://openjdk.org/jeps/248>JEP 248: Make G1 the Default Garbage Collector</a></li><li><a href=https://openjdk.org/jeps/523>JEP 523: Make G1 the Default Garbage Collector in All Environments</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/jvm/>jvm</a>
+</span></span></code></pre></div><hr><h2 id=5-references>5. References</h2><ul><li><a href=https://docs.oracle.com/en/java/javase/22/gctuning/garbage-first-g1-garbage-collector1.html#GUID-ED3AB6D3-FD9B-4447-9EDF-983ED2F7A573>Garbage-First (G1) Garbage Collector — HotSpot Virtual Machine Garbage Collection Tuning Guide (Java SE 22)</a></li><li><a href=https://openjdk.org/jeps/248>JEP 248: Make G1 the Default Garbage Collector</a></li><li><a href=https://openjdk.org/jeps/523>JEP 523: Make G1 the Default Garbage Collector in All Environments</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/jvm/>jvm</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/gc/>gc</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/g1/>g1</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/ data-tooltip="Apache Flink internals - JobManager" aria-label="NEXT: Apache Flink internals - JobManager"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/data/stream/flink/client/ data-tooltip="Apache Flink internals - client job submission" aria-label="PREVIOUS: Apache Flink internals - client job submission"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
