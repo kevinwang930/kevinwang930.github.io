@@ -1,5 +1,5 @@
 ---
-title: "Apache Flink internals - client job submission"
+title: "Apache Flink internals - cluster topology and client job submission"
 date: 2026-10-06T19:00:00+02:00
 categories:
 - data
@@ -50,16 +50,49 @@ env.execute("orders-per-minute");
 
 Here Kafka (or another connector) is the source, keyed windows hold per-user counts in operator state, and another connector is the sink.
 
-### Cluster roles
+### Cluster deployment
 
-That job is scheduled onto a Flink cluster with two process roles:
+Flink is deployed as a cluster of one **JobManager** process and several **TaskManager** processes. Two deployments are in common use. An **application cluster** is created for one job and removed with that job, so its JobManager serves that job alone. A **session cluster** is started first and then accepts many jobs; they share the JobManager and the slots, and each job still gets its own **JobMaster** inside that process.
 
-| Role | Responsibility |
-|------|----------------|
-| **JobManager** | Accepts jobs, builds the scheduling plan, coordinates checkpoints, recovers failures |
-| **TaskManager** | Hosts **task slots**; runs one or more subtasks; holds keyed/operator state locally |
+| Deployment | When the cluster exists | What the JobManager serves |
+|------------|-------------------------|----------------------------|
+| **Application** | Created with the job, deleted with the job | That one job |
+| **Session** | Started beforehand, stays up | Every job submitted into it |
 
-One JobManager is the leader for a given high-availability setup. The client submits to the JobManager. TaskManagers register slots with the ResourceManager; the JobMaster claims slots and deploys tasks into them. Source and sink connectors run inside those tasks—the JobManager never sees individual records. When operators repartition (for example after `keyBy`), TaskManagers exchange records over pipelined network buffers (shuffle). Checkpoints are triggered by the JobManager and acknowledged by the tasks.
+#### Application cluster
+
+This is the usual production deployment on Kubernetes: one `FlinkDeployment` is one cluster is one job.
+
+```text
+FlinkDeployment "orders-per-minute"
+  JobManager pod
+    Dispatcher          cluster REST entry
+    ResourceManager     creates and tracks this cluster's TaskManagers
+    JobMaster           this job only: schedule, deploy, checkpoints
+  TaskManager pod     TaskManager pod
+    slot   slot          slot   slot
+          \________ shuffle after keyBy ________/
+```
+
+A `FlinkDeployment` (the Flink Kubernetes Operator), or `flink run-application -t kubernetes-application`, asks Kubernetes for a JobManager pod and a Service in front of it. The pod starts the Dispatcher and the ResourceManager, then runs the job’s `main` in that same process. `env.execute` submits to the local Dispatcher, and the Dispatcher starts the JobMaster. The ResourceManager creates TaskManager pods through the Kubernetes API, enough slots for the job’s parallelism. Each TaskManager registers its slots, the JobMaster claims them and deploys the tasks. Deleting the `FlinkDeployment` deletes the pods. The operator’s list of deployments is the list of clusters.
+
+The Dispatcher and the ResourceManager belong to the cluster. The JobMaster belongs to the job. Here they share one JVM and one job, so the JobManager process is dedicated to that job. TaskManagers are separate JVMs. Source and sink connectors run inside the tasks. Records stay on the TaskManagers; after `keyBy` those processes shuffle with each other. Checkpoint files go to S3 or HDFS: the tasks write the state, the JobManager keeps the handles.
+
+#### Session cluster
+
+A session cluster starts the workers and then waits for jobs. On a set of machines, `bin/start-cluster.sh` launches one JobManager and a TaskManager for each host in `config/workers`. Those TaskManagers register their slots with the ResourceManager. Each later client, with `execution.target` set to `remote`, uploads a `StreamGraph` to the Dispatcher’s REST port. The Dispatcher starts another JobMaster in the same JVM. The jobs share the Dispatcher, the ResourceManager, and the slot pool. A Kubernetes session is the same shape with a long-lived JobManager pod.
+
+```text
+one session JobManager pod
+  Dispatcher
+  ResourceManager
+  JobMaster (orders-per-minute)
+  JobMaster (another job)
+        |
+TaskManager pool, shared slots
+```
+
+With high availability, extra JobManager pods stand by. One of them holds the leader lease (a Kubernetes ConfigMap, or ZooKeeper). TaskManagers and clients follow the leader.
 
 ---
 
