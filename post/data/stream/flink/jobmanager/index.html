@@ -1,8 +1,1017 @@
-<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eThe client submits a \u003cstrong\u003e\u003ccode\u003eStreamGraph\u003c\/code\u003e\u003c\/strong\u003e. The \u003cstrong\u003eJobManager\u003c\/strong\u003e (the per-job \u003cstrong\u003eJobMaster\u003c\/strong\u003e) compiles that plan into a \u003cstrong\u003e\u003ccode\u003eJobGraph\u003c\/code\u003e\u003c\/strong\u003e, expands it to an \u003cstrong\u003e\u003ccode\u003eExecutionGraph\u003c\/code\u003e\u003c\/strong\u003e, and schedules tasks.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/stream\/flink\/jobmanager\/","keywords":"[flink, jobmanager, jobgraph]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.168.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="flink,jobmanager,jobgraph"><meta name=description content="The client submits a StreamGraph. The JobManager (the per-job JobMaster) compiles that plan into a JobGraph, expands it to an ExecutionGraph, and schedules tasks."><meta property="og:description" content="The client submits a StreamGraph. The JobManager (the per-job JobMaster) compiles that plan into a JobGraph, expands it to an ExecutionGraph, and schedules tasks."><meta property="og:type" content="article"><meta property="og:title" content="Apache Flink internals - JobManager"><meta name=twitter:title content="Apache Flink internals - JobManager"><meta property="og:url" content="https://kevinwang930.github.io/post/data/stream/flink/jobmanager/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/stream/flink/jobmanager/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="The client submits a StreamGraph. The JobManager (the per-job JobMaster) compiles that plan into a JobGraph, expands it to an ExecutionGraph, and schedules tasks."><meta name=twitter:description content="The client submits a StreamGraph. The JobManager (the per-job JobMaster) compiles that plan into a JobGraph, expands it to an ExecutionGraph, and schedules tasks."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-10-16T17:20:00"><meta property="article:modified_time" content="2026-10-16T17:20:00"><meta property="article:section" content="data"><meta property="article:section" content="stream"><meta property="article:section" content="flink"><meta property="article:tag" content="data"><meta property="article:tag" content="stream"><meta property="article:tag" content="flink"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Apache Flink internals - JobManager</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Apache Flink internals - JobManager</h1><div class="postShorten-meta post-meta"><time datetime=2026-10-16T17:20:00+02:00>October 16, 2026
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eA \u003cstrong\u003eJobManager\u003c\/strong\u003e is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.\u003c\/p\u003e\n\u003cp\u003eThe program arrives in one of two ways. An \u003cstrong\u003eapplication cluster\u003c\/strong\u003e already has the user JAR on the JobManager. It runs \u003ccode\u003emain()\u003c\/code\u003e itself and copies that JAR into the BlobServer, so the workers can load it. A \u003cstrong\u003esession cluster\u003c\/strong\u003e receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/stream\/flink\/jobmanager\/","keywords":"[flink, jobmanager, jobgraph]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.168.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="flink,jobmanager,jobgraph"><meta name=description content="A JobManager is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.
+The program arrives in one of two ways. An application cluster already has the user JAR on the JobManager. It runs main() itself and copies that JAR into the BlobServer, so the workers can load it. A session cluster receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them."><meta property="og:description" content="A JobManager is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.
+The program arrives in one of two ways. An application cluster already has the user JAR on the JobManager. It runs main() itself and copies that JAR into the BlobServer, so the workers can load it. A session cluster receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them."><meta property="og:type" content="article"><meta property="og:title" content="Apache Flink internals - JobManager"><meta name=twitter:title content="Apache Flink internals - JobManager"><meta property="og:url" content="https://kevinwang930.github.io/post/data/stream/flink/jobmanager/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/stream/flink/jobmanager/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="A JobManager is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.
+The program arrives in one of two ways. An application cluster already has the user JAR on the JobManager. It runs main() itself and copies that JAR into the BlobServer, so the workers can load it. A session cluster receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them."><meta name=twitter:description content="A JobManager is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.
+The program arrives in one of two ways. An application cluster already has the user JAR on the JobManager. It runs main() itself and copies that JAR into the BlobServer, so the workers can load it. A session cluster receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-10-16T17:20:00"><meta property="article:modified_time" content="2026-10-16T17:20:00"><meta property="article:section" content="data"><meta property="article:section" content="stream"><meta property="article:section" content="flink"><meta property="article:tag" content="data"><meta property="article:tag" content="stream"><meta property="article:tag" content="flink"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Apache Flink internals - JobManager</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Apache Flink internals - JobManager</h1><div class="postShorten-meta post-meta"><time datetime=2026-10-16T17:20:00+02:00>October 16, 2026
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/stream>stream</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>The client submits a <strong><code>StreamGraph</code></strong>. The <strong>JobManager</strong> (the per-job <strong>JobMaster</strong>) compiles that plan into a <strong><code>JobGraph</code></strong>, expands it to an <strong><code>ExecutionGraph</code></strong>, and schedules tasks.</p><hr><h2 id=1-jobgraph-creation>1. JobGraph creation</h2><p><strong><code>StreamingJobGraphGenerator</code></strong> runs on the cluster, while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
+<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>JobManager</strong> is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.</p><p>The program arrives in one of two ways. An <strong>application cluster</strong> already has the user JAR on the JobManager. It runs <code>main()</code> itself and copies that JAR into the BlobServer, so the workers can load it. A <strong>session cluster</strong> receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.</p><hr><h2 id=1-overview>1. Overview</h2><p>The <strong>JobManager</strong> is the process that owns a running job. One JVM holds three services:</p><ul><li><strong>Dispatcher</strong> — starts each application, then a JobMaster for each of its jobs.</li><li><strong>ResourceManager</strong> — registry of TaskManagers and free slots.</li><li><strong>JobMaster</strong> — one per job. Compiles the plan and deploys tasks.</li></ul><p>Records stay on the TaskManagers. This post continues from <a href=https://kevinwang930.github.io/post/data/stream/flink/client/>cluster topology and client job submission</a>.</p><p>The Dispatcher is reached by two paths:</p><ol><li><strong>Application cluster</strong> — the user JAR is already on the JobManager, in the image or fetched from remote storage. At startup the Dispatcher creates a <code>PackagedProgramApplication</code> and runs <code>main()</code> there. Each <code>execute()</code> goes through <code>EmbeddedExecutor</code>, which copies that local JAR into the BlobServer with <code>BlobClient</code> and then calls <code>submitJob</code>. TaskManagers download it by <code>PermanentBlobKey</code>, the same way as in a session cluster. The submitting client sends no job request.</li><li><strong>Session cluster</strong> — the client has already run <code>main()</code> and built the <code>StreamGraph</code>. It sends that plan and the user JARs in one REST call. <code>JobSubmitHandler</code> stores each JAR in the BlobServer, wraps the plan in a <code>SingleJobApplication</code>, and calls <code>submitApplication</code>.</li></ol><p>Both paths are job dispatch (§3). They differ in which <code>AbstractApplication</code> is registered and who copies the JAR into the BlobServer. They meet at <code>Dispatcher.submitJob</code>, which starts the JobMaster. That JobMaster compiles the <code>JobGraph</code> (§4) and deploys the <code>ExecutionGraph</code> (§5).</p><p><strong>Orders-per-minute</strong> is the example: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>. Once the JobMaster holds that <code>StreamGraph</code>, both paths become two chained tasks and a hash shuffle:</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><hr><h2 id=2-jobmanager-election>2. JobManager election</h2><p>A Flink cluster needs one place that accepts jobs. That place is the Dispatcher inside a JobManager. If two JobManagers both accepted jobs, they would start the same work twice. So when you run more than one JobManager, they choose a single working process. The others stay up and do nothing until the working one dies.</p><p>One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.</p><p>The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call <code>submitJob</code>, and restore saved plans after a restart. After a job is submitted, that job&rsquo;s JobMaster has its own later election. This section is only the Dispatcher election.</p><p>Each JobManager process has a <code>DefaultDispatcherRunner</code>. It joins the election by calling <code>leaderElection.startLeaderElection(this)</code>. The service calls back:</p><ul><li><code>grantLeadership</code> — this process won. The runner builds a <code>SessionDispatcherLeaderProcess</code> and starts it. That process creates the Dispatcher. Clients can now submit jobs here.</li><li><code>revokeLeadership</code> — this process lost, or the grant was a tie that got corrected. The runner stops that process. The Dispatcher goes away. No second Dispatcher is left running on a waiting JobManager.</li></ul><p>Before a grant, and after a revoke, the runner holds a <code>StoppedDispatcherLeaderProcess</code>. That object does not create a Dispatcher.</p><p><code>leaderSessionId</code> is a new id for this win. It is not the session-cluster type. The next win gets a new id, so an old Dispatcher cannot keep acting after it has lost.</p><p>The class name <code>SessionDispatcherLeaderProcess</code> is historical. It was written for session mode, and application mode still uses <code>SessionDispatcherLeaderProcessFactory</code>. What changes is the factory handed in. Application mode passes <code>ApplicationDispatcherGatewayServiceFactory</code>, which starts the user <code>main()</code>. Session mode passes <code>DefaultDispatcherGatewayServiceFactory</code>, which waits for a client submission. Both factories are called from the same leader process once <code>grantLeadership</code> fires.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface LeaderElection {
+  + startLeaderElection(LeaderContender) : void
+  + confirmLeadershipAsync(UUID, String) : CompletableFuture
+}
+
+interface LeaderElectionService {
+  + createLeaderElection(String) : LeaderElection
+}
+
+interface LeaderElectionDriver {
+  + hasLeadership() : boolean
+  + publishLeaderInformation(String, LeaderInformation) : void
+  + deleteLeaderInformation(String) : void
+}
+
+interface &#34;LeaderElectionDriver.Listener&#34; as LeaderElectionDriverListener {
+  + onGrantLeadership(UUID) : void
+  + onRevokeLeadership() : void
+}
+
+abstract class &#34;KubernetesLeaderElector.LeaderCallbackHandler&#34; as LeaderCallbackHandler {
+  + {abstract} isLeader() : void
+  + {abstract} notLeader() : void
+}
+
+interface LeaderContender {
+  + grantLeadership(UUID) : void
+  + revokeLeadership() : void
+}
+
+interface DispatcherRunner {
+  + getShutDownFuture() : CompletableFuture
+}
+
+interface DispatcherLeaderProcess {
+  + start() : void
+  + getLeaderSessionId() : UUID
+}
+
+abstract class &#34;DefaultLeaderElection.ParentService&#34; as ParentService {
+  + {abstract} register(String, LeaderContender) : void
+  + {abstract} confirmLeadershipAsync(String, UUID, String) : CompletableFuture
+}
+
+class StandaloneLeaderElection {
+  - UUID sessionID
+  + startLeaderElection(LeaderContender) : void
+}
+
+class DefaultLeaderElection {
+  - ParentService parentService
+  + startLeaderElection(LeaderContender) : void
+  + confirmLeadershipAsync(UUID, String) : CompletableFuture
+}
+
+class KubernetesLeaderElectionDriver {
+  - String configMapName
+  - KubernetesLeaderElector leaderElector
+  + hasLeadership() : boolean
+}
+
+class KubernetesLeaderElector {
+  - LeaderElectionConfig leaderElectionConfig
+  + run() : void
+  + stop() : void
+  + {static} hasLeadership(KubernetesConfigMap, String) : boolean
+}
+
+class &#34;KubernetesLeaderElectionDriver.LeaderCallbackHandlerImpl&#34; as LeaderCallbackHandlerImpl {
+  + isLeader() : void
+  + notLeader() : void
+}
+
+class DefaultLeaderElectionService {
+  - Map~String, LeaderContender~ leaderContenderRegistry
+  - UUID issuedLeaderSessionID
+  + createLeaderElection(String) : LeaderElection
+  + onGrantLeadership(UUID) : void
+  + onRevokeLeadership() : void
+}
+
+class DefaultDispatcherRunner {
+  - LeaderElection leaderElection
+  - DispatcherLeaderProcessFactory dispatcherLeaderProcessFactory
+  - DispatcherLeaderProcess dispatcherLeaderProcess
+  + start() : void
+  + grantLeadership(UUID) : void
+  + revokeLeadership() : void
+}
+
+class SessionDispatcherLeaderProcess {
+  - DispatcherGatewayServiceFactory dispatcherGatewayServiceFactory
+  + onStart() : void
+  - createDispatcher(...) : void
+}
+
+class StoppedDispatcherLeaderProcess
+
+class Dispatcher {
+  + submitJob(ExecutionPlan, Duration) : CompletableFuture
+}
+
+StandaloneLeaderElection -up-|&gt; LeaderElection
+DefaultLeaderElection -up-|&gt; LeaderElection
+DefaultLeaderElection --&gt; ParentService
+
+KubernetesLeaderElectionDriver -up-|&gt; LeaderElectionDriver
+LeaderCallbackHandlerImpl -up-|&gt; LeaderCallbackHandler
+
+DefaultLeaderElectionService -up-|&gt; ParentService
+DefaultLeaderElectionService -up-|&gt; LeaderElectionService
+DefaultLeaderElectionService -up-|&gt; LeaderElectionDriverListener
+
+DefaultDispatcherRunner -up-|&gt; LeaderContender
+DefaultDispatcherRunner -up-|&gt; DispatcherRunner
+SessionDispatcherLeaderProcess -up-|&gt; DispatcherLeaderProcess
+StoppedDispatcherLeaderProcess -[norank]up-|&gt; DispatcherLeaderProcess
+
+DefaultDispatcherRunner --&gt; LeaderElection : startLeaderElection
+LeaderCallbackHandlerImpl --&gt; DefaultLeaderElectionService : onGrantLeadership / onRevokeLeadership
+DefaultLeaderElectionService --&gt; DefaultDispatcherRunner : grantLeadership / revokeLeadership
+DefaultDispatcherRunner --&gt; DefaultLeaderElection : confirmLeadershipAsync
+DefaultDispatcherRunner --&gt; SessionDispatcherLeaderProcess : create on grant
+DefaultDispatcherRunner --&gt; StoppedDispatcherLeaderProcess : before grant / after revoke
+SessionDispatcherLeaderProcess --&gt; Dispatcher : createDispatcher
+
+DefaultDispatcherRunner -[hidden]down-&gt; DispatcherLeaderProcess
+DefaultLeaderElectionService -[hidden]down-&gt; LeaderElectionDriver
+KubernetesLeaderElectionDriver -[hidden]down-&gt; KubernetesLeaderElector
+KubernetesLeaderElector -[hidden]down-&gt; LeaderCallbackHandler
+KubernetesLeaderElectionDriver --&gt; KubernetesLeaderElector
+KubernetesLeaderElector +-- LeaderCallbackHandler
+SessionDispatcherLeaderProcess -[hidden]down-&gt; StoppedDispatcherLeaderProcess
+@enduml
+</code></pre><h3 id=election-mechanism>Election Mechanism</h3><p>With one JobManager and no high availability, there is nothing to race. <code>StandaloneLeaderElection</code> grants leadership to that single process as soon as it starts. The Dispatcher comes up and stays up.</p><p>With several JobManagers, the ConfigMap decides the winner. Each process runs the same steps.</p><p>On Kubernetes that store is a <strong>ConfigMap</strong>. A ConfigMap is a small Kubernetes object made of text keys and values. It is not a file inside the JobManager process. The API server keeps it in etcd, with the rest of the cluster&rsquo;s objects. Flink uses one named <code>{clusterId}-cluster-config-map</code>. The JobManager that holds the lock writes its id into that object. After the Dispatcher has started, it writes the Dispatcher address there too. The other JobManagers watch the same ConfigMap and read that address when they need to send a job.</p><ol><li><code>DefaultDispatcherRunner.start</code> registers itself as a <code>LeaderContender</code>.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>void</span> <span style=color:#a6e22e>start</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    leaderElection.<span style=color:#a6e22e>startLeaderElection</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>With no high availability, <code>leaderElection</code> is a <code>StandaloneLeaderElection</code>. It grants in the same call.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startLeaderElection</span>(LeaderContender contender) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lock) {
+</span></span><span style=display:flex><span>        Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>                leaderContender <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;No LeaderContender should have been registered with this LeaderElection, yet.&#34;</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>leaderContender</span> <span style=color:#f92672>=</span> contender;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// One process, no shared store. The Dispatcher starts immediately.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>leaderContender</span>.<span style=color:#a6e22e>grantLeadership</span>(sessionID);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>With high availability, <code>leaderElection</code> is a <code>DefaultLeaderElection</code>. <code>startLeaderElection</code> does not talk to Kubernetes. It only hands the contender to the service.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startLeaderElection</span>(LeaderContender contender) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkNotNull</span>(contender);
+</span></span><span style=display:flex><span>    parentService.<span style=color:#a6e22e>register</span>(componentId, contender);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>parentService</code> is the <code>DefaultLeaderElectionService</code>. The first <code>register</code> creates the driver, and that constructor is the call that joins the election. The contender is saved in <code>leaderContenderRegistry</code> so a later grant can find it. A second component id on the same service only does the <code>put</code>. If this process is already the leader, that new contender is granted the current <code>issuedLeaderSessionID</code> at once.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(String componentId, LeaderContender contender) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    checkNotNull(componentId, <span style=color:#e6db74>&#34;componentId must not be null.&#34;</span>);
+</span></span><span style=display:flex><span>    checkNotNull(contender, <span style=color:#e6db74>&#34;Contender must not be null.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lock) {
+</span></span><span style=display:flex><span>        Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>                running,
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;The DefaultLeaderElectionService should have established a connection to the backend before it&#39;s started.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// First contender: open the driver. Later contenders reuse it.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (leaderElectionDriver <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            createLeaderElectionDriver();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>                leaderContenderRegistry.<span style=color:#a6e22e>put</span>(componentId, contender) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;There shouldn&#39;t be any contender registered under the passed component &#39;%s&#39;.&#34;</span>,
+</span></span><span style=display:flex><span>                componentId);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (issuedLeaderSessionID <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            runInLeaderEventThread(
+</span></span><span style=display:flex><span>                    LEADER_ACQUISITION_EVENT_LOG_NAME,
+</span></span><span style=display:flex><span>                    () <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                            notifyLeaderContenderOfLeadership(
+</span></span><span style=display:flex><span>                                    componentId, issuedLeaderSessionID));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>createLeaderElectionDriver</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>            leaderContenderRegistry.<span style=color:#a6e22e>isEmpty</span>(),
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;No LeaderContender should have been registered, yet.&#34;</span>);
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>            leaderElectionDriver <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;This DefaultLeaderElectionService cannot be reused. Calling startLeaderElectionBackend can only be called once to establish the connection to the HA backend.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// The service is the LeaderElectionDriver.Listener passed into the driver.</span>
+</span></span><span style=display:flex><span>    leaderElectionDriver <span style=color:#f92672>=</span> leaderElectionDriverFactory.<span style=color:#a6e22e>create</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><ol start=2><li>The driver talks to the ConfigMap. <code>KubernetesLeaderElectionDriver</code> builds a <code>KubernetesLeaderElector</code> and calls <code>run()</code>. That elector holds a <code>ConfigMapLock</code> on <code>{clusterId}-cluster-config-map</code> and starts a fabric8 <code>LeaderElector</code>. The others wait on the same ConfigMap.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>leaderElector</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        kubeClient.<span style=color:#a6e22e>createLeaderElector</span>(
+</span></span><span style=display:flex><span>                leaderElectionConfiguration, <span style=color:#66d9ef>new</span> LeaderCallbackHandlerImpl());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>kubernetesWatch <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        configMapSharedWatcher.<span style=color:#a6e22e>watch</span>(
+</span></span><span style=display:flex><span>                configMapName, <span style=color:#66d9ef>new</span> ConfigMapCallbackHandlerImpl(), watchExecutor);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>leaderElector.<span style=color:#a6e22e>run</span>();
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>.<span style=color:#a6e22e>withLock</span>(
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> ConfigMapLock(
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> ObjectMetaBuilder()
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>withNamespace</span>(kubernetesClient.<span style=color:#a6e22e>getNamespace</span>())
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>withName</span>(leaderConfig.<span style=color:#a6e22e>getConfigMapName</span>())
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>withLabels</span>(
+</span></span><span style=display:flex><span>                                KubernetesUtils.<span style=color:#a6e22e>getConfigMapLabels</span>(
+</span></span><span style=display:flex><span>                                        leaderConfig.<span style=color:#a6e22e>getClusterId</span>()))
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>build</span>(),
+</span></span><span style=display:flex><span>                leaderConfig.<span style=color:#a6e22e>getLockIdentity</span>()))
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>run</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lock) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (executorService.<span style=color:#a6e22e>isShutdown</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// The elector was already stopped. Do not start another session.</span>
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            resetInternalLeaderElector();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>resetInternalLeaderElector</span>() {
+</span></span><span style=display:flex><span>    cancelCurrentLeaderElectionSession();
+</span></span><span style=display:flex><span>    currentLeaderElectionSession <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>new</span> LeaderElector(kubernetesClient, leaderElectionConfig, executorService).<span style=color:#a6e22e>start</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>start()</code> may run only once. It calls <code>acquire()</code>, which retries <code>tryAcquireOrRenew</code> until this process holds the lock. The callbacks were wired in the elector constructor: <code>onStartLeading</code> is <code>LeaderCallbackHandler.isLeader</code>, and <code>onStopLeading</code> is <code>notLeader</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>.<span style=color:#a6e22e>withLeaderCallbacks</span>(
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> LeaderCallbacks(
+</span></span><span style=display:flex><span>                leaderCallbackHandler::isLeader,
+</span></span><span style=display:flex><span>                leaderCallbackHandler::notLeader,
+</span></span><span style=display:flex><span>                newLeader <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                        LOG.<span style=color:#a6e22e>info</span>(
+</span></span><span style=display:flex><span>                                <span style=color:#e6db74>&#34;New leader elected {} for {}.&#34;</span>,
+</span></span><span style=display:flex><span>                                newLeader,
+</span></span><span style=display:flex><span>                                leaderConfig.<span style=color:#a6e22e>getConfigMapName</span>())))
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;?&gt;</span> <span style=color:#a6e22e>start</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (<span style=color:#66d9ef>this</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (started <span style=color:#f92672>||</span> stopped) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;LeaderElector may only be used once, please create another instance&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        started <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    CompletableFuture<span style=color:#f92672>&lt;</span>Void<span style=color:#f92672>&gt;</span> result <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> CompletableFuture<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>    CompletableFuture<span style=color:#f92672>&lt;?&gt;</span> acquireFuture <span style=color:#f92672>=</span> acquire();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    acquireFuture.<span style=color:#a6e22e>whenComplete</span>((v, t) <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (t <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// The lock is ours. Keep renewing it until the deadline is missed.</span>
+</span></span><span style=display:flex><span>            CompletableFuture<span style=color:#f92672>&lt;?&gt;</span> renewFuture <span style=color:#f92672>=</span> renewWithTimeout();
+</span></span><span style=display:flex><span>            result.<span style=color:#a6e22e>whenComplete</span>((v1, t1) <span style=color:#f92672>-&gt;</span> renewFuture.<span style=color:#a6e22e>cancel</span>(<span style=color:#66d9ef>true</span>));
+</span></span><span style=display:flex><span>            renewFuture.<span style=color:#a6e22e>whenComplete</span>((v1, t1) <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                stopLeading();
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (t1 <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                    result.<span style=color:#a6e22e>completeExceptionally</span>(t1);
+</span></span><span style=display:flex><span>                } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                    result.<span style=color:#a6e22e>complete</span>(<span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            });
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Cancelled, or the acquire loop failed. Drop the lock if we hold it.</span>
+</span></span><span style=display:flex><span>            stopLeading();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    });
+</span></span><span style=display:flex><span>    result.<span style=color:#a6e22e>whenComplete</span>((v, t) <span style=color:#f92672>-&gt;</span> acquireFuture.<span style=color:#a6e22e>cancel</span>(<span style=color:#66d9ef>true</span>));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> result;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> CompletableFuture<span style=color:#f92672>&lt;</span>Void<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>acquire</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> loop(completion <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (tryAcquireOrRenew()) {
+</span></span><span style=display:flex><span>                completion.<span style=color:#a6e22e>complete</span>(<span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>catch</span> (KubernetesClientException exception) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (exception.<span style=color:#a6e22e>getCode</span>() <span style=color:#f92672>==</span> HttpURLConnection.<span style=color:#a6e22e>HTTP_CONFLICT</span>) {
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// Another update won the compare. Retry.</span>
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// A transient API error. Retry.</span>
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }, () <span style=color:#f92672>-&gt;</span> jitter(leaderElectionConfig.<span style=color:#a6e22e>getRetryPeriod</span>(), JITTER_FACTOR).<span style=color:#a6e22e>toMillis</span>(), executor);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>tryAcquireOrRenew</code> reads the lock record on the ConfigMap. No record means this process creates one and becomes leader. A record held by someone else is left alone until <code>renewTime + leaseDuration</code> has passed. An expired record, or a record this process already holds, is updated with this process&rsquo;s identity.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>synchronized</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>tryAcquireOrRenew</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (stopped) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> Lock lock <span style=color:#f92672>=</span> leaderElectionConfig.<span style=color:#a6e22e>getLock</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ZonedDateTime now <span style=color:#f92672>=</span> now();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LeaderElectionRecord oldLeaderElectionRecord <span style=color:#f92672>=</span> lock.<span style=color:#a6e22e>get</span>(kubernetesClient);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (oldLeaderElectionRecord <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> LeaderElectionRecord newLeaderElectionRecord <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> LeaderElectionRecord(
+</span></span><span style=display:flex><span>                lock.<span style=color:#a6e22e>identity</span>(), leaderElectionConfig.<span style=color:#a6e22e>getLeaseDuration</span>(), now, now, 0);
+</span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>create</span>(kubernetesClient, newLeaderElectionRecord);
+</span></span><span style=display:flex><span>        updateObserved(newLeaderElectionRecord);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    updateObserved(oldLeaderElectionRecord);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> isLeader <span style=color:#f92672>=</span> isLeader(oldLeaderElectionRecord);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isLeader <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>canBecomeLeader(oldLeaderElectionRecord)) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Another process renewed recently. Wait and retry.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LeaderElectionRecord newLeaderElectionRecord <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> LeaderElectionRecord(
+</span></span><span style=display:flex><span>            lock.<span style=color:#a6e22e>identity</span>(),
+</span></span><span style=display:flex><span>            leaderElectionConfig.<span style=color:#a6e22e>getLeaseDuration</span>(),
+</span></span><span style=display:flex><span>            isLeader <span style=color:#f92672>?</span> oldLeaderElectionRecord.<span style=color:#a6e22e>getAcquireTime</span>() : now,
+</span></span><span style=display:flex><span>            now,
+</span></span><span style=display:flex><span>            oldLeaderElectionRecord.<span style=color:#a6e22e>getLeaderTransitions</span>() <span style=color:#f92672>+</span> (isLeader <span style=color:#f92672>?</span> 0 : 1));
+</span></span><span style=display:flex><span>    lock.<span style=color:#a6e22e>update</span>(kubernetesClient, newLeaderElectionRecord);
+</span></span><span style=display:flex><span>    updateObserved(newLeaderElectionRecord);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>canBecomeLeader</span>(LeaderElectionRecord leaderElectionRecord) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> Utils.<span style=color:#a6e22e>isNullOrEmpty</span>(leaderElectionRecord.<span style=color:#a6e22e>getHolderIdentity</span>())
+</span></span><span style=display:flex><span>            <span style=color:#f92672>||</span> now().<span style=color:#a6e22e>isAfter</span>(leaderElectionRecord.<span style=color:#a6e22e>getRenewTime</span>().<span style=color:#a6e22e>plus</span>(leaderElectionConfig.<span style=color:#a6e22e>getLeaseDuration</span>()));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>updateObserved</code> is where the win becomes a callback. If the holder identity changes to this process, <code>onStartLeading</code> runs, which is <code>isLeader</code> above.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>updateObserved</span>(LeaderElectionRecord leaderElectionRecord) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LeaderElectionRecord current <span style=color:#f92672>=</span> observedRecord.<span style=color:#a6e22e>getAndSet</span>(leaderElectionRecord);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>Objects.<span style=color:#a6e22e>equals</span>(leaderElectionRecord, current)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> String currentLeader <span style=color:#f92672>=</span> current <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> <span style=color:#66d9ef>null</span> : current.<span style=color:#a6e22e>getHolderIdentity</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> String newLeader <span style=color:#f92672>=</span> leaderElectionRecord.<span style=color:#a6e22e>getHolderIdentity</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>Objects.<span style=color:#a6e22e>equals</span>(newLeader, currentLeader)) {
+</span></span><span style=display:flex><span>            leaderElectionConfig.<span style=color:#a6e22e>getLeaderCallbacks</span>().<span style=color:#a6e22e>onNewLeader</span>(newLeader);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (Objects.<span style=color:#a6e22e>equals</span>(currentLeader, leaderElectionConfig.<span style=color:#a6e22e>getLock</span>().<span style=color:#a6e22e>identity</span>())) {
+</span></span><span style=display:flex><span>                leaderElectionConfig.<span style=color:#a6e22e>getLeaderCallbacks</span>().<span style=color:#a6e22e>onStopLeading</span>();
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (Objects.<span style=color:#a6e22e>equals</span>(newLeader, leaderElectionConfig.<span style=color:#a6e22e>getLock</span>().<span style=color:#a6e22e>identity</span>())) {
+</span></span><span style=display:flex><span>                leaderElectionConfig.<span style=color:#a6e22e>getLeaderCallbacks</span>().<span style=color:#a6e22e>onStartLeading</span>();
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><ol start=3><li>The driver that wins calls <code>onGrantLeadership</code> with a fresh <code>leaderSessionId</code>. Kubernetes does that from <code>LeaderCallbackHandlerImpl.isLeader</code>.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>isLeader</span>() {
+</span></span><span style=display:flex><span>    leaderElectionListener.<span style=color:#a6e22e>onGrantLeadership</span>(UUID.<span style=color:#a6e22e>randomUUID</span>());
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>DefaultLeaderElectionService</code> stores that id in <code>issuedLeaderSessionID</code>, then walks <code>leaderContenderRegistry</code> and calls <code>grantLeadership</code> on each contender. An id that is no longer the issued one is ignored.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onGrantLeadership</span>(UUID leaderSessionID) {
+</span></span><span style=display:flex><span>    runInLeaderEventThread(
+</span></span><span style=display:flex><span>            LEADER_ACQUISITION_EVENT_LOG_NAME,
+</span></span><span style=display:flex><span>            () <span style=color:#f92672>-&gt;</span> onGrantLeadershipInternal(leaderSessionID));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onGrantLeadershipInternal</span>(UUID newLeaderSessionId) {
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>            issuedLeaderSessionID <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;The leadership should have been granted while not having the leadership acquired.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    issuedLeaderSessionID <span style=color:#f92672>=</span> newLeaderSessionId;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    leaderContenderRegistry
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>keySet</span>()
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>forEach</span>(
+</span></span><span style=display:flex><span>                    componentId <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                            notifyLeaderContenderOfLeadership(
+</span></span><span style=display:flex><span>                                    componentId, issuedLeaderSessionID));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>notifyLeaderContenderOfLeadership</span>(String componentId, UUID sessionID) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>leaderContenderRegistry.<span style=color:#a6e22e>containsKey</span>(componentId)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>sessionID.<span style=color:#a6e22e>equals</span>(issuedLeaderSessionID)) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// A late grant for an old session id. The current id stays in place.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>            <span style=color:#f92672>!</span>confirmedLeaderInformation.<span style=color:#a6e22e>hasLeaderInformation</span>(componentId),
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;The leadership should have been granted while not having the leadership acquired.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    leaderContenderRegistry.<span style=color:#a6e22e>get</span>(componentId).<span style=color:#a6e22e>grantLeadership</span>(issuedLeaderSessionID);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>On the runner, <code>grantLeadership</code> starts <code>SessionDispatcherLeaderProcess</code>, which creates the Dispatcher.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>grantLeadership</span>(UUID leaderSessionID) {
+</span></span><span style=display:flex><span>    runActionIfRunning(
+</span></span><span style=display:flex><span>            () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                startNewDispatcherLeaderProcess(leaderSessionID);
+</span></span><span style=display:flex><span>            });
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><ol start=4><li>The Dispatcher has an address only after it has started. The runner waits for that address, then calls <code>confirmLeadershipAsync(leaderSessionId, address)</code>.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>forwardConfirmLeaderSessionFuture</span>(
+</span></span><span style=display:flex><span>        UUID leaderSessionID, DispatcherLeaderProcess newDispatcherLeaderProcess) {
+</span></span><span style=display:flex><span>    FutureUtils.<span style=color:#a6e22e>assertNoException</span>(
+</span></span><span style=display:flex><span>            newDispatcherLeaderProcess
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getLeaderAddressFuture</span>()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>thenCompose</span>(
+</span></span><span style=display:flex><span>                            leaderAddress <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                    leaderElection.<span style=color:#a6e22e>confirmLeadershipAsync</span>(
+</span></span><span style=display:flex><span>                                            leaderSessionID, leaderAddress)));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>DefaultLeaderElection</code> forwards that call to the service. The service writes the session id and the address into the ConfigMap only when <code>hasLeadershipInternal</code> is still true: the driver still holds the lock, the contender is still registered, and the id is still <code>issuedLeaderSessionID</code>. A late confirmation for a lost lock is not published. Other processes read the confirmed record to find where to send jobs.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>Void<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>confirmLeadershipAsync</span>(
+</span></span><span style=display:flex><span>        UUID leaderSessionID, String leaderAddress) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> parentService.<span style=color:#a6e22e>confirmLeadershipAsync</span>(componentId, leaderSessionID, leaderAddress);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>if</span> (hasLeadershipInternal(componentId, leaderSessionID)) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LeaderInformation newConfirmedLeaderInformation <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            LeaderInformation.<span style=color:#a6e22e>known</span>(leaderSessionID, leaderAddress);
+</span></span><span style=display:flex><span>    confirmedLeaderInformation <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            LeaderInformationRegister.<span style=color:#a6e22e>merge</span>(
+</span></span><span style=display:flex><span>                    confirmedLeaderInformation, componentId, newConfirmedLeaderInformation);
+</span></span><span style=display:flex><span>    leaderElectionDriver.<span style=color:#a6e22e>publishLeaderInformation</span>(
+</span></span><span style=display:flex><span>            componentId, newConfirmedLeaderInformation);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>hasLeadershipInternal</span>(String componentId, UUID leaderSessionId) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (leaderElectionDriver <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (leaderContenderRegistry.<span style=color:#a6e22e>containsKey</span>(componentId)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> leaderElectionDriver.<span style=color:#a6e22e>hasLeadership</span>()
+</span></span><span style=display:flex><span>                    <span style=color:#f92672>&amp;&amp;</span> leaderSessionId.<span style=color:#a6e22e>equals</span>(issuedLeaderSessionID);
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><ol start=5><li>If the lock is lost — the process dies, or the callback says <code>notLeader</code> — the driver calls <code>onRevokeLeadership</code>. The service clears <code>issuedLeaderSessionID</code> and calls <code>revokeLeadership</code> on every contender still in the registry. The runner stops the Dispatcher. The next process that takes the lock gets a new <code>leaderSessionId</code> and repeats from step 3.</li></ol><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>notLeader</span>() {
+</span></span><span style=display:flex><span>    leaderElectionListener.<span style=color:#a6e22e>onRevokeLeadership</span>();
+</span></span><span style=display:flex><span>    leaderElector.<span style=color:#a6e22e>run</span>();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onRevokeLeadershipInternal</span>() {
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>            issuedLeaderSessionID <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>,
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;The leadership should have been revoked while having the leadership acquired.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>leaderContenderRegistry.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        leaderContenderRegistry.<span style=color:#a6e22e>forEach</span>(<span style=color:#66d9ef>this</span>::notifyLeaderContenderOfLeadershipLoss);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    issuedLeaderSessionID <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>revokeLeadership</span>() {
+</span></span><span style=display:flex><span>    runActionIfRunning(
+</span></span><span style=display:flex><span>            () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>stopDispatcherLeaderProcess</span>();
+</span></span><span style=display:flex><span>            });
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=3-job-dispatch>3. Job dispatch</h2><p>Both cluster types register an application, then call <code>Dispatcher.submitJob</code>. That call starts the JobMaster.</p><p>An <strong>application cluster</strong> starts a <code>PackagedProgramApplication</code> and runs <code>main()</code> on the JobManager (§3.1). A <strong>session cluster</strong> receives a client plan, wraps it in a <code>SingleJobApplication</code>, and does not run <code>main()</code> again (§3.2).</p><p><code>submitJob</code> persists the plan and builds the JobMaster. Compiling the restored <code>StreamGraph</code> into a <code>JobGraph</code> is §4.</p><h3 id=31-application-cluster>3.1 Application cluster</h3><p>The factory creates the application before the Dispatcher RPC starts. The user program is a <code>PackagedProgram</code> (JAR plus entry class), not a client-built <code>StreamGraph</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class ApplicationDispatcherLeaderProcessFactoryFactory {
+  - PackagedProgram program
+  - DispatcherFactory dispatcherFactory
+  + createFactory(...) : DispatcherLeaderProcessFactory
+}
+
+class ApplicationDispatcherGatewayServiceFactory {
+  - PackagedProgram program
+  - DispatcherFactory dispatcherFactory
+  + create(...) : DispatcherGatewayService
+}
+
+interface DispatcherFactory {
+  + createDispatcher(RpcService, DispatcherId, ..., DispatcherBootstrapFactory, ...) : Dispatcher
+}
+
+class SessionDispatcherLeaderProcessFactory {
+  - DispatcherGatewayServiceFactory dispatcherGatewayServiceFactory
+  + create(UUID) : DispatcherLeaderProcess
+}
+
+class SessionDispatcherLeaderProcess {
+  - DispatcherGatewayServiceFactory dispatcherGatewayServiceFactory
+  + onStart() : void
+  - createDispatcher(...) : void
+}
+
+class ApplicationBootstrap {
+  - AbstractApplication application
+  + getApplication() : AbstractApplication
+}
+
+class Dispatcher {
+  - DispatcherBootstrap dispatcherBootstrap
+  - Map applications
+  + onStart() : void
+  + start() : void
+  - maybeSubmitApplicationInApplicationMode() : void
+  - internalSubmitApplication(Application) : CompletableFuture
+  + submitJob(ExecutionPlan, Duration) : CompletableFuture
+}
+
+abstract class AbstractApplication {
+  - ApplicationID applicationId
+  + {abstract} execute(DispatcherGateway, ...) : CompletableFuture
+}
+
+class PackagedProgramApplication {
+  - PackagedProgram program
+  - Configuration configuration
+  + execute(DispatcherGateway, ...) : CompletableFuture
+  - runApplicationEntryPoint(...) : void
+}
+
+class PackagedProgram {
+  - File jarFile
+  - String entryPointClassName
+}
+
+class EmbeddedExecutor {
+  - DispatcherGateway dispatcherGateway
+  - Collection applicationJobIds
+  + execute(Pipeline, Configuration, ClassLoader) : CompletableFuture
+  - submitJob(...) : CompletableFuture
+  - internalSubmit(...) : CompletableFuture
+}
+
+class BlobClient {
+  + uploadFile(JobID, Path) : PermanentBlobKey
+}
+
+class StreamGraph {
+  + serializeUserDefinedInstances() : void
+}
+
+&#39; who creates the Dispatcher
+ApplicationDispatcherLeaderProcessFactoryFactory --&gt; ApplicationDispatcherGatewayServiceFactory : new
+ApplicationDispatcherLeaderProcessFactoryFactory --&gt; SessionDispatcherLeaderProcessFactory : new
+SessionDispatcherLeaderProcessFactory --&gt; SessionDispatcherLeaderProcess : create
+SessionDispatcherLeaderProcess --&gt; ApplicationDispatcherGatewayServiceFactory : create()
+ApplicationDispatcherGatewayServiceFactory --&gt; PackagedProgramApplication : new
+ApplicationDispatcherGatewayServiceFactory --&gt; ApplicationBootstrap : bootstrap
+ApplicationDispatcherGatewayServiceFactory --&gt; DispatcherFactory : createDispatcher
+DispatcherFactory --&gt; Dispatcher : createDispatcher
+ApplicationDispatcherGatewayServiceFactory --&gt; Dispatcher : start
+
+ApplicationBootstrap --&gt; PackagedProgramApplication
+PackagedProgramApplication -up-|&gt; AbstractApplication
+ApplicationDispatcherGatewayServiceFactory --&gt; PackagedProgram
+Dispatcher --&gt; ApplicationBootstrap : onStart
+Dispatcher --&gt; PackagedProgramApplication : internalSubmitApplication
+PackagedProgramApplication --&gt; EmbeddedExecutor : run main()
+EmbeddedExecutor --&gt; BlobClient : upload JAR
+EmbeddedExecutor --&gt; StreamGraph : serializeUserDefinedInstances
+EmbeddedExecutor --&gt; Dispatcher : submitJob
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>PackagedProgramApplication bootstrapApplication <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>new</span> PackagedProgramApplication(
+</span></span><span style=display:flex><span>                applicationId,
+</span></span><span style=display:flex><span>                program,
+</span></span><span style=display:flex><span>                recoveredJobInfos,
+</span></span><span style=display:flex><span>                recoveredTerminalJobInfos,
+</span></span><span style=display:flex><span>                configuration,
+</span></span><span style=display:flex><span>                jobCountLimits.<span style=color:#a6e22e>f0</span>,
+</span></span><span style=display:flex><span>                jobCountLimits.<span style=color:#a6e22e>f1</span>,
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>true</span>,
+</span></span><span style=display:flex><span>                configuration.<span style=color:#a6e22e>get</span>(DeploymentOptions.<span style=color:#a6e22e>SUBMIT_FAILED_JOB_ON_APPLICATION_ERROR</span>),
+</span></span><span style=display:flex><span>                configuration.<span style=color:#a6e22e>get</span>(DeploymentOptions.<span style=color:#a6e22e>SHUTDOWN_ON_APPLICATION_FINISH</span>));
+</span></span></code></pre></div><p><code>onStart</code> treats an <code>ApplicationBootstrap</code> as application mode and submits that application on the dispatcher thread.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>if</span> (dispatcherBootstrap <span style=color:#66d9ef>instanceof</span> ApplicationBootstrap) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Application Mode</span>
+</span></span><span style=display:flex><span>    maybeSubmitApplicationInApplicationMode();
+</span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Session Mode</span>
+</span></span><span style=display:flex><span>    recoverApplicationsAndJobsInSessionMode();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>if</span> (applicationResult <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        internalSubmitApplication(application).<span style=color:#a6e22e>get</span>();
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable throwable) {
+</span></span><span style=display:flex><span>        onFatalError(
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> DispatcherException(
+</span></span><span style=display:flex><span>                        String.<span style=color:#a6e22e>format</span>(<span style=color:#e6db74>&#34;Could not start application %s.&#34;</span>, applicationId),
+</span></span><span style=display:flex><span>                        throwable));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>internalSubmitApplication</code> puts the application in <code>applications</code>, then calls <code>execute</code>. <code>PackagedProgramApplication.execute</code> schedules <code>runApplicationEntryPoint</code>, which runs the user program through <code>EmbeddedExecutor</code>. That executor is the only place an application-cluster job calls <code>submitJob</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>return</span> dispatcherGateway
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>getBlobServerPort</span>(rpcTimeout)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>thenCombine</span>(
+</span></span><span style=display:flex><span>                dispatcherGateway.<span style=color:#a6e22e>getBlobServerAddress</span>(rpcTimeout),
+</span></span><span style=display:flex><span>                (blobServerPort, blobServerAddress) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>new</span> InetSocketAddress(
+</span></span><span style=display:flex><span>                                blobServerAddress.<span style=color:#a6e22e>getHostName</span>(), blobServerPort))
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>thenCompose</span>(
+</span></span><span style=display:flex><span>                blobServerAddress <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                        ClientUtils.<span style=color:#a6e22e>extractAndUploadExecutionPlanFiles</span>(
+</span></span><span style=display:flex><span>                                streamGraph,
+</span></span><span style=display:flex><span>                                () <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> BlobClient(blobServerAddress, configuration));
+</span></span><span style=display:flex><span>                        streamGraph.<span style=color:#a6e22e>serializeUserDefinedInstances</span>();
+</span></span><span style=display:flex><span>                    } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CompletionException(e);
+</span></span><span style=display:flex><span>                    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> internalSubmit(dispatcherGateway, streamGraph, rpcTimeout);
+</span></span><span style=display:flex><span>                })
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>thenApply</span>(ack <span style=color:#f92672>-&gt;</span> streamGraph.<span style=color:#a6e22e>getJobID</span>());
+</span></span></code></pre></div><p><code>EmbeddedExecutor.internalSubmit</code> is <code>dispatcherGateway.submitJob</code>. The JAR is already on this process; <code>BlobClient</code> only publishes it so TaskManagers can download it by <code>PermanentBlobKey</code>.</p><h3 id=32-session-cluster>3.2 Session cluster</h3><p>The client has already run <code>main()</code> and built the <code>StreamGraph</code>. That plan and the user JARs arrive at <code>JobSubmitHandler.handleRequest</code> as one <code>HandlerRequest</code>. <code>uploadedFiles</code> holds the execution-plan file and the user JARs, as temporary files on that process. The handler uploads the JARs, then submits a <code>SingleJobApplication</code>.</p><p><strong>Upload jars</strong> copies those JARs into the BlobServer with <code>putPermanent</code>. The file lands under <code>storageDir</code> as <code>job_&lt;jobId>/blob_&lt;key></code>, and the same bytes are copied to <code>blobStore</code> when high availability is on. Each TaskManager holds a <code>PermanentBlobCache</code>. Its <code>getFile</code> reads the local cache, and downloads from the BlobServer by <code>PermanentBlobKey</code> when the file is missing.</p><p><strong>Submit the application</strong> wraps the plan in <code>SingleJobApplication</code> and calls <code>gateway.submitApplication</code>. That application&rsquo;s <code>execute</code> forwards the same plan to <code>submitJob</code>. It does not run <code>main()</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class SessionDispatcherLeaderProcess {
+  - DispatcherGatewayServiceFactory dispatcherGatewayServiceFactory
+  - ExecutionPlanStore executionPlanStore
+  - JobResultStore jobResultStore
+  - ApplicationStore applicationStore
+  - BlobServer blobServer
+  + onStart() : void
+  - createDispatcher(...) : void
+}
+
+interface ExecutionPlanStore {
+  + start(ExecutionPlanListener) : void
+  + recoverExecutionPlan(JobID) : ExecutionPlan
+  + getJobIds() : Collection
+  + putExecutionPlan(ExecutionPlan) : void
+}
+
+interface JobResultStore {
+  + createDirtyResultAsync(JobResultEntry) : CompletableFuture
+  + markResultAsCleanAsync(JobID) : CompletableFuture
+  + hasJobResultEntryAsync(JobID) : CompletableFuture
+  + getDirtyResults() : Set
+}
+
+interface ApplicationStore {
+  + start() : void
+  + recoverApplication(ApplicationID) : Optional
+  + getApplicationIds() : Collection
+  + putApplication(ApplicationStoreEntry) : void
+}
+
+class Dispatcher {
+  + submitApplication(Application, Duration) : CompletableFuture
+  + submitJob(ExecutionPlan, Duration) : CompletableFuture
+  - internalSubmitApplication(Application) : CompletableFuture
+  - persistAndRunJob(ExecutionPlan) : void
+}
+
+class SingleJobApplication {
+  - ExecutionPlan executionPlan
+  + execute(DispatcherGateway, ...) : CompletableFuture
+}
+
+class JobSubmitHandler {
+  + handleRequest(HandlerRequest, DispatcherGateway) : CompletableFuture
+  + loadExecutionPlan(JobSubmitRequestBody, Map) : CompletableFuture
+  + uploadExecutionPlanFiles(...) : CompletableFuture
+}
+
+class BlobClient {
+  + uploadFile(JobID, Path) : PermanentBlobKey
+}
+
+class BlobServer {
+  - storageDir : File
+  - blobStore : BlobStore
+  + putPermanent(JobID, InputStream) : PermanentBlobKey
+  + getFile(JobID, PermanentBlobKey) : File
+}
+
+class JobMasterServiceLeadershipRunnerFactory {
+  + createJobManagerRunner(ExecutionPlan, ...) : JobManagerRunner
+}
+
+class StreamGraph {
+  + serializeUserDefinedInstances() : void
+  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
+}
+
+SessionDispatcherLeaderProcess --&gt; Dispatcher : createDispatcher
+SessionDispatcherLeaderProcess --&gt; ExecutionPlanStore
+SessionDispatcherLeaderProcess --&gt; JobResultStore
+SessionDispatcherLeaderProcess --&gt; ApplicationStore
+JobSubmitHandler --&gt; BlobClient : upload client JARs
+JobSubmitHandler --&gt; Dispatcher : submitApplication
+Dispatcher --&gt; SingleJobApplication : execute
+SingleJobApplication --&gt; Dispatcher : submitJob
+BlobClient --&gt; BlobServer : putPermanent
+Dispatcher --&gt; JobMasterServiceLeadershipRunnerFactory : persistAndRunJob
+JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefinedInstances
+@enduml
+</code></pre><p><code>handleRequest</code> is the whole procedure: index the uploaded files, read the plan, upload the JARs, then submit.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Multipart files from the client: the execution-plan file and the user JARs.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>final</span> Collection<span style=color:#f92672>&lt;</span>File<span style=color:#f92672>&gt;</span> uploadedFiles;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Nonnull</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> Collection<span style=color:#f92672>&lt;</span>File<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getUploadedFiles</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> uploadedFiles;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> CompletableFuture<span style=color:#f92672>&lt;</span>JobSubmitResponseBody<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>handleRequest</span>(
+</span></span><span style=display:flex><span>            <span style=color:#a6e22e>@Nonnull</span> HandlerRequest<span style=color:#f92672>&lt;</span>JobSubmitRequestBody<span style=color:#f92672>&gt;</span> request,
+</span></span><span style=display:flex><span>            <span style=color:#a6e22e>@Nonnull</span> DispatcherGateway gateway)
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throws</span> RestHandlerException {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Temp files from the request, indexed by the name the client sent.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> Collection<span style=color:#f92672>&lt;</span>File<span style=color:#f92672>&gt;</span> uploadedFiles <span style=color:#f92672>=</span> request.<span style=color:#a6e22e>getUploadedFiles</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> Map<span style=color:#f92672>&lt;</span>String, Path<span style=color:#f92672>&gt;</span> nameToFile <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                uploadedFiles.<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>collect</span>(Collectors.<span style=color:#a6e22e>toMap</span>(File::getName, Path::fromLocalFile));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (uploadedFiles.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>!=</span> nameToFile.<span style=color:#a6e22e>size</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> RestHandlerException(
+</span></span><span style=display:flex><span>                    String.<span style=color:#a6e22e>format</span>(
+</span></span><span style=display:flex><span>                            <span style=color:#e6db74>&#34;The number of uploaded files was %s than the expected count. Expected: %s Actual %s&#34;</span>,
+</span></span><span style=display:flex><span>                            uploadedFiles.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>&lt;</span> nameToFile.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>?</span> <span style=color:#e6db74>&#34;lower&#34;</span> : <span style=color:#e6db74>&#34;higher&#34;</span>,
+</span></span><span style=display:flex><span>                            nameToFile.<span style=color:#a6e22e>size</span>(),
+</span></span><span style=display:flex><span>                            uploadedFiles.<span style=color:#a6e22e>size</span>()),
+</span></span><span style=display:flex><span>                    HttpResponseStatus.<span style=color:#a6e22e>BAD_REQUEST</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> JobSubmitRequestBody requestBody <span style=color:#f92672>=</span> request.<span style=color:#a6e22e>getRequestBody</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (requestBody.<span style=color:#a6e22e>executionPlanFileName</span> <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> RestHandlerException(
+</span></span><span style=display:flex><span>                    String.<span style=color:#a6e22e>format</span>(
+</span></span><span style=display:flex><span>                            <span style=color:#e6db74>&#34;The %s field must not be omitted or be null.&#34;</span>,
+</span></span><span style=display:flex><span>                            JobSubmitRequestBody.<span style=color:#a6e22e>FIELD_NAME_JOB_GRAPH</span>),
+</span></span><span style=display:flex><span>                    HttpResponseStatus.<span style=color:#a6e22e>BAD_REQUEST</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Read the execution-plan file into a StreamGraph shell.</span>
+</span></span><span style=display:flex><span>        CompletableFuture<span style=color:#f92672>&lt;</span>ExecutionPlan<span style=color:#f92672>&gt;</span> executionPlanFuture <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                loadExecutionPlan(requestBody, nameToFile);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// JAR paths among those uploaded files. Still local temp files.</span>
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>Path<span style=color:#f92672>&gt;</span> jarFiles <span style=color:#f92672>=</span> getJarFilesToUpload(requestBody.<span style=color:#a6e22e>jarFileNames</span>, nameToFile);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>String, Path<span style=color:#f92672>&gt;&gt;</span> artifacts <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                getArtifactFilesToUpload(requestBody.<span style=color:#a6e22e>artifactFileNames</span>, nameToFile);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Copy the JARs into the BlobServer and record their PermanentBlobKeys.</span>
+</span></span><span style=display:flex><span>        CompletableFuture<span style=color:#f92672>&lt;</span>ExecutionPlan<span style=color:#f92672>&gt;</span> finalizedExecutionPlanFuture <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                uploadExecutionPlanFiles(
+</span></span><span style=display:flex><span>                        gateway, executionPlanFuture, jarFiles, artifacts, configuration);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Register a SingleJobApplication. Its execute() calls submitJob.</span>
+</span></span><span style=display:flex><span>        CompletableFuture<span style=color:#f92672>&lt;</span>Acknowledge<span style=color:#f92672>&gt;</span> jobSubmissionFuture <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                finalizedExecutionPlanFuture.<span style=color:#a6e22e>thenCompose</span>(
+</span></span><span style=display:flex><span>                        executionPlan <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                            SingleJobApplication application <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                                    <span style=color:#66d9ef>new</span> SingleJobApplication(executionPlan);
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> gateway.<span style=color:#a6e22e>submitApplication</span>(application, timeout);
+</span></span><span style=display:flex><span>                        });
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> jobSubmissionFuture.<span style=color:#a6e22e>thenCombine</span>(
+</span></span><span style=display:flex><span>                executionPlanFuture,
+</span></span><span style=display:flex><span>                (ack, executionPlan) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>new</span> JobSubmitResponseBody(<span style=color:#e6db74>&#34;/jobs/&#34;</span> <span style=color:#f92672>+</span> executionPlan.<span style=color:#a6e22e>getJobID</span>()));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>private</span> CompletableFuture<span style=color:#f92672>&lt;</span>ExecutionPlan<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>loadExecutionPlan</span>(
+</span></span><span style=display:flex><span>            JobSubmitRequestBody requestBody, Map<span style=color:#f92672>&lt;</span>String, Path<span style=color:#f92672>&gt;</span> nameToFile)
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throws</span> MissingFileException {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// The execution-plan entry in uploadedFiles, not a JAR.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> Path executionPlanFile <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                getPathAndAssertUpload(
+</span></span><span style=display:flex><span>                        requestBody.<span style=color:#a6e22e>executionPlanFileName</span>, FILE_TYPE_EXECUTION_PLAN, nameToFile);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> CompletableFuture.<span style=color:#a6e22e>supplyAsync</span>(
+</span></span><span style=display:flex><span>                () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                    ExecutionPlan executionPlan;
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>try</span> (ObjectInputStream objectIn <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>new</span> ObjectInputStream(
+</span></span><span style=display:flex><span>                                    executionPlanFile.<span style=color:#a6e22e>getFileSystem</span>().<span style=color:#a6e22e>open</span>(executionPlanFile))) {
+</span></span><span style=display:flex><span>                        <span style=color:#75715e>// Shell only: job id, sources, sinks, and SerializedValue bytes.</span>
+</span></span><span style=display:flex><span>                        executionPlan <span style=color:#f92672>=</span> (ExecutionPlan) objectIn.<span style=color:#a6e22e>readObject</span>();
+</span></span><span style=display:flex><span>                    } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CompletionException(
+</span></span><span style=display:flex><span>                                <span style=color:#66d9ef>new</span> RestHandlerException(
+</span></span><span style=display:flex><span>                                        <span style=color:#e6db74>&#34;Failed to deserialize ExecutionPlan.&#34;</span>,
+</span></span><span style=display:flex><span>                                        HttpResponseStatus.<span style=color:#a6e22e>BAD_REQUEST</span>,
+</span></span><span style=display:flex><span>                                        e));
+</span></span><span style=display:flex><span>                    }
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> executionPlan;
+</span></span><span style=display:flex><span>                },
+</span></span><span style=display:flex><span>                executor);
+</span></span><span style=display:flex><span>    }
+</span></span></code></pre></div><h3 id=33-upload-jars>3.3 Upload jars</h3><p><code>getJarFilesToUpload</code> picks the JAR entries out of <code>uploadedFiles</code>. Those paths are still local temp files. <code>uploadExecutionPlanFiles</code> asks the Dispatcher for the BlobServer address and sends each JAR through a <code>BlobClient</code>. The BlobServer stores the bytes and returns a <code>PermanentBlobKey</code>, which is written onto the <code>ExecutionPlan</code> with <code>addUserJarBlobKey</code>. TaskManagers later download the JAR by that key. The execution-plan file is not sent again; <code>loadExecutionPlan</code> has already turned it into an object with <code>readObject</code>. That object is still a shell: <code>streamNodes</code> is null, and <code>ParseOrder</code> is still bytes inside a <code>SerializedValue</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> CompletableFuture<span style=color:#f92672>&lt;</span>ExecutionPlan<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>uploadExecutionPlanFiles</span>(
+</span></span><span style=display:flex><span>            DispatcherGateway gateway,
+</span></span><span style=display:flex><span>            CompletableFuture<span style=color:#f92672>&lt;</span>ExecutionPlan<span style=color:#f92672>&gt;</span> executionPlanFuture,
+</span></span><span style=display:flex><span>            Collection<span style=color:#f92672>&lt;</span>Path<span style=color:#f92672>&gt;</span> jarFiles,
+</span></span><span style=display:flex><span>            Collection<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>String, Path<span style=color:#f92672>&gt;&gt;</span> artifacts,
+</span></span><span style=display:flex><span>            Configuration configuration) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// BlobServer lives with the Dispatcher. TaskManagers download JARs from it.</span>
+</span></span><span style=display:flex><span>        CompletableFuture<span style=color:#f92672>&lt;</span>Integer<span style=color:#f92672>&gt;</span> blobServerPortFuture <span style=color:#f92672>=</span> gateway.<span style=color:#a6e22e>getBlobServerPort</span>(timeout);
+</span></span><span style=display:flex><span>        CompletableFuture<span style=color:#f92672>&lt;</span>InetAddress<span style=color:#f92672>&gt;</span> blobServerAddressFuture <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                gateway.<span style=color:#a6e22e>getBlobServerAddress</span>(timeout);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> executionPlanFuture.<span style=color:#a6e22e>thenCombine</span>(
+</span></span><span style=display:flex><span>                blobServerPortFuture.<span style=color:#a6e22e>thenCombine</span>(
+</span></span><span style=display:flex><span>                        blobServerAddressFuture,
+</span></span><span style=display:flex><span>                        (blobServerPort, blobServerAddress) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                <span style=color:#66d9ef>new</span> InetSocketAddress(
+</span></span><span style=display:flex><span>                                        blobServerAddress.<span style=color:#a6e22e>getHostName</span>(), blobServerPort)),
+</span></span><span style=display:flex><span>                (ExecutionPlan executionPlan, InetSocketAddress blobSocketAddress) <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                        <span style=color:#75715e>// Each JAR becomes a PermanentBlobKey on the ExecutionPlan.</span>
+</span></span><span style=display:flex><span>                        ClientUtils.<span style=color:#a6e22e>uploadExecutionPlanFiles</span>(
+</span></span><span style=display:flex><span>                                executionPlan,
+</span></span><span style=display:flex><span>                                jarFiles,
+</span></span><span style=display:flex><span>                                artifacts,
+</span></span><span style=display:flex><span>                                () <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> BlobClient(blobSocketAddress, configuration));
+</span></span><span style=display:flex><span>                    } <span style=color:#66d9ef>catch</span> (FlinkException e) {
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CompletionException(
+</span></span><span style=display:flex><span>                                <span style=color:#66d9ef>new</span> RestHandlerException(
+</span></span><span style=display:flex><span>                                        <span style=color:#e6db74>&#34;Could not upload job files.&#34;</span>,
+</span></span><span style=display:flex><span>                                        HttpResponseStatus.<span style=color:#a6e22e>INTERNAL_SERVER_ERROR</span>,
+</span></span><span style=display:flex><span>                                        e));
+</span></span><span style=display:flex><span>                    }
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> executionPlan;
+</span></span><span style=display:flex><span>                });
+</span></span><span style=display:flex><span>    }
+</span></span></code></pre></div><h3 id=34-submit-the-job>3.4 Submit the job</h3><p>Both entries call <code>Dispatcher.submitJob</code> only after their application is in <code>applications</code>. The method refuses a plan with no matching application. <code>internalSubmitJob</code> then persists the plan and builds the JobMaster.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>Acknowledge<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>submitJob</span>(ExecutionPlan executionPlan, Duration timeout) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> JobID jobID <span style=color:#f92672>=</span> executionPlan.<span style=color:#a6e22e>getJobID</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> (MdcCloseable ignored <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            MdcUtils.<span style=color:#a6e22e>withContext</span>(
+</span></span><span style=display:flex><span>                    MdcUtils.<span style=color:#a6e22e>asContextData</span>(jobID, executionPlan.<span style=color:#a6e22e>getJobConfiguration</span>()))) {
+</span></span><span style=display:flex><span>        log.<span style=color:#a6e22e>info</span>(<span style=color:#e6db74>&#34;Received job submission &#39;{}&#39; ({}).&#34;</span>, executionPlan.<span style=color:#a6e22e>getName</span>(), jobID);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> isInGloballyTerminalState(jobID)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>thenComposeAsync</span>(
+</span></span><span style=display:flex><span>                    isTerminated <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>if</span> (isTerminated) {
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> FutureUtils.<span style=color:#a6e22e>completedExceptionally</span>(
+</span></span><span style=display:flex><span>                                    DuplicateJobSubmissionException.<span style=color:#a6e22e>ofGloballyTerminated</span>(jobID));
+</span></span><span style=display:flex><span>                        } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (jobManagerRunnerRegistry.<span style=color:#a6e22e>isRegistered</span>(jobID)
+</span></span><span style=display:flex><span>                                <span style=color:#f92672>||</span> submittedAndWaitingTerminationJobIDs.<span style=color:#a6e22e>contains</span>(jobID)
+</span></span><span style=display:flex><span>                                <span style=color:#f92672>||</span> suspendedJobs.<span style=color:#a6e22e>containsKey</span>(jobID)) {
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> FutureUtils.<span style=color:#a6e22e>completedExceptionally</span>(
+</span></span><span style=display:flex><span>                                    DuplicateJobSubmissionException.<span style=color:#a6e22e>of</span>(jobID));
+</span></span><span style=display:flex><span>                        } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (executionPlan.<span style=color:#a6e22e>isPartialResourceConfigured</span>()) {
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> FutureUtils.<span style=color:#a6e22e>completedExceptionally</span>(
+</span></span><span style=display:flex><span>                                    <span style=color:#66d9ef>new</span> JobSubmissionException(
+</span></span><span style=display:flex><span>                                            jobID,
+</span></span><span style=display:flex><span>                                            <span style=color:#e6db74>&#34;Currently jobs is not supported if parts of the vertices &#34;</span>
+</span></span><span style=display:flex><span>                                                    <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;have resources configured. The limitation will be &#34;</span>
+</span></span><span style=display:flex><span>                                                    <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;removed in future versions.&#34;</span>));
+</span></span><span style=display:flex><span>                        } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>isEmpty</span>()
+</span></span><span style=display:flex><span>                                <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>applications.<span style=color:#a6e22e>containsKey</span>(
+</span></span><span style=display:flex><span>                                        executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>get</span>())) {
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> FutureUtils.<span style=color:#a6e22e>completedExceptionally</span>(
+</span></span><span style=display:flex><span>                                    <span style=color:#66d9ef>new</span> JobSubmissionException(
+</span></span><span style=display:flex><span>                                            jobID,
+</span></span><span style=display:flex><span>                                            <span style=color:#e6db74>&#34;Failed to find the associated application for the job. This suggests the job is submitted through an unsupported or incomplete path.&#34;</span>));
+</span></span><span style=display:flex><span>                        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>return</span> internalSubmitJob(executionPlan);
+</span></span><span style=display:flex><span>                        }
+</span></span><span style=display:flex><span>                    },
+</span></span><span style=display:flex><span>                    getMainThreadExecutor(jobID));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>persistAndRunJob</span>(ExecutionPlan executionPlan) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    executionPlanWriter.<span style=color:#a6e22e>putExecutionPlan</span>(executionPlan);
+</span></span><span style=display:flex><span>    initJobClientExpiredTime(executionPlan);
+</span></span><span style=display:flex><span>    runJob(
+</span></span><span style=display:flex><span>            createJobMasterRunner(executionPlan),
+</span></span><span style=display:flex><span>            ExecutionType.<span style=color:#a6e22e>SUBMISSION</span>,
+</span></span><span style=display:flex><span>            executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElse</span>(<span style=color:#66d9ef>null</span>));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>gateway.submitApplication</code> is the session entry into that path. The Dispatcher starts a JobMaster. Before that JobMaster is constructed, <code>JobMasterServiceLeadershipRunnerFactory</code> builds a user class loader from the blob keys and calls <code>deserializeUserDefinedInstances</code>. That restores the node map, the <code>keyBy</code> selector, and the <code>ParseOrder</code> instance. The JobMaster then holds a live <code>StreamGraph</code>. Turning it into a <code>JobGraph</code> is the next section. The application-cluster path reaches the same factory after <code>EmbeddedExecutor</code> has already serialized those instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobManagerRunner <span style=color:#a6e22e>createJobManagerRunner</span>(
+</span></span><span style=display:flex><span>            ExecutionPlan executionPlan,
+</span></span><span style=display:flex><span>            Configuration configuration,
+</span></span><span style=display:flex><span>            RpcService rpcService,
+</span></span><span style=display:flex><span>            HighAvailabilityServices highAvailabilityServices,
+</span></span><span style=display:flex><span>            HeartbeatServices heartbeatServices,
+</span></span><span style=display:flex><span>            JobManagerSharedServices jobManagerServices,
+</span></span><span style=display:flex><span>            JobManagerJobMetricGroupFactory jobManagerJobMetricGroupFactory,
+</span></span><span style=display:flex><span>            FatalErrorHandler fatalErrorHandler,
+</span></span><span style=display:flex><span>            Collection<span style=color:#f92672>&lt;</span>FailureEnricher<span style=color:#f92672>&gt;</span> failureEnrichers,
+</span></span><span style=display:flex><span>            JobStatusListener jobStatusListener,
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>long</span> initializationTimestamp)
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        checkArgument(<span style=color:#f92672>!</span>executionPlan.<span style=color:#a6e22e>isEmpty</span>(), <span style=color:#e6db74>&#34;The given job is empty&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> JobMasterConfiguration jobMasterConfiguration <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                JobMasterConfiguration.<span style=color:#a6e22e>fromConfiguration</span>(configuration);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> JobResultStore jobResultStore <span style=color:#f92672>=</span> highAvailabilityServices.<span style=color:#a6e22e>getJobResultStore</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> LeaderElection jobManagerLeaderElection <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                highAvailabilityServices.<span style=color:#a6e22e>getJobManagerLeaderElection</span>(executionPlan.<span style=color:#a6e22e>getJobID</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> SlotPoolServiceSchedulerFactory slotPoolServiceSchedulerFactory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                DefaultSlotPoolServiceSchedulerFactory.<span style=color:#a6e22e>fromConfiguration</span>(
+</span></span><span style=display:flex><span>                        configuration, executionPlan.<span style=color:#a6e22e>getJobType</span>(), executionPlan.<span style=color:#a6e22e>isDynamic</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (jobMasterConfiguration.<span style=color:#a6e22e>getConfiguration</span>().<span style=color:#a6e22e>get</span>(JobManagerOptions.<span style=color:#a6e22e>SCHEDULER_MODE</span>)
+</span></span><span style=display:flex><span>                <span style=color:#f92672>==</span> SchedulerExecutionMode.<span style=color:#a6e22e>REACTIVE</span>) {
+</span></span><span style=display:flex><span>            Preconditions.<span style=color:#a6e22e>checkState</span>(
+</span></span><span style=display:flex><span>                    slotPoolServiceSchedulerFactory.<span style=color:#a6e22e>getSchedulerType</span>()
+</span></span><span style=display:flex><span>                            <span style=color:#f92672>==</span> JobManagerOptions.<span style=color:#a6e22e>SchedulerType</span>.<span style=color:#a6e22e>Adaptive</span>,
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Adaptive Scheduler is required for reactive mode&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// User JARs were stored as blob keys in §3. This loader can read ParseOrder.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> LibraryCacheManager.<span style=color:#a6e22e>ClassLoaderLease</span> classLoaderLease <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                jobManagerServices
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>getLibraryCacheManager</span>()
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>registerClassLoaderLease</span>(
+</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getJobID</span>(),
+</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElseThrow</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> ClassLoader userCodeClassLoader <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                classLoaderLease
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>getOrResolveClassLoader</span>(
+</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getUserJarBlobKeys</span>(), executionPlan.<span style=color:#a6e22e>getClasspaths</span>())
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>asClassLoader</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Fill the transient node map and operator factories before the JobMaster runs.</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
+</span></span><span style=display:flex><span>            ((StreamGraph) executionPlan)
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
+</span></span><span style=display:flex><span>                            userCodeClassLoader, jobManagerServices.<span style=color:#a6e22e>getFutureExecutor</span>());
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> DefaultJobMasterServiceFactory jobMasterServiceFactory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> DefaultJobMasterServiceFactory(
+</span></span><span style=display:flex><span>                        MdcUtils.<span style=color:#a6e22e>scopeToJob</span>(
+</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getJobID</span>(), jobManagerServices.<span style=color:#a6e22e>getIoExecutor</span>()),
+</span></span><span style=display:flex><span>                        rpcService,
+</span></span><span style=display:flex><span>                        jobMasterConfiguration,
+</span></span><span style=display:flex><span>                        executionPlan,
+</span></span><span style=display:flex><span>                        highAvailabilityServices,
+</span></span><span style=display:flex><span>                        slotPoolServiceSchedulerFactory,
+</span></span><span style=display:flex><span>                        jobManagerServices,
+</span></span><span style=display:flex><span>                        heartbeatServices,
+</span></span><span style=display:flex><span>                        jobManagerJobMetricGroupFactory,
+</span></span><span style=display:flex><span>                        fatalErrorHandler,
+</span></span><span style=display:flex><span>                        userCodeClassLoader,
+</span></span><span style=display:flex><span>                        failureEnrichers,
+</span></span><span style=display:flex><span>                        jobStatusListener,
+</span></span><span style=display:flex><span>                        initializationTimestamp);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> DefaultJobMasterServiceProcessFactory jobMasterServiceProcessFactory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> DefaultJobMasterServiceProcessFactory(
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getJobID</span>(),
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getName</span>(),
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getJobType</span>(),
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getCheckpointingSettings</span>(),
+</span></span><span style=display:flex><span>                        initializationTimestamp,
+</span></span><span style=display:flex><span>                        jobMasterServiceFactory);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> JobMasterServiceLeadershipRunner(
+</span></span><span style=display:flex><span>                jobMasterServiceProcessFactory,
+</span></span><span style=display:flex><span>                jobManagerLeaderElection,
+</span></span><span style=display:flex><span>                jobResultStore,
+</span></span><span style=display:flex><span>                classLoaderLease,
+</span></span><span style=display:flex><span>                fatalErrorHandler);
+</span></span><span style=display:flex><span>    }
+</span></span></code></pre></div><p><code>StreamGraph.deserializeUserDefinedInstances</code> forwards to <code>UserDefinedObjectsHolder</code>. That holder turns each <code>SerializedValue</code> back into an object with the user class loader. The operator-factory bytes become the <code>StreamMap</code> that holds <code>ParseOrder</code>. The node-map bytes become <code>streamNodes</code>, edges, and <code>statePartitioners</code>. The method bodies stay in the user JAR; deserialization restores the instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Entry used by createJobManagerRunner. The holder does the actual restore.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
+</span></span><span style=display:flex><span>        ClassLoader userClassLoader, Executor serializationExecutor) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>userDefinedObjectsHolder</span>.<span style=color:#a6e22e>deserialize</span>(userClassLoader, serializationExecutor);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Operator factories were serialized on their own so this step can run in parallel.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deserialize</span>(ClassLoader userClassLoader, Executor serializationExecutor)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    Collection<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>Integer, StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span> streamNodeToOperatorFactories <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            deserializeOperators(userClassLoader, serializationExecutor);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Node map, edges, keyBy partitioner, and execution config.</span>
+</span></span><span style=display:flex><span>    virtualSideOutputNodes <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            serializedVirtualSideOutputNodes.<span style=color:#a6e22e>deserializeValue</span>(userClassLoader);
+</span></span><span style=display:flex><span>    virtualPartitionNodes <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            serializedVirtualPartitionNodes.<span style=color:#a6e22e>deserializeValue</span>(userClassLoader);
+</span></span><span style=display:flex><span>    executionConfig <span style=color:#f92672>=</span> serializedExecutionConfig.<span style=color:#a6e22e>deserializeValue</span>(userClassLoader);
+</span></span><span style=display:flex><span>    streamNodes <span style=color:#f92672>=</span> serializedStreamNodes.<span style=color:#a6e22e>deserializeValue</span>(userClassLoader);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ParseOrder&#39;s StreamMap goes back onto its node. It was transient on StreamNode.</span>
+</span></span><span style=display:flex><span>    streamNodeToOperatorFactories.<span style=color:#a6e22e>forEach</span>(
+</span></span><span style=display:flex><span>            tuple2 <span style=color:#f92672>-&gt;</span> getStreamNode(tuple2.<span style=color:#a6e22e>f0</span>).<span style=color:#a6e22e>setOperatorFactory</span>(tuple2.<span style=color:#a6e22e>f1</span>));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> CompletableFuture<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>Integer, StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span>
+</span></span><span style=display:flex><span>        <span style=color:#a6e22e>deserializeOperatorFactoriesAsync</span>(
+</span></span><span style=display:flex><span>                ClassLoader userClassLoader,
+</span></span><span style=display:flex><span>                Executor serializationExecutor,
+</span></span><span style=display:flex><span>                Tuple2<span style=color:#f92672>&lt;</span>Integer, SerializedValue<span style=color:#f92672>&lt;</span>StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span> tuple2) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> CompletableFuture.<span style=color:#a6e22e>supplyAsync</span>(
+</span></span><span style=display:flex><span>            () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                    <span style=color:#75715e>// Loads the user class (ParseOrder) from the JAR, not from these bytes.</span>
+</span></span><span style=display:flex><span>                    StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;</span> streamOperatorFactory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                            tuple2.<span style=color:#a6e22e>f1</span>.<span style=color:#a6e22e>deserializeValue</span>(userClassLoader);
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> Tuple2.<span style=color:#a6e22e>of</span>(tuple2.<span style=color:#a6e22e>f0</span>, streamOperatorFactory);
+</span></span><span style=display:flex><span>                } <span style=color:#66d9ef>catch</span> (Throwable throwable) {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> RuntimeException(
+</span></span><span style=display:flex><span>                            String.<span style=color:#a6e22e>format</span>(
+</span></span><span style=display:flex><span>                                    <span style=color:#e6db74>&#34;Could not deserialize stream node %s&#34;</span>, tuple2.<span style=color:#a6e22e>f0</span>),
+</span></span><span style=display:flex><span>                            throwable);
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            },
+</span></span><span style=display:flex><span>            serializationExecutor);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// The byte[] was written on the client. The user class loader turns it back into an object.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> T <span style=color:#a6e22e>deserializeValue</span>(ClassLoader loader) <span style=color:#66d9ef>throws</span> IOException, ClassNotFoundException {
+</span></span><span style=display:flex><span>    Preconditions.<span style=color:#a6e22e>checkNotNull</span>(loader, <span style=color:#e6db74>&#34;No classloader has been passed&#34;</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> InstantiationUtil.<span style=color:#a6e22e>deserializeObject</span>(serializedData, loader);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>For <strong>orders-per-minute</strong>, after this call the in-memory graph is the one the client built:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>streamNodes
+</span></span><span style=display:flex><span>  orders            SourceOperatorFactory
+</span></span><span style=display:flex><span>  ParseOrder        StreamMap(ParseOrder)          restored from factory bytes
+</span></span><span style=display:flex><span>  window+aggregate  WindowOperatorFactory
+</span></span><span style=display:flex><span>                    statePartitioners = userId     restored inside the node bytes
+</span></span><span style=display:flex><span>                    stateKeySerializer = userId
+</span></span><span style=display:flex><span>  kafkaSink         SinkWriterOperatorFactory
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>virtualPartitionNodes
+</span></span><span style=display:flex><span>  keyBy(userId)     KeyGroupStreamPartitioner(Order::getUserId)
+</span></span></code></pre></div><p><code>getJobGraph</code> can now walk those nodes. Before <code>deserializeUserDefinedInstances</code>, <code>streamNodes</code> is null.</p><hr><h2 id=4-jobgraph-creation>4. JobGraph creation</h2><p>On either path the JAR is in the BlobServer and the JobMaster holds the restored <code>StreamGraph</code> from §3. This section is the compile. <strong><code>StreamingJobGraphGenerator</code></strong> runs while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
 </span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> JobGraph) {
 </span></span><span style=display:flex><span>    jobGraph <span style=color:#f92672>=</span> (JobGraph) executionPlan;
 </span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
@@ -11,7 +1020,7 @@
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#75715e>// StreamGraph.getJobGraph</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> StreamingJobGraphGenerator.<span style=color:#a6e22e>createJobGraph</span>(userClassLoader, <span style=color:#66d9ef>this</span>, jobId, applicationId);
-</span></span></code></pre></div><p>That compile decides <strong>operator chaining</strong>: which <code>StreamNode</code>s share one thread as a single <strong><code>JobVertex</code></strong>, and where a <strong>network</strong> boundary must remain. Chainable <strong>forward</strong> edges collapse into one vertex. <strong>Hash</strong> / rebalance edges become <strong><code>JobEdge</code>s</strong> (intermediate result partitions).</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>That compile decides <strong>operator chaining</strong>: which <code>StreamNode</code>s share one thread as a single <strong><code>JobVertex</code></strong>, and where a <strong>network</strong> boundary must remain. Chainable <strong>forward</strong> edges collapse into one vertex. <strong>Hash</strong> / rebalance edges become <strong><code>JobEdge</code>s</strong> (intermediate result partitions). The orders-per-minute picture of that result is in §1.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class JobMaster {
   - executionPlan : ExecutionPlan
@@ -99,7 +1108,7 @@ IntermediateDataSet *-- JobEdge
 </span></span><span style=display:flex><span>  chained operators:  window+aggregate , kafkaSink
 </span></span><span style=display:flex><span>  statePartitioner:   userId KeySelector
 </span></span><span style=display:flex><span>  parallelism:        p
-</span></span></code></pre></div><p>Two deployment units, not four. <code>keyBy</code> is only the edge between A and B.</p><hr><h2 id=2-executiongraph>2. ExecutionGraph</h2><p>On the JobManager, the <strong>JobMaster</strong> expands the <code>JobGraph</code> from §1 into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a <strong><code>StreamTask</code></strong> (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Two deployment units, not four. <code>keyBy</code> is only the edge between A and B.</p><hr><h2 id=5-executiongraph>5. ExecutionGraph</h2><p>On the JobManager, the <strong>JobMaster</strong> expands the <code>JobGraph</code> from §4 into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a <strong><code>StreamTask</code></strong> (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class JobMaster {
   + startJobExecution()
@@ -155,7 +1164,7 @@ TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
 </span></span><span style=display:flex><span><span style=color:#75715e>// On the worker: load invokable (e.g. OneInputStreamTask) and run</span>
 </span></span><span style=display:flex><span>StreamTask<span style=color:#f92672>&lt;?</span>, <span style=color:#f92672>?&gt;</span> task <span style=color:#f92672>=</span> createInvokable(deployment);
 </span></span><span style=display:flex><span>task.<span style=color:#a6e22e>invoke</span>(); <span style=color:#75715e>// mailbox loop: records, timers, checkpoint barriers</span>
-</span></span></code></pre></div><p>After this step the logical pipeline is concrete parallel work: TaskManagers run <code>StreamTask</code>s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.</p><hr><h2 id=3-taskmanagers-slots-and-data-exchange>3. TaskManagers, slots, and data exchange</h2><p>A TaskManager is a JVM worker. It advertises a fixed number of <strong>slots</strong>; each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.</p><p>Records leave a chain through a <strong>result partition</strong> and enter the downstream chain through an <strong>input gate</strong>. Exchange modes matter:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><strong>Pipelined</strong></td><td>Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming)</td></tr><tr><td><strong>Blocking</strong></td><td>Producer finishes a partition before the consumer reads (common in batch)</td></tr></tbody></table><p>Partitioners on <code>StreamEdge</code> decide routing: <code>ForwardPartitioner</code> keeps data local to the same subtask index, <code>KeyGroupStreamPartitioner</code> (after <code>keyBy</code>) hashes keys into key groups, <code>RebalancePartitioner</code> round-robins for load balance.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
+</span></span></code></pre></div><p>After this step the logical pipeline is concrete parallel work: TaskManagers run <code>StreamTask</code>s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.</p><hr><h2 id=6-taskmanagers-slots-and-data-exchange>6. TaskManagers, slots, and data exchange</h2><p>A TaskManager is a JVM worker. It advertises a fixed number of <strong>slots</strong>; each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.</p><p>Records leave a chain through a <strong>result partition</strong> and enter the downstream chain through an <strong>input gate</strong>. Exchange modes matter:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><strong>Pipelined</strong></td><td>Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming)</td></tr><tr><td><strong>Blocking</strong></td><td>Producer finishes a partition before the consumer reads (common in batch)</td></tr></tbody></table><p>Partitioners on <code>StreamEdge</code> decide routing: <code>ForwardPartitioner</code> keeps data local to the same subtask index, <code>KeyGroupStreamPartitioner</code> (after <code>keyBy</code>) hashes keys into key groups, <code>RebalancePartitioner</code> round-robins for load balance.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
   subgraph TM1[&#34;TaskManager 1&#34;]
     S0[&#34;Slot 0\nStreamTask A.0&#34;]
     S1[&#34;Slot 1\nStreamTask A.1&#34;]
@@ -168,7 +1177,7 @@ TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
   S0 --&gt;|&#34;hash(key) buffers&#34;| S3
   S1 --&gt;|&#34;hash(key) buffers&#34;| S2
   S1 --&gt;|&#34;hash(key) buffers&#34;| S3
-</code></pre><p>Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.</p><hr><h2 id=4-state-and-checkpoints>4. State and checkpoints</h2><p>Stateful operators store values in a <strong>state backend</strong> (heap, RocksDB, or others). After <code>keyBy</code>, state is <strong>keyed</strong>: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.</p><p>Consistency across the distributed graph uses <strong>checkpoints</strong>. The JobMaster’s <code>CheckpointCoordinator</code> periodically triggers a checkpoint:</p><ol><li>Allocate a checkpoint id and storage location.</li><li>Send a trigger to source tasks (and notify operator coordinators when present).</li><li>Sources inject a <strong>checkpoint barrier</strong> into each outgoing stream.</li><li>Barriers flow with the data. On alignment (exactly-once), a task waits until the barrier arrives on all input channels for that checkpoint, then snapshots its state and forwards the barrier downstream.</li><li>Tasks acknowledge the coordinator with state handles. When all acknowledge, the checkpoint is marked <strong>completed</strong> and becomes the recovery baseline.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+</code></pre><p>Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.</p><hr><h2 id=7-state-and-checkpoints>7. State and checkpoints</h2><p>Stateful operators store values in a <strong>state backend</strong> (heap, RocksDB, or others). After <code>keyBy</code>, state is <strong>keyed</strong>: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.</p><p>Consistency across the distributed graph uses <strong>checkpoints</strong>. The JobMaster’s <code>CheckpointCoordinator</code> periodically triggers a checkpoint:</p><ol><li>Allocate a checkpoint id and storage location.</li><li>Send a trigger to source tasks (and notify operator coordinators when present).</li><li>Sources inject a <strong>checkpoint barrier</strong> into each outgoing stream.</li><li>Barriers flow with the data. On alignment (exactly-once), a task waits until the barrier arrives on all input channels for that checkpoint, then snapshots its state and forwards the barrier downstream.</li><li>Tasks acknowledge the coordinator with state handles. When all acknowledge, the checkpoint is marked <strong>completed</strong> and becomes the recovery baseline.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
   participant CC as CheckpointCoordinator
   participant Src as Source StreamTask
   participant Op as Downstream StreamTask
@@ -181,7 +1190,7 @@ TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
   Op-&gt;&gt;CC: AcknowledgeCheckpoint(n)
   Src-&gt;&gt;CC: AcknowledgeCheckpoint(n)
   CC-&gt;&gt;CC: mark checkpoint n complete
-</code></pre><p>Exactly-once end-to-end additionally requires transactional sinks (or two-phase commit operators) that commit only after the checkpoint that includes their side effects completes. At-least-once can skip full barrier alignment so barriers overtake buffered data; recovery may replay more records.</p><p>Savepoints are user-triggered checkpoints with a stable format used for stop-with-savepoint, deploy upgrades, and rescaling. Externalized checkpoints keep metadata after job termination when retention is configured.</p><p>On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.</p><hr><h2 id=5-event-time-and-watermarks>5. Event time and watermarks</h2><p>Flink distinguishes <strong>processing time</strong> (wall clock on the machine) from <strong>event time</strong> (timestamps carried by records). Event-time windows and timers fire from the progress of <strong>watermarks</strong>, not from wall-clock ticks.</p><p>A <code>WatermarkStrategy</code> supplies:</p><ul><li>a <code>TimestampAssigner</code> that stamps each record;</li><li>a <code>WatermarkGenerator</code> that emits watermark values (periodically or on records).</li></ul><p><code>WatermarkStrategy.forBoundedOutOfOrderness(Duration)</code> is the common generator: it tracks the max observed event timestamp and emits <code>maxEventTs - outOfOrderness</code> (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>DataStream<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span> events <span style=color:#f92672>=</span> env.<span style=color:#a6e22e>fromSource</span>(
+</code></pre><p>Exactly-once end-to-end additionally requires transactional sinks (or two-phase commit operators) that commit only after the checkpoint that includes their side effects completes. At-least-once can skip full barrier alignment so barriers overtake buffered data; recovery may replay more records.</p><p>Savepoints are user-triggered checkpoints with a stable format used for stop-with-savepoint, deploy upgrades, and rescaling. Externalized checkpoints keep metadata after job termination when retention is configured.</p><p>On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.</p><hr><h2 id=8-event-time-and-watermarks>8. Event time and watermarks</h2><p>Flink distinguishes <strong>processing time</strong> (wall clock on the machine) from <strong>event time</strong> (timestamps carried by records). Event-time windows and timers fire from the progress of <strong>watermarks</strong>, not from wall-clock ticks.</p><p>A <code>WatermarkStrategy</code> supplies:</p><ul><li>a <code>TimestampAssigner</code> that stamps each record;</li><li>a <code>WatermarkGenerator</code> that emits watermark values (periodically or on records).</li></ul><p><code>WatermarkStrategy.forBoundedOutOfOrderness(Duration)</code> is the common generator: it tracks the max observed event timestamp and emits <code>maxEventTs - outOfOrderness</code> (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>DataStream<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span> events <span style=color:#f92672>=</span> env.<span style=color:#a6e22e>fromSource</span>(
 </span></span><span style=display:flex><span>    source,
 </span></span><span style=display:flex><span>    WatermarkStrategy
 </span></span><span style=display:flex><span>        .<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span>forBoundedOutOfOrderness(Duration.<span style=color:#a6e22e>ofSeconds</span>(5))
@@ -198,7 +1207,7 @@ TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
 </span></span><span style=display:flex><span>bound = 5s  =&gt;  W ≈ maxEventTs - 5s
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>window [0,60s): closes when watermark &gt;= 60s
-</span></span></code></pre></div><p>Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if <code>allowedLateness</code> extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.</p><hr><h2 id=6-minimal-job-shape>6. Minimal job shape</h2><p>A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>StreamExecutionEnvironment env <span style=color:#f92672>=</span> StreamExecutionEnvironment.<span style=color:#a6e22e>getExecutionEnvironment</span>();
+</span></span></code></pre></div><p>Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if <code>allowedLateness</code> extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.</p><hr><h2 id=9-minimal-job-shape>9. Minimal job shape</h2><p>A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>StreamExecutionEnvironment env <span style=color:#f92672>=</span> StreamExecutionEnvironment.<span style=color:#a6e22e>getExecutionEnvironment</span>();
 </span></span><span style=display:flex><span>env.<span style=color:#a6e22e>enableCheckpointing</span>(10_000); <span style=color:#75715e>// ms</span>
 </span></span><span style=display:flex><span>env.<span style=color:#a6e22e>getCheckpointConfig</span>().<span style=color:#a6e22e>setCheckpointingConsistencyMode</span>(CheckpointingMode.<span style=color:#a6e22e>EXACTLY_ONCE</span>);
 </span></span><span style=display:flex><span>
