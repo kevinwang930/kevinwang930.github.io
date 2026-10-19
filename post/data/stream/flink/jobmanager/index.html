@@ -6,7 +6,7 @@ The program arrives in one of two ways. An application cluster already has the u
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/stream>stream</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>JobManager</strong> is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.</p><p>The program arrives in one of two ways. An <strong>application cluster</strong> already has the user JAR on the JobManager. It runs <code>main()</code> itself and copies that JAR into the BlobServer, so the workers can load it. A <strong>session cluster</strong> receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.</p><hr><h2 id=1-overview>1. Overview</h2><p>The <strong>JobManager</strong> is the process that owns a running job. One JVM holds three services:</p><ul><li><strong>Dispatcher</strong> — starts each application, then a JobMaster for each of its jobs.</li><li><strong>ResourceManager</strong> — registry of TaskManagers and free slots.</li><li><strong>JobMaster</strong> — one per job. Compiles the plan and deploys tasks.</li></ul><p>Records stay on the TaskManagers. This post continues from <a href=https://kevinwang930.github.io/post/data/stream/flink/client/>cluster topology and client job submission</a>.</p><p>The Dispatcher is reached by two paths:</p><ol><li><strong>Application cluster</strong> — the user JAR is already on the JobManager, in the image or fetched from remote storage. At startup the Dispatcher creates a <code>PackagedProgramApplication</code> and runs <code>main()</code> there. Each <code>execute()</code> goes through <code>EmbeddedExecutor</code>, which copies that local JAR into the BlobServer with <code>BlobClient</code> and then calls <code>submitJob</code>. TaskManagers download it by <code>PermanentBlobKey</code>, the same way as in a session cluster. The submitting client sends no job request.</li><li><strong>Session cluster</strong> — the client has already run <code>main()</code> and built the <code>StreamGraph</code>. It sends that plan and the user JARs in one REST call. <code>JobSubmitHandler</code> stores each JAR in the BlobServer, wraps the plan in a <code>SingleJobApplication</code>, and calls <code>submitApplication</code>.</li></ol><p>Both paths are job dispatch (§3). They differ in which <code>AbstractApplication</code> is registered and who copies the JAR into the BlobServer. They meet at <code>Dispatcher.submitJob</code>, which starts the JobMaster. That JobMaster compiles the <code>JobGraph</code> (§4) and deploys the <code>ExecutionGraph</code> (§5).</p><p><strong>Orders-per-minute</strong> is the example: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>. Once the JobMaster holds that <code>StreamGraph</code>, both paths become two chained tasks and a hash shuffle:</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><hr><h2 id=2-jobmanager-election>2. JobManager election</h2><p>A Flink cluster needs one place that accepts jobs. That place is the Dispatcher inside a JobManager. If two JobManagers both accepted jobs, they would start the same work twice. So when you run more than one JobManager, they choose a single working process. The others stay up and do nothing until the working one dies.</p><p>One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.</p><p>The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call <code>submitJob</code>, and restore saved plans after a restart. After a job is submitted, that job&rsquo;s JobMaster has its own later election. This section is only the Dispatcher election.</p><p>Each JobManager process has a <code>DefaultDispatcherRunner</code>. It joins the election by calling <code>leaderElection.startLeaderElection(this)</code>. The service calls back:</p><ul><li><code>grantLeadership</code> — this process won. The runner builds a <code>SessionDispatcherLeaderProcess</code> and starts it. That process creates the Dispatcher. Clients can now submit jobs here.</li><li><code>revokeLeadership</code> — this process lost, or the grant was a tie that got corrected. The runner stops that process. The Dispatcher goes away. No second Dispatcher is left running on a waiting JobManager.</li></ul><p>Before a grant, and after a revoke, the runner holds a <code>StoppedDispatcherLeaderProcess</code>. That object does not create a Dispatcher.</p><p><code>leaderSessionId</code> is a new id for this win. It is not the session-cluster type. The next win gets a new id, so an old Dispatcher cannot keep acting after it has lost.</p><p>The class name <code>SessionDispatcherLeaderProcess</code> is historical. It was written for session mode, and application mode still uses <code>SessionDispatcherLeaderProcessFactory</code>. What changes is the factory handed in. Application mode passes <code>ApplicationDispatcherGatewayServiceFactory</code>, which starts the user <code>main()</code>. Session mode passes <code>DefaultDispatcherGatewayServiceFactory</code>, which waits for a client submission. Both factories are called from the same leader process once <code>grantLeadership</code> fires.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>JobManager</strong> is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.</p><p>The program arrives in one of two ways. An <strong>application cluster</strong> already has the user JAR on the JobManager. It runs <code>main()</code> itself and copies that JAR into the BlobServer, so the workers can load it. A <strong>session cluster</strong> receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.</p><hr><h2 id=1-overview>1. Overview</h2><p>The <strong>JobManager</strong> is the process that owns a running job. One JVM holds three services:</p><ul><li><strong>Dispatcher</strong> — starts each application, then a JobMaster for each of its jobs.</li><li><strong>ResourceManager</strong> — registry of TaskManagers and free slots.</li><li><strong>JobMaster</strong> — one per job. Compiles the plan and deploys tasks.</li></ul><p>Records stay on the TaskManagers. This post continues from <a href=https://kevinwang930.github.io/post/data/stream/flink/client/>cluster topology and client job submission</a>.</p><p>The Dispatcher is reached by two paths:</p><ol><li><strong>Application cluster</strong> — the user JAR is already on the JobManager, in the image or fetched from remote storage. At startup the Dispatcher creates a <code>PackagedProgramApplication</code> and runs <code>main()</code> there. Each <code>execute()</code> goes through <code>EmbeddedExecutor</code>, which copies that local JAR into the BlobServer with <code>BlobClient</code> and then calls <code>submitJob</code>. TaskManagers download it by <code>PermanentBlobKey</code>, the same way as in a session cluster. The submitting client sends no job request.</li><li><strong>Session cluster</strong> — the client has already run <code>main()</code> and built the <code>StreamGraph</code>. It sends that plan and the user JARs in one REST call. <code>JobSubmitHandler</code> stores each JAR in the BlobServer, wraps the plan in a <code>SingleJobApplication</code>, and calls <code>submitApplication</code>.</li></ol><p>Both paths are job dispatch (§3). They differ in which <code>AbstractApplication</code> is registered and who copies the JAR into the BlobServer. They meet at <code>Dispatcher.submitJob</code>, which starts the JobMaster. That JobMaster compiles the <code>JobGraph</code> (§4) and deploys the <code>ExecutionGraph</code> (§5).</p><p><strong>Orders-per-minute</strong> is the example: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>. Once the JobMaster holds that <code>StreamGraph</code>, both paths become two chained tasks and a hash shuffle:</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><hr><h2 id=2-jobmanager-election>2. JobManager election</h2><p>A Flink cluster needs one place that accepts jobs. That place is the Dispatcher inside a JobManager. If two JobManagers both accepted jobs, they would start the same work twice. So when you run more than one JobManager, they choose a single working process. The others stay up and do nothing until the working one dies.</p><p>One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.</p><p>The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call <code>submitJob</code>, and restore saved plans after a restart. After a job is submitted, that job&rsquo;s JobMaster has its own election (§3.4). This section is only the Dispatcher election.</p><p>Each JobManager process has a <code>DefaultDispatcherRunner</code>. It joins the election by calling <code>leaderElection.startLeaderElection(this)</code>. The service calls back:</p><ul><li><code>grantLeadership</code> — this process won. The runner builds a <code>SessionDispatcherLeaderProcess</code> and starts it. That process creates the Dispatcher. Clients can now submit jobs here.</li><li><code>revokeLeadership</code> — this process lost, or the grant was a tie that got corrected. The runner stops that process. The Dispatcher goes away. No second Dispatcher is left running on a waiting JobManager.</li></ul><p>Before a grant, and after a revoke, the runner holds a <code>StoppedDispatcherLeaderProcess</code>. That object does not create a Dispatcher.</p><p><code>leaderSessionId</code> is a new id for this win. It is not the session-cluster type. The next win gets a new id, so an old Dispatcher cannot keep acting after it has lost.</p><p>The class name <code>SessionDispatcherLeaderProcess</code> is historical. It was written for session mode, and application mode still uses <code>SessionDispatcherLeaderProcessFactory</code>. What changes is the factory handed in. Application mode passes <code>ApplicationDispatcherGatewayServiceFactory</code>, which starts the user <code>main()</code>. Session mode passes <code>DefaultDispatcherGatewayServiceFactory</code>, which waits for a client submission. Both factories are called from the same leader process once <code>grantLeadership</code> fires.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 interface LeaderElection {
@@ -812,7 +812,114 @@ JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefi
 </span></span><span style=display:flex><span>                    <span style=color:#66d9ef>return</span> executionPlan;
 </span></span><span style=display:flex><span>                });
 </span></span><span style=display:flex><span>    }
-</span></span></code></pre></div><h3 id=34-submit-the-job>3.4 Submit the job</h3><p>Both entries call <code>Dispatcher.submitJob</code> only after their application is in <code>applications</code>. The method refuses a plan with no matching application. <code>internalSubmitJob</code> then persists the plan and builds the JobMaster.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span></code></pre></div><h3 id=34-jobmaster-creation>3.4 JobMaster creation</h3><p>A JobMaster runs one job. It asks TaskManagers for slots, deploys the tasks, and drives checkpoints. The JobManager that won the Dispatcher election (§2) can hold many JobMasters, one for each running job. The waiting JobManagers hold none.</p><p>The JobMaster election uses the same Kubernetes ConfigMap as the JobManager election, <code>{clusterId}-cluster-config-map</code>. There is one lock. The JobManager that wins it also wins the JobMaster election for the jobs it recovers. Each job&rsquo;s election entry in that ConfigMap is <code>job-{jobId}</code>.</p><p>The participant is a <code>JobMasterServiceLeadershipRunner</code> inside that JobManager. <code>start</code> registers the runner. If this process already holds the ConfigMap, <code>grantLeadership</code> creates the JobMaster. <code>revokeLeadership</code> stops it when the lock is lost. A second runner appears only when another JobManager takes the ConfigMap and recovers the same job before the old JobMaster has stopped.</p><p><code>createJobManagerRunner</code> returns the runner. It does not construct the JobMaster yet. <code>grantLeadership</code> asks the process factory for a <code>DefaultJobMasterServiceProcess</code>, and that process asks <code>DefaultJobMasterServiceFactory</code> to construct the <code>JobMaster</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface JobManagerRunnerFactory {
+  + createJobManagerRunner(ExecutionPlan, ...) : JobManagerRunner
+}
+
+class JobMasterServiceLeadershipRunnerFactory {
+  + createJobManagerRunner(ExecutionPlan, ...) : JobManagerRunner
+}
+
+interface JobManagerRunner {
+  + start() : void
+  + getJobMasterGateway() : CompletableFuture
+  + getResultFuture() : CompletableFuture
+}
+
+interface LeaderContender {
+  + grantLeadership(UUID) : void
+  + revokeLeadership() : void
+}
+
+interface LeaderElection {
+  + startLeaderElection(LeaderContender) : void
+}
+
+class JobMasterServiceLeadershipRunner {
+  - JobMasterServiceProcessFactory jobMasterServiceProcessFactory
+  - LeaderElection leaderElection
+  - JobMasterServiceProcess jobMasterServiceProcess
+  + start() : void
+  + grantLeadership(UUID) : void
+}
+
+interface JobMasterServiceProcessFactory {
+  + create(UUID) : JobMasterServiceProcess
+}
+
+class DefaultJobMasterServiceProcessFactory {
+  - JobMasterServiceFactory jobMasterServiceFactory
+  + create(UUID) : JobMasterServiceProcess
+}
+
+interface JobMasterServiceProcess {
+  + getLeaderSessionId() : UUID
+  + getJobMasterGatewayFuture() : CompletableFuture
+}
+
+class DefaultJobMasterServiceProcess {
+  - UUID leaderSessionId
+  - CompletableFuture~JobMasterService~ jobMasterServiceFuture
+}
+
+interface JobMasterServiceFactory {
+  + createJobMasterService(UUID, OnCompletionActions) : CompletableFuture
+}
+
+class DefaultJobMasterServiceFactory {
+  - ExecutionPlan executionPlan
+  - ClassLoader userCodeClassloader
+  + createJobMasterService(UUID, OnCompletionActions) : CompletableFuture
+}
+
+interface JobMasterService {
+  + getGateway() : JobMasterGateway
+  + getAddress() : String
+}
+
+interface JobMasterGateway {
+  + updateTaskExecutionState(TaskExecutionState) : CompletableFuture
+  + triggerSavepoint(...) : CompletableFuture
+}
+
+interface SchedulerNG {
+  + startScheduling() : void
+}
+
+class JobMaster {
+  - ExecutionPlan executionPlan
+  - ClassLoader userCodeLoader
+  - SlotPoolService slotPoolService
+  - SchedulerNG schedulerNG
+  - startScheduling() : void
+}
+
+JobMasterServiceLeadershipRunnerFactory -up-|&gt; JobManagerRunnerFactory
+JobMasterServiceLeadershipRunner -up-|&gt; JobManagerRunner
+JobMasterServiceLeadershipRunner -up-|&gt; LeaderContender
+DefaultJobMasterServiceProcessFactory -up-|&gt; JobMasterServiceProcessFactory
+DefaultJobMasterServiceProcess -up-|&gt; JobMasterServiceProcess
+DefaultJobMasterServiceFactory -up-|&gt; JobMasterServiceFactory
+JobMaster -up-|&gt; JobMasterService
+JobMaster -up-|&gt; JobMasterGateway
+
+JobMasterServiceLeadershipRunnerFactory --&gt; DefaultJobMasterServiceFactory : new
+JobMasterServiceLeadershipRunnerFactory --&gt; DefaultJobMasterServiceProcessFactory : new
+JobMasterServiceLeadershipRunnerFactory --&gt; JobMasterServiceLeadershipRunner : new
+DefaultJobMasterServiceProcessFactory --&gt; DefaultJobMasterServiceFactory
+JobMasterServiceLeadershipRunner --&gt; LeaderElection : start
+JobMasterServiceLeadershipRunner --&gt; DefaultJobMasterServiceProcess : create on grant
+DefaultJobMasterServiceProcess --&gt; DefaultJobMasterServiceFactory : createJobMasterService
+DefaultJobMasterServiceFactory --&gt; JobMaster : new JobMaster
+JobMaster --&gt; SchedulerNG : startScheduling
+
+JobMasterServiceLeadershipRunner -[hidden]down-&gt; DefaultJobMasterServiceProcess
+DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
+@enduml
+</code></pre><p>Both entries call <code>Dispatcher.submitJob</code> only after their application is in <code>applications</code>. The method refuses a plan with no matching application. <code>internalSubmitJob</code> then persists the plan and builds the JobMaster.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>Acknowledge<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>submitJob</span>(ExecutionPlan executionPlan, Duration timeout) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> JobID jobID <span style=color:#f92672>=</span> executionPlan.<span style=color:#a6e22e>getJobID</span>();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> (MdcCloseable ignored <span style=color:#f92672>=</span>
@@ -859,7 +966,7 @@ JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefi
 </span></span><span style=display:flex><span>            ExecutionType.<span style=color:#a6e22e>SUBMISSION</span>,
 </span></span><span style=display:flex><span>            executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElse</span>(<span style=color:#66d9ef>null</span>));
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>gateway.submitApplication</code> is the session entry into that path. The Dispatcher starts a JobMaster. Before that JobMaster is constructed, <code>JobMasterServiceLeadershipRunnerFactory</code> builds a user class loader from the blob keys and calls <code>deserializeUserDefinedInstances</code>. That restores the node map, the <code>keyBy</code> selector, and the <code>ParseOrder</code> instance. The JobMaster then holds a live <code>StreamGraph</code>. Turning it into a <code>JobGraph</code> is the next section. The application-cluster path reaches the same factory after <code>EmbeddedExecutor</code> has already serialized those instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span></code></pre></div><p><code>createJobMasterRunner</code> calls <code>JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner</code>. Inside that method the user class loader is built and <code>deserializeUserDefinedInstances</code> restores the <code>StreamGraph</code>. That restore is §4.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobManagerRunner <span style=color:#a6e22e>createJobManagerRunner</span>(
 </span></span><span style=display:flex><span>            ExecutionPlan executionPlan,
 </span></span><span style=display:flex><span>            Configuration configuration,
@@ -896,26 +1003,7 @@ JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefi
 </span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Adaptive Scheduler is required for reactive mode&#34;</span>);
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// User JARs were stored as blob keys in §3. This loader can read ParseOrder.</span>
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> LibraryCacheManager.<span style=color:#a6e22e>ClassLoaderLease</span> classLoaderLease <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>                jobManagerServices
-</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>getLibraryCacheManager</span>()
-</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>registerClassLoaderLease</span>(
-</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getJobID</span>(),
-</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElseThrow</span>());
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> ClassLoader userCodeClassLoader <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>                classLoaderLease
-</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>getOrResolveClassLoader</span>(
-</span></span><span style=display:flex><span>                                executionPlan.<span style=color:#a6e22e>getUserJarBlobKeys</span>(), executionPlan.<span style=color:#a6e22e>getClasspaths</span>())
-</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>asClassLoader</span>();
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// Fill the transient node map and operator factories before the JobMaster runs.</span>
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
-</span></span><span style=display:flex><span>            ((StreamGraph) executionPlan)
-</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
-</span></span><span style=display:flex><span>                            userCodeClassLoader, jobManagerServices.<span style=color:#a6e22e>getFutureExecutor</span>());
-</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §4.</span>
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> DefaultJobMasterServiceFactory jobMasterServiceFactory <span style=color:#f92672>=</span>
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> DefaultJobMasterServiceFactory(
@@ -951,6 +1039,26 @@ JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefi
 </span></span><span style=display:flex><span>                classLoaderLease,
 </span></span><span style=display:flex><span>                fatalErrorHandler);
 </span></span><span style=display:flex><span>    }
+</span></span></code></pre></div><hr><h2 id=4-jobgraph-creation>4. JobGraph creation</h2><p>Before the compile, <code>createJobManagerRunner</code> builds a user class loader from the blob keys and calls <code>deserializeUserDefinedInstances</code>. That restores the node map, the <code>keyBy</code> selector, and the <code>ParseOrder</code> instance. The application-cluster path reaches the same factory after <code>EmbeddedExecutor</code> has already serialized those instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// User JARs were stored as blob keys in §3. This loader can read ParseOrder.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>final</span> LibraryCacheManager.<span style=color:#a6e22e>ClassLoaderLease</span> classLoaderLease <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        jobManagerServices
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getLibraryCacheManager</span>()
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>registerClassLoaderLease</span>(
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getJobID</span>(),
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElseThrow</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>final</span> ClassLoader userCodeClassLoader <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        classLoaderLease
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getOrResolveClassLoader</span>(
+</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getUserJarBlobKeys</span>(), executionPlan.<span style=color:#a6e22e>getClasspaths</span>())
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>asClassLoader</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Fill the transient node map and operator factories before the JobMaster runs.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
+</span></span><span style=display:flex><span>    ((StreamGraph) executionPlan)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
+</span></span><span style=display:flex><span>                    userCodeClassLoader, jobManagerServices.<span style=color:#a6e22e>getFutureExecutor</span>());
+</span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p><code>StreamGraph.deserializeUserDefinedInstances</code> forwards to <code>UserDefinedObjectsHolder</code>. That holder turns each <code>SerializedValue</code> back into an object with the user class loader. The operator-factory bytes become the <code>StreamMap</code> that holds <code>ParseOrder</code>. The node-map bytes become <code>streamNodes</code>, edges, and <code>statePartitioners</code>. The method bodies stay in the user JAR; deserialization restores the instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Entry used by createJobManagerRunner. The holder does the actual restore.</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
 </span></span><span style=display:flex><span>        ClassLoader userClassLoader, Executor serializationExecutor) <span style=color:#66d9ef>throws</span> Exception {
@@ -1011,7 +1119,7 @@ JobMasterServiceLeadershipRunnerFactory --&gt; StreamGraph : deserializeUserDefi
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>virtualPartitionNodes
 </span></span><span style=display:flex><span>  keyBy(userId)     KeyGroupStreamPartitioner(Order::getUserId)
-</span></span></code></pre></div><p><code>getJobGraph</code> can now walk those nodes. Before <code>deserializeUserDefinedInstances</code>, <code>streamNodes</code> is null.</p><hr><h2 id=4-jobgraph-creation>4. JobGraph creation</h2><p>On either path the JAR is in the BlobServer and the JobMaster holds the restored <code>StreamGraph</code> from §3. This section is the compile. <strong><code>StreamingJobGraphGenerator</code></strong> runs while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
+</span></span></code></pre></div><p><code>getJobGraph</code> can now walk those nodes. Before <code>deserializeUserDefinedInstances</code>, <code>streamNodes</code> is null.</p><p>The JobMaster holds that restored <code>StreamGraph</code>. This section is the compile. <strong><code>StreamingJobGraphGenerator</code></strong> runs while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
 </span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> JobGraph) {
 </span></span><span style=display:flex><span>    jobGraph <span style=color:#f92672>=</span> (JobGraph) executionPlan;
 </span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
