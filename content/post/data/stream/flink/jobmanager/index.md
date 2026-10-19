@@ -52,7 +52,7 @@ A Flink cluster needs one place that accepts jobs. That place is the Dispatcher 
 
 One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.
 
-The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call `submitJob`, and restore saved plans after a restart. After a job is submitted, that job's JobMaster has its own later election. This section is only the Dispatcher election.
+The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call `submitJob`, and restore saved plans after a restart. After a job is submitted, that job's JobMaster has its own election (§3.4). This section is only the Dispatcher election.
 
 Each JobManager process has a `DefaultDispatcherRunner`. It joins the election by calling `leaderElection.startLeaderElection(this)`. The service calls back:
 
@@ -1029,7 +1029,125 @@ private CompletableFuture<ExecutionPlan> uploadExecutionPlanFiles(
     }
 ```
 
-### 3.4 Submit the job
+### 3.4 JobMaster creation
+
+A JobMaster runs one job. It asks TaskManagers for slots, deploys the tasks, and drives checkpoints. The JobManager that won the Dispatcher election (§2) can hold many JobMasters, one for each running job. The waiting JobManagers hold none.
+
+The JobMaster election uses the same Kubernetes ConfigMap as the JobManager election, `{clusterId}-cluster-config-map`. There is one lock. The JobManager that wins it also wins the JobMaster election for the jobs it recovers. Each job's election entry in that ConfigMap is `job-{jobId}`.
+
+The participant is a `JobMasterServiceLeadershipRunner` inside that JobManager. `start` registers the runner. If this process already holds the ConfigMap, `grantLeadership` creates the JobMaster. `revokeLeadership` stops it when the lock is lost. A second runner appears only when another JobManager takes the ConfigMap and recovers the same job before the old JobMaster has stopped.
+
+`createJobManagerRunner` returns the runner. It does not construct the JobMaster yet. `grantLeadership` asks the process factory for a `DefaultJobMasterServiceProcess`, and that process asks `DefaultJobMasterServiceFactory` to construct the `JobMaster`.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface JobManagerRunnerFactory {
+  + createJobManagerRunner(ExecutionPlan, ...) : JobManagerRunner
+}
+
+class JobMasterServiceLeadershipRunnerFactory {
+  + createJobManagerRunner(ExecutionPlan, ...) : JobManagerRunner
+}
+
+interface JobManagerRunner {
+  + start() : void
+  + getJobMasterGateway() : CompletableFuture
+  + getResultFuture() : CompletableFuture
+}
+
+interface LeaderContender {
+  + grantLeadership(UUID) : void
+  + revokeLeadership() : void
+}
+
+interface LeaderElection {
+  + startLeaderElection(LeaderContender) : void
+}
+
+class JobMasterServiceLeadershipRunner {
+  - JobMasterServiceProcessFactory jobMasterServiceProcessFactory
+  - LeaderElection leaderElection
+  - JobMasterServiceProcess jobMasterServiceProcess
+  + start() : void
+  + grantLeadership(UUID) : void
+}
+
+interface JobMasterServiceProcessFactory {
+  + create(UUID) : JobMasterServiceProcess
+}
+
+class DefaultJobMasterServiceProcessFactory {
+  - JobMasterServiceFactory jobMasterServiceFactory
+  + create(UUID) : JobMasterServiceProcess
+}
+
+interface JobMasterServiceProcess {
+  + getLeaderSessionId() : UUID
+  + getJobMasterGatewayFuture() : CompletableFuture
+}
+
+class DefaultJobMasterServiceProcess {
+  - UUID leaderSessionId
+  - CompletableFuture~JobMasterService~ jobMasterServiceFuture
+}
+
+interface JobMasterServiceFactory {
+  + createJobMasterService(UUID, OnCompletionActions) : CompletableFuture
+}
+
+class DefaultJobMasterServiceFactory {
+  - ExecutionPlan executionPlan
+  - ClassLoader userCodeClassloader
+  + createJobMasterService(UUID, OnCompletionActions) : CompletableFuture
+}
+
+interface JobMasterService {
+  + getGateway() : JobMasterGateway
+  + getAddress() : String
+}
+
+interface JobMasterGateway {
+  + updateTaskExecutionState(TaskExecutionState) : CompletableFuture
+  + triggerSavepoint(...) : CompletableFuture
+}
+
+interface SchedulerNG {
+  + startScheduling() : void
+}
+
+class JobMaster {
+  - ExecutionPlan executionPlan
+  - ClassLoader userCodeLoader
+  - SlotPoolService slotPoolService
+  - SchedulerNG schedulerNG
+  - startScheduling() : void
+}
+
+JobMasterServiceLeadershipRunnerFactory -up-|> JobManagerRunnerFactory
+JobMasterServiceLeadershipRunner -up-|> JobManagerRunner
+JobMasterServiceLeadershipRunner -up-|> LeaderContender
+DefaultJobMasterServiceProcessFactory -up-|> JobMasterServiceProcessFactory
+DefaultJobMasterServiceProcess -up-|> JobMasterServiceProcess
+DefaultJobMasterServiceFactory -up-|> JobMasterServiceFactory
+JobMaster -up-|> JobMasterService
+JobMaster -up-|> JobMasterGateway
+
+JobMasterServiceLeadershipRunnerFactory --> DefaultJobMasterServiceFactory : new
+JobMasterServiceLeadershipRunnerFactory --> DefaultJobMasterServiceProcessFactory : new
+JobMasterServiceLeadershipRunnerFactory --> JobMasterServiceLeadershipRunner : new
+DefaultJobMasterServiceProcessFactory --> DefaultJobMasterServiceFactory
+JobMasterServiceLeadershipRunner --> LeaderElection : start
+JobMasterServiceLeadershipRunner --> DefaultJobMasterServiceProcess : create on grant
+DefaultJobMasterServiceProcess --> DefaultJobMasterServiceFactory : createJobMasterService
+DefaultJobMasterServiceFactory --> JobMaster : new JobMaster
+JobMaster --> SchedulerNG : startScheduling
+
+JobMasterServiceLeadershipRunner -[hidden]down-> DefaultJobMasterServiceProcess
+DefaultJobMasterServiceProcess -[hidden]down-> JobMaster
+@enduml
+```
 
 Both entries call `Dispatcher.submitJob` only after their application is in `applications`. The method refuses a plan with no matching application. `internalSubmitJob` then persists the plan and builds the JobMaster.
 
@@ -1086,7 +1204,7 @@ private void persistAndRunJob(ExecutionPlan executionPlan) throws Exception {
 }
 ```
 
-`gateway.submitApplication` is the session entry into that path. The Dispatcher starts a JobMaster. Before that JobMaster is constructed, `JobMasterServiceLeadershipRunnerFactory` builds a user class loader from the blob keys and calls `deserializeUserDefinedInstances`. That restores the node map, the `keyBy` selector, and the `ParseOrder` instance. The JobMaster then holds a live `StreamGraph`. Turning it into a `JobGraph` is the next section. The application-cluster path reaches the same factory after `EmbeddedExecutor` has already serialized those instances.
+`createJobMasterRunner` calls `JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner`. Inside that method the user class loader is built and `deserializeUserDefinedInstances` restores the `StreamGraph`. That restore is §4.
 
 ```java
 @Override
@@ -1126,26 +1244,7 @@ public JobManagerRunner createJobManagerRunner(
                     "Adaptive Scheduler is required for reactive mode");
         }
 
-        // User JARs were stored as blob keys in §3. This loader can read ParseOrder.
-        final LibraryCacheManager.ClassLoaderLease classLoaderLease =
-                jobManagerServices
-                        .getLibraryCacheManager()
-                        .registerClassLoaderLease(
-                                executionPlan.getJobID(),
-                                executionPlan.getApplicationId().orElseThrow());
-
-        final ClassLoader userCodeClassLoader =
-                classLoaderLease
-                        .getOrResolveClassLoader(
-                                executionPlan.getUserJarBlobKeys(), executionPlan.getClasspaths())
-                        .asClassLoader();
-
-        // Fill the transient node map and operator factories before the JobMaster runs.
-        if (executionPlan instanceof StreamGraph) {
-            ((StreamGraph) executionPlan)
-                    .deserializeUserDefinedInstances(
-                            userCodeClassLoader, jobManagerServices.getFutureExecutor());
-        }
+        // classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §4.
 
         final DefaultJobMasterServiceFactory jobMasterServiceFactory =
                 new DefaultJobMasterServiceFactory(
@@ -1181,6 +1280,35 @@ public JobManagerRunner createJobManagerRunner(
                 classLoaderLease,
                 fatalErrorHandler);
     }
+```
+
+---
+
+## 4. JobGraph creation
+
+Before the compile, `createJobManagerRunner` builds a user class loader from the blob keys and calls `deserializeUserDefinedInstances`. That restores the node map, the `keyBy` selector, and the `ParseOrder` instance. The application-cluster path reaches the same factory after `EmbeddedExecutor` has already serialized those instances.
+
+```java
+// User JARs were stored as blob keys in §3. This loader can read ParseOrder.
+final LibraryCacheManager.ClassLoaderLease classLoaderLease =
+        jobManagerServices
+                .getLibraryCacheManager()
+                .registerClassLoaderLease(
+                        executionPlan.getJobID(),
+                        executionPlan.getApplicationId().orElseThrow());
+
+final ClassLoader userCodeClassLoader =
+        classLoaderLease
+                .getOrResolveClassLoader(
+                        executionPlan.getUserJarBlobKeys(), executionPlan.getClasspaths())
+                .asClassLoader();
+
+// Fill the transient node map and operator factories before the JobMaster runs.
+if (executionPlan instanceof StreamGraph) {
+    ((StreamGraph) executionPlan)
+            .deserializeUserDefinedInstances(
+                    userCodeClassLoader, jobManagerServices.getFutureExecutor());
+}
 ```
 
 `StreamGraph.deserializeUserDefinedInstances` forwards to `UserDefinedObjectsHolder`. That holder turns each `SerializedValue` back into an object with the user class loader. The operator-factory bytes become the `StreamMap` that holds `ParseOrder`. The node-map bytes become `streamNodes`, edges, and `statePartitioners`. The method bodies stay in the user JAR; deserialization restores the instances.
@@ -1258,11 +1386,7 @@ virtualPartitionNodes
 
 `getJobGraph` can now walk those nodes. Before `deserializeUserDefinedInstances`, `streamNodes` is null.
 
----
-
-## 4. JobGraph creation
-
-On either path the JAR is in the BlobServer and the JobMaster holds the restored `StreamGraph` from §3. This section is the compile. **`StreamingJobGraphGenerator`** runs while the JobMaster builds its scheduler. `DefaultSchedulerFactory` and `AdaptiveSchedulerFactory` both do this:
+The JobMaster holds that restored `StreamGraph`. This section is the compile. **`StreamingJobGraphGenerator`** runs while the JobMaster builds its scheduler. `DefaultSchedulerFactory` and `AdaptiveSchedulerFactory` both do this:
 
 ```java
 JobGraph jobGraph;
