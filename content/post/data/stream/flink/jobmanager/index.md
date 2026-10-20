@@ -615,7 +615,7 @@ Both cluster types register an application, then call `Dispatcher.submitJob`. Th
 
 An **application cluster** starts a `PackagedProgramApplication` and runs `main()` on the JobManager (§3.1). A **session cluster** receives a client plan, wraps it in a `SingleJobApplication`, and does not run `main()` again (§3.2).
 
-`submitJob` persists the plan and builds the JobMaster. Compiling the restored `StreamGraph` into a `JobGraph` is §4.
+`submitJob` persists the plan and builds the JobMaster. The user classes for that job are loaded and released in §3.5. Compiling the restored `StreamGraph` into a `JobGraph` is §4.
 
 ### 3.1 Application cluster
 
@@ -1204,7 +1204,7 @@ private void persistAndRunJob(ExecutionPlan executionPlan) throws Exception {
 }
 ```
 
-`createJobMasterRunner` calls `JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner`. Inside that method the user class loader is built and `deserializeUserDefinedInstances` restores the `StreamGraph`. That restore is §4.
+`createJobMasterRunner` calls `JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner`. Inside that method the user class loader is built and `deserializeUserDefinedInstances` restores the `StreamGraph`. That restore is §3.5.
 
 ```java
 @Override
@@ -1244,7 +1244,7 @@ public JobManagerRunner createJobManagerRunner(
                     "Adaptive Scheduler is required for reactive mode");
         }
 
-        // classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §4.
+        // classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §3.5.
 
         final DefaultJobMasterServiceFactory jobMasterServiceFactory =
                 new DefaultJobMasterServiceFactory(
@@ -1282,32 +1282,269 @@ public JobManagerRunner createJobManagerRunner(
     }
 ```
 
----
+### 3.5 Job class life cycle
 
-## 4. JobGraph creation
+A job's user classes live in a class loader owned by that job. `createJobManagerRunner` registers a lease, then resolves the loader from the blob keys. The default resolve order is child-first: `ParseOrder` and the other task classes are taken from the job JAR before Flink's own classpath. Classes that must stay Flink's, such as `org.apache.flink`, are still loaded parent-first.
 
-Before the compile, `createJobManagerRunner` builds a user class loader from the blob keys and calls `deserializeUserDefinedInstances`. That restores the node map, the `keyBy` selector, and the `ParseOrder` instance. The application-cluster path reaches the same factory after `EmbeddedExecutor` has already serialized those instances.
+The lease is reference-counted. The loader stays open while any lease for that job is held. `JobMasterServiceLeadershipRunner` calls `classLoaderLease.release()` after the JobMaster process has stopped. When the count reaches zero, the manager closes the `URLClassLoader`, drops the cache entry, and clears Jackson's type cache so it does not keep those classes alive. A TaskManager uses the same `LibraryCacheManager` and releases its own lease when the job leaves that process.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface LibraryCacheManager {
+  + registerClassLoaderLease(JobID, ApplicationID) : ClassLoaderLease
+}
+
+interface ClassLoaderHandle {
+  + getOrResolveClassLoader(Collection, Collection) : UserCodeClassLoader
+}
+
+interface ClassLoaderLease {
+  + release() : void
+}
+
+class BlobLibraryCacheManager {
+  - Map~JobID, LibraryCacheEntry~ cacheEntries
+  - PermanentBlobService blobService
+  + registerClassLoaderLease(JobID, ApplicationID) : ClassLoaderLease
+}
+
+class "BlobLibraryCacheManager.LibraryCacheEntry" as LibraryCacheEntry {
+  - int referenceCount
+  - ResolvedClassLoader resolvedClassLoader
+  + obtainLease() : ClassLoaderLease
+  - release() : void
+  - releaseClassLoader() : void
+}
+
+class "BlobLibraryCacheManager.DefaultClassLoaderLease" as DefaultClassLoaderLease {
+  + getOrResolveClassLoader(Collection, Collection) : UserCodeClassLoader
+  + release() : void
+}
+
+interface UserCodeClassLoader {
+  + asClassLoader() : ClassLoader
+  + registerReleaseHookIfAbsent(String, Runnable) : void
+}
+
+class "BlobLibraryCacheManager.ResolvedClassLoader" as ResolvedClassLoader {
+  - ClassLoader classLoader
+  - releaseClassLoader() : void
+}
+
+abstract class MutableURLClassLoader {
+  + addURL(URL) : void
+  + {abstract} copy() : MutableURLClassLoader
+}
+
+abstract class FlinkUserCodeClassLoader {
+  # Consumer~Throwable~ classLoadingExceptionHandler
+  + loadClass(String, boolean) : Class
+  # loadClassWithoutExceptionHandling(String, boolean) : Class
+}
+
+class ChildFirstClassLoader
+
+class ParentFirstClassLoader
+
+class JobMasterServiceLeadershipRunner {
+  - ClassLoaderLease classLoaderLease
+}
+
+interface PermanentBlobService {
+  + getFile(JobID, PermanentBlobKey) : File
+}
+
+class StreamGraph {
+  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
+}
+
+BlobLibraryCacheManager -up-|> LibraryCacheManager
+ClassLoaderLease -up-|> ClassLoaderHandle
+DefaultClassLoaderLease -up-|> ClassLoaderLease
+ResolvedClassLoader -up-|> UserCodeClassLoader
+FlinkUserCodeClassLoader -up-|> MutableURLClassLoader
+ChildFirstClassLoader -up-|> FlinkUserCodeClassLoader
+ParentFirstClassLoader -[norank]up-|> FlinkUserCodeClassLoader
+
+JobMasterServiceLeadershipRunner --> ClassLoaderLease : register / release
+BlobLibraryCacheManager --> LibraryCacheEntry : one entry per job
+LibraryCacheEntry --> DefaultClassLoaderLease : obtainLease
+DefaultClassLoaderLease --> LibraryCacheEntry : release
+LibraryCacheEntry --> ResolvedClassLoader : getOrResolveClassLoader
+LibraryCacheEntry --> PermanentBlobService : getFile
+ResolvedClassLoader --> ChildFirstClassLoader : child-first
+StreamGraph --> ChildFirstClassLoader : deserializeUserDefinedInstances
+
+BlobLibraryCacheManager -[hidden]down-> LibraryCacheEntry
+LibraryCacheEntry -[hidden]down-> MutableURLClassLoader
+ChildFirstClassLoader -[hidden]down-> ParentFirstClassLoader
+ParentFirstClassLoader -[hidden]down-> UserCodeClassLoader
+UserCodeClassLoader -[hidden]down-> ResolvedClassLoader
+@enduml
+```
+
+`createJobManagerRunner` builds the loader from the blob keys and calls `deserializeUserDefinedInstances`. That restores the node map, the `keyBy` selector, and the `ParseOrder` instance. The application-cluster path reaches the same factory after `EmbeddedExecutor` has already serialized those instances.
 
 ```java
-// User JARs were stored as blob keys in §3. This loader can read ParseOrder.
-final LibraryCacheManager.ClassLoaderLease classLoaderLease =
-        jobManagerServices
-                .getLibraryCacheManager()
-                .registerClassLoaderLease(
-                        executionPlan.getJobID(),
-                        executionPlan.getApplicationId().orElseThrow());
+@Override
+public JobManagerRunner createJobManagerRunner(
+        ExecutionPlan executionPlan,
+        Configuration configuration,
+        RpcService rpcService,
+        HighAvailabilityServices highAvailabilityServices,
+        HeartbeatServices heartbeatServices,
+        JobManagerSharedServices jobManagerServices,
+        JobManagerJobMetricGroupFactory jobManagerJobMetricGroupFactory,
+        FatalErrorHandler fatalErrorHandler,
+        Collection<FailureEnricher> failureEnrichers,
+        JobStatusListener jobStatusListener,
+        long initializationTimestamp)
+        throws Exception {
 
-final ClassLoader userCodeClassLoader =
-        classLoaderLease
-                .getOrResolveClassLoader(
-                        executionPlan.getUserJarBlobKeys(), executionPlan.getClasspaths())
-                .asClassLoader();
+    // Empty-plan check, JobMasterConfiguration, JobResultStore, the job LeaderElection,
+    // the slot-pool scheduler, and the reactive-mode check are in §3.4.
 
-// Fill the transient node map and operator factories before the JobMaster runs.
-if (executionPlan instanceof StreamGraph) {
-    ((StreamGraph) executionPlan)
-            .deserializeUserDefinedInstances(
-                    userCodeClassLoader, jobManagerServices.getFutureExecutor());
+    // User JARs were stored as blob keys in §3. This loader can read ParseOrder.
+    final LibraryCacheManager.ClassLoaderLease classLoaderLease =
+            jobManagerServices
+                    .getLibraryCacheManager()
+                    .registerClassLoaderLease(
+                            executionPlan.getJobID(),
+                            executionPlan.getApplicationId().orElseThrow());
+
+    final ClassLoader userCodeClassLoader =
+            classLoaderLease
+                    .getOrResolveClassLoader(
+                            executionPlan.getUserJarBlobKeys(), executionPlan.getClasspaths())
+                    .asClassLoader();
+
+    // Fill the transient node map and operator factories before the JobMaster runs.
+    if (executionPlan instanceof StreamGraph) {
+        ((StreamGraph) executionPlan)
+                .deserializeUserDefinedInstances(
+                        userCodeClassLoader, jobManagerServices.getFutureExecutor());
+    }
+
+    // userCodeClassLoader is passed to DefaultJobMasterServiceFactory.
+    // classLoaderLease is passed to the JobMasterServiceLeadershipRunner returned in §3.4.
+}
+```
+
+`registerClassLoaderLease` creates one `LibraryCacheEntry` for the job and returns a lease. The first `getOrResolveClassLoader` downloads the JARs and builds the class loader. A later call with the same jar contents reuses that loader.
+
+```java
+@Override
+public ClassLoaderLease registerClassLoaderLease(JobID jobId, ApplicationID applicationId) {
+    synchronized (lockObject) {
+        return cacheEntries
+                .computeIfAbsent(jobId, jobID -> new LibraryCacheEntry(jobId, applicationId))
+                .obtainLease();
+    }
+}
+
+@Override
+public UserCodeClassLoader getOrResolveClassLoader(
+        Collection<PermanentBlobKey> requiredJarFiles, Collection<URL> requiredClasspaths)
+        throws IOException {
+    verifyIsNotClosed();
+    return libraryCacheEntry.getOrResolveClassLoader(requiredJarFiles, requiredClasspaths);
+}
+
+private UserCodeClassLoader getOrResolveClassLoader(
+        Collection<PermanentBlobKey> libraries, Collection<URL> classPaths) throws IOException {
+    synchronized (lockObject) {
+        verifyIsNotReleased();
+
+        if (resolvedClassLoader == null) {
+            boolean systemClassLoader =
+                    wrapsSystemClassLoader && libraries.isEmpty() && classPaths.isEmpty();
+            resolvedClassLoader =
+                    new ResolvedClassLoader(
+                            systemClassLoader
+                                    ? ClassLoader.getSystemClassLoader()
+                                    : createUserCodeClassLoader(
+                                            jobId, applicationId, libraries, classPaths),
+                            libraries,
+                            classPaths,
+                            systemClassLoader);
+        } else {
+            resolvedClassLoader.verifyClassLoader(libraries, classPaths);
+        }
+
+        return resolvedClassLoader;
+    }
+}
+
+private URLClassLoader createUserCodeClassLoader(
+        JobID jobId,
+        ApplicationID applicationId,
+        Collection<PermanentBlobKey> requiredJarFiles,
+        Collection<URL> requiredClasspaths)
+        throws IOException {
+    try {
+        final URL[] libraryURLs = new URL[requiredJarFiles.size() + requiredClasspaths.size()];
+        int count = 0;
+        for (PermanentBlobKey key : requiredJarFiles) {
+            try {
+                libraryURLs[count] = blobService.getFile(jobId, key).toURI().toURL();
+            } catch (Exception e) {
+                libraryURLs[count] = blobService.getFile(applicationId, key).toURI().toURL();
+            }
+            ++count;
+        }
+
+        for (URL url : requiredClasspaths) {
+            libraryURLs[count] = url;
+            ++count;
+        }
+
+        return classLoaderFactory.createClassLoader(libraryURLs);
+    } catch (Exception e) {
+        ExceptionUtils.tryRethrowIOException(e);
+        throw new IOException("Library cache could not register the user code libraries.", e);
+    }
+}
+```
+
+`classLoaderFactory.createClassLoader` builds a `ChildFirstClassLoader` unless the resolve order is parent-first. `loadClass` records a failure, then `ChildFirstClassLoader` searches the job JAR before the parent. A name that matches `alwaysParentFirstPatterns` goes to the parent immediately.
+
+```java
+@Override
+public final Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+    try {
+        synchronized (getClassLoadingLock(name)) {
+            return loadClassWithoutExceptionHandling(name, resolve);
+        }
+    } catch (Throwable classLoadingException) {
+        classLoadingExceptionHandler.accept(classLoadingException);
+        throw classLoadingException;
+    }
+}
+
+@Override
+protected Class<?> loadClassWithoutExceptionHandling(String name, boolean resolve)
+        throws ClassNotFoundException {
+    Class<?> c = findLoadedClass(name);
+
+    if (c == null) {
+        for (String alwaysParentFirstPattern : alwaysParentFirstPatterns) {
+            if (name.startsWith(alwaysParentFirstPattern)) {
+                return super.loadClassWithoutExceptionHandling(name, resolve);
+            }
+        }
+
+        try {
+            c = findClass(name);
+        } catch (ClassNotFoundException e) {
+            c = super.loadClassWithoutExceptionHandling(name, resolve);
+        }
+    } else if (resolve) {
+        resolveClass(c);
+    }
+
+    return c;
 }
 ```
 
@@ -1336,6 +1573,18 @@ private void deserialize(ClassLoader userClassLoader, Executor serializationExec
     // ParseOrder's StreamMap goes back onto its node. It was transient on StreamNode.
     streamNodeToOperatorFactories.forEach(
             tuple2 -> getStreamNode(tuple2.f0).setOperatorFactory(tuple2.f1));
+}
+
+private Collection<Tuple2<Integer, StreamOperatorFactory<?>>> deserializeOperators(
+        ClassLoader userClassLoader, Executor serializationExecutor) throws Exception {
+    List<CompletableFuture<Tuple2<Integer, StreamOperatorFactory<?>>>> futures =
+            streamNodeToSerializedOperatorFactories.stream()
+                    .map(
+                            tuple2 ->
+                                    deserializeOperatorFactoriesAsync(
+                                            userClassLoader, serializationExecutor, tuple2))
+                    .collect(Collectors.toList());
+    return FutureUtils.combineAll(futures).get();
 }
 
 private CompletableFuture<Tuple2<Integer, StreamOperatorFactory<?>>>
@@ -1385,6 +1634,106 @@ virtualPartitionNodes
 ```
 
 `getJobGraph` can now walk those nodes. Before `deserializeUserDefinedInstances`, `streamNodes` is null.
+
+The loader is removed when the last lease for the job is released. The runner does that after the JobMaster process has closed.
+
+```java
+@Override
+public CompletableFuture<Void> closeAsync() {
+    // Already STOPPED: return terminationFuture.
+    // Otherwise set STOPPED, fail jobMasterGatewayFuture, and complete resultFuture as SUSPENDED.
+    final CompletableFuture<Void> processTerminationFuture = jobMasterServiceProcess.closeAsync();
+
+    FutureUtils.runAfterwards(
+            processTerminationFuture,
+            () -> {
+                classLoaderLease.release();
+                // leaderElection.close() runs in this same callback.
+            });
+
+    // FutureUtils.forward copies this future onto terminationFuture, which is returned.
+}
+```
+
+`release` drops the reference count. At zero, the cache entry closes the class loader and removes the job.
+
+```java
+@Override
+public void release() {
+    if (isClosed) {
+        return;
+    }
+
+    isClosed = true;
+
+    libraryCacheEntry.release();
+}
+
+private void release() {
+    synchronized (lockObject) {
+        if (isReleased) {
+            return;
+        }
+
+        if (referenceCount > 0) {
+            referenceCount -= 1;
+        }
+
+        if (referenceCount == 0) {
+            releaseClassLoader();
+            cacheEntries.remove(jobId);
+        }
+    }
+}
+
+private void releaseClassLoader() {
+    if (resolvedClassLoader != null) {
+        resolvedClassLoader.releaseClassLoader();
+        resolvedClassLoader = null;
+    }
+    isReleased = true;
+}
+```
+
+Closing that cached loader runs its shutdown hooks and closes the `URLClassLoader`. Jackson's type cache is cleared in the same step, so it does not keep the user classes reachable.
+
+```java
+private void releaseClassLoader() {
+    runReleaseHooks();
+
+    if (!wrapsSystemClassLoader) {
+        try {
+            ((Closeable) classLoader).close();
+        } catch (IOException e) {
+            LOG.warn(
+                    "Failed to release user code class loader for "
+                            + Arrays.toString(libraries.toArray()));
+        }
+    }
+    // Drop cached Java types that still point at user classes.
+    TypeFactory.defaultInstance().clearCache();
+}
+
+private void runReleaseHooks() {
+    Set<Map.Entry<String, Runnable>> hooks = releaseHooks.entrySet();
+    if (!hooks.isEmpty()) {
+        for (Map.Entry<String, Runnable> hookEntry : hooks) {
+            try {
+                hookEntry.getValue().run();
+            } catch (Throwable t) {
+                LOG.warn(
+                        "Failed to run release hook '{}' for user code class loader.",
+                        hookEntry.getValue(),
+                        t);
+            }
+        }
+
+        releaseHooks.clear();
+    }
+}
+```
+
+## 4. JobGraph creation
 
 The JobMaster holds that restored `StreamGraph`. This section is the compile. **`StreamingJobGraphGenerator`** runs while the JobMaster builds its scheduler. `DefaultSchedulerFactory` and `AdaptiveSchedulerFactory` both do this:
 
