@@ -451,7 +451,7 @@ SessionDispatcherLeaderProcess -[hidden]down-&gt; StoppedDispatcherLeaderProcess
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>stopDispatcherLeaderProcess</span>();
 </span></span><span style=display:flex><span>            });
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h2 id=3-job-dispatch>3. Job dispatch</h2><p>Both cluster types register an application, then call <code>Dispatcher.submitJob</code>. That call starts the JobMaster.</p><p>An <strong>application cluster</strong> starts a <code>PackagedProgramApplication</code> and runs <code>main()</code> on the JobManager (§3.1). A <strong>session cluster</strong> receives a client plan, wraps it in a <code>SingleJobApplication</code>, and does not run <code>main()</code> again (§3.2).</p><p><code>submitJob</code> persists the plan and builds the JobMaster. Compiling the restored <code>StreamGraph</code> into a <code>JobGraph</code> is §4.</p><h3 id=31-application-cluster>3.1 Application cluster</h3><p>The factory creates the application before the Dispatcher RPC starts. The user program is a <code>PackagedProgram</code> (JAR plus entry class), not a client-built <code>StreamGraph</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><h2 id=3-job-dispatch>3. Job dispatch</h2><p>Both cluster types register an application, then call <code>Dispatcher.submitJob</code>. That call starts the JobMaster.</p><p>An <strong>application cluster</strong> starts a <code>PackagedProgramApplication</code> and runs <code>main()</code> on the JobManager (§3.1). A <strong>session cluster</strong> receives a client plan, wraps it in a <code>SingleJobApplication</code>, and does not run <code>main()</code> again (§3.2).</p><p><code>submitJob</code> persists the plan and builds the JobMaster. The user classes for that job are loaded and released in §3.5. Compiling the restored <code>StreamGraph</code> into a <code>JobGraph</code> is §4.</p><h3 id=31-application-cluster>3.1 Application cluster</h3><p>The factory creates the application before the Dispatcher RPC starts. The user program is a <code>PackagedProgram</code> (JAR plus entry class), not a client-built <code>StreamGraph</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class ApplicationDispatcherLeaderProcessFactoryFactory {
   - PackagedProgram program
@@ -966,7 +966,7 @@ DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
 </span></span><span style=display:flex><span>            ExecutionType.<span style=color:#a6e22e>SUBMISSION</span>,
 </span></span><span style=display:flex><span>            executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElse</span>(<span style=color:#66d9ef>null</span>));
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>createJobMasterRunner</code> calls <code>JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner</code>. Inside that method the user class loader is built and <code>deserializeUserDefinedInstances</code> restores the <code>StreamGraph</code>. That restore is §4.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span></code></pre></div><p><code>createJobMasterRunner</code> calls <code>JobMasterServiceLeadershipRunnerFactory.createJobManagerRunner</code>. Inside that method the user class loader is built and <code>deserializeUserDefinedInstances</code> restores the <code>StreamGraph</code>. That restore is §3.5.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobManagerRunner <span style=color:#a6e22e>createJobManagerRunner</span>(
 </span></span><span style=display:flex><span>            ExecutionPlan executionPlan,
 </span></span><span style=display:flex><span>            Configuration configuration,
@@ -1003,7 +1003,7 @@ DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
 </span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Adaptive Scheduler is required for reactive mode&#34;</span>);
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §4.</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// classLoaderLease, userCodeClassLoader, and deserializeUserDefinedInstances are §3.5.</span>
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> DefaultJobMasterServiceFactory jobMasterServiceFactory <span style=color:#f92672>=</span>
 </span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> DefaultJobMasterServiceFactory(
@@ -1039,25 +1039,247 @@ DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
 </span></span><span style=display:flex><span>                classLoaderLease,
 </span></span><span style=display:flex><span>                fatalErrorHandler);
 </span></span><span style=display:flex><span>    }
-</span></span></code></pre></div><hr><h2 id=4-jobgraph-creation>4. JobGraph creation</h2><p>Before the compile, <code>createJobManagerRunner</code> builds a user class loader from the blob keys and calls <code>deserializeUserDefinedInstances</code>. That restores the node map, the <code>keyBy</code> selector, and the <code>ParseOrder</code> instance. The application-cluster path reaches the same factory after <code>EmbeddedExecutor</code> has already serialized those instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// User JARs were stored as blob keys in §3. This loader can read ParseOrder.</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>final</span> LibraryCacheManager.<span style=color:#a6e22e>ClassLoaderLease</span> classLoaderLease <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>        jobManagerServices
-</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getLibraryCacheManager</span>()
-</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>registerClassLoaderLease</span>(
-</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getJobID</span>(),
-</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElseThrow</span>());
+</span></span></code></pre></div><h3 id=35-job-class-life-cycle>3.5 Job class life cycle</h3><p>A job&rsquo;s user classes live in a class loader owned by that job. <code>createJobManagerRunner</code> registers a lease, then resolves the loader from the blob keys. The default resolve order is child-first: <code>ParseOrder</code> and the other task classes are taken from the job JAR before Flink&rsquo;s own classpath. Classes that must stay Flink&rsquo;s, such as <code>org.apache.flink</code>, are still loaded parent-first.</p><p>The lease is reference-counted. The loader stays open while any lease for that job is held. <code>JobMasterServiceLeadershipRunner</code> calls <code>classLoaderLease.release()</code> after the JobMaster process has stopped. When the count reaches zero, the manager closes the <code>URLClassLoader</code>, drops the cache entry, and clears Jackson&rsquo;s type cache so it does not keep those classes alive. A TaskManager uses the same <code>LibraryCacheManager</code> and releases its own lease when the job leaves that process.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface LibraryCacheManager {
+  + registerClassLoaderLease(JobID, ApplicationID) : ClassLoaderLease
+}
+
+interface ClassLoaderHandle {
+  + getOrResolveClassLoader(Collection, Collection) : UserCodeClassLoader
+}
+
+interface ClassLoaderLease {
+  + release() : void
+}
+
+class BlobLibraryCacheManager {
+  - Map~JobID, LibraryCacheEntry~ cacheEntries
+  - PermanentBlobService blobService
+  + registerClassLoaderLease(JobID, ApplicationID) : ClassLoaderLease
+}
+
+class &#34;BlobLibraryCacheManager.LibraryCacheEntry&#34; as LibraryCacheEntry {
+  - int referenceCount
+  - ResolvedClassLoader resolvedClassLoader
+  + obtainLease() : ClassLoaderLease
+  - release() : void
+  - releaseClassLoader() : void
+}
+
+class &#34;BlobLibraryCacheManager.DefaultClassLoaderLease&#34; as DefaultClassLoaderLease {
+  + getOrResolveClassLoader(Collection, Collection) : UserCodeClassLoader
+  + release() : void
+}
+
+interface UserCodeClassLoader {
+  + asClassLoader() : ClassLoader
+  + registerReleaseHookIfAbsent(String, Runnable) : void
+}
+
+class &#34;BlobLibraryCacheManager.ResolvedClassLoader&#34; as ResolvedClassLoader {
+  - ClassLoader classLoader
+  - releaseClassLoader() : void
+}
+
+abstract class MutableURLClassLoader {
+  + addURL(URL) : void
+  + {abstract} copy() : MutableURLClassLoader
+}
+
+abstract class FlinkUserCodeClassLoader {
+  # Consumer~Throwable~ classLoadingExceptionHandler
+  + loadClass(String, boolean) : Class
+  # loadClassWithoutExceptionHandling(String, boolean) : Class
+}
+
+class ChildFirstClassLoader
+
+class ParentFirstClassLoader
+
+class JobMasterServiceLeadershipRunner {
+  - ClassLoaderLease classLoaderLease
+}
+
+interface PermanentBlobService {
+  + getFile(JobID, PermanentBlobKey) : File
+}
+
+class StreamGraph {
+  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
+}
+
+BlobLibraryCacheManager -up-|&gt; LibraryCacheManager
+ClassLoaderLease -up-|&gt; ClassLoaderHandle
+DefaultClassLoaderLease -up-|&gt; ClassLoaderLease
+ResolvedClassLoader -up-|&gt; UserCodeClassLoader
+FlinkUserCodeClassLoader -up-|&gt; MutableURLClassLoader
+ChildFirstClassLoader -up-|&gt; FlinkUserCodeClassLoader
+ParentFirstClassLoader -[norank]up-|&gt; FlinkUserCodeClassLoader
+
+JobMasterServiceLeadershipRunner --&gt; ClassLoaderLease : register / release
+BlobLibraryCacheManager --&gt; LibraryCacheEntry : one entry per job
+LibraryCacheEntry --&gt; DefaultClassLoaderLease : obtainLease
+DefaultClassLoaderLease --&gt; LibraryCacheEntry : release
+LibraryCacheEntry --&gt; ResolvedClassLoader : getOrResolveClassLoader
+LibraryCacheEntry --&gt; PermanentBlobService : getFile
+ResolvedClassLoader --&gt; ChildFirstClassLoader : child-first
+StreamGraph --&gt; ChildFirstClassLoader : deserializeUserDefinedInstances
+
+BlobLibraryCacheManager -[hidden]down-&gt; LibraryCacheEntry
+LibraryCacheEntry -[hidden]down-&gt; MutableURLClassLoader
+ChildFirstClassLoader -[hidden]down-&gt; ParentFirstClassLoader
+ParentFirstClassLoader -[hidden]down-&gt; UserCodeClassLoader
+UserCodeClassLoader -[hidden]down-&gt; ResolvedClassLoader
+@enduml
+</code></pre><p><code>createJobManagerRunner</code> builds the loader from the blob keys and calls <code>deserializeUserDefinedInstances</code>. That restores the node map, the <code>keyBy</code> selector, and the <code>ParseOrder</code> instance. The application-cluster path reaches the same factory after <code>EmbeddedExecutor</code> has already serialized those instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> JobManagerRunner <span style=color:#a6e22e>createJobManagerRunner</span>(
+</span></span><span style=display:flex><span>        ExecutionPlan executionPlan,
+</span></span><span style=display:flex><span>        Configuration configuration,
+</span></span><span style=display:flex><span>        RpcService rpcService,
+</span></span><span style=display:flex><span>        HighAvailabilityServices highAvailabilityServices,
+</span></span><span style=display:flex><span>        HeartbeatServices heartbeatServices,
+</span></span><span style=display:flex><span>        JobManagerSharedServices jobManagerServices,
+</span></span><span style=display:flex><span>        JobManagerJobMetricGroupFactory jobManagerJobMetricGroupFactory,
+</span></span><span style=display:flex><span>        FatalErrorHandler fatalErrorHandler,
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>FailureEnricher<span style=color:#f92672>&gt;</span> failureEnrichers,
+</span></span><span style=display:flex><span>        JobStatusListener jobStatusListener,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>long</span> initializationTimestamp)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> Exception {
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>final</span> ClassLoader userCodeClassLoader <span style=color:#f92672>=</span>
-</span></span><span style=display:flex><span>        classLoaderLease
-</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getOrResolveClassLoader</span>(
-</span></span><span style=display:flex><span>                        executionPlan.<span style=color:#a6e22e>getUserJarBlobKeys</span>(), executionPlan.<span style=color:#a6e22e>getClasspaths</span>())
-</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>asClassLoader</span>();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Empty-plan check, JobMasterConfiguration, JobResultStore, the job LeaderElection,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// the slot-pool scheduler, and the reactive-mode check are in §3.4.</span>
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Fill the transient node map and operator factories before the JobMaster runs.</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
-</span></span><span style=display:flex><span>    ((StreamGraph) executionPlan)
-</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
-</span></span><span style=display:flex><span>                    userCodeClassLoader, jobManagerServices.<span style=color:#a6e22e>getFutureExecutor</span>());
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// User JARs were stored as blob keys in §3. This loader can read ParseOrder.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LibraryCacheManager.<span style=color:#a6e22e>ClassLoaderLease</span> classLoaderLease <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            jobManagerServices
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getLibraryCacheManager</span>()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>registerClassLoaderLease</span>(
+</span></span><span style=display:flex><span>                            executionPlan.<span style=color:#a6e22e>getJobID</span>(),
+</span></span><span style=display:flex><span>                            executionPlan.<span style=color:#a6e22e>getApplicationId</span>().<span style=color:#a6e22e>orElseThrow</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ClassLoader userCodeClassLoader <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            classLoaderLease
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getOrResolveClassLoader</span>(
+</span></span><span style=display:flex><span>                            executionPlan.<span style=color:#a6e22e>getUserJarBlobKeys</span>(), executionPlan.<span style=color:#a6e22e>getClasspaths</span>())
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>asClassLoader</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Fill the transient node map and operator factories before the JobMaster runs.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
+</span></span><span style=display:flex><span>        ((StreamGraph) executionPlan)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
+</span></span><span style=display:flex><span>                        userCodeClassLoader, jobManagerServices.<span style=color:#a6e22e>getFutureExecutor</span>());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// userCodeClassLoader is passed to DefaultJobMasterServiceFactory.</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// classLoaderLease is passed to the JobMasterServiceLeadershipRunner returned in §3.4.</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>registerClassLoaderLease</code> creates one <code>LibraryCacheEntry</code> for the job and returns a lease. The first <code>getOrResolveClassLoader</code> downloads the JARs and builds the class loader. A later call with the same jar contents reuses that loader.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> ClassLoaderLease <span style=color:#a6e22e>registerClassLoaderLease</span>(JobID jobId, ApplicationID applicationId) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lockObject) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> cacheEntries
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>computeIfAbsent</span>(jobId, jobID <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> LibraryCacheEntry(jobId, applicationId))
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>obtainLease</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> UserCodeClassLoader <span style=color:#a6e22e>getOrResolveClassLoader</span>(
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>PermanentBlobKey<span style=color:#f92672>&gt;</span> requiredJarFiles, Collection<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> requiredClasspaths)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    verifyIsNotClosed();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> libraryCacheEntry.<span style=color:#a6e22e>getOrResolveClassLoader</span>(requiredJarFiles, requiredClasspaths);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> UserCodeClassLoader <span style=color:#a6e22e>getOrResolveClassLoader</span>(
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>PermanentBlobKey<span style=color:#f92672>&gt;</span> libraries, Collection<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> classPaths) <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lockObject) {
+</span></span><span style=display:flex><span>        verifyIsNotReleased();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (resolvedClassLoader <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>boolean</span> systemClassLoader <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                    wrapsSystemClassLoader <span style=color:#f92672>&amp;&amp;</span> libraries.<span style=color:#a6e22e>isEmpty</span>() <span style=color:#f92672>&amp;&amp;</span> classPaths.<span style=color:#a6e22e>isEmpty</span>();
+</span></span><span style=display:flex><span>            resolvedClassLoader <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>new</span> ResolvedClassLoader(
+</span></span><span style=display:flex><span>                            systemClassLoader
+</span></span><span style=display:flex><span>                                    <span style=color:#f92672>?</span> ClassLoader.<span style=color:#a6e22e>getSystemClassLoader</span>()
+</span></span><span style=display:flex><span>                                    : createUserCodeClassLoader(
+</span></span><span style=display:flex><span>                                            jobId, applicationId, libraries, classPaths),
+</span></span><span style=display:flex><span>                            libraries,
+</span></span><span style=display:flex><span>                            classPaths,
+</span></span><span style=display:flex><span>                            systemClassLoader);
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>            resolvedClassLoader.<span style=color:#a6e22e>verifyClassLoader</span>(libraries, classPaths);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> resolvedClassLoader;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> URLClassLoader <span style=color:#a6e22e>createUserCodeClassLoader</span>(
+</span></span><span style=display:flex><span>        JobID jobId,
+</span></span><span style=display:flex><span>        ApplicationID applicationId,
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>PermanentBlobKey<span style=color:#f92672>&gt;</span> requiredJarFiles,
+</span></span><span style=display:flex><span>        Collection<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> requiredClasspaths)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> IOException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> URL<span style=color:#f92672>[]</span> libraryURLs <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> URL<span style=color:#f92672>[</span>requiredJarFiles.<span style=color:#a6e22e>size</span>() <span style=color:#f92672>+</span> requiredClasspaths.<span style=color:#a6e22e>size</span>()<span style=color:#f92672>]</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> count <span style=color:#f92672>=</span> 0;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (PermanentBlobKey key : requiredJarFiles) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                libraryURLs<span style=color:#f92672>[</span>count<span style=color:#f92672>]</span> <span style=color:#f92672>=</span> blobService.<span style=color:#a6e22e>getFile</span>(jobId, key).<span style=color:#a6e22e>toURI</span>().<span style=color:#a6e22e>toURL</span>();
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>                libraryURLs<span style=color:#f92672>[</span>count<span style=color:#f92672>]</span> <span style=color:#f92672>=</span> blobService.<span style=color:#a6e22e>getFile</span>(applicationId, key).<span style=color:#a6e22e>toURI</span>().<span style=color:#a6e22e>toURL</span>();
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#f92672>++</span>count;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (URL url : requiredClasspaths) {
+</span></span><span style=display:flex><span>            libraryURLs<span style=color:#f92672>[</span>count<span style=color:#f92672>]</span> <span style=color:#f92672>=</span> url;
+</span></span><span style=display:flex><span>            <span style=color:#f92672>++</span>count;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> classLoaderFactory.<span style=color:#a6e22e>createClassLoader</span>(libraryURLs);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>        ExceptionUtils.<span style=color:#a6e22e>tryRethrowIOException</span>(e);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IOException(<span style=color:#e6db74>&#34;Library cache could not register the user code libraries.&#34;</span>, e);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>classLoaderFactory.createClassLoader</code> builds a <code>ChildFirstClassLoader</code> unless the resolve order is parent-first. <code>loadClass</code> records a failure, then <code>ChildFirstClassLoader</code> searches the job JAR before the parent. A name that matches <code>alwaysParentFirstPatterns</code> goes to the parent immediately.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> Class<span style=color:#f92672>&lt;?&gt;</span> <span style=color:#a6e22e>loadClass</span>(String name, <span style=color:#66d9ef>boolean</span> resolve) <span style=color:#66d9ef>throws</span> ClassNotFoundException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>synchronized</span> (getClassLoadingLock(name)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> loadClassWithoutExceptionHandling(name, resolve);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable classLoadingException) {
+</span></span><span style=display:flex><span>        classLoadingExceptionHandler.<span style=color:#a6e22e>accept</span>(classLoadingException);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> classLoadingException;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> Class<span style=color:#f92672>&lt;?&gt;</span> <span style=color:#a6e22e>loadClassWithoutExceptionHandling</span>(String name, <span style=color:#66d9ef>boolean</span> resolve)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> ClassNotFoundException {
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;</span> c <span style=color:#f92672>=</span> findLoadedClass(name);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (String alwaysParentFirstPattern : alwaysParentFirstPatterns) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (name.<span style=color:#a6e22e>startsWith</span>(alwaysParentFirstPattern)) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>super</span>.<span style=color:#a6e22e>loadClassWithoutExceptionHandling</span>(name, resolve);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            c <span style=color:#f92672>=</span> findClass(name);
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>catch</span> (ClassNotFoundException e) {
+</span></span><span style=display:flex><span>            c <span style=color:#f92672>=</span> <span style=color:#66d9ef>super</span>.<span style=color:#a6e22e>loadClassWithoutExceptionHandling</span>(name, resolve);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (resolve) {
+</span></span><span style=display:flex><span>        resolveClass(c);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> c;
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p><code>StreamGraph.deserializeUserDefinedInstances</code> forwards to <code>UserDefinedObjectsHolder</code>. That holder turns each <code>SerializedValue</code> back into an object with the user class loader. The operator-factory bytes become the <code>StreamMap</code> that holds <code>ParseOrder</code>. The node-map bytes become <code>streamNodes</code>, edges, and <code>statePartitioners</code>. The method bodies stay in the user JAR; deserialization restores the instances.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Entry used by createJobManagerRunner. The holder does the actual restore.</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deserializeUserDefinedInstances</span>(
@@ -1081,6 +1303,18 @@ DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
 </span></span><span style=display:flex><span>    <span style=color:#75715e>// ParseOrder&#39;s StreamMap goes back onto its node. It was transient on StreamNode.</span>
 </span></span><span style=display:flex><span>    streamNodeToOperatorFactories.<span style=color:#a6e22e>forEach</span>(
 </span></span><span style=display:flex><span>            tuple2 <span style=color:#f92672>-&gt;</span> getStreamNode(tuple2.<span style=color:#a6e22e>f0</span>).<span style=color:#a6e22e>setOperatorFactory</span>(tuple2.<span style=color:#a6e22e>f1</span>));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> Collection<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>Integer, StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span> <span style=color:#a6e22e>deserializeOperators</span>(
+</span></span><span style=display:flex><span>        ClassLoader userClassLoader, Executor serializationExecutor) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>CompletableFuture<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>Integer, StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;&gt;</span> futures <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            streamNodeToSerializedOperatorFactories.<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>map</span>(
+</span></span><span style=display:flex><span>                            tuple2 <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                    deserializeOperatorFactoriesAsync(
+</span></span><span style=display:flex><span>                                            userClassLoader, serializationExecutor, tuple2))
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>collect</span>(Collectors.<span style=color:#a6e22e>toList</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> FutureUtils.<span style=color:#a6e22e>combineAll</span>(futures).<span style=color:#a6e22e>get</span>();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> CompletableFuture<span style=color:#f92672>&lt;</span>Tuple2<span style=color:#f92672>&lt;</span>Integer, StreamOperatorFactory<span style=color:#f92672>&lt;?&gt;&gt;&gt;</span>
@@ -1119,7 +1353,90 @@ DefaultJobMasterServiceProcess -[hidden]down-&gt; JobMaster
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>virtualPartitionNodes
 </span></span><span style=display:flex><span>  keyBy(userId)     KeyGroupStreamPartitioner(Order::getUserId)
-</span></span></code></pre></div><p><code>getJobGraph</code> can now walk those nodes. Before <code>deserializeUserDefinedInstances</code>, <code>streamNodes</code> is null.</p><p>The JobMaster holds that restored <code>StreamGraph</code>. This section is the compile. <strong><code>StreamingJobGraphGenerator</code></strong> runs while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
+</span></span></code></pre></div><p><code>getJobGraph</code> can now walk those nodes. Before <code>deserializeUserDefinedInstances</code>, <code>streamNodes</code> is null.</p><p>The loader is removed when the last lease for the job is released. The runner does that after the JobMaster process has closed.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>Void<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>closeAsync</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Already STOPPED: return terminationFuture.</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Otherwise set STOPPED, fail jobMasterGatewayFuture, and complete resultFuture as SUSPENDED.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> CompletableFuture<span style=color:#f92672>&lt;</span>Void<span style=color:#f92672>&gt;</span> processTerminationFuture <span style=color:#f92672>=</span> jobMasterServiceProcess.<span style=color:#a6e22e>closeAsync</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    FutureUtils.<span style=color:#a6e22e>runAfterwards</span>(
+</span></span><span style=display:flex><span>            processTerminationFuture,
+</span></span><span style=display:flex><span>            () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                classLoaderLease.<span style=color:#a6e22e>release</span>();
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// leaderElection.close() runs in this same callback.</span>
+</span></span><span style=display:flex><span>            });
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// FutureUtils.forward copies this future onto terminationFuture, which is returned.</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>release</code> drops the reference count. At zero, the cache entry closes the class loader and removes the job.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>release</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (isClosed) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    isClosed <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    libraryCacheEntry.<span style=color:#a6e22e>release</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>release</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (lockObject) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (isReleased) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (referenceCount <span style=color:#f92672>&gt;</span> 0) {
+</span></span><span style=display:flex><span>            referenceCount <span style=color:#f92672>-=</span> 1;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (referenceCount <span style=color:#f92672>==</span> 0) {
+</span></span><span style=display:flex><span>            releaseClassLoader();
+</span></span><span style=display:flex><span>            cacheEntries.<span style=color:#a6e22e>remove</span>(jobId);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>releaseClassLoader</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (resolvedClassLoader <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        resolvedClassLoader.<span style=color:#a6e22e>releaseClassLoader</span>();
+</span></span><span style=display:flex><span>        resolvedClassLoader <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    isReleased <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Closing that cached loader runs its shutdown hooks and closes the <code>URLClassLoader</code>. Jackson&rsquo;s type cache is cleared in the same step, so it does not keep the user classes reachable.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>releaseClassLoader</span>() {
+</span></span><span style=display:flex><span>    runReleaseHooks();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>wrapsSystemClassLoader) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            ((Closeable) classLoader).<span style=color:#a6e22e>close</span>();
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>catch</span> (IOException e) {
+</span></span><span style=display:flex><span>            LOG.<span style=color:#a6e22e>warn</span>(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;Failed to release user code class loader for &#34;</span>
+</span></span><span style=display:flex><span>                            <span style=color:#f92672>+</span> Arrays.<span style=color:#a6e22e>toString</span>(libraries.<span style=color:#a6e22e>toArray</span>()));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Drop cached Java types that still point at user classes.</span>
+</span></span><span style=display:flex><span>    TypeFactory.<span style=color:#a6e22e>defaultInstance</span>().<span style=color:#a6e22e>clearCache</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>runReleaseHooks</span>() {
+</span></span><span style=display:flex><span>    Set<span style=color:#f92672>&lt;</span>Map.<span style=color:#a6e22e>Entry</span><span style=color:#f92672>&lt;</span>String, Runnable<span style=color:#f92672>&gt;&gt;</span> hooks <span style=color:#f92672>=</span> releaseHooks.<span style=color:#a6e22e>entrySet</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>hooks.<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Map.<span style=color:#a6e22e>Entry</span><span style=color:#f92672>&lt;</span>String, Runnable<span style=color:#f92672>&gt;</span> hookEntry : hooks) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>                hookEntry.<span style=color:#a6e22e>getValue</span>().<span style=color:#a6e22e>run</span>();
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>catch</span> (Throwable t) {
+</span></span><span style=display:flex><span>                LOG.<span style=color:#a6e22e>warn</span>(
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;Failed to run release hook &#39;{}&#39; for user code class loader.&#34;</span>,
+</span></span><span style=display:flex><span>                        hookEntry.<span style=color:#a6e22e>getValue</span>(),
+</span></span><span style=display:flex><span>                        t);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        releaseHooks.<span style=color:#a6e22e>clear</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h2 id=4-jobgraph-creation>4. JobGraph creation</h2><p>The JobMaster holds that restored <code>StreamGraph</code>. This section is the compile. <strong><code>StreamingJobGraphGenerator</code></strong> runs while the JobMaster builds its scheduler. <code>DefaultSchedulerFactory</code> and <code>AdaptiveSchedulerFactory</code> both do this:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>JobGraph jobGraph;
 </span></span><span style=display:flex><span><span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> JobGraph) {
 </span></span><span style=display:flex><span>    jobGraph <span style=color:#f92672>=</span> (JobGraph) executionPlan;
 </span></span><span style=display:flex><span>} <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (executionPlan <span style=color:#66d9ef>instanceof</span> StreamGraph) {
