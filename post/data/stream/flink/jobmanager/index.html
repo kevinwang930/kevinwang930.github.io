@@ -6,7 +6,7 @@ The program arrives in one of two ways. An application cluster already has the u
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/stream>stream</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>JobManager</strong> is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.</p><p>The program arrives in one of two ways. An <strong>application cluster</strong> already has the user JAR on the JobManager. It runs <code>main()</code> itself and copies that JAR into the BlobServer, so the workers can load it. A <strong>session cluster</strong> receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.</p><hr><h2 id=1-overview>1. Overview</h2><p>The <strong>JobManager</strong> is the process that owns a running job. One JVM holds three services:</p><ul><li><strong>Dispatcher</strong> — starts each application, then a JobMaster for each of its jobs.</li><li><strong>ResourceManager</strong> — registry of TaskManagers and free slots.</li><li><strong>JobMaster</strong> — one per job. Compiles the plan and deploys tasks.</li></ul><p>Records stay on the TaskManagers. This post continues from <a href=https://kevinwang930.github.io/post/data/stream/flink/client/>cluster topology and client job submission</a>.</p><p>The Dispatcher is reached by two paths:</p><ol><li><strong>Application cluster</strong> — the user JAR is already on the JobManager, in the image or fetched from remote storage. At startup the Dispatcher creates a <code>PackagedProgramApplication</code> and runs <code>main()</code> there. Each <code>execute()</code> goes through <code>EmbeddedExecutor</code>, which copies that local JAR into the BlobServer with <code>BlobClient</code> and then calls <code>submitJob</code>. TaskManagers download it by <code>PermanentBlobKey</code>, the same way as in a session cluster. The submitting client sends no job request.</li><li><strong>Session cluster</strong> — the client has already run <code>main()</code> and built the <code>StreamGraph</code>. It sends that plan and the user JARs in one REST call. <code>JobSubmitHandler</code> stores each JAR in the BlobServer, wraps the plan in a <code>SingleJobApplication</code>, and calls <code>submitApplication</code>.</li></ol><p>Both paths are job dispatch (§3). They differ in which <code>AbstractApplication</code> is registered and who copies the JAR into the BlobServer. They meet at <code>Dispatcher.submitJob</code>, which starts the JobMaster. That JobMaster compiles the <code>JobGraph</code> (§4) and deploys the <code>ExecutionGraph</code> (§5).</p><p><strong>Orders-per-minute</strong> is the example: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>. Once the JobMaster holds that <code>StreamGraph</code>, both paths become two chained tasks and a hash shuffle:</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><hr><h2 id=2-jobmanager-election>2. JobManager election</h2><p>A Flink cluster needs one place that accepts jobs. That place is the Dispatcher inside a JobManager. If two JobManagers both accepted jobs, they would start the same work twice. So when you run more than one JobManager, they choose a single working process. The others stay up and do nothing until the working one dies.</p><p>One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.</p><p>The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call <code>submitJob</code>, and restore saved plans after a restart. After a job is submitted, that job&rsquo;s JobMaster has its own election (§3.4). This section is only the Dispatcher election.</p><p>Each JobManager process has a <code>DefaultDispatcherRunner</code>. It joins the election by calling <code>leaderElection.startLeaderElection(this)</code>. The service calls back:</p><ul><li><code>grantLeadership</code> — this process won. The runner builds a <code>SessionDispatcherLeaderProcess</code> and starts it. That process creates the Dispatcher. Clients can now submit jobs here.</li><li><code>revokeLeadership</code> — this process lost, or the grant was a tie that got corrected. The runner stops that process. The Dispatcher goes away. No second Dispatcher is left running on a waiting JobManager.</li></ul><p>Before a grant, and after a revoke, the runner holds a <code>StoppedDispatcherLeaderProcess</code>. That object does not create a Dispatcher.</p><p><code>leaderSessionId</code> is a new id for this win. It is not the session-cluster type. The next win gets a new id, so an old Dispatcher cannot keep acting after it has lost.</p><p>The class name <code>SessionDispatcherLeaderProcess</code> is historical. It was written for session mode, and application mode still uses <code>SessionDispatcherLeaderProcessFactory</code>. What changes is the factory handed in. Application mode passes <code>ApplicationDispatcherGatewayServiceFactory</code>, which starts the user <code>main()</code>. Session mode passes <code>DefaultDispatcherGatewayServiceFactory</code>, which waits for a client submission. Both factories are called from the same leader process once <code>grantLeadership</code> fires.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>JobManager</strong> is the process that takes a Flink job and runs it. It finds workers that have room, and keeps the job going until it finishes. The data itself is processed on those workers.</p><p>The program arrives in one of two ways. An <strong>application cluster</strong> already has the user JAR on the JobManager. It runs <code>main()</code> itself and copies that JAR into the BlobServer, so the workers can load it. A <strong>session cluster</strong> receives a client request: the client uploads the JAR, then submits the job. Either way the JobManager splits the program into tasks and starts them.</p><hr><h2 id=1-overview>1. Overview</h2><p>The <strong>JobManager</strong> is the process that owns a running job. One JVM holds three services:</p><ul><li><strong>Dispatcher</strong> — starts each application, then a JobMaster for each of its jobs.</li><li><strong>ResourceManager</strong> — registry of TaskManagers and free slots.</li><li><strong>JobMaster</strong> — one per job. Compiles the plan and deploys tasks.</li></ul><p>Records stay on the <a href=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/>TaskManagers</a>. This post continues from <a href=https://kevinwang930.github.io/post/data/stream/flink/client/>cluster topology and client job submission</a>.</p><p>The Dispatcher is reached by two paths:</p><ol><li><strong>Application cluster</strong> — the user JAR is already on the JobManager, in the image or fetched from remote storage. At startup the Dispatcher creates a <code>PackagedProgramApplication</code> and runs <code>main()</code> there. Each <code>execute()</code> goes through <code>EmbeddedExecutor</code>, which copies that local JAR into the BlobServer with <code>BlobClient</code> and then calls <code>submitJob</code>. TaskManagers download it by <code>PermanentBlobKey</code>, the same way as in a session cluster. The submitting client sends no job request.</li><li><strong>Session cluster</strong> — the client has already run <code>main()</code> and built the <code>StreamGraph</code>. It sends that plan and the user JARs in one REST call. <code>JobSubmitHandler</code> stores each JAR in the BlobServer, wraps the plan in a <code>SingleJobApplication</code>, and calls <code>submitApplication</code>.</li></ol><p>Both paths are job dispatch (§3). They differ in which <code>AbstractApplication</code> is registered and who copies the JAR into the BlobServer. They meet at <code>Dispatcher.submitJob</code>, which starts the JobMaster. That JobMaster compiles the <code>JobGraph</code> (§4) and deploys the <code>ExecutionGraph</code> (§5).</p><p><strong>Orders-per-minute</strong> is the example: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>. Once the JobMaster holds that <code>StreamGraph</code>, both paths become two chained tasks and a hash shuffle:</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/jobmanager/images/flink-graph-translation.svg alt="orders-per-minute job graph translation"></p><hr><h2 id=2-jobmanager-election>2. JobManager election</h2><p>A Flink cluster needs one place that accepts jobs. That place is the Dispatcher inside a JobManager. If two JobManagers both accepted jobs, they would start the same work twice. So when you run more than one JobManager, they choose a single working process. The others stay up and do nothing until the working one dies.</p><p>One JobManager process is enough for either mode. The extras are only for failover. A session cluster often has them, because the cluster stays up across many jobs. An application cluster often has one: if it dies, Kubernetes or YARN starts that application again. Both modes use the same election code when you do configure extras.</p><p>The TaskManagers are a different group. They run the data. This election does not choose a TaskManager. It only chooses which JobManager may run the Dispatcher: accept an application, call <code>submitJob</code>, and restore saved plans after a restart. After a job is submitted, that job&rsquo;s JobMaster has its own election (§3.4). This section is only the Dispatcher election.</p><p>Each JobManager process has a <code>DefaultDispatcherRunner</code>. It joins the election by calling <code>leaderElection.startLeaderElection(this)</code>. The service calls back:</p><ul><li><code>grantLeadership</code> — this process won. The runner builds a <code>SessionDispatcherLeaderProcess</code> and starts it. That process creates the Dispatcher. Clients can now submit jobs here.</li><li><code>revokeLeadership</code> — this process lost, or the grant was a tie that got corrected. The runner stops that process. The Dispatcher goes away. No second Dispatcher is left running on a waiting JobManager.</li></ul><p>Before a grant, and after a revoke, the runner holds a <code>StoppedDispatcherLeaderProcess</code>. That object does not create a Dispatcher.</p><p><code>leaderSessionId</code> is a new id for this win. It is not the session-cluster type. The next win gets a new id, so an old Dispatcher cannot keep acting after it has lost.</p><p>The class name <code>SessionDispatcherLeaderProcess</code> is historical. It was written for session mode, and application mode still uses <code>SessionDispatcherLeaderProcessFactory</code>. What changes is the factory handed in. Application mode passes <code>ApplicationDispatcherGatewayServiceFactory</code>, which starts the user <code>main()</code>. Session mode passes <code>DefaultDispatcherGatewayServiceFactory</code>, which waits for a client submission. Both factories are called from the same leader process once <code>grantLeadership</code> fires.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 interface LeaderElection {
@@ -1533,15 +1533,19 @@ IntermediateDataSet *-- JobEdge
 </span></span><span style=display:flex><span>  chained operators:  window+aggregate , kafkaSink
 </span></span><span style=display:flex><span>  statePartitioner:   userId KeySelector
 </span></span><span style=display:flex><span>  parallelism:        p
-</span></span></code></pre></div><p>Two deployment units, not four. <code>keyBy</code> is only the edge between A and B.</p><hr><h2 id=5-executiongraph>5. ExecutionGraph</h2><p>On the JobManager, the <strong>JobMaster</strong> expands the <code>JobGraph</code> from §4 into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a <strong><code>StreamTask</code></strong> (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>Two deployment units, not four. <code>keyBy</code> is only the edge between A and B.</p><hr><h2 id=5-executiongraph>5. ExecutionGraph</h2><p>On the JobManager, the <strong>JobMaster</strong> expands the <code>JobGraph</code> from §4 into an <strong><code>ExecutionGraph</code></strong>: each <code>JobVertex</code> expands to <code>parallelism</code> <strong><code>ExecutionVertex</code></strong> instances (subtasks <code>A.0</code>, <code>A.1</code>, …). Each vertex holds an <code>Execution</code> attempt. Failures reset executions and restore state from the latest completed checkpoint. Deploying those attempts is §5.1.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class JobMaster {
   + startJobExecution()
 }
 
+class SchedulerBase {
+  + startScheduling()
+}
+
 class ExecutionGraph {
-  Map verticesById
-  + scheduleForExecution()
+  - Map tasks
+  + attachJobGraph(List, JobManagerJobMetricGroup)
   + failGlobal(Throwable)
 }
 
@@ -1556,53 +1560,438 @@ class ExecutionVertex {
 }
 
 class Execution {
-  + deploy()
-  + fail(Throwable)
+  - vertex : ExecutionVertex
+  - attemptId : ExecutionAttemptID
+  - state : ExecutionState
+  - assignedResource : LogicalSlot
+  + tryAssignResource(LogicalSlot) : boolean
+  + getAssignedResource() : LogicalSlot
+  + deploy() : void
+  + fail(Throwable) : void
 }
 
-class TaskDeploymentDescriptor
-class StreamTask {
-  + invoke()
+interface LogicalSlot {
+  + getTaskManagerLocation() : TaskManagerLocation
+  + getTaskManagerGateway() : TaskManagerGateway
+  + getLocality() : Locality
+  + isAlive() : boolean
+  + tryAssignPayload(Payload) : boolean
+  + getPayload() : Payload
+  + releaseSlot(Throwable) : CompletableFuture
+  + getAllocationId() : AllocationID
+  + getSlotRequestId() : SlotRequestId
 }
 
-JobMaster ..&gt; ExecutionGraph : build from JobGraph
+interface &#34;LogicalSlot.Payload&#34; as SlotPayload {
+  + fail(Throwable) : void
+  + getTerminalStateFuture() : CompletableFuture
+}
+
+JobMaster ..&gt; SchedulerBase : startJobExecution
+SchedulerBase --&gt; ExecutionGraph : build from JobGraph
 ExecutionGraph --&gt; ExecutionJobVertex
 ExecutionJobVertex --&gt; ExecutionVertex : parallelism
 ExecutionVertex --&gt; Execution : attempt
-Execution ..&gt; TaskDeploymentDescriptor : deploy
-TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
+Execution --&gt; LogicalSlot : assignedResource
+Execution -up-|&gt; SlotPayload
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// JobMaster (simplified): JobGraph -&gt; ExecutionGraph -&gt; schedule</span>
-</span></span><span style=display:flex><span>ExecutionGraph executionGraph <span style=color:#f92672>=</span> DefaultExecutionGraphBuilder.<span style=color:#a6e22e>buildGraph</span>(
-</span></span><span style=display:flex><span>    jobGraph,
-</span></span><span style=display:flex><span>    configuration,
-</span></span><span style=display:flex><span>    blobWriter,
-</span></span><span style=display:flex><span>    <span style=color:#75715e>/* ... */</span>);
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>static</span> DefaultExecutionGraph <span style=color:#a6e22e>buildGraph</span>(
+</span></span><span style=display:flex><span>        JobGraph jobGraph,
+</span></span><span style=display:flex><span>        Configuration jobManagerConfig,
+</span></span><span style=display:flex><span>        ScheduledExecutorService futureExecutor,
+</span></span><span style=display:flex><span>        Executor ioExecutor,
+</span></span><span style=display:flex><span>        ClassLoader classLoader,
+</span></span><span style=display:flex><span>        CompletedCheckpointStore completedCheckpointStore,
+</span></span><span style=display:flex><span>        CheckpointsCleaner checkpointsCleaner,
+</span></span><span style=display:flex><span>        CheckpointIDCounter checkpointIdCounter,
+</span></span><span style=display:flex><span>        Duration rpcTimeout,
+</span></span><span style=display:flex><span>        BlobWriter blobWriter,
+</span></span><span style=display:flex><span>        Logger log,
+</span></span><span style=display:flex><span>        ShuffleMaster<span style=color:#f92672>&lt;?&gt;</span> shuffleMaster,
+</span></span><span style=display:flex><span>        JobMasterPartitionTracker partitionTracker,
+</span></span><span style=display:flex><span>        TaskDeploymentDescriptorFactory.<span style=color:#a6e22e>PartitionLocationConstraint</span> partitionLocationConstraint,
+</span></span><span style=display:flex><span>        ExecutionDeploymentListener executionDeploymentListener,
+</span></span><span style=display:flex><span>        ExecutionStateUpdateListener executionStateUpdateListener,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>long</span> initializationTimestamp,
+</span></span><span style=display:flex><span>        VertexAttemptNumberStore vertexAttemptNumberStore,
+</span></span><span style=display:flex><span>        VertexParallelismStore vertexParallelismStore,
+</span></span><span style=display:flex><span>        CheckpointStatsTracker checkpointStatsTracker,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> isDynamicGraph,
+</span></span><span style=display:flex><span>        ExecutionJobVertex.<span style=color:#a6e22e>Factory</span> executionJobVertexFactory,
+</span></span><span style=display:flex><span>        MarkPartitionFinishedStrategy markPartitionFinishedStrategy,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>boolean</span> nonFinishedHybridPartitionShouldBeUnknown,
+</span></span><span style=display:flex><span>        JobManagerJobMetricGroup jobManagerJobMetricGroup,
+</span></span><span style=display:flex><span>        ExecutionPlanSchedulingContext executionPlanSchedulingContext)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> JobExecutionException, JobException {
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>executionGraph.<span style=color:#a6e22e>scheduleForExecution</span>();
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// JobInformation, the TaskDeploymentDescriptorFactory, and checkpoint setup surround this call.</span>
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// Each ExecutionVertex gets an Execution attempt that deploys to a slot</span>
-</span></span><span style=display:flex><span>Execution execution <span style=color:#f92672>=</span> executionVertex.<span style=color:#a6e22e>getCurrentExecutionAttempt</span>();
-</span></span><span style=display:flex><span>LogicalSlot slot <span style=color:#f92672>=</span> slotPool.<span style=color:#a6e22e>allocateSlot</span>(<span style=color:#75715e>/* ... */</span>);
-</span></span><span style=display:flex><span>execution.<span style=color:#a6e22e>deploy</span>(slot); <span style=color:#75715e>// TaskManager receives TaskDeploymentDescriptor</span>
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>JobVertex<span style=color:#f92672>&gt;</span> sortedTopology <span style=color:#f92672>=</span> jobGraph.<span style=color:#a6e22e>getVerticesSortedTopologicallyFromSources</span>();
+</span></span><span style=display:flex><span>    executionGraph.<span style=color:#a6e22e>attachJobGraph</span>(sortedTopology, jobManagerJobMetricGroup);
+</span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// On the worker: load invokable (e.g. OneInputStreamTask) and run</span>
-</span></span><span style=display:flex><span>StreamTask<span style=color:#f92672>&lt;?</span>, <span style=color:#f92672>?&gt;</span> task <span style=color:#f92672>=</span> createInvokable(deployment);
-</span></span><span style=display:flex><span>task.<span style=color:#a6e22e>invoke</span>(); <span style=color:#75715e>// mailbox loop: records, timers, checkpoint barriers</span>
-</span></span></code></pre></div><p>After this step the logical pipeline is concrete parallel work: TaskManagers run <code>StreamTask</code>s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.</p><hr><h2 id=6-taskmanagers-slots-and-data-exchange>6. TaskManagers, slots, and data exchange</h2><p>A TaskManager is a JVM worker. It advertises a fixed number of <strong>slots</strong>; each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.</p><p>Records leave a chain through a <strong>result partition</strong> and enter the downstream chain through an <strong>input gate</strong>. Exchange modes matter:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><strong>Pipelined</strong></td><td>Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming)</td></tr><tr><td><strong>Blocking</strong></td><td>Producer finishes a partition before the consumer reads (common in batch)</td></tr></tbody></table><p>Partitioners on <code>StreamEdge</code> decide routing: <code>ForwardPartitioner</code> keeps data local to the same subtask index, <code>KeyGroupStreamPartitioner</code> (after <code>keyBy</code>) hashes keys into key groups, <code>RebalancePartitioner</code> round-robins for load balance.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
-  subgraph TM1[&#34;TaskManager 1&#34;]
-    S0[&#34;Slot 0\nStreamTask A.0&#34;]
-    S1[&#34;Slot 1\nStreamTask A.1&#34;]
-  end
-  subgraph TM2[&#34;TaskManager 2&#34;]
-    S2[&#34;Slot 0\nStreamTask B.0&#34;]
-    S3[&#34;Slot 1\nStreamTask B.1&#34;]
-  end
-  S0 --&gt;|&#34;hash(key) buffers&#34;| S2
-  S0 --&gt;|&#34;hash(key) buffers&#34;| S3
-  S1 --&gt;|&#34;hash(key) buffers&#34;| S2
-  S1 --&gt;|&#34;hash(key) buffers&#34;| S3
-</code></pre><p>Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.</p><hr><h2 id=7-state-and-checkpoints>7. State and checkpoints</h2><p>Stateful operators store values in a <strong>state backend</strong> (heap, RocksDB, or others). After <code>keyBy</code>, state is <strong>keyed</strong>: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.</p><p>Consistency across the distributed graph uses <strong>checkpoints</strong>. The JobMaster’s <code>CheckpointCoordinator</code> periodically triggers a checkpoint:</p><ol><li>Allocate a checkpoint id and storage location.</li><li>Send a trigger to source tasks (and notify operator coordinators when present).</li><li>Sources inject a <strong>checkpoint barrier</strong> into each outgoing stream.</li><li>Barriers flow with the data. On alignment (exactly-once), a task waits until the barrier arrives on all input channels for that checkpoint, then snapshots its state and forwards the barrier downstream.</li><li>Tasks acknowledge the coordinator with state handles. When all acknowledge, the checkpoint is marked <strong>completed</strong> and becomes the recovery baseline.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>attachJobVertices</span>(
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>JobVertex<span style=color:#f92672>&gt;</span> topologicallySorted, JobManagerJobMetricGroup jobManagerJobMetricGroup)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> JobException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (JobVertex jobVertex : topologicallySorted) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// if (jobVertex.isInputVertex() &amp;&amp; !jobVertex.isStoppable()) {</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>//     this.isStoppable = false;</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// }</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        VertexParallelismInformation parallelismInfo <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                parallelismStore.<span style=color:#a6e22e>getParallelismInfo</span>(jobVertex.<span style=color:#a6e22e>getID</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        ExecutionJobVertex ejv <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                executionJobVertexFactory.<span style=color:#a6e22e>createExecutionJobVertex</span>(
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>this</span>, jobVertex, parallelismInfo, coordinatorStore, jobManagerJobMetricGroup);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        ExecutionJobVertex previousTask <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>tasks</span>.<span style=color:#a6e22e>putIfAbsent</span>(jobVertex.<span style=color:#a6e22e>getID</span>(), ejv);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (previousTask <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> JobException(
+</span></span><span style=display:flex><span>                    String.<span style=color:#a6e22e>format</span>(
+</span></span><span style=display:flex><span>                            <span style=color:#e6db74>&#34;Encountered two job vertices with ID %s : previous=[%s] / new=[%s]&#34;</span>,
+</span></span><span style=display:flex><span>                            jobVertex.<span style=color:#a6e22e>getID</span>(), ejv, previousTask));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>verticesInCreationOrder</span>.<span style=color:#a6e22e>add</span>(ejv);
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// this.numJobVerticesTotal++;</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>initialize</span>(
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>int</span> executionHistorySizeLimit,
+</span></span><span style=display:flex><span>        Duration timeout,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>long</span> createTimestamp,
+</span></span><span style=display:flex><span>        SubtaskAttemptNumberStore initialAttemptCounts,
+</span></span><span style=display:flex><span>        ExecutionPlanSchedulingContext executionPlanSchedulingContext)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throws</span> JobException {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    checkState(parallelismInfo.<span style=color:#a6e22e>getParallelism</span>() <span style=color:#f92672>&gt;</span> 0);
+</span></span><span style=display:flex><span>    checkState(<span style=color:#f92672>!</span>isInitialized());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>taskVertices</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ExecutionVertex<span style=color:#f92672>[</span>parallelismInfo.<span style=color:#a6e22e>getParallelism</span>()<span style=color:#f92672>]</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Intermediate results for the produced datasets are created before the vertices.</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>parallelismInfo</span>.<span style=color:#a6e22e>getParallelism</span>(); i<span style=color:#f92672>++</span>) {
+</span></span><span style=display:flex><span>        ExecutionVertex vertex <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                createExecutionVertex(
+</span></span><span style=display:flex><span>                        <span style=color:#66d9ef>this</span>,
+</span></span><span style=display:flex><span>                        i,
+</span></span><span style=display:flex><span>                        producedDataSets,
+</span></span><span style=display:flex><span>                        timeout,
+</span></span><span style=display:flex><span>                        createTimestamp,
+</span></span><span style=display:flex><span>                        executionHistorySizeLimit,
+</span></span><span style=display:flex><span>                        initialAttemptCounts.<span style=color:#a6e22e>getAttemptCount</span>(i));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>taskVertices</span><span style=color:#f92672>[</span>i<span style=color:#f92672>]</span> <span style=color:#f92672>=</span> vertex;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h3 id=51-task-deployment>5.1 Task deployment</h3><p>An <code>Execution</code> is still only an attempt until it has a slot. <code>startScheduling</code> asks the scheduling strategy for regions whose inputs are ready. For each region, <code>allocateSlotsAndDeploy</code> takes the current attempt and <code>Execution.deploy</code> sends a <code>TaskDeploymentDescriptor</code> to that TaskManager. The TaskManager starts the task thread, loads the invokable, and <code>StreamTask.invoke</code> runs the mailbox loop.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+class Execution {
+  - vertex : ExecutionVertex
+  - attemptId : ExecutionAttemptID
+  - state : ExecutionState
+  - assignedResource : LogicalSlot
+  + tryAssignResource(LogicalSlot) : boolean
+  + getAssignedResource() : LogicalSlot
+  + deploy() : void
+  + fail(Throwable) : void
+}
+
+interface LogicalSlot {
+  + getTaskManagerLocation() : TaskManagerLocation
+  + getTaskManagerGateway() : TaskManagerGateway
+  + getLocality() : Locality
+  + isAlive() : boolean
+  + tryAssignPayload(Payload) : boolean
+  + getPayload() : Payload
+  + releaseSlot(Throwable) : CompletableFuture
+  + getAllocationId() : AllocationID
+  + getSlotRequestId() : SlotRequestId
+}
+
+interface &#34;LogicalSlot.Payload&#34; as SlotPayload {
+  + fail(Throwable) : void
+  + getTerminalStateFuture() : CompletableFuture
+}
+
+class DefaultScheduler {
+  + allocateSlotsAndDeploy(List) : void
+}
+
+class TaskDeploymentDescriptor {
+  - jobId : JobID
+  - executionId : ExecutionAttemptID
+  - allocationId : AllocationID
+  - serializedJobInformation : MaybeOffloaded
+  - serializedTaskInformation : MaybeOffloaded
+  - serializedTaskRestore : MaybeOffloaded
+  - producedPartitions : List
+  - inputGates : List
+  + getJobId() : JobID
+  + getExecutionAttemptId() : ExecutionAttemptID
+  + getAllocationId() : AllocationID
+  + getJobInformation() : JobInformation
+  + getTaskInformation() : TaskInformation
+  + getTaskRestore() : JobManagerTaskRestore
+  + getProducedPartitions() : List
+  + getInputGates() : List
+  + loadBigData(PermanentBlobService, GroupCache, GroupCache, GroupCache) : void
+}
+
+class Task {
+  + startTaskThread() : void
+}
+
+class StreamTask {
+  + invoke() : void
+}
+
+DefaultScheduler --&gt; Execution : current attempt
+Execution --&gt; LogicalSlot : assignedResource
+Execution -up-|&gt; SlotPayload
+Execution ..&gt; TaskDeploymentDescriptor : submitTask
+TaskDeploymentDescriptor ..&gt; Task
+Task ..&gt; StreamTask : invoke
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startJobExecution</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// validateRunsInMainThread();</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// JobShuffleContext context = new JobShuffleContextImpl(executionPlan.getJobID(), this);</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// shuffleMaster.registerJob(context);</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// startJobMasterServices();</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// log.info(</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         &#34;Starting execution of job &#39;{}&#39; ({}) under job master id {}.&#34;,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         executionPlan.getName(),</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         executionPlan.getJobID(),</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         getFencingToken());</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    startScheduling();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startScheduling</span>() {
+</span></span><span style=display:flex><span>    schedulerNG.<span style=color:#a6e22e>startScheduling</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startScheduling</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// mainThreadExecutor.assertRunningInMainThread();</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// registerJobMetrics(...);</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// operatorCoordinatorHandler.startAllOperatorCoordinators();</span>
+</span></span><span style=display:flex><span>    startSchedulingInternal();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>startSchedulingInternal</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// log.info(</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         &#34;Starting scheduling with scheduling strategy [{}]&#34;,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>//         schedulingStrategy.getClass().getName());</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// transitionToRunning();</span>
+</span></span><span style=display:flex><span>    schedulingStrategy.<span style=color:#a6e22e>startScheduling</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>scheduleRegion</span>(<span style=color:#66d9ef>final</span> SchedulingPipelinedRegion region) {
+</span></span><span style=display:flex><span>    checkState(
+</span></span><span style=display:flex><span>            areRegionVerticesAllInCreatedState(region),
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;BUG: trying to schedule a region which is not in CREATED state&#34;</span>);
+</span></span><span style=display:flex><span>    scheduledRegions.<span style=color:#a6e22e>add</span>(region);
+</span></span><span style=display:flex><span>    schedulerOperations.<span style=color:#a6e22e>allocateSlotsAndDeploy</span>(regionVerticesSorted.<span style=color:#a6e22e>get</span>(region));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>allocateSlotsAndDeploy</span>(<span style=color:#66d9ef>final</span> List<span style=color:#f92672>&lt;</span>ExecutionVertexID<span style=color:#f92672>&gt;</span> verticesToDeploy) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> Map<span style=color:#f92672>&lt;</span>ExecutionVertexID, ExecutionVertexVersion<span style=color:#f92672>&gt;</span> requiredVersionByVertex <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            executionVertexVersioner.<span style=color:#a6e22e>recordVertexModifications</span>(verticesToDeploy);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> List<span style=color:#f92672>&lt;</span>Execution<span style=color:#f92672>&gt;</span> executionsToDeploy <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            verticesToDeploy.<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>map</span>(<span style=color:#66d9ef>this</span>::getCurrentExecutionOfVertex)
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>collect</span>(Collectors.<span style=color:#a6e22e>toList</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    executionDeployer.<span style=color:#a6e22e>allocateSlotsAndDeploy</span>(executionsToDeploy, requiredVersionByVertex);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> Execution <span style=color:#a6e22e>getCurrentExecutionOfVertex</span>(ExecutionVertexID executionVertexId) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> getExecutionVertex(executionVertexId).<span style=color:#a6e22e>getCurrentExecutionAttempt</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deploy</span>(Execution execution) <span style=color:#66d9ef>throws</span> JobException {
+</span></span><span style=display:flex><span>    execution.<span style=color:#a6e22e>deploy</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>deploy</span>() <span style=color:#66d9ef>throws</span> JobException {
+</span></span><span style=display:flex><span>    assertRunningInJobMasterMainThread();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> LogicalSlot slot <span style=color:#f92672>=</span> assignedResource;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    checkNotNull(
+</span></span><span style=display:flex><span>            slot,
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;In order to deploy the execution we first have to assign a resource via tryAssignResource.&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>slot.<span style=color:#a6e22e>isAlive</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> JobException(<span style=color:#e6db74>&#34;Target slot (TaskManager) for deployment is no longer alive.&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    ExecutionState previous <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>state</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (previous <span style=color:#f92672>==</span> SCHEDULED) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>transitionState(previous, DEPLOYING)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;Cannot deploy task: Concurrent deployment call race.&#34;</span>);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;The vertex must be in SCHEDULED state to be deployed. Found state &#34;</span> <span style=color:#f92672>+</span> previous);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span> <span style=color:#f92672>!=</span> slot.<span style=color:#a6e22e>getPayload</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(
+</span></span><span style=display:flex><span>                String.<span style=color:#a6e22e>format</span>(<span style=color:#e6db74>&#34;The execution %s has not been assigned to the assigned slot.&#34;</span>, <span style=color:#66d9ef>this</span>));
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (state <span style=color:#f92672>!=</span> DEPLOYING) {
+</span></span><span style=display:flex><span>            releaseSlotWhenNotInDeployingState(slot);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// LOG.info(&#34;Deploying {} ...&#34;, vertex.getTaskNameWithSubtaskIndex());</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> TaskManagerGateway taskManagerGateway <span style=color:#f92672>=</span> slot.<span style=color:#a6e22e>getTaskManagerGateway</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> ComponentMainThreadExecutor jobMasterMainThreadExecutor <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                vertex.<span style=color:#a6e22e>getExecutionGraphAccessor</span>().<span style=color:#a6e22e>getJobMasterMainThreadExecutor</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// getVertex().notifyPendingDeployment(this);</span>
+</span></span><span style=display:flex><span>        AtomicReference<span style=color:#f92672>&lt;</span>Either<span style=color:#f92672>&lt;</span>SerializedValue<span style=color:#f92672>&lt;</span>JobManagerTaskRestore<span style=color:#f92672>&gt;</span>, PermanentBlobKey<span style=color:#f92672>&gt;&gt;</span>
+</span></span><span style=display:flex><span>                maybeOffloadedTaskRestoreCleanupRef <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AtomicReference<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// this.tddCreatedDuringDeployFuture = taskDeploymentDescriptorFuture.thenRun(() -&gt; {});</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> CompletableFuture<span style=color:#f92672>&lt;</span>TaskDeploymentDescriptor<span style=color:#f92672>&gt;</span> taskDeploymentDescriptorFuture <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                CompletableFuture.<span style=color:#a6e22e>supplyAsync</span>(
+</span></span><span style=display:flex><span>                                initOffloadedTaskRestoreRef(
+</span></span><span style=display:flex><span>                                        taskRestore, maybeOffloadedTaskRestoreCleanupRef),
+</span></span><span style=display:flex><span>                                executor)
+</span></span><span style=display:flex><span>                        .<span style=color:#a6e22e>thenComposeAsync</span>(
+</span></span><span style=display:flex><span>                                tryGetTaskDeploymentDescriptorForSlot(slot),
+</span></span><span style=display:flex><span>                                jobMasterMainThreadExecutor);
+</span></span><span style=display:flex><span>        taskDeploymentDescriptorFuture
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>thenComposeAsync</span>(
+</span></span><span style=display:flex><span>                        deploymentDescriptor <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                taskManagerGateway.<span style=color:#a6e22e>submitTask</span>(deploymentDescriptor, rpcTimeout),
+</span></span><span style=display:flex><span>                        executor)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>whenCompleteAsync</span>(
+</span></span><span style=display:flex><span>                        (ack, failure) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                handleDeploymentCompletionAndCleanup(
+</span></span><span style=display:flex><span>                                        maybeOffloadedTaskRestoreCleanupRef, ack, failure),
+</span></span><span style=display:flex><span>                        jobMasterMainThreadExecutor);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable t) {
+</span></span><span style=display:flex><span>        ExceptionUtils.<span style=color:#a6e22e>rethrowIfFatalErrorOrOOM</span>(t);
+</span></span><span style=display:flex><span>        markFailed(t);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>submitTask</code> checks the JobManager leader and the slot, builds the <code>Task</code>, then starts its thread. <code>loadAndInstantiateInvokable</code> loads the task class, such as <code>OneInputStreamTask</code>, and <code>restoreAndInvoke</code> calls <code>invoke</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> CompletableFuture<span style=color:#f92672>&lt;</span>Acknowledge<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>submitTask</span>(
+</span></span><span style=display:flex><span>        TaskDeploymentDescriptor tdd, JobMasterId jobMasterId, Duration timeout) {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Leader id, active slot, offloaded TDD data, and new Task(...) precede the start.</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>boolean</span> taskAdded;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        taskAdded <span style=color:#f92672>=</span> taskSlotTable.<span style=color:#a6e22e>addTask</span>(task);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (SlotNotFoundException <span style=color:#f92672>|</span> SlotNotActiveException e) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> TaskSubmissionException(<span style=color:#e6db74>&#34;Could not submit task.&#34;</span>, e);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (taskAdded) {
+</span></span><span style=display:flex><span>        task.<span style=color:#a6e22e>startTaskThread</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// setupResultPartitionBookkeeping(</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>//         tdd.getJobId(), tdd.getProducedPartitions(), task.getTerminationFuture());</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> CompletableFuture.<span style=color:#a6e22e>completedFuture</span>(Acknowledge.<span style=color:#a6e22e>get</span>());
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>final</span> String message <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;TaskManager already contains a task for id &#34;</span> <span style=color:#f92672>+</span> task.<span style=color:#a6e22e>getExecutionId</span>() <span style=color:#f92672>+</span> <span style=color:#e6db74>&#39;.&#39;</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// log.debug(message);</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> TaskSubmissionException(message);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>static</span> TaskInvokable <span style=color:#a6e22e>loadAndInstantiateInvokable</span>(
+</span></span><span style=display:flex><span>        ClassLoader classLoader, String className, Environment environment) <span style=color:#66d9ef>throws</span> Throwable {
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> Class<span style=color:#f92672>&lt;?</span> <span style=color:#66d9ef>extends</span> TaskInvokable<span style=color:#f92672>&gt;</span> invokableClass;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        invokableClass <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                Class.<span style=color:#a6e22e>forName</span>(className, <span style=color:#66d9ef>true</span>, classLoader).<span style=color:#a6e22e>asSubclass</span>(TaskInvokable.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable t) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> Exception(<span style=color:#e6db74>&#34;Could not load the task&#39;s invokable class.&#34;</span>, t);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    Constructor<span style=color:#f92672>&lt;?</span> <span style=color:#66d9ef>extends</span> TaskInvokable<span style=color:#f92672>&gt;</span> statelessCtor;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        statelessCtor <span style=color:#f92672>=</span> invokableClass.<span style=color:#a6e22e>getConstructor</span>(Environment.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (NoSuchMethodException ee) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> FlinkException(<span style=color:#e6db74>&#34;Task misses proper constructor&#34;</span>, ee);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> statelessCtor.<span style=color:#a6e22e>newInstance</span>(environment);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (InvocationTargetException e) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> e.<span style=color:#a6e22e>getTargetException</span>();
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> FlinkException(<span style=color:#e6db74>&#34;Could not instantiate the task&#39;s invokable class.&#34;</span>, e);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>restoreAndInvoke</span>(
+</span></span><span style=display:flex><span>        TaskInvokable finalInvokable, AutoCloseableRegistry cleanUpRegistry) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>transitionState(ExecutionState.<span style=color:#a6e22e>DEPLOYING</span>, ExecutionState.<span style=color:#a6e22e>INITIALIZING</span>)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CancelTaskException();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// taskManagerActions.updateTaskExecutionState(</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>//         new TaskExecutionState(executionId, ExecutionState.INITIALIZING));</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// executingThread.setContextClassLoader(userCodeClassLoader.asClassLoader());</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        runWithSystemExitMonitoring(finalInvokable::restore);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>transitionState(ExecutionState.<span style=color:#a6e22e>INITIALIZING</span>, ExecutionState.<span style=color:#a6e22e>RUNNING</span>)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CancelTaskException();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// taskManagerActions.updateTaskExecutionState(</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>//         new TaskExecutionState(executionId, ExecutionState.RUNNING));</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        runWithSystemExitMonitoring(finalInvokable::invoke);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable throwable) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// cleanUpRegistry.registerCloseable(</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>//         () -&gt; runWithSystemExitMonitoring(() -&gt; finalInvokable.cleanUp(throwable)));</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> throwable;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// runWithSystemExitMonitoring(() -&gt; finalInvokable.cleanUp(null));</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@Override</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>invoke</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isRunning) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// LOG.debug(&#34;Restoring during invoke will be called.&#34;);</span>
+</span></span><span style=display:flex><span>        restoreInternal();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    ensureNotCanceled();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// scheduleBufferDebloater();</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// getEnvironment().getMetricGroup().getIOMetricGroup().markTaskStart();</span>
+</span></span><span style=display:flex><span>    runMailboxLoop();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ensureNotCanceled();</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// afterInvoke();</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>After this step the logical pipeline is concrete parallel work. How a TaskManager runs those <code>StreamTask</code>s and exchanges buffers is <a href=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/>TaskManager</a>.</p><hr><h2 id=6-state-and-checkpoints>6. State and checkpoints</h2><p>Stateful operators store values in a <strong>state backend</strong> (heap, RocksDB, or others). After <code>keyBy</code>, state is <strong>keyed</strong>: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.</p><p>Consistency across the distributed graph uses <strong>checkpoints</strong>. The JobMaster’s <code>CheckpointCoordinator</code> periodically triggers a checkpoint:</p><ol><li>Allocate a checkpoint id and storage location.</li><li>Send a trigger to source tasks (and notify operator coordinators when present).</li><li>Sources inject a <strong>checkpoint barrier</strong> into each outgoing stream.</li><li>Barriers flow with the data. On alignment (exactly-once), a task waits until the barrier arrives on all input channels for that checkpoint, then snapshots its state and forwards the barrier downstream.</li><li>Tasks acknowledge the coordinator with state handles. When all acknowledge, the checkpoint is marked <strong>completed</strong> and becomes the recovery baseline.</li></ol><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
   participant CC as CheckpointCoordinator
   participant Src as Source StreamTask
   participant Op as Downstream StreamTask
@@ -1615,24 +2004,7 @@ TaskDeploymentDescriptor ..&gt; StreamTask : TaskManager runs
   Op-&gt;&gt;CC: AcknowledgeCheckpoint(n)
   Src-&gt;&gt;CC: AcknowledgeCheckpoint(n)
   CC-&gt;&gt;CC: mark checkpoint n complete
-</code></pre><p>Exactly-once end-to-end additionally requires transactional sinks (or two-phase commit operators) that commit only after the checkpoint that includes their side effects completes. At-least-once can skip full barrier alignment so barriers overtake buffered data; recovery may replay more records.</p><p>Savepoints are user-triggered checkpoints with a stable format used for stop-with-savepoint, deploy upgrades, and rescaling. Externalized checkpoints keep metadata after job termination when retention is configured.</p><p>On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.</p><hr><h2 id=8-event-time-and-watermarks>8. Event time and watermarks</h2><p>Flink distinguishes <strong>processing time</strong> (wall clock on the machine) from <strong>event time</strong> (timestamps carried by records). Event-time windows and timers fire from the progress of <strong>watermarks</strong>, not from wall-clock ticks.</p><p>A <code>WatermarkStrategy</code> supplies:</p><ul><li>a <code>TimestampAssigner</code> that stamps each record;</li><li>a <code>WatermarkGenerator</code> that emits watermark values (periodically or on records).</li></ul><p><code>WatermarkStrategy.forBoundedOutOfOrderness(Duration)</code> is the common generator: it tracks the max observed event timestamp and emits <code>maxEventTs - outOfOrderness</code> (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>DataStream<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span> events <span style=color:#f92672>=</span> env.<span style=color:#a6e22e>fromSource</span>(
-</span></span><span style=display:flex><span>    source,
-</span></span><span style=display:flex><span>    WatermarkStrategy
-</span></span><span style=display:flex><span>        .<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span>forBoundedOutOfOrderness(Duration.<span style=color:#a6e22e>ofSeconds</span>(5))
-</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>withTimestampAssigner</span>((e, ts) <span style=color:#f92672>-&gt;</span> e.<span style=color:#a6e22e>getEventTimeMillis</span>()),
-</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;events&#34;</span>);
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>events
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>keyBy</span>(Event::getKey)
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>window</span>(TumblingEventTimeWindows.<span style=color:#a6e22e>of</span>(Duration.<span style=color:#a6e22e>ofMinutes</span>(1)))
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>aggregate</span>(<span style=color:#66d9ef>new</span> CountAggregate())
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>sinkTo</span>(sink);
-</span></span></code></pre></div><p>Watermarks propagate downstream. At a multi-input operator, the effective watermark is the <strong>minimum</strong> across inputs (and channels): the operator must not advance event time past data that might still arrive on a slower channel. Idle sources can be marked idle so they do not hold the minimum forever.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>records:   t=10  t=12  t=11  t=18  t=20
-</span></span><span style=display:flex><span>watermark:              ....  W=13       W=15
-</span></span><span style=display:flex><span>bound = 5s  =&gt;  W ≈ maxEventTs - 5s
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>window [0,60s): closes when watermark &gt;= 60s
-</span></span></code></pre></div><p>Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if <code>allowedLateness</code> extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.</p><hr><h2 id=9-minimal-job-shape>9. Minimal job shape</h2><p>A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>StreamExecutionEnvironment env <span style=color:#f92672>=</span> StreamExecutionEnvironment.<span style=color:#a6e22e>getExecutionEnvironment</span>();
+</code></pre><p>Exactly-once end-to-end additionally requires transactional sinks (or two-phase commit operators) that commit only after the checkpoint that includes their side effects completes. At-least-once can skip full barrier alignment so barriers overtake buffered data; recovery may replay more records.</p><p>Savepoints are user-triggered checkpoints with a stable format used for stop-with-savepoint, deploy upgrades, and rescaling. Externalized checkpoints keep metadata after job termination when retention is configured.</p><p>On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.</p><p>Watermarks and event time are applied by the tasks. That path is <a href=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/>TaskManager §2</a>.</p><hr><h2 id=7-minimal-job-shape>7. Minimal job shape</h2><p>A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>StreamExecutionEnvironment env <span style=color:#f92672>=</span> StreamExecutionEnvironment.<span style=color:#a6e22e>getExecutionEnvironment</span>();
 </span></span><span style=display:flex><span>env.<span style=color:#a6e22e>enableCheckpointing</span>(10_000); <span style=color:#75715e>// ms</span>
 </span></span><span style=display:flex><span>env.<span style=color:#a6e22e>getCheckpointConfig</span>().<span style=color:#a6e22e>setCheckpointingConsistencyMode</span>(CheckpointingMode.<span style=color:#a6e22e>EXACTLY_ONCE</span>);
 </span></span><span style=display:flex><span>
