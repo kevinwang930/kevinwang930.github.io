@@ -103,7 +103,7 @@ User code does not schedule tasks. On the client, Flink records the pipeline and
 1. **API `Transformation`s** — each DataStream call appends a node to a list on the environment.
 2. **`StreamGraph`** — `StreamGraphGenerator` turns that list into `StreamNode` / `StreamEdge` (partitioners, exchange mode).
 3. **Submit** — a `PipelineExecutor` hands the `StreamGraph` (`ExecutionPlan`) to a `ClusterClient`. `RestClusterClient` writes that graph and uploads it. It does not build a `JobGraph`.
-4. **StreamGraph serialization** — the plan is Java-serialized once, with the user JARs alongside. Records and state use Flink's own `TypeSerializer`s, which the client fixes per stream while building the graph and ships inside it.
+4. **StreamGraph serialization** — the plan has two parts: user objects are Java-serialized into `SerializedValue` bytes (§2.3.1), and each data type gets a `TypeSerializer` stored on the `StreamNode` (§2.3.2). Records and state then use those serializers.
 
 `JobGraph` compilation, the `ExecutionGraph`, and task deployment run on the cluster. That path is [JobManager](/post/data/stream/flink/jobmanager/).
 
@@ -567,7 +567,7 @@ public CompletableFuture<JobID> submitJob(ExecutionPlan executionPlan) {
 }
 ```
 
-The bytes in that file are Java serialization of the `StreamGraph` (§2.3). After the JobMaster restores the graph, it compiles a `JobGraph`. See [JobManager](/post/data/stream/flink/jobmanager/).
+The bytes in that file are Java serialization of the `StreamGraph` shell (§2.3.1). User objects inside it are already `SerializedValue` bytes. After the JobMaster restores the graph, it compiles a `JobGraph`. See [JobManager](/post/data/stream/flink/jobmanager/).
 
 ### 2.3 StreamGraph serialization
 
@@ -576,11 +576,185 @@ Serialization turns a Java object into bytes and back. A Flink job needs it in t
 - **The plan**, once per submission. The client writes the `StreamGraph` with ordinary Java serialization and uploads the user JARs beside it.
 - **The data**, all the time. Every record sent between tasks, every value in keyed state, and every checkpoint is bytes.
 
-For the data, Flink does not use Java serialization. It uses its own framework, built on two types. A `TypeInformation` describes the type of a stream, for example "`Order`, a POJO with fields `amount` and `userId`". A `TypeSerializer`, created from that `TypeInformation`, reads and writes values of exactly that type.
+The plan write has two parts. §2.3.1 Java-serializes the user objects. §2.3.2 creates a `TypeSerializer` for each data type and stores it on the `StreamNode`. §2.3.3 onward is how those serializers write records, keys, and checkpoints.
 
-The difference from Java serialization is *when the type is known*. Java serialization learns the type from each object at runtime, so it writes the class name and field descriptions into the bytes. Flink learns the type on the client, while building the `StreamGraph`, and stores the serializers in the `StreamNode`s. The bytes then hold only field values. Records become smaller and can be decoded one at a time, the runtime can compare keys without deserializing them, and checkpoints record which serializer wrote the state, so a changed job can check whether it can still read it.
+#### 2.3.1 User object serialization
 
-The diagram shows how the graph holds the serializers and which `TypeInformation` creates which `TypeSerializer`:
+The JobManager does not put user JARs on its own classpath. It loads them later, in a class loader built for that job. The submit call reads the `StreamGraph` before that loader exists, so `ParseOrder` is not loaded yet. A live operator or `keyBy` selector on the graph would have to be resolved during that read.
+
+`UserDefinedObjectsHolder` keeps those objects as bytes written on the client, where the classes were already loaded. The submit read rebuilds the shell from the holder. The job class loader loads `ParseOrder` afterwards, and the holder is restored then. 
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface Serializable
+
+interface ExecutionPlan
+
+interface Pipeline
+
+class StreamGraph {
+  - transient executionConfig : ExecutionConfig
+  - transient streamNodes : Map
+  - transient virtualSideOutputNodes : Map
+  - transient virtualPartitionNodes : Map
+  - userDefinedObjectsHolder : UserDefinedObjectsHolder
+  - checkpointingSettings : JobCheckpointingSettings
+  + serializeUserDefinedInstances() : void
+  + deserializeUserDefinedInstances(ClassLoader, Executor) : void
+}
+
+class "StreamGraph.UserDefinedObjectsHolder" as UserDefinedObjectsHolder {
+  - serializedStreamNodes : SerializedValue
+  - serializedVirtualSideOutputNodes : SerializedValue
+  - serializedVirtualPartitionNodes : SerializedValue
+  - serializedExecutionConfig : SerializedValue
+  - streamNodeToSerializedOperatorFactories : Collection
+}
+
+class SerializedValue {
+  - serializedData : byte[]
+  + SerializedValue(T)
+  + deserializeValue(ClassLoader) : T
+}
+
+class InstantiationUtil {
+  + {static} serializeObject(Object) : byte[]
+  + {static} deserializeObject(byte[], ClassLoader) : T
+}
+
+class StreamNode {
+  - transient operatorFactory : StreamOperatorFactory
+}
+
+interface StreamOperatorFactory
+
+class JobCheckpointingSettings {
+  - masterHooks : SerializedValue
+  - defaultStateBackend : SerializedValue
+  - defaultCheckpointStorage : SerializedValue
+}
+
+ExecutionPlan -up-|> Serializable
+StreamGraph -up-|> ExecutionPlan
+StreamGraph -[norank]up-|> Pipeline
+
+StreamGraph --> UserDefinedObjectsHolder
+StreamGraph --> StreamNode : transient streamNodes
+StreamGraph --> JobCheckpointingSettings
+UserDefinedObjectsHolder --> SerializedValue
+JobCheckpointingSettings --> SerializedValue
+StreamNode --> StreamOperatorFactory : transient operatorFactory
+SerializedValue --> InstantiationUtil : serializeObject / deserializeObject
+
+StreamGraph -[hidden]down-> UserDefinedObjectsHolder
+UserDefinedObjectsHolder -[hidden]down-> SerializedValue
+SerializedValue -[hidden]down-> InstantiationUtil
+StreamGraph -[hidden]down-> StreamNode
+StreamNode -[hidden]down-> JobCheckpointingSettings
+@enduml
+```
+
+```java
+public void serializeUserDefinedInstances() throws IOException {
+    final ExecutorService serializationExecutor =
+            Executors.newFixedThreadPool(
+                    Math.max(
+                            1,
+                            Math.min(
+                                    Hardware.getNumberCPUCores(),
+                                    getExecutionConfig().getParallelism())),
+                    new ExecutorThreadFactory("flink-operator-serialization-io"));
+    try {
+        this.userDefinedObjectsHolder =
+                new UserDefinedObjectsHolder(
+                        streamNodes,
+                        virtualSideOutputNodes,
+                        virtualPartitionNodes,
+                        executionConfig,
+                        serializationExecutor);
+    } finally {
+        serializationExecutor.shutdown();
+    }
+}
+
+public UserDefinedObjectsHolder(
+        Map<Integer, StreamNode> streamNodes,
+        Map<Integer, Tuple2<Integer, OutputTag>> virtualSideOutputNodes,
+        Map<Integer, Tuple3<Integer, StreamPartitioner<?>, StreamExchangeMode>>
+                virtualPartitionNodes,
+        ExecutionConfig executionConfig,
+        Executor serializationExecutor)
+        throws IOException {
+    serializeStreamNodes(streamNodes, serializationExecutor);
+
+    this.serializedVirtualSideOutputNodes = new SerializedValue<>(virtualSideOutputNodes);
+    this.serializedVirtualPartitionNodes = new SerializedValue<>(virtualPartitionNodes);
+    this.serializedExecutionConfig = new SerializedValue<>(executionConfig);
+}
+
+private void serializeStreamNodes(
+        Map<Integer, StreamNode> toBeSerializedStreamNodes, Executor serializationExecutor) {
+    try {
+        this.streamNodeToSerializedOperatorFactories =
+                serializeOperatorFactories(
+                        toBeSerializedStreamNodes.values(), serializationExecutor);
+        this.serializedStreamNodes = new SerializedValue<>(toBeSerializedStreamNodes);
+    } catch (Exception e) {
+        throw new RuntimeException("Could not serialize stream nodes", e);
+    }
+}
+
+private Collection<Tuple2<Integer, SerializedValue<StreamOperatorFactory<?>>>>
+        serializeOperatorFactories(
+                Collection<StreamNode> streamNodes, Executor serializationExecutor)
+                throws Exception {
+    List<CompletableFuture<Tuple2<Integer, SerializedValue<StreamOperatorFactory<?>>>>> futures =
+            streamNodes.stream()
+                    .filter(node -> node.getOperatorFactory() != null)
+                    .map(
+                            node ->
+                                    serializeOperatorFactoriesAsync(
+                                            serializationExecutor, node))
+                    .collect(Collectors.toList());
+    return FutureUtils.combineAll(futures).get();
+}
+
+private CompletableFuture<Tuple2<Integer, SerializedValue<StreamOperatorFactory<?>>>>
+        serializeOperatorFactoriesAsync(Executor serializationExecutor, StreamNode node) {
+    return CompletableFuture.supplyAsync(
+            () -> {
+                try {
+                    return Tuple2.of(
+                            node.getId(), new SerializedValue<>(node.getOperatorFactory()));
+                } catch (Throwable throwable) {
+                    throw new RuntimeException(
+                            String.format("Could not serialize stream node %s", node),
+                            throwable);
+                }
+            },
+            serializationExecutor);
+}
+```
+
+```java
+public SerializedValue(T value) throws IOException {
+    Preconditions.checkNotNull(value, "Value must not be null");
+    this.serializedData = InstantiationUtil.serializeObject(value);
+}
+
+public T deserializeValue(ClassLoader loader) throws IOException, ClassNotFoundException {
+    Preconditions.checkNotNull(loader, "No classloader has been passed");
+    return InstantiationUtil.deserializeObject(serializedData, loader);
+}
+```
+
+#### 2.3.2 Data type serializer creation
+
+A record, a key, and a checkpoint value are each read on their own. One record may be the only bytes a subpartition receives, and one state value may be the only bytes a restore reads. The class name and the field layout have to be known before any of those values is written.
+
+`TypeSerializer` is that fixed description. The client creates it from the stream type while building the `StreamGraph` and stores it on the `StreamNode`. A later reader uses the serializer already in the plan, so the bytes of a value are its fields. A checkpoint records which serializer wrote the state, so a changed job can decide whether it can still read it.
 
 ```plantuml
 @startuml
@@ -646,14 +820,6 @@ PojoSerializer o-- TypeSerializer : fieldSerializers
 @enduml
 ```
 
-#### 2.3.1 Serializers are fixed at graph build
-
-Flink chooses a serializer for every stream on the client, before the job starts. The cluster receives these serializers inside the plan and never has to work out a record's type at runtime.
-
-The choice starts from the user function. `TypeExtractor` derives the output type of each function from its generic signature: `ParseOrder implements MapFunction<String, Order>` gives `Order`, and `returns(...)` supplies the type when erasure hides it. A class that is public, has a public no-argument constructor, and exposes every field publicly or through a getter and setter becomes a `PojoTypeInfo`; other classes become a `GenericTypeInfo`. Basic types, tuples, rows, and Avro types have their own `TypeInformation`.
-
-`StreamGraph.addOperator` turns the input and output types into serializers with the job's `SerializerConfig`, and `keyBy` stores the key serializer on the keyed node:
-
 ```java
 setSerializers(vertexID, createSerializer(inTypeInfo), null, createSerializer(outTypeInfo));
 
@@ -671,11 +837,9 @@ public void setOneInputStateKey(
 }
 ```
 
-A task receives its serializers with its configuration and applies them to every element. The field layout of a POJO is resolved once by reflection when the serializer is created, not once per record.
+The serializers from §2.3.2 travel inside the plan. Records, keys, and checkpoints are written with them.
 
-For **orders-per-minute**, the client places three kinds of serializer on the `StreamGraph`. The forward edge from `orders` to `ParseOrder` carries `String` with a `StringSerializer`; the two operators are usually chained, so those records are handed over as objects. The hash edge from `ParseOrder` to the window carries `Order` with a `PojoSerializer`, which writes every record into network buffers. The window-and-aggregate node has a `StringSerializer` as `stateKeySerializer` for `userId`, which forms the key bytes in RocksDB, and a serializer for the aggregate's accumulator, derived from its `TypeInformation`, which writes the state values and their checkpoints.
-
-#### 2.3.2 Compact, self-contained records
+#### 2.3.3 Compact, self-contained records
 
 Because the serializer already knows the type, a record's bytes contain only its field values, with no class name or field descriptions. Each record is also complete on its own: it can be decoded without the bytes that came before it.
 
@@ -771,7 +935,7 @@ public static ByteBuffer serializeRecord(
 
 On the read side, `TypeSerializer.deserialize(T reuse, DataInputView source)` can fill an existing instance. With `pipeline.object-reuse` enabled (default `false`), the runtime passes the same instance for each record, which removes one allocation per element at the cost that a user function must not keep a reference to its input.
 
-#### 2.3.3 Work on serialized bytes
+#### 2.3.4 Work on serialized bytes
 
 A Flink serializer always writes equal values as equal bytes. The runtime can therefore store, look up, and sort by key using the bytes alone, without turning them back into objects.
 
@@ -825,7 +989,7 @@ TypeComparator ..> MemorySegment : putNormalizedKey
 @enduml
 ```
 
-#### 2.3.4 Schema evolution of state
+#### 2.3.5 Schema evolution of state
 
 State outlives code. A job is stopped with a savepoint, its classes are changed, and it is restarted from that savepoint. Flink stores a description of the old serializer next to the state, so the new job can decide whether to read the old bytes as they are, convert them, or refuse to start.
 
@@ -884,7 +1048,7 @@ TypeSerializerSchemaCompatibility --> Type
 
 For a POJO, adding or removing a field yields `COMPATIBLE_AFTER_MIGRATION`: the old serializer, restored from its snapshot, reads each value, and the new serializer writes it back; an added field keeps the value set by the no-argument constructor. A different POJO class or an incompatible field serializer, such as a changed field type, yields `INCOMPATIBLE`, and the job fails at restore time rather than reading corrupt values. Java serialization offers only the `serialVersionUID` check: without an explicit value, any change to the class changes the computed identifier and reading fails with `InvalidClassException`.
 
-#### 2.3.5 Kryo fallback for generic types
+#### 2.3.6 Kryo fallback for generic types
 
 Not every class can be analyzed field by field. For those, Flink falls back to the general-purpose Kryo library. The fallback keeps the job running but gives up most of the advantages above, so Flink lets a job forbid it.
 

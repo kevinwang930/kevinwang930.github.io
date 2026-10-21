@@ -31,7 +31,7 @@ The **JobManager** is the process that owns a running job. One JVM holds three s
 - **ResourceManager** — registry of TaskManagers and free slots.
 - **JobMaster** — one per job. Compiles the plan and deploys tasks.
 
-Records stay on the TaskManagers. This post continues from [cluster topology and client job submission](/post/data/stream/flink/client/).
+Records stay on the [TaskManagers](/post/data/stream/flink/taskmanager/). This post continues from [cluster topology and client job submission](/post/data/stream/flink/client/).
 
 The Dispatcher is reached by two paths:
 
@@ -1866,7 +1866,7 @@ Two deployment units, not four. `keyBy` is only the edge between A and B.
 
 ## 5. ExecutionGraph
 
-On the JobManager, the **JobMaster** expands the `JobGraph` from §4 into an **`ExecutionGraph`**: each `JobVertex` expands to `parallelism` **`ExecutionVertex`** instances (subtasks `A.0`, `A.1`, …). The scheduler requests slots, deploys tasks, and each successful deployment starts a **`StreamTask`** (or source/sink specialization) in a TaskManager slot. Failures reset executions and restore state from the latest completed checkpoint.
+On the JobManager, the **JobMaster** expands the `JobGraph` from §4 into an **`ExecutionGraph`**: each `JobVertex` expands to `parallelism` **`ExecutionVertex`** instances (subtasks `A.0`, `A.1`, …). Each vertex holds an `Execution` attempt. Failures reset executions and restore state from the latest completed checkpoint. Deploying those attempts is §5.1.
 
 ```plantuml
 @startuml
@@ -1875,9 +1875,13 @@ class JobMaster {
   + startJobExecution()
 }
 
+class SchedulerBase {
+  + startScheduling()
+}
+
 class ExecutionGraph {
-  Map verticesById
-  + scheduleForExecution()
+  - Map tasks
+  + attachJobGraph(List, JobManagerJobMetricGroup)
   + failGlobal(Throwable)
 }
 
@@ -1892,82 +1896,462 @@ class ExecutionVertex {
 }
 
 class Execution {
-  + deploy()
-  + fail(Throwable)
+  - vertex : ExecutionVertex
+  - attemptId : ExecutionAttemptID
+  - state : ExecutionState
+  - assignedResource : LogicalSlot
+  + tryAssignResource(LogicalSlot) : boolean
+  + getAssignedResource() : LogicalSlot
+  + deploy() : void
+  + fail(Throwable) : void
 }
 
-class TaskDeploymentDescriptor
-class StreamTask {
-  + invoke()
+interface LogicalSlot {
+  + getTaskManagerLocation() : TaskManagerLocation
+  + getTaskManagerGateway() : TaskManagerGateway
+  + getLocality() : Locality
+  + isAlive() : boolean
+  + tryAssignPayload(Payload) : boolean
+  + getPayload() : Payload
+  + releaseSlot(Throwable) : CompletableFuture
+  + getAllocationId() : AllocationID
+  + getSlotRequestId() : SlotRequestId
 }
 
-JobMaster ..> ExecutionGraph : build from JobGraph
+interface "LogicalSlot.Payload" as SlotPayload {
+  + fail(Throwable) : void
+  + getTerminalStateFuture() : CompletableFuture
+}
+
+JobMaster ..> SchedulerBase : startJobExecution
+SchedulerBase --> ExecutionGraph : build from JobGraph
 ExecutionGraph --> ExecutionJobVertex
 ExecutionJobVertex --> ExecutionVertex : parallelism
 ExecutionVertex --> Execution : attempt
-Execution ..> TaskDeploymentDescriptor : deploy
-TaskDeploymentDescriptor ..> StreamTask : TaskManager runs
+Execution --> LogicalSlot : assignedResource
+Execution -up-|> SlotPayload
 @enduml
 ```
 
 ```java
-// JobMaster (simplified): JobGraph -> ExecutionGraph -> schedule
-ExecutionGraph executionGraph = DefaultExecutionGraphBuilder.buildGraph(
-    jobGraph,
-    configuration,
-    blobWriter,
-    /* ... */);
+public static DefaultExecutionGraph buildGraph(
+        JobGraph jobGraph,
+        Configuration jobManagerConfig,
+        ScheduledExecutorService futureExecutor,
+        Executor ioExecutor,
+        ClassLoader classLoader,
+        CompletedCheckpointStore completedCheckpointStore,
+        CheckpointsCleaner checkpointsCleaner,
+        CheckpointIDCounter checkpointIdCounter,
+        Duration rpcTimeout,
+        BlobWriter blobWriter,
+        Logger log,
+        ShuffleMaster<?> shuffleMaster,
+        JobMasterPartitionTracker partitionTracker,
+        TaskDeploymentDescriptorFactory.PartitionLocationConstraint partitionLocationConstraint,
+        ExecutionDeploymentListener executionDeploymentListener,
+        ExecutionStateUpdateListener executionStateUpdateListener,
+        long initializationTimestamp,
+        VertexAttemptNumberStore vertexAttemptNumberStore,
+        VertexParallelismStore vertexParallelismStore,
+        CheckpointStatsTracker checkpointStatsTracker,
+        boolean isDynamicGraph,
+        ExecutionJobVertex.Factory executionJobVertexFactory,
+        MarkPartitionFinishedStrategy markPartitionFinishedStrategy,
+        boolean nonFinishedHybridPartitionShouldBeUnknown,
+        JobManagerJobMetricGroup jobManagerJobMetricGroup,
+        ExecutionPlanSchedulingContext executionPlanSchedulingContext)
+        throws JobExecutionException, JobException {
 
-executionGraph.scheduleForExecution();
+    // JobInformation, the TaskDeploymentDescriptorFactory, and checkpoint setup surround this call.
 
-// Each ExecutionVertex gets an Execution attempt that deploys to a slot
-Execution execution = executionVertex.getCurrentExecutionAttempt();
-LogicalSlot slot = slotPool.allocateSlot(/* ... */);
-execution.deploy(slot); // TaskManager receives TaskDeploymentDescriptor
+    List<JobVertex> sortedTopology = jobGraph.getVerticesSortedTopologicallyFromSources();
+    executionGraph.attachJobGraph(sortedTopology, jobManagerJobMetricGroup);
+}
 
-// On the worker: load invokable (e.g. OneInputStreamTask) and run
-StreamTask<?, ?> task = createInvokable(deployment);
-task.invoke(); // mailbox loop: records, timers, checkpoint barriers
+private void attachJobVertices(
+        List<JobVertex> topologicallySorted, JobManagerJobMetricGroup jobManagerJobMetricGroup)
+        throws JobException {
+    for (JobVertex jobVertex : topologicallySorted) {
+        // if (jobVertex.isInputVertex() && !jobVertex.isStoppable()) {
+        //     this.isStoppable = false;
+        // }
+
+        VertexParallelismInformation parallelismInfo =
+                parallelismStore.getParallelismInfo(jobVertex.getID());
+
+        ExecutionJobVertex ejv =
+                executionJobVertexFactory.createExecutionJobVertex(
+                        this, jobVertex, parallelismInfo, coordinatorStore, jobManagerJobMetricGroup);
+
+        ExecutionJobVertex previousTask = this.tasks.putIfAbsent(jobVertex.getID(), ejv);
+        if (previousTask != null) {
+            throw new JobException(
+                    String.format(
+                            "Encountered two job vertices with ID %s : previous=[%s] / new=[%s]",
+                            jobVertex.getID(), ejv, previousTask));
+        }
+
+        this.verticesInCreationOrder.add(ejv);
+        // this.numJobVerticesTotal++;
+    }
+}
+
+protected void initialize(
+        int executionHistorySizeLimit,
+        Duration timeout,
+        long createTimestamp,
+        SubtaskAttemptNumberStore initialAttemptCounts,
+        ExecutionPlanSchedulingContext executionPlanSchedulingContext)
+        throws JobException {
+
+    checkState(parallelismInfo.getParallelism() > 0);
+    checkState(!isInitialized());
+
+    this.taskVertices = new ExecutionVertex[parallelismInfo.getParallelism()];
+
+    // Intermediate results for the produced datasets are created before the vertices.
+
+    for (int i = 0; i < this.parallelismInfo.getParallelism(); i++) {
+        ExecutionVertex vertex =
+                createExecutionVertex(
+                        this,
+                        i,
+                        producedDataSets,
+                        timeout,
+                        createTimestamp,
+                        executionHistorySizeLimit,
+                        initialAttemptCounts.getAttemptCount(i));
+
+        this.taskVertices[i] = vertex;
+    }
+}
 ```
 
-After this step the logical pipeline is concrete parallel work: TaskManagers run `StreamTask`s, exchange buffers on network edges, and acknowledge checkpoints back to the JobMaster.
+### 5.1 Task deployment
+
+An `Execution` is still only an attempt until it has a slot. `startScheduling` asks the scheduling strategy for regions whose inputs are ready. For each region, `allocateSlotsAndDeploy` takes the current attempt and `Execution.deploy` sends a `TaskDeploymentDescriptor` to that TaskManager. The TaskManager starts the task thread, loads the invokable, and `StreamTask.invoke` runs the mailbox loop.
+
+```plantuml
+@startuml
+top to bottom direction
+
+class Execution {
+  - vertex : ExecutionVertex
+  - attemptId : ExecutionAttemptID
+  - state : ExecutionState
+  - assignedResource : LogicalSlot
+  + tryAssignResource(LogicalSlot) : boolean
+  + getAssignedResource() : LogicalSlot
+  + deploy() : void
+  + fail(Throwable) : void
+}
+
+interface LogicalSlot {
+  + getTaskManagerLocation() : TaskManagerLocation
+  + getTaskManagerGateway() : TaskManagerGateway
+  + getLocality() : Locality
+  + isAlive() : boolean
+  + tryAssignPayload(Payload) : boolean
+  + getPayload() : Payload
+  + releaseSlot(Throwable) : CompletableFuture
+  + getAllocationId() : AllocationID
+  + getSlotRequestId() : SlotRequestId
+}
+
+interface "LogicalSlot.Payload" as SlotPayload {
+  + fail(Throwable) : void
+  + getTerminalStateFuture() : CompletableFuture
+}
+
+class DefaultScheduler {
+  + allocateSlotsAndDeploy(List) : void
+}
+
+class TaskDeploymentDescriptor {
+  - jobId : JobID
+  - executionId : ExecutionAttemptID
+  - allocationId : AllocationID
+  - serializedJobInformation : MaybeOffloaded
+  - serializedTaskInformation : MaybeOffloaded
+  - serializedTaskRestore : MaybeOffloaded
+  - producedPartitions : List
+  - inputGates : List
+  + getJobId() : JobID
+  + getExecutionAttemptId() : ExecutionAttemptID
+  + getAllocationId() : AllocationID
+  + getJobInformation() : JobInformation
+  + getTaskInformation() : TaskInformation
+  + getTaskRestore() : JobManagerTaskRestore
+  + getProducedPartitions() : List
+  + getInputGates() : List
+  + loadBigData(PermanentBlobService, GroupCache, GroupCache, GroupCache) : void
+}
+
+class Task {
+  + startTaskThread() : void
+}
+
+class StreamTask {
+  + invoke() : void
+}
+
+DefaultScheduler --> Execution : current attempt
+Execution --> LogicalSlot : assignedResource
+Execution -up-|> SlotPayload
+Execution ..> TaskDeploymentDescriptor : submitTask
+TaskDeploymentDescriptor ..> Task
+Task ..> StreamTask : invoke
+@enduml
+```
+
+```java
+private void startJobExecution() throws Exception {
+    // validateRunsInMainThread();
+    // JobShuffleContext context = new JobShuffleContextImpl(executionPlan.getJobID(), this);
+    // shuffleMaster.registerJob(context);
+    // startJobMasterServices();
+    // log.info(
+    //         "Starting execution of job '{}' ({}) under job master id {}.",
+    //         executionPlan.getName(),
+    //         executionPlan.getJobID(),
+    //         getFencingToken());
+
+    startScheduling();
+}
+
+private void startScheduling() {
+    schedulerNG.startScheduling();
+}
+
+@Override
+public final void startScheduling() {
+    // mainThreadExecutor.assertRunningInMainThread();
+    // registerJobMetrics(...);
+    // operatorCoordinatorHandler.startAllOperatorCoordinators();
+    startSchedulingInternal();
+}
+
+@Override
+protected void startSchedulingInternal() {
+    // log.info(
+    //         "Starting scheduling with scheduling strategy [{}]",
+    //         schedulingStrategy.getClass().getName());
+    // transitionToRunning();
+    schedulingStrategy.startScheduling();
+}
+
+private void scheduleRegion(final SchedulingPipelinedRegion region) {
+    checkState(
+            areRegionVerticesAllInCreatedState(region),
+            "BUG: trying to schedule a region which is not in CREATED state");
+    scheduledRegions.add(region);
+    schedulerOperations.allocateSlotsAndDeploy(regionVerticesSorted.get(region));
+}
+
+@Override
+public void allocateSlotsAndDeploy(final List<ExecutionVertexID> verticesToDeploy) {
+    final Map<ExecutionVertexID, ExecutionVertexVersion> requiredVersionByVertex =
+            executionVertexVersioner.recordVertexModifications(verticesToDeploy);
+
+    final List<Execution> executionsToDeploy =
+            verticesToDeploy.stream()
+                    .map(this::getCurrentExecutionOfVertex)
+                    .collect(Collectors.toList());
+
+    executionDeployer.allocateSlotsAndDeploy(executionsToDeploy, requiredVersionByVertex);
+}
+
+private Execution getCurrentExecutionOfVertex(ExecutionVertexID executionVertexId) {
+    return getExecutionVertex(executionVertexId).getCurrentExecutionAttempt();
+}
+
+@Override
+public void deploy(Execution execution) throws JobException {
+    execution.deploy();
+}
+
+public void deploy() throws JobException {
+    assertRunningInJobMasterMainThread();
+
+    final LogicalSlot slot = assignedResource;
+
+    checkNotNull(
+            slot,
+            "In order to deploy the execution we first have to assign a resource via tryAssignResource.");
+
+    if (!slot.isAlive()) {
+        throw new JobException("Target slot (TaskManager) for deployment is no longer alive.");
+    }
+
+    ExecutionState previous = this.state;
+    if (previous == SCHEDULED) {
+        if (!transitionState(previous, DEPLOYING)) {
+            throw new IllegalStateException("Cannot deploy task: Concurrent deployment call race.");
+        }
+    } else {
+        throw new IllegalStateException(
+                "The vertex must be in SCHEDULED state to be deployed. Found state " + previous);
+    }
+
+    if (this != slot.getPayload()) {
+        throw new IllegalStateException(
+                String.format("The execution %s has not been assigned to the assigned slot.", this));
+    }
+
+    try {
+        if (state != DEPLOYING) {
+            releaseSlotWhenNotInDeployingState(slot);
+            return;
+        }
+
+        // LOG.info("Deploying {} ...", vertex.getTaskNameWithSubtaskIndex());
+
+        final TaskManagerGateway taskManagerGateway = slot.getTaskManagerGateway();
+
+        final ComponentMainThreadExecutor jobMasterMainThreadExecutor =
+                vertex.getExecutionGraphAccessor().getJobMasterMainThreadExecutor();
+
+        // getVertex().notifyPendingDeployment(this);
+        AtomicReference<Either<SerializedValue<JobManagerTaskRestore>, PermanentBlobKey>>
+                maybeOffloadedTaskRestoreCleanupRef = new AtomicReference<>();
+        // this.tddCreatedDuringDeployFuture = taskDeploymentDescriptorFuture.thenRun(() -> {});
+        final CompletableFuture<TaskDeploymentDescriptor> taskDeploymentDescriptorFuture =
+                CompletableFuture.supplyAsync(
+                                initOffloadedTaskRestoreRef(
+                                        taskRestore, maybeOffloadedTaskRestoreCleanupRef),
+                                executor)
+                        .thenComposeAsync(
+                                tryGetTaskDeploymentDescriptorForSlot(slot),
+                                jobMasterMainThreadExecutor);
+        taskDeploymentDescriptorFuture
+                .thenComposeAsync(
+                        deploymentDescriptor ->
+                                taskManagerGateway.submitTask(deploymentDescriptor, rpcTimeout),
+                        executor)
+                .whenCompleteAsync(
+                        (ack, failure) ->
+                                handleDeploymentCompletionAndCleanup(
+                                        maybeOffloadedTaskRestoreCleanupRef, ack, failure),
+                        jobMasterMainThreadExecutor);
+    } catch (Throwable t) {
+        ExceptionUtils.rethrowIfFatalErrorOrOOM(t);
+        markFailed(t);
+    }
+}
+```
+
+`submitTask` checks the JobManager leader and the slot, builds the `Task`, then starts its thread. `loadAndInstantiateInvokable` loads the task class, such as `OneInputStreamTask`, and `restoreAndInvoke` calls `invoke`.
+
+```java
+public CompletableFuture<Acknowledge> submitTask(
+        TaskDeploymentDescriptor tdd, JobMasterId jobMasterId, Duration timeout) {
+
+    // Leader id, active slot, offloaded TDD data, and new Task(...) precede the start.
+
+    boolean taskAdded;
+
+    try {
+        taskAdded = taskSlotTable.addTask(task);
+    } catch (SlotNotFoundException | SlotNotActiveException e) {
+        throw new TaskSubmissionException("Could not submit task.", e);
+    }
+
+    if (taskAdded) {
+        task.startTaskThread();
+
+        // setupResultPartitionBookkeeping(
+        //         tdd.getJobId(), tdd.getProducedPartitions(), task.getTerminationFuture());
+        return CompletableFuture.completedFuture(Acknowledge.get());
+    } else {
+        final String message =
+                "TaskManager already contains a task for id " + task.getExecutionId() + '.';
+
+        // log.debug(message);
+        throw new TaskSubmissionException(message);
+    }
+}
+
+private static TaskInvokable loadAndInstantiateInvokable(
+        ClassLoader classLoader, String className, Environment environment) throws Throwable {
+
+    final Class<? extends TaskInvokable> invokableClass;
+    try {
+        invokableClass =
+                Class.forName(className, true, classLoader).asSubclass(TaskInvokable.class);
+    } catch (Throwable t) {
+        throw new Exception("Could not load the task's invokable class.", t);
+    }
+
+    Constructor<? extends TaskInvokable> statelessCtor;
+
+    try {
+        statelessCtor = invokableClass.getConstructor(Environment.class);
+    } catch (NoSuchMethodException ee) {
+        throw new FlinkException("Task misses proper constructor", ee);
+    }
+
+    try {
+        return statelessCtor.newInstance(environment);
+    } catch (InvocationTargetException e) {
+        throw e.getTargetException();
+    } catch (Exception e) {
+        throw new FlinkException("Could not instantiate the task's invokable class.", e);
+    }
+}
+
+private void restoreAndInvoke(
+        TaskInvokable finalInvokable, AutoCloseableRegistry cleanUpRegistry) throws Exception {
+    try {
+        if (!transitionState(ExecutionState.DEPLOYING, ExecutionState.INITIALIZING)) {
+            throw new CancelTaskException();
+        }
+
+        // taskManagerActions.updateTaskExecutionState(
+        //         new TaskExecutionState(executionId, ExecutionState.INITIALIZING));
+        // executingThread.setContextClassLoader(userCodeClassLoader.asClassLoader());
+
+        runWithSystemExitMonitoring(finalInvokable::restore);
+
+        if (!transitionState(ExecutionState.INITIALIZING, ExecutionState.RUNNING)) {
+            throw new CancelTaskException();
+        }
+
+        // taskManagerActions.updateTaskExecutionState(
+        //         new TaskExecutionState(executionId, ExecutionState.RUNNING));
+
+        runWithSystemExitMonitoring(finalInvokable::invoke);
+    } catch (Throwable throwable) {
+        // cleanUpRegistry.registerCloseable(
+        //         () -> runWithSystemExitMonitoring(() -> finalInvokable.cleanUp(throwable)));
+        throw throwable;
+    }
+    // runWithSystemExitMonitoring(() -> finalInvokable.cleanUp(null));
+}
+
+@Override
+public final void invoke() throws Exception {
+    if (!isRunning) {
+        // LOG.debug("Restoring during invoke will be called.");
+        restoreInternal();
+    }
+
+    ensureNotCanceled();
+
+    // scheduleBufferDebloater();
+    // getEnvironment().getMetricGroup().getIOMetricGroup().markTaskStart();
+    runMailboxLoop();
+
+    // ensureNotCanceled();
+    // afterInvoke();
+}
+```
+
+After this step the logical pipeline is concrete parallel work. How a TaskManager runs those `StreamTask`s and exchanges buffers is [TaskManager](/post/data/stream/flink/taskmanager/).
 
 ---
 
-## 6. TaskManagers, slots, and data exchange
-
-A TaskManager is a JVM worker. It advertises a fixed number of **slots**; each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.
-
-Records leave a chain through a **result partition** and enter the downstream chain through an **input gate**. Exchange modes matter:
-
-| Mode | Behavior |
-|------|----------|
-| **Pipelined** | Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming) |
-| **Blocking** | Producer finishes a partition before the consumer reads (common in batch) |
-
-Partitioners on `StreamEdge` decide routing: `ForwardPartitioner` keeps data local to the same subtask index, `KeyGroupStreamPartitioner` (after `keyBy`) hashes keys into key groups, `RebalancePartitioner` round-robins for load balance.
-
-```mermaid
-flowchart TB
-  subgraph TM1["TaskManager 1"]
-    S0["Slot 0\nStreamTask A.0"]
-    S1["Slot 1\nStreamTask A.1"]
-  end
-  subgraph TM2["TaskManager 2"]
-    S2["Slot 0\nStreamTask B.0"]
-    S3["Slot 1\nStreamTask B.1"]
-  end
-  S0 -->|"hash(key) buffers"| S2
-  S0 -->|"hash(key) buffers"| S3
-  S1 -->|"hash(key) buffers"| S2
-  S1 -->|"hash(key) buffers"| S3
-```
-
-Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.
-
----
-
-## 7. State and checkpoints
+## 6. State and checkpoints
 
 Stateful operators store values in a **state backend** (heap, RocksDB, or others). After `keyBy`, state is **keyed**: each key group lives with the subtask that owns that group. Operator state (e.g. source offsets as list state) is redistributed on rescale by redistribution schemes declared on the state descriptor.
 
@@ -2001,49 +2385,11 @@ Savepoints are user-triggered checkpoints with a stable format used for stop-wit
 
 On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.
 
----
-
-## 8. Event time and watermarks
-
-Flink distinguishes **processing time** (wall clock on the machine) from **event time** (timestamps carried by records). Event-time windows and timers fire from the progress of **watermarks**, not from wall-clock ticks.
-
-A `WatermarkStrategy` supplies:
-
-- a `TimestampAssigner` that stamps each record;
-- a `WatermarkGenerator` that emits watermark values (periodically or on records).
-
-`WatermarkStrategy.forBoundedOutOfOrderness(Duration)` is the common generator: it tracks the max observed event timestamp and emits `maxEventTs - outOfOrderness` (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.
-
-```java
-DataStream<Event> events = env.fromSource(
-    source,
-    WatermarkStrategy
-        .<Event>forBoundedOutOfOrderness(Duration.ofSeconds(5))
-        .withTimestampAssigner((e, ts) -> e.getEventTimeMillis()),
-    "events");
-
-events
-    .keyBy(Event::getKey)
-    .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
-    .aggregate(new CountAggregate())
-    .sinkTo(sink);
-```
-
-Watermarks propagate downstream. At a multi-input operator, the effective watermark is the **minimum** across inputs (and channels): the operator must not advance event time past data that might still arrive on a slower channel. Idle sources can be marked idle so they do not hold the minimum forever.
-
-```text
-records:   t=10  t=12  t=11  t=18  t=20
-watermark:              ....  W=13       W=15
-bound = 5s  =>  W ≈ maxEventTs - 5s
-
-window [0,60s): closes when watermark >= 60s
-```
-
-Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if `allowedLateness` extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.
+Watermarks and event time are applied by the tasks. That path is [TaskManager §2](/post/data/stream/flink/taskmanager/).
 
 ---
 
-## 9. Minimal job shape
+## 7. Minimal job shape
 
 A complete streaming job always has the same outer shape: environment, source with timestamps if event time is used, keyed stateful (or windowed) operators, sink, and checkpoint configuration.
 
