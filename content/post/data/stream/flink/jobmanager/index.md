@@ -2385,7 +2385,7 @@ Savepoints are user-triggered checkpoints with a stable format used for stop-wit
 
 On recovery, the JobMaster resumes from the latest completed checkpoint: tasks restore state handles, sources re-emit from the offsets stored in that snapshot, and in-flight data after the barriers is discarded or replayed according to the mode.
 
-Watermarks and event time are applied by the tasks. That path is [TaskManager §2](/post/data/stream/flink/taskmanager/).
+Watermarks and event time are applied by the tasks. That path is [late data handling](/post/data/stream/flink/late-data-handling/).
 
 ---
 

@@ -18,7 +18,7 @@ A **TaskManager** is the worker that runs a Flink job. The JobManager only picks
 
 - **Slots.** Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
 - **Direct exchange.** A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-- **Local state and time.** Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.
+- **Local state and time.** Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is [late data handling](/post/data/stream/flink/late-data-handling/).
 
 
 <!--more-->
@@ -73,6 +73,10 @@ The job needs two slots, not four. The `keyBy(userId)` edge is still a hash from
 
 ## 2. Data exchange
 
+A TaskManager keeps two connections. One is with the JobManager, for slots and tasks. The other is with other TaskManagers, for records.
+
+![Orders-per-minute on two TaskManagers. Pekko client connects to the other Pekko server, which then reaches TaskExecutor. Records use NettyClient and NettyServer.](images/taskmanager-jobmanager-connections.svg)
+
 Operators inside one chain pass a record by a method call. The exchange starts at the boundary between two tasks. The producer has already serialized the record into a network **buffer** and appended that buffer to a **result subpartition**. The consumer reads it through an **input channel** on its input gate. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.
 
 There are two connections.
@@ -114,34 +118,77 @@ That loop is the backpressure in section 1. A full input gate stops granting cre
 ```plantuml
 @startuml
 
-class ResultPartition
-class ResultSubpartition
-
-class InputGate
-class InputChannel {
-  + requestSubpartitions() : void
+class TaskExecutor {
+  - taskExecutorServices : TaskManagerServices
+  - shuffleEnvironment : ShuffleEnvironment
 }
-class LocalInputChannel
-class RemoteInputChannel
+class TaskManagerServices {
+  - shuffleEnvironment : ShuffleEnvironment
+}
+class NettyShuffleServiceFactory {
+  + createShuffleEnvironment(ShuffleEnvironmentContext) : NettyShuffleEnvironment
+}
 
-class NettyPartitionRequestClient {
+class ShuffleEnvironment {
+  + start() : int
+  + createResultPartitionWriters(ShuffleIOOwnerContext, List) : List
+  + createInputGates(ShuffleIOOwnerContext, PartitionProducerStateProvider, List) : List
+}
+class NettyShuffleEnvironment {
+  - connectionManager : ConnectionManager
+  - resultPartitionManager : ResultPartitionManager
+  - resultPartitionFactory : ResultPartitionFactory
+  - singleInputGateFactory : SingleInputGateFactory
+}
+
+class ConnectionManager {
+  + start() : int
+  + createPartitionRequestClient(ConnectionID) : PartitionRequestClient
+}
+class NettyConnectionManager {
+  - server : NettyServer
+  - client : NettyClient
+  - nettyProtocol : NettyProtocol
+}
+class NettyServer {
+  + init(NettyProtocol, NettyBufferPool) : int
+}
+class NettyClient {
+  + init(NettyProtocol, NettyBufferPool) : void
+  + connect(InetSocketAddress) : ChannelFuture
+}
+class PartitionRequestClient {
   + requestSubpartition(ResultPartitionID, ResultSubpartitionIndexSet, RemoteInputChannel, int) : void
+}
+class NettyPartitionRequestClient {
+  - tcpChannel : Channel
 }
 class NettyProtocol {
   + getServerChannelHandlers() : ChannelHandler[]
   + getClientChannelHandlers() : ChannelHandler[]
 }
 
+class ResultPartitionManager {
+  + registerResultPartition(ResultPartition) : void
+  + createSubpartitionView(ResultPartitionID, ResultSubpartitionIndexSet, BufferAvailabilityListener) : ResultSubpartitionView
+}
+class ResultPartition
+class ResultSubpartition
+class SingleInputGate
+class InputChannel {
+  + requestSubpartitions() : void
+}
+class LocalInputChannel
+class RemoteInputChannel
+class NettyMessage
 class "NettyMessage.PartitionRequest" as PartitionRequest {
   - partitionId : ResultPartitionID
-  - queueIndexSet : ResultSubpartitionIndexSet
   - receiverId : InputChannelID
   - credit : int
 }
 class "NettyMessage.BufferResponse" as BufferResponse {
   - buffer : Buffer
   - receiverId : InputChannelID
-  - sequenceNumber : int
   - backlog : int
 }
 class "NettyMessage.AddCredit" as AddCredit {
@@ -149,15 +196,36 @@ class "NettyMessage.AddCredit" as AddCredit {
   - receiverId : InputChannelID
 }
 
-ResultPartition --> ResultSubpartition
-InputGate --> InputChannel
+NettyShuffleEnvironment -up-|> ShuffleEnvironment
+NettyConnectionManager -up-|> ConnectionManager
+NettyPartitionRequestClient -down-|> PartitionRequestClient
 LocalInputChannel -up-|> InputChannel
 RemoteInputChannel -up-|> InputChannel
+PartitionRequest -up-|> NettyMessage
+BufferResponse -up-|> NettyMessage
+AddCredit -up-|> NettyMessage
+
+TaskExecutor -down-> TaskManagerServices : taskExecutorServices
+TaskManagerServices -down-> ShuffleEnvironment : shuffleEnvironment
+TaskExecutor -down-> ShuffleEnvironment : shuffleEnvironment
+NettyShuffleServiceFactory --> NettyShuffleEnvironment : createShuffleEnvironment
+
+NettyShuffleEnvironment --> ConnectionManager
+NettyShuffleEnvironment --> ResultPartitionManager
+NettyShuffleEnvironment --> ResultPartition : createResultPartitionWriters
+NettyShuffleEnvironment --> SingleInputGate : createInputGates
+
+NettyConnectionManager --> NettyServer
+NettyConnectionManager --> NettyClient
+NettyConnectionManager --> NettyProtocol
+NettyClient --> NettyPartitionRequestClient
+
+ResultPartitionManager --> ResultPartition
+ResultPartition --> ResultSubpartition
+SingleInputGate --> InputChannel
+LocalInputChannel --> ResultPartitionManager : createSubpartitionView
 RemoteInputChannel --> NettyPartitionRequestClient
 NettyPartitionRequestClient --> PartitionRequest
-NettyProtocol --> PartitionRequest
-NettyProtocol --> BufferResponse
-NettyProtocol --> AddCredit
 
 @enduml
 ```
@@ -313,40 +381,239 @@ public void requestSubpartition(
 }
 ```
 
-## 3. Event time and watermarks
+## 3. Task execution
 
-Flink distinguishes **processing time** (wall clock on the machine) from **event time** (timestamps carried by records). Event-time windows and timers fire from the progress of **watermarks**, not from wall-clock ticks. The client attaches a `WatermarkStrategy` when it builds the source. Each `StreamTask` runs that strategy on its records.
+The JobMaster sends one `TaskDeploymentDescriptor` per execution attempt by calling `TaskExecutorGateway.submitTask`. `TaskExecutor` implements that gateway method. The call checks that this attempt still belongs to the current JobMaster and that `tryMarkSlotActive` can take the slot named in the descriptor. It then builds a `Task`, puts that task in the slot with `taskSlotTable.addTask`, and calls `startTaskThread`. The `Task` object is the thread. Its `run` method calls `doRun`.
 
-A `WatermarkStrategy` supplies:
+`doRun` moves the attempt from `CREATED` to `DEPLOYING`. It loads the user-code class loader, calls `setupPartitionsAndGates` so the result partitions and input gates from section 2 exist, and builds a `RuntimeEnvironment`. `loadAndInstantiateInvokable` loads `TaskInformation.getInvokableClassName()` and calls the constructor that takes that environment. For a streaming job the class is a `StreamTask`: `SourceOperatorStreamTask` when the task is a source operator, `OneInputStreamTask` when the task has one network input. In the orders-per-minute job each of `A.0`, `A.1`, `B.0`, and `B.1` is one of these threads. Operators inside the chain still share that one thread.
 
-- a `TimestampAssigner` that stamps each record;
-- a `WatermarkGenerator` that emits watermark values (periodically or on records).
+```plantuml
+@startuml
 
-`WatermarkStrategy.forBoundedOutOfOrderness(Duration)` is the common generator: it tracks the max observed event timestamp and emits `maxEventTs - outOfOrderness` (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.
+class TaskExecutorGateway {
+  + submitTask(TaskDeploymentDescriptor, JobMasterId, Duration) : CompletableFuture<Acknowledge>
+}
+class TaskExecutor implements TaskExecutorGateway {
+  - taskExecutorServices : TaskManagerServices
+}
+class Task {
+  - executingThread : Thread
+  - executionState : ExecutionState
+  - invokable : TaskInvokable
+  - nameOfInvokableClass : String
+  - partitionWriters : ResultPartitionWriter[]
+  - inputGates : IndexedInputGate[]
+  + startTaskThread() : void
+  + run() : void
+  - doRun() : void
+  - restoreAndInvoke(TaskInvokable, AutoCloseableRegistry) : void
+}
+class Environment {
+  + getAllWriters() : ResultPartitionWriter[]
+  + getAllInputGates() : IndexedInputGate[]
+}
+class RuntimeEnvironment implements Environment {
+  - writers : ResultPartitionWriter[]
+  - inputGates : IndexedInputGate[]
+  - containingTask : Task
+}
+class TaskInvokable {
+  + restore() : void
+  + invoke() : void
+  + cleanUp(Throwable) : void
+  + cancel() : void
+}
+class AbstractInvokable implements TaskInvokable {
+  - environment : Environment
+}
+class StreamTask implements TaskInvokable {
+  - environment : Environment
+  # mailboxProcessor : MailboxProcessor
+  # operatorChain : OperatorChain
+  # inputProcessor : StreamInputProcessor
+  # mainOperator : StreamOperator
+  + invoke() : void
+  # init() : void
+  # processInput(MailboxDefaultAction.Controller) : void
+}
+class OneInputStreamTask extends StreamTask
+class SourceOperatorStreamTask extends StreamTask
+class OneInputStreamOperator
+class StreamMap implements OneInputStreamOperator {
+  + processElement(StreamRecord) : void
+}
+class WindowOperator implements OneInputStreamOperator {
+  # windowAssigner : WindowAssigner
+  - trigger : Trigger
+  + processElement(StreamRecord) : void
+}
+class SourceOperator {
+  - sourceReader : SourceReader
+  + initReader() : void
+  + getSourceReader() : SourceReader
+}
+class MailboxProcessor {
+  # mailbox : TaskMailbox
+  # mailboxDefaultAction : MailboxDefaultAction
+  + runMailboxLoop() : void
+}
+class OperatorChain {
+  # streamOutputs : RecordWriterOutput[]
+  # mainOperatorWrapper : StreamOperatorWrapper
+  + getMainOperator() : StreamOperator
+}
+
+TaskExecutor --> Task : new Task
+Task --> TaskInvokable : invokable
+AbstractInvokable --> Environment : environment
+StreamTask --> Environment : environment
+RuntimeEnvironment --> Task : containingTask
+StreamTask --> MailboxProcessor : mailboxProcessor
+StreamTask --> OperatorChain : operatorChain
+MailboxProcessor --> MailboxDefaultAction : mailboxDefaultAction
+OneInputStreamTask --> OneInputStreamOperator : mainOperator
+SourceOperatorStreamTask --> SourceOperator : mainOperator
+
+AbstractInvokable -[hidden]-> StreamTask
+OneInputStreamTask -[hidden]-> SourceOperatorStreamTask
+MailboxProcessor -[hidden]-> OperatorChain
+Task -[hidden]-> StreamTask
+OneInputStreamTask -[hidden]down- StreamMap
+StreamMap -[hidden]down- WindowOperator
+SourceOperatorStreamTask -[hidden]down- SourceOperator
+
+@enduml
+```
+
+`restoreAndInvoke` is the state machine around the user code. `restore` runs while the attempt is `INITIALIZING`. `invoke` runs while it is `RUNNING`. Each transition is reported to the JobMaster through `taskManagerActions.updateTaskExecutionState`. After `invoke` returns, `doRun` finishes the result partitions and moves the attempt to `FINISHED`. A failure or a cancel takes the other branch, `transitionStateOnFailure`.
 
 ```java
-DataStream<Event> events = env.fromSource(
-    source,
-    WatermarkStrategy
-        .<Event>forBoundedOutOfOrderness(Duration.ofSeconds(5))
-        .withTimestampAssigner((e, ts) -> e.getEventTimeMillis()),
-    "events");
+private void restoreAndInvoke(
+        TaskInvokable finalInvokable, AutoCloseableRegistry cleanUpRegistry) throws Exception {
+    try {
+        // switch to the INITIALIZING state, if that fails, we have been canceled/failed in the
+        // meantime
+        if (!transitionState(ExecutionState.DEPLOYING, ExecutionState.INITIALIZING)) {
+            throw new CancelTaskException();
+        }
 
-events
-    .keyBy(Event::getKey)
-    .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
-    .aggregate(new CountAggregate())
-    .sinkTo(sink);
+        taskManagerActions.updateTaskExecutionState(
+                new TaskExecutionState(executionId, ExecutionState.INITIALIZING));
+
+        // make sure the user code classloader is accessible thread-locally
+        executingThread.setContextClassLoader(userCodeClassLoader.asClassLoader());
+
+        runWithSystemExitMonitoring(finalInvokable::restore);
+
+        if (!transitionState(ExecutionState.INITIALIZING, ExecutionState.RUNNING)) {
+            throw new CancelTaskException();
+        }
+
+        // notify everyone that we switched to running
+        taskManagerActions.updateTaskExecutionState(
+                new TaskExecutionState(executionId, ExecutionState.RUNNING));
+
+        runWithSystemExitMonitoring(finalInvokable::invoke);
+    } catch (Throwable throwable) {
+        cleanUpRegistry.registerCloseable(
+                () -> runWithSystemExitMonitoring(() -> finalInvokable.cleanUp(throwable)));
+        throw throwable;
+    }
+    runWithSystemExitMonitoring(() -> finalInvokable.cleanUp(null));
+}
 ```
 
-Watermarks propagate downstream. At a multi-input operator, the effective watermark is the **minimum** across inputs (and channels): the operator must not advance event time past data that might still arrive on a slower channel. Idle sources can be marked idle so they do not hold the minimum forever.
+`StreamTask.restore` builds the `OperatorChain`, calls the task's `init` (a `OneInputStreamTask` builds a `StreamOneInputProcessor` over its input gate and that chain), and restores state. `invoke` then enters the mailbox. `runMailboxLoop` is the whole steady state of the thread: take any mail that is waiting, then run the default action. Mail is how a checkpoint, a timer, or a cancel reaches this thread. The default action is `processInput`.
 
-```text
-records:   t=10  t=12  t=11  t=18  t=20
-watermark:              ....  W=13       W=15
-bound = 5s  =>  W ≈ maxEventTs - 5s
+```java
+public final void invoke() throws Exception {
+    // Allow invoking method 'invoke' without having to call 'restore' before it.
+    if (!isRunning) {
+        LOG.debug("Restoring during invoke will be called.");
+        restoreInternal();
+    }
 
-window [0,60s): closes when watermark >= 60s
+    // final check to exit early before starting to run
+    ensureNotCanceled();
+
+    scheduleBufferDebloater();
+
+    // let the task do its work
+    getEnvironment().getMetricGroup().getIOMetricGroup().markTaskStart();
+    runMailboxLoop();
+
+    // if this left the run() method cleanly despite the fact that this was canceled,
+    // make sure the "clean shutdown" is not attempted
+    ensureNotCanceled();
+
+    afterInvoke();
+}
 ```
 
-Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if `allowedLateness` extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.
+```java
+public void runMailboxLoop() throws Exception {
+    suspended = !mailboxLoopRunning;
+
+    final TaskMailbox localMailbox = mailbox;
+
+    checkState(
+            localMailbox.isMailboxThread(),
+            "Method must be executed by declared mailbox thread!");
+
+    assert localMailbox.getState() == TaskMailbox.State.OPEN : "Mailbox must be opened!";
+
+    final MailboxController mailboxController = new MailboxController(this);
+
+    while (isNextLoopPossible()) {
+        // The blocking `processMail` call will not return until default action is available.
+        processMail(localMailbox, false);
+        if (isNextLoopPossible()) {
+            mailboxDefaultAction.runDefaultAction(
+                    mailboxController); // lock is acquired inside default action as needed
+        }
+    }
+}
+```
+
+`processInput` asks the input processor for one step. `MORE_AVAILABLE` means another record can be read on the next loop. `NOTHING_AVAILABLE` and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2, observed from inside the task thread. `END_OF_DATA` and `END_OF_INPUT` finish the input and suspend the default action so the loop can drain the remaining mail and leave `invoke`.
+
+```java
+protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
+    DataInputStatus status = inputProcessor.processInput();
+    switch (status) {
+        case MORE_AVAILABLE:
+            if (taskIsAvailable()) {
+                return;
+            }
+            break;
+        case NOTHING_AVAILABLE:
+            break;
+        case END_OF_RECOVERY:
+            throw new IllegalStateException("We should not receive this event here.");
+        case STOPPED:
+            endData(StopMode.NO_DRAIN);
+            return;
+        case END_OF_DATA:
+            endData(StopMode.DRAIN);
+            notifyEndOfData();
+            return;
+        case END_OF_INPUT:
+            if (recoveryCompletionFuture != null && !recoveryCompletionFuture.isDone()) {
+                // suspend only the default action while recovery is still running
+                MailboxDefaultAction.Suspension suspension = controller.suspendDefaultAction();
+                recoveryCompletionFuture.whenComplete(
+                        (ign, t) ->
+                                mainMailboxExecutor.execute(
+                                        suspension::resume,
+                                        "resume default action after recovery"));
+                return;
+            }
+            controller.suspendDefaultAction();
+            mailboxProcessor.suspend();
+            return;
+    }
+
+    // if the chain, the result writer, the input, or the changelog is unavailable,
+    // suspend the default action until that future completes
+}
+```
