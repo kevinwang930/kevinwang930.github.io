@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-label="Orders-per-minute. ResourceManager and JobMaster join PekkoRpcService. Pekko client connects to the other process Pekko server. That server then reaches TaskExecutor. Shuffle records use NettyClient and NettyServer.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-label="Orders-per-minute. ResourceManager and JobMaster join PekkoRpcService. Pekko client connects to the other process Pekko server. That server then reaches TaskExecutor. Shuffle records leave the producer's NettyServer and arrive at the consumer's NettyClient.">
   <defs>
     <marker id="rpc" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
       <path d="M0,0 L10,4 L0,8 Z" fill="#2563eb"/>
@@ -55,10 +55,10 @@
   <text x="167" y="772" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">B.0</text>
   <text x="167" y="796" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155">window -&gt; kafkaSink</text>
 
-  <rect x="328" y="556" width="232" height="120" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="444" y="622" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#9a3412">NettyClient</text>
-  <rect x="328" y="724" width="232" height="120" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
-  <text x="444" y="790" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#065f46">NettyServer</text>
+  <rect x="328" y="556" width="232" height="120" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+  <text x="444" y="622" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#065f46">NettyServer</text>
+  <rect x="328" y="724" width="232" height="120" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
+  <text x="444" y="790" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#9a3412">NettyClient</text>
 
   <rect x="704" y="340" width="560" height="556" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.6"/>
   <text x="720" y="362" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#9a3412">TaskManager</text>
@@ -70,10 +70,10 @@
   <rect x="720" y="462" width="528" height="40" rx="6" fill="#ffffff" stroke="#c2410c"/>
   <text x="984" y="487" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#0f172a">TaskExecutor</text>
 
-  <rect x="720" y="556" width="232" height="120" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
-  <text x="836" y="622" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#9a3412">NettyClient</text>
-  <rect x="720" y="724" width="232" height="120" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
-  <text x="836" y="790" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#065f46">NettyServer</text>
+  <rect x="720" y="556" width="232" height="120" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+  <text x="836" y="622" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#065f46">NettyServer</text>
+  <rect x="720" y="724" width="232" height="120" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
+  <text x="836" y="790" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#9a3412">NettyClient</text>
 
   <rect x="980" y="518" width="268" height="358" rx="6" fill="#e4eaf4" stroke="#94a3b8"/>
   <text x="1114" y="542" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#334155">Slot 1</text>
@@ -111,7 +111,7 @@
   <line x1="1114" y1="676" x2="1114" y2="716" stroke="#ffffff" stroke-width="6"/>
   <line x1="1114" y1="676" x2="1114" y2="716" stroke="#059669" stroke-width="2.5" marker-end="url(#local)"/>
 
-  <!-- A to the local Netty client, server to the local B. Horizontal only. -->
+  <!-- A writes into the local NettyServer. The consumer's NettyClient delivers to B. -->
   <line x1="288" y1="616" x2="328" y2="616" stroke="#ffffff" stroke-width="6"/>
   <line x1="288" y1="616" x2="328" y2="616" stroke="#ea580c" stroke-width="2.5" marker-end="url(#data)"/>
   <line x1="328" y1="784" x2="288" y2="784" stroke="#ffffff" stroke-width="6"/>

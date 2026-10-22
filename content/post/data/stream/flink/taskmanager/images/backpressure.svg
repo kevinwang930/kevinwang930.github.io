@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="500" viewBox="0 0 1180 500" role="img" aria-label="Backpressure. The consumer sends PartitionRequest with credit to the view reader. The producer sends BufferResponse while credit remains. AddCredit returns freed buffers. Zero credit keeps buffers in the subpartition. An empty buffer pool stops the RecordWriter. A local consumer reads the subpartition in this process.">
+  <defs>
+    <marker id="bpData" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#ea580c"/>
+    </marker>
+    <marker id="bpCredit" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="bpBack" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#059669"/>
+    </marker>
+    <marker id="bpWait" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="500" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <rect x="16" y="12" width="440" height="476" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="32" y="40" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#9a3412">Producer</text>
+
+  <rect x="36" y="56" width="176" height="56" rx="6" fill="#ffffff" stroke="#c2410c"/>
+  <text x="124" y="89" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a">RecordWriter</text>
+
+  <rect x="260" y="56" width="180" height="56" rx="6" fill="#f8fafc" stroke="#64748b"/>
+  <text x="350" y="80" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a">Buffer pool</text>
+  <text x="350" y="98" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b">empty stops the writer</text>
+
+  <rect x="36" y="156" width="404" height="104" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+  <text x="238" y="190" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a">PipelinedSubpartition</text>
+  <text x="238" y="212" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#9a3412">credit = 0 keeps the buffers</text>
+  <rect x="186" y="226" width="32" height="16" rx="2" fill="#ffffff" stroke="#ea580c"/>
+  <rect x="226" y="226" width="32" height="16" rx="2" fill="#ffffff" stroke="#ea580c"/>
+  <rect x="266" y="226" width="32" height="16" rx="2" fill="#ffffff" stroke="#ea580c"/>
+
+  <rect x="36" y="300" width="176" height="68" rx="6" fill="#ecfdf5" stroke="#059669"/>
+  <text x="124" y="328" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#065f46">LocalInputChannel</text>
+  <text x="124" y="348" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b">same process</text>
+
+  <rect x="260" y="300" width="180" height="68" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="350" y="328" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#0f172a">View reader</text>
+  <text x="350" y="348" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#9a3412">credit</text>
+
+  <rect x="260" y="408" width="180" height="52" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.6"/>
+  <text x="350" y="439" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#065f46">NettyServer</text>
+
+  <rect x="724" y="176" width="440" height="312" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="740" y="204" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#1e3a8a">Consumer</text>
+
+  <rect x="744" y="220" width="400" height="52" rx="6" fill="#ffffff" stroke="#2563eb"/>
+  <text x="944" y="251" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a">Task</text>
+
+  <rect x="744" y="300" width="400" height="68" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="944" y="328" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a">RemoteInputChannel</text>
+  <text x="944" y="350" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1d4ed8">unannounced credit</text>
+
+  <rect x="744" y="408" width="400" height="52" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="944" y="439" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#9a3412">NettyClient</text>
+
+  <text x="592" y="312" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#2563eb">PartitionRequest</text>
+  <text x="560" y="376" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#059669">AddCredit</text>
+  <text x="592" y="424" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#ea580c">BufferResponse</text>
+  <text x="592" y="456" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b">TCP window</text>
+  <text x="364" y="286" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#ea580c">credit &gt; 0</text>
+
+  <!-- producer -->
+  <line x1="260" y1="84" x2="212" y2="84" stroke="#ffffff" stroke-width="6"/>
+  <line x1="260" y1="84" x2="212" y2="84" stroke="#64748b" stroke-width="2.5" marker-end="url(#bpWait)"/>
+  <line x1="124" y1="112" x2="124" y2="156" stroke="#ffffff" stroke-width="6"/>
+  <line x1="124" y1="112" x2="124" y2="156" stroke="#ea580c" stroke-width="2.5" marker-end="url(#bpData)"/>
+  <line x1="124" y1="260" x2="124" y2="300" stroke="#ffffff" stroke-width="6"/>
+  <line x1="124" y1="260" x2="124" y2="300" stroke="#059669" stroke-width="2.5" marker-end="url(#bpBack)"/>
+  <line x1="350" y1="260" x2="350" y2="300" stroke="#ffffff" stroke-width="6"/>
+  <line x1="350" y1="260" x2="350" y2="300" stroke="#ea580c" stroke-width="2.5" marker-end="url(#bpData)"/>
+  <line x1="350" y1="368" x2="350" y2="408" stroke="#ffffff" stroke-width="6"/>
+  <line x1="350" y1="368" x2="350" y2="408" stroke="#64748b" stroke-width="2.5" marker-end="url(#bpWait)"/>
+
+  <!-- consumer -->
+  <line x1="944" y1="300" x2="944" y2="272" stroke="#ffffff" stroke-width="6"/>
+  <line x1="944" y1="300" x2="944" y2="272" stroke="#059669" stroke-width="2.5" marker-end="url(#bpBack)"/>
+  <line x1="944" y1="408" x2="944" y2="368" stroke="#ffffff" stroke-width="6"/>
+  <line x1="944" y1="408" x2="944" y2="368" stroke="#64748b" stroke-width="2.5" marker-end="url(#bpWait)"/>
+
+  <!-- PartitionRequest, consumer to the view reader -->
+  <polyline points="744,322 440,322" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <polyline points="744,322 440,322" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#bpCredit)"/>
+
+  <!-- AddCredit, NettyClient to the view reader. Lane x=700 stays off the other two arrows. -->
+  <polyline points="744,396 700,396 700,356 440,356" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <polyline points="744,396 700,396 700,356 440,356" fill="none" stroke="#059669" stroke-width="2.5" marker-end="url(#bpBack)"/>
+
+  <!-- BufferResponse, NettyServer to NettyClient -->
+  <polyline points="440,434 744,434" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <polyline points="440,434 744,434" fill="none" stroke="#ea580c" stroke-width="2.5" marker-end="url(#bpData)"/>
+</svg>

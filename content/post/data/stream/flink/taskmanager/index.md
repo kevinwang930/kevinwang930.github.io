@@ -75,7 +75,7 @@ The job needs two slots, not four. The `keyBy(userId)` edge is still a hash from
 
 A TaskManager keeps two connections. One is with the JobManager, for slots and tasks. The other is with other TaskManagers, for records.
 
-![Orders-per-minute on two TaskManagers. Pekko client connects to the other Pekko server, which then reaches TaskExecutor. Records use NettyClient and NettyServer.](images/taskmanager-jobmanager-connections.svg)
+![Orders-per-minute on two TaskManagers. Pekko client connects to the other Pekko server, which then reaches TaskExecutor. Records leave the producer's NettyServer and arrive on the consumer's NettyClient.](images/taskmanager-jobmanager-connections.svg)
 
 Operators inside one chain pass a record by a method call. The exchange starts at the boundary between two tasks. The producer has already serialized the record into a network **buffer** and appended that buffer to a **result subpartition**. The consumer reads it through an **input channel** on its input gate. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.
 
@@ -113,7 +113,7 @@ The id selects the message. The consumer speaks first.
 3. **`AddCredit`.** The consumer frees a buffer and tells the producer it may send that many more.
 4. **`BacklogAnnouncement`.** The producer has buffers and zero credit, so it tells the consumer the backlog. The consumer grants credit when it has room again.
 
-That loop is the backpressure in section 1. A full input gate stops granting credit, the producer stops writing that subpartition, and the slowdown follows the pipelined edge back to the source. In the orders-per-minute job, `A.0` keeps a subpartition for `B.0` and another for `B.1`. Each of those is its own input channel, local or remote depending on which TaskManager runs `B`.
+That loop is the backpressure from section 1. Section 2.1 is the code that enforces the credit. A full input gate stops granting credit, the producer stops writing that subpartition, and the slowdown follows the pipelined edge back to the source. In the orders-per-minute job, `A.0` keeps a subpartition for `B.0` and another for `B.1`. Each of those is its own input channel, local or remote depending on which TaskManager runs `B`.
 
 ```plantuml
 @startuml
@@ -381,6 +381,212 @@ public void requestSubpartition(
 }
 ```
 
+### 2.1 Backpressure
+
+The frames travel on the Netty TCP connection, and that socket keeps a TCP window. `PartitionRequestQueue` will not flush the next frame while the channel is not writable, and it tries again when the window opens. The decision to hold a record is the credit count, before that flush.
+
+`PartitionRequestServerHandler` builds a `CreditBasedSequenceNumberingViewReader` with the credit from the `PartitionRequest`. That reader is the producer-side gate for one input channel. `getNextBuffer` takes one buffer from the subpartition and spends one credit. `getNextDataType` reports the next buffer only while credit remains. An event still passes at zero credit. `PipelinedSubpartition.getAvailabilityAndBacklog` uses the same test: with no credit, the subpartition is available only when the next item is an event.
+
+`PartitionRequestQueue.enqueueAvailableReader` asks that availability before it queues a write. When the reader is not available and the backlog is positive, `needAnnounceBacklog` is true only if the channel started with zero credit and still has none. The queue then sends a `BacklogAnnouncement` and does not write a `BufferResponse`.
+
+The consumer gives the credit back. `RemoteInputChannel.notifyBufferAvailable` adds the number of freed buffers to `unannouncedCredit`. The first addition calls `NettyPartitionRequestClient.notifyCreditAvailable`, which fires an `AddCredit` on the TCP connection. The server handler runs `reader.addCredit`, and `addCreditOrResumeConsumption` enqueues the reader so the next `BufferResponse` can leave.
+
+Buffers that cannot be sent stay in the producer's subpartition and hold network buffers. `ResultPartition.getAvailableFuture` is the buffer pool's future, and `RecordWriter.getAvailableFuture` returns it. When the pool has no free buffer, the task thread suspends its default action. That wait is section 3. The slowdown then sits on the upstream operator.
+
+A local consumer does not send these messages. `LocalInputChannel` reads the subpartition in this process. Buffers it has not taken occupy the same pool, so the producer task waits on `getAvailableFuture` as well. In the orders-per-minute job, `A.0` to `B.1` is the remote credit path, and `A.0` to `B.0` is the local pool.
+
+![Credit stops the producer. PartitionRequest carries the initial credit to the view reader. BufferResponse leaves only while credit remains. AddCredit returns freed buffers. Zero credit keeps buffers in the subpartition, and an empty buffer pool stops the RecordWriter. A local consumer reads that subpartition in this process.](images/backpressure.svg)
+
+```plantuml
+@startuml
+
+class RecordWriter {
+  # targetPartition : ResultPartitionWriter
+  + getAvailableFuture() : CompletableFuture
+}
+class ResultPartitionWriter
+class ResultPartition {
+  # bufferPool : BufferPool
+  + getAvailableFuture() : CompletableFuture
+}
+class BufferPool
+class PipelinedSubpartition {
+  + getAvailabilityAndBacklog(boolean) : AvailabilityWithBacklog
+}
+class ResultSubpartition
+class PipelinedSubpartitionView {
+  - parent : PipelinedSubpartition
+  + getAvailabilityAndBacklog(boolean) : AvailabilityWithBacklog
+}
+class ResultSubpartitionView
+class NetworkSequenceViewReader {
+  + getNextBuffer() : BufferAndAvailability
+  + getAvailabilityAndBacklog() : AvailabilityWithBacklog
+  + addCredit(int) : void
+  + needAnnounceBacklog() : boolean
+}
+class CreditBasedSequenceNumberingViewReader {
+  - numCreditsAvailable : int
+  - initialCredit : int
+  - subpartitionView : ResultSubpartitionView
+  - requestQueue : PartitionRequestQueue
+  + addCredit(int) : void
+  + getNextBuffer() : BufferAndAvailability
+}
+class PartitionRequestQueue {
+  - availableReaders : ArrayDeque
+  + channelWritabilityChanged(ChannelHandlerContext) : void
+  ~ addCreditOrResumeConsumption(InputChannelID, Consumer) : void
+}
+class RemoteInputChannel {
+  - unannouncedCredit : AtomicInteger
+  - initialCredit : int
+  - partitionRequestClient : PartitionRequestClient
+  + notifyBufferAvailable(int) : void
+  + onSenderBacklog(int) : void
+  + getInitialCredit() : int
+}
+class LocalInputChannel {
+  - subpartitionView : ResultSubpartitionView
+}
+class PartitionRequestClient {
+  + notifyCreditAvailable(RemoteInputChannel) : void
+}
+class NettyPartitionRequestClient {
+  - tcpChannel : Channel
+  + notifyCreditAvailable(RemoteInputChannel) : void
+}
+class NettyMessage
+class "NettyMessage.PartitionRequest" as PartitionRequest {
+  - credit : int
+}
+class "NettyMessage.BufferResponse" as BufferResponse {
+  - backlog : int
+}
+class "NettyMessage.AddCredit" as AddCredit {
+  - credit : int
+}
+class "NettyMessage.BacklogAnnouncement" as BacklogAnnouncement {
+  ~ backlog : int
+  ~ receiverId : InputChannelID
+}
+
+ResultPartition -up-|> ResultPartitionWriter
+PipelinedSubpartition -up-|> ResultSubpartition
+PipelinedSubpartitionView -up-|> ResultSubpartitionView
+CreditBasedSequenceNumberingViewReader -up-|> NetworkSequenceViewReader
+NettyPartitionRequestClient -down-|> PartitionRequestClient
+PartitionRequest -up-|> NettyMessage
+BufferResponse -up-|> NettyMessage
+AddCredit -up-|> NettyMessage
+BacklogAnnouncement -up-|> NettyMessage
+
+RecordWriter -down-> ResultPartitionWriter : targetPartition
+ResultPartition -down-> BufferPool : bufferPool
+PipelinedSubpartitionView --> PipelinedSubpartition : parent
+CreditBasedSequenceNumberingViewReader --> ResultSubpartitionView : subpartitionView
+CreditBasedSequenceNumberingViewReader -down-> PartitionRequestQueue : requestQueue
+PartitionRequestQueue --> NetworkSequenceViewReader : availableReaders
+LocalInputChannel --> ResultSubpartitionView : subpartitionView
+RemoteInputChannel -down-> PartitionRequestClient : partitionRequestClient
+NettyPartitionRequestClient --> AddCredit : notifyCreditAvailable
+
+@enduml
+```
+
+```java
+@Override
+public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+    writeAndFlushNextMessageIfPossible(ctx.channel());
+}
+
+private void writeAndFlushNextMessageIfPossible(final Channel channel) throws IOException {
+    if (fatalError || !channel.isWritable()) {
+        return;
+    }
+
+    // poll an available reader and write one BufferResponse
+}
+```
+
+```java
+private Buffer.DataType getNextDataType(BufferAndBacklog bufferAndBacklog) {
+    final Buffer.DataType nextDataType = bufferAndBacklog.getNextDataType();
+    if (numCreditsAvailable > 0 || nextDataType.isEvent()) {
+        return nextDataType;
+    }
+    return Buffer.DataType.NONE;
+}
+
+@Nullable
+@Override
+public BufferAndAvailability getNextBuffer() throws IOException {
+    BufferAndBacklog next = subpartitionView.getNextBuffer();
+    if (next != null) {
+        if (next.buffer().isBuffer() && --numCreditsAvailable < 0) {
+            throw new IllegalStateException("no credit available");
+        }
+
+        final Buffer.DataType nextDataType = getNextDataType(next);
+        return new BufferAndAvailability(
+                next.buffer(), nextDataType, next.buffersInBacklog(), next.getSequenceNumber());
+    } else {
+        return null;
+    }
+}
+```
+
+```java
+private void enqueueAvailableReader(final NetworkSequenceViewReader reader) throws Exception {
+    if (reader.isRegisteredAsAvailable()) {
+        return;
+    }
+
+    ResultSubpartitionView.AvailabilityWithBacklog availabilityWithBacklog =
+            reader.getAvailabilityAndBacklog();
+    if (!availabilityWithBacklog.isAvailable()) {
+        int backlog = availabilityWithBacklog.getBacklog();
+        if (backlog > 0 && reader.needAnnounceBacklog()) {
+            announceBacklog(reader, backlog);
+        }
+        return;
+    }
+
+    // Queue an available reader for consumption. If the queue is empty,
+    // we try trigger the actual write. Otherwise this will be handled by
+    // the writeAndFlushNextMessageIfPossible calls.
+    boolean triggerWrite = availableReaders.isEmpty();
+    registerAvailableReader(reader);
+
+    if (triggerWrite) {
+        writeAndFlushNextMessageIfPossible(ctx.channel());
+    }
+}
+```
+
+```java
+@Override
+public void notifyBufferAvailable(int numAvailableBuffers) throws IOException {
+    if (numAvailableBuffers > 0 && unannouncedCredit.getAndAdd(numAvailableBuffers) == 0) {
+        notifyCreditAvailable();
+    }
+}
+```
+
+```java
+@Override
+public void addCredit(int creditDeltas) {
+    numCreditsAvailable += creditDeltas;
+}
+```
+
+```java
+@Override
+public CompletableFuture<?> getAvailableFuture() {
+    return bufferPool.getAvailableFuture();
+}
+```
+
 ## 3. Task execution
 
 The JobMaster sends one `TaskDeploymentDescriptor` per execution attempt by calling `TaskExecutorGateway.submitTask`. `TaskExecutor` implements that gateway method. The call checks that this attempt still belongs to the current JobMaster and that `tryMarkSlotActive` can take the slot named in the descriptor. It then builds a `Task`, puts that task in the slot with `taskSlotTable.addTask`, and calls `startTaskThread`. The `Task` object is the thread. Its `run` method calls `doRun`.
@@ -575,7 +781,7 @@ public void runMailboxLoop() throws Exception {
 }
 ```
 
-`processInput` asks the input processor for one step. `MORE_AVAILABLE` means another record can be read on the next loop. `NOTHING_AVAILABLE` and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2, observed from inside the task thread. `END_OF_DATA` and `END_OF_INPUT` finish the input and suspend the default action so the loop can drain the remaining mail and leave `invoke`.
+`processInput` asks the input processor for one step. `MORE_AVAILABLE` means another record can be read on the next loop. `NOTHING_AVAILABLE` and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2.1, observed from inside the task thread. `END_OF_DATA` and `END_OF_INPUT` finish the input and suspend the default action so the loop can drain the remaining mail and leave `invoke`.
 
 ```java
 protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
