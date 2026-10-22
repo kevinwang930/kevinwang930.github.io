@@ -14,11 +14,11 @@ keywords:
 - taskmanager
 ---
 
-A **TaskManager** is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
+A **TaskManager** is the worker that runs the tasks of a Flink job. The JobManager assigns a free slot and sends the task. This process then holds the slot, moves the records, and executes the operators.
 
-- **Slots.** Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
-- **Direct exchange.** A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-- **Local state and time.** Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is [late data handling](/post/data/stream/flink/late-data-handling/).
+- **Slots.** The process offers a fixed number of slots. Tasks in one slot-sharing group can share a slot. Operators chained inside one task share that task's thread, so a record between them is a method call.
+- **Data exchange.** One connection talks to the JobManager about slots and tasks. Another carries records to other TaskManagers. A full input stops granting credit, and the sender slows down.
+- **Task execution.** Deployment starts one thread per task. That thread builds the operators, restores them, and runs them until the task finishes. 
 
 
 <!--more-->
