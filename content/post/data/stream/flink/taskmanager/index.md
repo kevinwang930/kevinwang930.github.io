@@ -43,12 +43,14 @@ Partitioners on `StreamEdge` decide routing: `ForwardPartitioner` keeps data loc
 ```mermaid
 flowchart TB
   subgraph TM1["TaskManager 1"]
-    S0["Slot 0\nStreamTask A.0"]
-    S1["Slot 1\nStreamTask A.1"]
+    direction LR
+    S0["Slot 0<br>StreamTask A.0"]
+    S1["Slot 1<br>StreamTask A.1"]
   end
   subgraph TM2["TaskManager 2"]
-    S2["Slot 0\nStreamTask B.0"]
-    S3["Slot 1\nStreamTask B.1"]
+    direction LR
+    S2["Slot 0<br>StreamTask B.0"]
+    S3["Slot 1<br>StreamTask B.1"]
   end
   S0 -->|"hash(key) buffers"| S2
   S0 -->|"hash(key) buffers"| S3

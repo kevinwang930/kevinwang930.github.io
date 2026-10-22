@@ -61,23 +61,39 @@
     }
 
     const loadPlantUMLOnNeed = () => {
-      let plantumlPrefix = "language-plantuml";
-
-      if (document.querySelectorAll("[class^=" + plantumlPrefix + "]").length > 0) {
-        loadScript('https://cdn.jsdelivr.net/gh/jmnote/plantuml-encoder@1.2.4/dist/plantuml-encoder.min.js', () => {
-          (function () {
-            Array.prototype.forEach.call(document.querySelectorAll("[class^=" + plantumlPrefix + "]"), function (code) {
-              let image = document.createElement("IMG");
-              image.loading = 'lazy'; // Lazy loading
-              image.src = 'http://www.plantuml.com/plantuml/svg/~1' + plantumlEncoder.encode(code.innerText);
-              code.parentNode.insertBefore(image, code);
-              code.style.display = 'none';
-            });
-          })();
-
-          console.log("PlantUML init done");
-        })
+      const blocks = document.querySelectorAll("[class^=language-plantuml]");
+      if (blocks.length === 0) {
+        return;
       }
+
+      // PlantUML 1.2026.9, rendered in the browser. viz-global.js must load first.
+      const plantumlVersion = "1.2026.9";
+      loadScript("https://cdn.jsdelivr.net/npm/@plantuml/core@" + plantumlVersion + "/viz-global.js", () => {
+        import("https://cdn.jsdelivr.net/npm/@plantuml/core@" + plantumlVersion + "/plantuml.js")
+          .then(({ renderToString }) => {
+            Array.prototype.forEach.call(blocks, function (code) {
+              const target = document.createElement("div");
+              target.className = "plantuml";
+              code.parentNode.insertBefore(target, code);
+              code.style.display = "none";
+              const lines = code.innerText.replace(/\r\n/g, "\n").split("\n");
+              renderToString(
+                lines,
+                (svg) => {
+                  target.innerHTML = svg;
+                },
+                (message) => {
+                  console.error("PlantUML render failed:", message);
+                  target.textContent = message;
+                }
+              );
+            });
+            console.log("PlantUML init done");
+          })
+          .catch((err) => {
+            console.error("PlantUML failed to load:", err);
+          });
+      });
     }
 
     window.addEventListener('load', function (event) {
@@ -85,5 +101,12 @@
       loadPlantUMLOnNeed();
     })
   </script>
+  <style>
+    .plantuml svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
 
   {{ partial "foot.html" . }}
