@@ -1,28 +1,28 @@
-<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eA \u003cstrong\u003eTaskManager\u003c\/strong\u003e is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.\u003c\/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eSlots.\u003c\/strong\u003e Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.\u003c\/li\u003e\n\u003cli\u003e\u003cstrong\u003eDirect exchange.\u003c\/strong\u003e A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.\u003c\/li\u003e\n\u003cli\u003e\u003cstrong\u003eLocal state and time.\u003c\/strong\u003e Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.\u003c\/li\u003e\n\u003c\/ul\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/stream\/flink\/taskmanager\/","keywords":"[flink, taskmanager]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.168.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="flink,taskmanager"><meta name=description content="A TaskManager is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eA \u003cstrong\u003eTaskManager\u003c\/strong\u003e is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.\u003c\/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eSlots.\u003c\/strong\u003e Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.\u003c\/li\u003e\n\u003cli\u003e\u003cstrong\u003eDirect exchange.\u003c\/strong\u003e A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.\u003c\/li\u003e\n\u003cli\u003e\u003cstrong\u003eLocal state and time.\u003c\/strong\u003e Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is \u003ca href=\u0022\/post\/data\/stream\/flink\/late-data-handling\/\u0022\u003elate data handling\u003c\/a\u003e.\u003c\/li\u003e\n\u003c\/ul\u003e","url":"https:\/\/kevinwang930.github.io\/post\/data\/stream\/flink\/taskmanager\/","keywords":"[flink, taskmanager]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.168.0 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="flink,taskmanager"><meta name=description content="A TaskManager is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
 
 Slots. Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
 Direct exchange. A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.
+Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is late data handling.
 "><meta property="og:description" content="A TaskManager is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
 
 Slots. Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
 Direct exchange. A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.
+Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is late data handling.
 "><meta property="og:type" content="article"><meta property="og:title" content="Apache Flink internals - TaskManager"><meta name=twitter:title content="Apache Flink internals - TaskManager"><meta property="og:url" content="https://kevinwang930.github.io/post/data/stream/flink/taskmanager/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/data/stream/flink/taskmanager/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="A TaskManager is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
 
 Slots. Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
 Direct exchange. A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.
+Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is late data handling.
 "><meta name=twitter:description content="A TaskManager is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.
 
 Slots. Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.
 Direct exchange. A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.
-Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.
+Local state and time. Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is late data handling.
 "><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-10-21T16:57:00"><meta property="article:modified_time" content="2026-10-21T16:57:00"><meta property="article:section" content="data"><meta property="article:section" content="stream"><meta property="article:section" content="flink"><meta property="article:tag" content="data"><meta property="article:tag" content="stream"><meta property="article:tag" content="flink"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Apache Flink internals - TaskManager</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Apache Flink internals - TaskManager</h1><div class="postShorten-meta post-meta"><time datetime=2026-10-21T16:57:00+02:00>October 21, 2026
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/data>data</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/stream>stream</a>,
-<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>TaskManager</strong> is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.</p><ul><li><strong>Slots.</strong> Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.</li><li><strong>Direct exchange.</strong> A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.</li><li><strong>Local state and time.</strong> Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive.</li></ul><hr><h2 id=1-slot-management>1. Slot management</h2><p>Each TaskManager sets its own slot count with <code>taskmanager.numberOfTaskSlots</code>. The default is 1. <code>TaskManagerConfiguration.fromConfiguration</code> reads that value, and a configured <code>-1</code> is stored as 1. The count divides this process&rsquo;s CPU, task heap, task off-heap, managed memory, and network memory into equal shares. One share is the default slot. When the process registers with the ResourceManager it sends the count, that default slot size, and the total resources. Those are the slots this worker can offer.</p><p>A TaskManager advertises a fixed number of <strong>slots</strong>. Each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.</p><p>Records leave a chain through a <strong>result partition</strong> and enter the downstream chain through an <strong>input gate</strong>. Exchange modes matter:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><strong>Pipelined</strong></td><td>Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming)</td></tr><tr><td><strong>Blocking</strong></td><td>Producer finishes a partition before the consumer reads (common in batch)</td></tr></tbody></table><p>Partitioners on <code>StreamEdge</code> decide routing: <code>ForwardPartitioner</code> keeps data local to the same subtask index, <code>KeyGroupStreamPartitioner</code> (after <code>keyBy</code>) hashes keys into key groups, <code>RebalancePartitioner</code> round-robins for load balance.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
+<a class=category-link href=https://kevinwang930.github.io/categories/flink>flink</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>A <strong>TaskManager</strong> is the worker that runs a Flink job. The JobManager only picks a free slot and sends the task. After that, the records, the state, and the event-time clock live on this process.</p><ul><li><strong>Slots.</strong> Capacity is a fixed number of slots. Chained operators share one slot and one thread, so a record between them is a local call.</li><li><strong>Direct exchange.</strong> A record for another task goes straight from this worker to that worker. When the receiver is full, this worker slows the sender.</li><li><strong>Local state and time.</strong> Keyed state stays on the machine that owns the key. The task stamps event time and advances watermarks as records arrive. That path is <a href=https://kevinwang930.github.io/post/data/stream/flink/late-data-handling/>late data handling</a>.</li></ul><hr><h2 id=1-slot-management>1. Slot management</h2><p>Each TaskManager sets its own slot count with <code>taskmanager.numberOfTaskSlots</code>. The default is 1. <code>TaskManagerConfiguration.fromConfiguration</code> reads that value, and a configured <code>-1</code> is stored as 1. The count divides this process&rsquo;s CPU, task heap, task off-heap, managed memory, and network memory into equal shares. One share is the default slot. When the process registers with the ResourceManager it sends the count, that default slot size, and the total resources. Those are the slots this worker can offer.</p><p>A TaskManager advertises a fixed number of <strong>slots</strong>. Each slot can run one parallel pipeline slice (one subtask from each chained JobVertex sharing that slot in slot-sharing groups). CPU and managed memory are budgeted per slot.</p><p>Records leave a chain through a <strong>result partition</strong> and enter the downstream chain through an <strong>input gate</strong>. Exchange modes matter:</p><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><strong>Pipelined</strong></td><td>Producer sends buffers as soon as they fill; consumer reads concurrently (default streaming)</td></tr><tr><td><strong>Blocking</strong></td><td>Producer finishes a partition before the consumer reads (common in batch)</td></tr></tbody></table><p>Partitioners on <code>StreamEdge</code> decide routing: <code>ForwardPartitioner</code> keeps data local to the same subtask index, <code>KeyGroupStreamPartitioner</code> (after <code>keyBy</code>) hashes keys into key groups, <code>RebalancePartitioner</code> round-robins for load balance.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TB
   subgraph TM1[&#34;TaskManager 1&#34;]
     direction LR
     S0[&#34;Slot 0&lt;br&gt;StreamTask A.0&#34;]
@@ -39,7 +39,7 @@ Local state and time. Keyed state stays on the machine that owns the key. The ta
   S1 --&gt;|&#34;hash(key) buffers&#34;| S3
 </code></pre><p>Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.</p><p><strong>Orders-per-minute Example</strong> . It reads order records, parses each one into an <code>Order</code>, groups them by <code>userId</code>, counts them in a one-minute window, and writes the counts to Kafka: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>.</p><p>At parallelism 2 that pipeline is two tasks. <code>A</code> is <code>orders → ParseOrder</code>, and <code>B</code> is <code>window → kafkaSink</code>. They are in one slot-sharing group, so each slot holds the pair with the same subtask index:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Slot 0:  A.0 orders → ParseOrder     B.0 window → kafkaSink
 </span></span><span style=display:flex><span>Slot 1:  A.1 orders → ParseOrder     B.1 window → kafkaSink
-</span></span></code></pre></div><p>The job needs two slots, not four. The <code>keyBy(userId)</code> edge is still a hash from every <code>A</code> subtask to every <code>B</code> subtask.</p><h2 id=2-data-exchange>2. Data exchange</h2><p>Operators inside one chain pass a record by a method call. The exchange starts at the boundary between two tasks. The producer has already serialized the record into a network <strong>buffer</strong> and appended that buffer to a <strong>result subpartition</strong>. The consumer reads it through an <strong>input channel</strong> on its input gate. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.</p><p>There are two connections.</p><ul><li><strong>Same TaskManager.</strong> <code>LocalInputChannel</code> asks <code>ResultPartitionManager.createSubpartitionView</code>. The buffer stays in this process. Sharing a slot does not turn a hash edge into a chain: <code>A.0</code> and <code>B.0</code> in one slot still meet at a subpartition, and the call is local only because both tasks are on this worker.</li><li><strong>Another TaskManager.</strong> <code>RemoteInputChannel</code> opens a Netty TCP connection to the producer&rsquo;s data port, <code>taskmanager.data.port</code> (default <code>0</code>, so the operating system assigns it). The assigned port is part of the <code>TaskManagerLocation</code> this worker registered. Many input channels share that one TCP connection. Every message carries an <code>InputChannelID</code>, so the receiver can hand the bytes to the right channel.</li></ul><p>The bytes on that TCP connection are length-prefixed frames, defined by <code>NettyMessage</code>. A frame is not a fixed size. The first 4 bytes are the frame length, counting those 4 bytes themselves. Then a 4-byte magic number <code>0xBADC0FFE</code>, then a 1-byte message id, then the body. <code>NettyMessageDecoder</code> waits until <code>frame length - 4</code> more bytes have arrived, checks the magic number, and switches on the id. <code>AddCredit</code> has a fixed body. <code>BufferResponse</code> grows with the buffer: its header names the buffer size, and the buffer bytes follow in the same frame.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>| FRAME LENGTH (4) | MAGIC NUMBER (4) | ID (1) | message body |
+</span></span></code></pre></div><p>The job needs two slots, not four. The <code>keyBy(userId)</code> edge is still a hash from every <code>A</code> subtask to every <code>B</code> subtask.</p><h2 id=2-data-exchange>2. Data exchange</h2><p>A TaskManager keeps two connections. One is with the JobManager, for slots and tasks. The other is with other TaskManagers, for records.</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/images/taskmanager-jobmanager-connections.svg alt="Orders-per-minute on two TaskManagers. Pekko client connects to the other Pekko server, which then reaches TaskExecutor. Records use NettyClient and NettyServer."></p><p>Operators inside one chain pass a record by a method call. The exchange starts at the boundary between two tasks. The producer has already serialized the record into a network <strong>buffer</strong> and appended that buffer to a <strong>result subpartition</strong>. The consumer reads it through an <strong>input channel</strong> on its input gate. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.</p><p>There are two connections.</p><ul><li><strong>Same TaskManager.</strong> <code>LocalInputChannel</code> asks <code>ResultPartitionManager.createSubpartitionView</code>. The buffer stays in this process. Sharing a slot does not turn a hash edge into a chain: <code>A.0</code> and <code>B.0</code> in one slot still meet at a subpartition, and the call is local only because both tasks are on this worker.</li><li><strong>Another TaskManager.</strong> <code>RemoteInputChannel</code> opens a Netty TCP connection to the producer&rsquo;s data port, <code>taskmanager.data.port</code> (default <code>0</code>, so the operating system assigns it). The assigned port is part of the <code>TaskManagerLocation</code> this worker registered. Many input channels share that one TCP connection. Every message carries an <code>InputChannelID</code>, so the receiver can hand the bytes to the right channel.</li></ul><p>The bytes on that TCP connection are length-prefixed frames, defined by <code>NettyMessage</code>. A frame is not a fixed size. The first 4 bytes are the frame length, counting those 4 bytes themselves. Then a 4-byte magic number <code>0xBADC0FFE</code>, then a 1-byte message id, then the body. <code>NettyMessageDecoder</code> waits until <code>frame length - 4</code> more bytes have arrived, checks the magic number, and switches on the id. <code>AddCredit</code> has a fixed body. <code>BufferResponse</code> grows with the buffer: its header names the buffer size, and the buffer bytes follow in the same frame.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>| FRAME LENGTH (4) | MAGIC NUMBER (4) | ID (1) | message body |
 </span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>static</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>int</span> FRAME_HEADER_LENGTH <span style=color:#f92672>=</span>
 </span></span><span style=display:flex><span>        4 <span style=color:#f92672>+</span> 4 <span style=color:#f92672>+</span> 1; <span style=color:#75715e>// frame length (4), magic number (4), msg ID (1)</span>
 </span></span><span style=display:flex><span>
@@ -55,34 +55,77 @@ Local state and time. Keyed state stays on the machine that owns the key. The ta
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><p>The id selects the message. The consumer speaks first.</p><ol><li><strong><code>PartitionRequest</code>.</strong> The consumer names the result partition, the subpartition indexes, its <code>InputChannelID</code>, and an initial <strong>credit</strong>. Credit is how many buffers the consumer can accept right now.</li><li><strong><code>BufferResponse</code>.</strong> The producer sends one buffer, a sequence number, and the <strong>backlog</strong> (how many buffers are still waiting). It sends only while credit remains.</li><li><strong><code>AddCredit</code>.</strong> The consumer frees a buffer and tells the producer it may send that many more.</li><li><strong><code>BacklogAnnouncement</code>.</strong> The producer has buffers and zero credit, so it tells the consumer the backlog. The consumer grants credit when it has room again.</li></ol><p>That loop is the backpressure in section 1. A full input gate stops granting credit, the producer stops writing that subpartition, and the slowdown follows the pipelined edge back to the source. In the orders-per-minute job, <code>A.0</code> keeps a subpartition for <code>B.0</code> and another for <code>B.1</code>. Each of those is its own input channel, local or remote depending on which TaskManager runs <code>B</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
-class ResultPartition
-class ResultSubpartition
-
-class InputGate
-class InputChannel {
-  + requestSubpartitions() : void
+class TaskExecutor {
+  - taskExecutorServices : TaskManagerServices
+  - shuffleEnvironment : ShuffleEnvironment
 }
-class LocalInputChannel
-class RemoteInputChannel
+class TaskManagerServices {
+  - shuffleEnvironment : ShuffleEnvironment
+}
+class NettyShuffleServiceFactory {
+  + createShuffleEnvironment(ShuffleEnvironmentContext) : NettyShuffleEnvironment
+}
 
-class NettyPartitionRequestClient {
+class ShuffleEnvironment {
+  + start() : int
+  + createResultPartitionWriters(ShuffleIOOwnerContext, List) : List
+  + createInputGates(ShuffleIOOwnerContext, PartitionProducerStateProvider, List) : List
+}
+class NettyShuffleEnvironment {
+  - connectionManager : ConnectionManager
+  - resultPartitionManager : ResultPartitionManager
+  - resultPartitionFactory : ResultPartitionFactory
+  - singleInputGateFactory : SingleInputGateFactory
+}
+
+class ConnectionManager {
+  + start() : int
+  + createPartitionRequestClient(ConnectionID) : PartitionRequestClient
+}
+class NettyConnectionManager {
+  - server : NettyServer
+  - client : NettyClient
+  - nettyProtocol : NettyProtocol
+}
+class NettyServer {
+  + init(NettyProtocol, NettyBufferPool) : int
+}
+class NettyClient {
+  + init(NettyProtocol, NettyBufferPool) : void
+  + connect(InetSocketAddress) : ChannelFuture
+}
+class PartitionRequestClient {
   + requestSubpartition(ResultPartitionID, ResultSubpartitionIndexSet, RemoteInputChannel, int) : void
+}
+class NettyPartitionRequestClient {
+  - tcpChannel : Channel
 }
 class NettyProtocol {
   + getServerChannelHandlers() : ChannelHandler[]
   + getClientChannelHandlers() : ChannelHandler[]
 }
 
+class ResultPartitionManager {
+  + registerResultPartition(ResultPartition) : void
+  + createSubpartitionView(ResultPartitionID, ResultSubpartitionIndexSet, BufferAvailabilityListener) : ResultSubpartitionView
+}
+class ResultPartition
+class ResultSubpartition
+class SingleInputGate
+class InputChannel {
+  + requestSubpartitions() : void
+}
+class LocalInputChannel
+class RemoteInputChannel
+class NettyMessage
 class &#34;NettyMessage.PartitionRequest&#34; as PartitionRequest {
   - partitionId : ResultPartitionID
-  - queueIndexSet : ResultSubpartitionIndexSet
   - receiverId : InputChannelID
   - credit : int
 }
 class &#34;NettyMessage.BufferResponse&#34; as BufferResponse {
   - buffer : Buffer
   - receiverId : InputChannelID
-  - sequenceNumber : int
   - backlog : int
 }
 class &#34;NettyMessage.AddCredit&#34; as AddCredit {
@@ -90,15 +133,36 @@ class &#34;NettyMessage.AddCredit&#34; as AddCredit {
   - receiverId : InputChannelID
 }
 
-ResultPartition --&gt; ResultSubpartition
-InputGate --&gt; InputChannel
+NettyShuffleEnvironment -up-|&gt; ShuffleEnvironment
+NettyConnectionManager -up-|&gt; ConnectionManager
+NettyPartitionRequestClient -down-|&gt; PartitionRequestClient
 LocalInputChannel -up-|&gt; InputChannel
 RemoteInputChannel -up-|&gt; InputChannel
+PartitionRequest -up-|&gt; NettyMessage
+BufferResponse -up-|&gt; NettyMessage
+AddCredit -up-|&gt; NettyMessage
+
+TaskExecutor -down-&gt; TaskManagerServices : taskExecutorServices
+TaskManagerServices -down-&gt; ShuffleEnvironment : shuffleEnvironment
+TaskExecutor -down-&gt; ShuffleEnvironment : shuffleEnvironment
+NettyShuffleServiceFactory --&gt; NettyShuffleEnvironment : createShuffleEnvironment
+
+NettyShuffleEnvironment --&gt; ConnectionManager
+NettyShuffleEnvironment --&gt; ResultPartitionManager
+NettyShuffleEnvironment --&gt; ResultPartition : createResultPartitionWriters
+NettyShuffleEnvironment --&gt; SingleInputGate : createInputGates
+
+NettyConnectionManager --&gt; NettyServer
+NettyConnectionManager --&gt; NettyClient
+NettyConnectionManager --&gt; NettyProtocol
+NettyClient --&gt; NettyPartitionRequestClient
+
+ResultPartitionManager --&gt; ResultPartition
+ResultPartition --&gt; ResultSubpartition
+SingleInputGate --&gt; InputChannel
+LocalInputChannel --&gt; ResultPartitionManager : createSubpartitionView
 RemoteInputChannel --&gt; NettyPartitionRequestClient
 NettyPartitionRequestClient --&gt; PartitionRequest
-NettyProtocol --&gt; PartitionRequest
-NettyProtocol --&gt; BufferResponse
-NettyProtocol --&gt; AddCredit
 
 @enduml
 </code></pre><p>A local consumer takes a view of the subpartition in this process.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>requestSubpartitions</span>() <span style=color:#66d9ef>throws</span> IOException {
@@ -239,24 +303,217 @@ NettyProtocol --&gt; AddCredit
 </span></span><span style=display:flex><span>                        TimeUnit.<span style=color:#a6e22e>MILLISECONDS</span>);
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h2 id=3-event-time-and-watermarks>3. Event time and watermarks</h2><p>Flink distinguishes <strong>processing time</strong> (wall clock on the machine) from <strong>event time</strong> (timestamps carried by records). Event-time windows and timers fire from the progress of <strong>watermarks</strong>, not from wall-clock ticks. The client attaches a <code>WatermarkStrategy</code> when it builds the source. Each <code>StreamTask</code> runs that strategy on its records.</p><p>A <code>WatermarkStrategy</code> supplies:</p><ul><li>a <code>TimestampAssigner</code> that stamps each record;</li><li>a <code>WatermarkGenerator</code> that emits watermark values (periodically or on records).</li></ul><p><code>WatermarkStrategy.forBoundedOutOfOrderness(Duration)</code> is the common generator: it tracks the max observed event timestamp and emits <code>maxEventTs - outOfOrderness</code> (minus one millisecond in the usual formulation), so late arrivals within the bound can still join open windows.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>DataStream<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span> events <span style=color:#f92672>=</span> env.<span style=color:#a6e22e>fromSource</span>(
-</span></span><span style=display:flex><span>    source,
-</span></span><span style=display:flex><span>    WatermarkStrategy
-</span></span><span style=display:flex><span>        .<span style=color:#f92672>&lt;</span>Event<span style=color:#f92672>&gt;</span>forBoundedOutOfOrderness(Duration.<span style=color:#a6e22e>ofSeconds</span>(5))
-</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>withTimestampAssigner</span>((e, ts) <span style=color:#f92672>-&gt;</span> e.<span style=color:#a6e22e>getEventTimeMillis</span>()),
-</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;events&#34;</span>);
+</span></span></code></pre></div><h2 id=3-task-execution>3. Task execution</h2><p>The JobMaster sends one <code>TaskDeploymentDescriptor</code> per execution attempt by calling <code>TaskExecutorGateway.submitTask</code>. <code>TaskExecutor</code> implements that gateway method. The call checks that this attempt still belongs to the current JobMaster and that <code>tryMarkSlotActive</code> can take the slot named in the descriptor. It then builds a <code>Task</code>, puts that task in the slot with <code>taskSlotTable.addTask</code>, and calls <code>startTaskThread</code>. The <code>Task</code> object is the thread. Its <code>run</code> method calls <code>doRun</code>.</p><p><code>doRun</code> moves the attempt from <code>CREATED</code> to <code>DEPLOYING</code>. It loads the user-code class loader, calls <code>setupPartitionsAndGates</code> so the result partitions and input gates from section 2 exist, and builds a <code>RuntimeEnvironment</code>. <code>loadAndInstantiateInvokable</code> loads <code>TaskInformation.getInvokableClassName()</code> and calls the constructor that takes that environment. For a streaming job the class is a <code>StreamTask</code>: <code>SourceOperatorStreamTask</code> when the task is a source operator, <code>OneInputStreamTask</code> when the task has one network input. In the orders-per-minute job each of <code>A.0</code>, <code>A.1</code>, <code>B.0</code>, and <code>B.1</code> is one of these threads. Operators inside the chain still share that one thread.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+
+class TaskExecutorGateway {
+  + submitTask(TaskDeploymentDescriptor, JobMasterId, Duration) : CompletableFuture&lt;Acknowledge&gt;
+}
+class TaskExecutor implements TaskExecutorGateway {
+  - taskExecutorServices : TaskManagerServices
+}
+class Task {
+  - executingThread : Thread
+  - executionState : ExecutionState
+  - invokable : TaskInvokable
+  - nameOfInvokableClass : String
+  - partitionWriters : ResultPartitionWriter[]
+  - inputGates : IndexedInputGate[]
+  + startTaskThread() : void
+  + run() : void
+  - doRun() : void
+  - restoreAndInvoke(TaskInvokable, AutoCloseableRegistry) : void
+}
+class Environment {
+  + getAllWriters() : ResultPartitionWriter[]
+  + getAllInputGates() : IndexedInputGate[]
+}
+class RuntimeEnvironment implements Environment {
+  - writers : ResultPartitionWriter[]
+  - inputGates : IndexedInputGate[]
+  - containingTask : Task
+}
+class TaskInvokable {
+  + restore() : void
+  + invoke() : void
+  + cleanUp(Throwable) : void
+  + cancel() : void
+}
+class AbstractInvokable implements TaskInvokable {
+  - environment : Environment
+}
+class StreamTask implements TaskInvokable {
+  - environment : Environment
+  # mailboxProcessor : MailboxProcessor
+  # operatorChain : OperatorChain
+  # inputProcessor : StreamInputProcessor
+  # mainOperator : StreamOperator
+  + invoke() : void
+  # init() : void
+  # processInput(MailboxDefaultAction.Controller) : void
+}
+class OneInputStreamTask extends StreamTask
+class SourceOperatorStreamTask extends StreamTask
+class OneInputStreamOperator
+class StreamMap implements OneInputStreamOperator {
+  + processElement(StreamRecord) : void
+}
+class WindowOperator implements OneInputStreamOperator {
+  # windowAssigner : WindowAssigner
+  - trigger : Trigger
+  + processElement(StreamRecord) : void
+}
+class SourceOperator {
+  - sourceReader : SourceReader
+  + initReader() : void
+  + getSourceReader() : SourceReader
+}
+class MailboxProcessor {
+  # mailbox : TaskMailbox
+  # mailboxDefaultAction : MailboxDefaultAction
+  + runMailboxLoop() : void
+}
+class OperatorChain {
+  # streamOutputs : RecordWriterOutput[]
+  # mainOperatorWrapper : StreamOperatorWrapper
+  + getMainOperator() : StreamOperator
+}
+
+TaskExecutor --&gt; Task : new Task
+Task --&gt; TaskInvokable : invokable
+AbstractInvokable --&gt; Environment : environment
+StreamTask --&gt; Environment : environment
+RuntimeEnvironment --&gt; Task : containingTask
+StreamTask --&gt; MailboxProcessor : mailboxProcessor
+StreamTask --&gt; OperatorChain : operatorChain
+MailboxProcessor --&gt; MailboxDefaultAction : mailboxDefaultAction
+OneInputStreamTask --&gt; OneInputStreamOperator : mainOperator
+SourceOperatorStreamTask --&gt; SourceOperator : mainOperator
+
+AbstractInvokable -[hidden]-&gt; StreamTask
+OneInputStreamTask -[hidden]-&gt; SourceOperatorStreamTask
+MailboxProcessor -[hidden]-&gt; OperatorChain
+Task -[hidden]-&gt; StreamTask
+OneInputStreamTask -[hidden]down- StreamMap
+StreamMap -[hidden]down- WindowOperator
+SourceOperatorStreamTask -[hidden]down- SourceOperator
+
+@enduml
+</code></pre><p><code>restoreAndInvoke</code> is the state machine around the user code. <code>restore</code> runs while the attempt is <code>INITIALIZING</code>. <code>invoke</code> runs while it is <code>RUNNING</code>. Each transition is reported to the JobMaster through <code>taskManagerActions.updateTaskExecutionState</code>. After <code>invoke</code> returns, <code>doRun</code> finishes the result partitions and moves the attempt to <code>FINISHED</code>. A failure or a cancel takes the other branch, <code>transitionStateOnFailure</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>restoreAndInvoke</span>(
+</span></span><span style=display:flex><span>        TaskInvokable finalInvokable, AutoCloseableRegistry cleanUpRegistry) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// switch to the INITIALIZING state, if that fails, we have been canceled/failed in the</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// meantime</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>transitionState(ExecutionState.<span style=color:#a6e22e>DEPLOYING</span>, ExecutionState.<span style=color:#a6e22e>INITIALIZING</span>)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CancelTaskException();
+</span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>events
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>keyBy</span>(Event::getKey)
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>window</span>(TumblingEventTimeWindows.<span style=color:#a6e22e>of</span>(Duration.<span style=color:#a6e22e>ofMinutes</span>(1)))
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>aggregate</span>(<span style=color:#66d9ef>new</span> CountAggregate())
-</span></span><span style=display:flex><span>    .<span style=color:#a6e22e>sinkTo</span>(sink);
-</span></span></code></pre></div><p>Watermarks propagate downstream. At a multi-input operator, the effective watermark is the <strong>minimum</strong> across inputs (and channels): the operator must not advance event time past data that might still arrive on a slower channel. Idle sources can be marked idle so they do not hold the minimum forever.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>records:   t=10  t=12  t=11  t=18  t=20
-</span></span><span style=display:flex><span>watermark:              ....  W=13       W=15
-</span></span><span style=display:flex><span>bound = 5s  =&gt;  W ≈ maxEventTs - 5s
+</span></span><span style=display:flex><span>        taskManagerActions.<span style=color:#a6e22e>updateTaskExecutionState</span>(
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> TaskExecutionState(executionId, ExecutionState.<span style=color:#a6e22e>INITIALIZING</span>));
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>window [0,60s): closes when watermark &gt;= 60s
-</span></span></code></pre></div><p>Late records that arrive after the watermark has passed their window are either dropped, sent to a side output configured for lateness, or allowed into still-open windows if <code>allowedLateness</code> extends the lifetime. Processing-time windows ignore watermarks and fire on timer service wall-clock deadlines.</p></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// make sure the user code classloader is accessible thread-locally</span>
+</span></span><span style=display:flex><span>        executingThread.<span style=color:#a6e22e>setContextClassLoader</span>(userCodeClassLoader.<span style=color:#a6e22e>asClassLoader</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        runWithSystemExitMonitoring(finalInvokable::restore);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>transitionState(ExecutionState.<span style=color:#a6e22e>INITIALIZING</span>, ExecutionState.<span style=color:#a6e22e>RUNNING</span>)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> CancelTaskException();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// notify everyone that we switched to running</span>
+</span></span><span style=display:flex><span>        taskManagerActions.<span style=color:#a6e22e>updateTaskExecutionState</span>(
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> TaskExecutionState(executionId, ExecutionState.<span style=color:#a6e22e>RUNNING</span>));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>        runWithSystemExitMonitoring(finalInvokable::invoke);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>catch</span> (Throwable throwable) {
+</span></span><span style=display:flex><span>        cleanUpRegistry.<span style=color:#a6e22e>registerCloseable</span>(
+</span></span><span style=display:flex><span>                () <span style=color:#f92672>-&gt;</span> runWithSystemExitMonitoring(() <span style=color:#f92672>-&gt;</span> finalInvokable.<span style=color:#a6e22e>cleanUp</span>(throwable)));
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> throwable;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    runWithSystemExitMonitoring(() <span style=color:#f92672>-&gt;</span> finalInvokable.<span style=color:#a6e22e>cleanUp</span>(<span style=color:#66d9ef>null</span>));
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>StreamTask.restore</code> builds the <code>OperatorChain</code>, calls the task&rsquo;s <code>init</code> (a <code>OneInputStreamTask</code> builds a <code>StreamOneInputProcessor</code> over its input gate and that chain), and restores state. <code>invoke</code> then enters the mailbox. <code>runMailboxLoop</code> is the whole steady state of the thread: take any mail that is waiting, then run the default action. Mail is how a checkpoint, a timer, or a cancel reaches this thread. The default action is <code>processInput</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>invoke</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Allow invoking method &#39;invoke&#39; without having to call &#39;restore&#39; before it.</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isRunning) {
+</span></span><span style=display:flex><span>        LOG.<span style=color:#a6e22e>debug</span>(<span style=color:#e6db74>&#34;Restoring during invoke will be called.&#34;</span>);
+</span></span><span style=display:flex><span>        restoreInternal();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// final check to exit early before starting to run</span>
+</span></span><span style=display:flex><span>    ensureNotCanceled();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    scheduleBufferDebloater();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// let the task do its work</span>
+</span></span><span style=display:flex><span>    getEnvironment().<span style=color:#a6e22e>getMetricGroup</span>().<span style=color:#a6e22e>getIOMetricGroup</span>().<span style=color:#a6e22e>markTaskStart</span>();
+</span></span><span style=display:flex><span>    runMailboxLoop();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// if this left the run() method cleanly despite the fact that this was canceled,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// make sure the &#34;clean shutdown&#34; is not attempted</span>
+</span></span><span style=display:flex><span>    ensureNotCanceled();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    afterInvoke();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>runMailboxLoop</span>() <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    suspended <span style=color:#f92672>=</span> <span style=color:#f92672>!</span>mailboxLoopRunning;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> TaskMailbox localMailbox <span style=color:#f92672>=</span> mailbox;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    checkState(
+</span></span><span style=display:flex><span>            localMailbox.<span style=color:#a6e22e>isMailboxThread</span>(),
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;Method must be executed by declared mailbox thread!&#34;</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>assert</span> localMailbox.<span style=color:#a6e22e>getState</span>() <span style=color:#f92672>==</span> TaskMailbox.<span style=color:#a6e22e>State</span>.<span style=color:#a6e22e>OPEN</span> : <span style=color:#e6db74>&#34;Mailbox must be opened!&#34;</span>;
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> MailboxController mailboxController <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> MailboxController(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>while</span> (isNextLoopPossible()) {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// The blocking `processMail` call will not return until default action is available.</span>
+</span></span><span style=display:flex><span>        processMail(localMailbox, <span style=color:#66d9ef>false</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (isNextLoopPossible()) {
+</span></span><span style=display:flex><span>            mailboxDefaultAction.<span style=color:#a6e22e>runDefaultAction</span>(
+</span></span><span style=display:flex><span>                    mailboxController); <span style=color:#75715e>// lock is acquired inside default action as needed</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>processInput</code> asks the input processor for one step. <code>MORE_AVAILABLE</code> means another record can be read on the next loop. <code>NOTHING_AVAILABLE</code> and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2, observed from inside the task thread. <code>END_OF_DATA</code> and <code>END_OF_INPUT</code> finish the input and suspend the default action so the loop can drain the remaining mail and leave <code>invoke</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>processInput</span>(MailboxDefaultAction.<span style=color:#a6e22e>Controller</span> controller) <span style=color:#66d9ef>throws</span> Exception {
+</span></span><span style=display:flex><span>    DataInputStatus status <span style=color:#f92672>=</span> inputProcessor.<span style=color:#a6e22e>processInput</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>switch</span> (status) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> MORE_AVAILABLE:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (taskIsAvailable()) {
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> NOTHING_AVAILABLE:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>break</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> END_OF_RECOVERY:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;We should not receive this event here.&#34;</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> STOPPED:
+</span></span><span style=display:flex><span>            endData(StopMode.<span style=color:#a6e22e>NO_DRAIN</span>);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> END_OF_DATA:
+</span></span><span style=display:flex><span>            endData(StopMode.<span style=color:#a6e22e>DRAIN</span>);
+</span></span><span style=display:flex><span>            notifyEndOfData();
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> END_OF_INPUT:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (recoveryCompletionFuture <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>recoveryCompletionFuture.<span style=color:#a6e22e>isDone</span>()) {
+</span></span><span style=display:flex><span>                <span style=color:#75715e>// suspend only the default action while recovery is still running</span>
+</span></span><span style=display:flex><span>                MailboxDefaultAction.<span style=color:#a6e22e>Suspension</span> suspension <span style=color:#f92672>=</span> controller.<span style=color:#a6e22e>suspendDefaultAction</span>();
+</span></span><span style=display:flex><span>                recoveryCompletionFuture.<span style=color:#a6e22e>whenComplete</span>(
+</span></span><span style=display:flex><span>                        (ign, t) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                                mainMailboxExecutor.<span style=color:#a6e22e>execute</span>(
+</span></span><span style=display:flex><span>                                        suspension::resume,
+</span></span><span style=display:flex><span>                                        <span style=color:#e6db74>&#34;resume default action after recovery&#34;</span>));
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            controller.<span style=color:#a6e22e>suspendDefaultAction</span>();
+</span></span><span style=display:flex><span>            mailboxProcessor.<span style=color:#a6e22e>suspend</span>();
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// if the chain, the result writer, the input, or the changelog is unavailable,</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// suspend the default action until that future completes</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/data/>data</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/stream/>stream</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/flink/>flink</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
 <span class="hide-xs hide-sm text-small icon-ml">NEXT</span></a></li><li class=post-action><a class="post-action-btn btn btn--default tooltip--top" href=https://kevinwang930.github.io/post/network/udp/ data-tooltip="UDP protocol analysis" aria-label="PREVIOUS: UDP protocol analysis"><span class="hide-xs hide-sm text-small icon-mr">PREVIOUS</span>
