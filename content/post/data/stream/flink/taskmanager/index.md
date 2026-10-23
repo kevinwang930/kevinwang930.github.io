@@ -17,7 +17,7 @@ keywords:
 A **TaskManager** is the worker that runs the tasks of a Flink job. The JobManager assigns a free slot and sends the task. This process then holds the slot, moves the records, and executes the operators.
 
 - **Slots.** The process offers a fixed number of slots. Tasks in one slot-sharing group can share a slot. Operators chained inside one task share that task's thread, so a record between them is a method call.
-- **Data exchange.** One connection talks to the JobManager about slots and tasks. Another carries records to other TaskManagers. A full input stops granting credit, and the sender slows down.
+- **Data exchange and back pressure.** One connection talks to the JobMaster about the task. Another carries records to other TaskManagers. A full input stops granting credit, and the sender slows down.
 - **Task execution.** Deployment starts one thread per task. That thread builds the operators, restores them, and runs them until the task finishes. 
 
 
@@ -71,49 +71,39 @@ Slot 1:  A.1 orders → ParseOrder     B.1 window → kafkaSink
 
 The job needs two slots, not four. The `keyBy(userId)` edge is still a hash from every `A` subtask to every `B` subtask.
 
-## 2. Data exchange
+## 2. Data exchange and back pressure
 
-A TaskManager keeps two connections. One is with the JobManager, for slots and tasks. The other is with other TaskManagers, for records.
+A TaskManager keeps two kinds of connection.
 
-![Orders-per-minute on two TaskManagers. Pekko client connects to the other Pekko server, which then reaches TaskExecutor. Records leave the producer's NettyServer and arrive on the consumer's NettyClient.](images/taskmanager-jobmanager-connections.svg)
+- **JobMaster.** The JobMaster sends the task on the JobMaster connection. Section 3 is the submit call.
+- **Other TaskManagers.** The record connection carries records from one task to another. The figure below is the record path.
 
-Operators inside one chain pass a record by a method call. The exchange starts at the boundary between two tasks. The producer has already serialized the record into a network **buffer** and appended that buffer to a **result subpartition**. The consumer reads it through an **input channel** on its input gate. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.
+A record inside one chain of operators is a method call. On the record connection, the producer writes the record into a network buffer and appends the buffer to a result subpartition. The consumer reads the buffer through an input channel. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.
 
-There are two connections.
+On the same TaskManager, the channel reads the subpartition in the local process. On another TaskManager, the channel opens a TCP connection to the producer's data port. Many channels share the TCP connection. Each message names an input channel, so the bytes reach the named channel.
 
-- **Same TaskManager.** `LocalInputChannel` asks `ResultPartitionManager.createSubpartitionView`. The buffer stays in this process. Sharing a slot does not turn a hash edge into a chain: `A.0` and `B.0` in one slot still meet at a subpartition, and the call is local only because both tasks are on this worker.
-- **Another TaskManager.** `RemoteInputChannel` opens a Netty TCP connection to the producer's data port, `taskmanager.data.port` (default `0`, so the operating system assigns it). The assigned port is part of the `TaskManagerLocation` this worker registered. Many input channels share that one TCP connection. Every message carries an `InputChannelID`, so the receiver can hand the bytes to the right channel.
+![Two TaskManagers. The ResultSubpartition sends buffers and announces the backlog size. The InputChannel adds credit. Local buffer pools borrow from the network buffer pool, which takes memory from off-heap. Netty carries the bytes over the sockets.](images/backpressure.svg)
 
-The bytes on that TCP connection are length-prefixed frames, defined by `NettyMessage`. A frame is not a fixed size. The first 4 bytes are the frame length, counting those 4 bytes themselves. Then a 4-byte magic number `0xBADC0FFE`, then a 1-byte message id, then the body. `NettyMessageDecoder` waits until `frame length - 4` more bytes have arrived, checks the magic number, and switches on the id. `AddCredit` has a fixed body. `BufferResponse` grows with the buffer: its header names the buffer size, and the buffer bytes follow in the same frame.
+In the orders-per-minute job, `A.0` to `B.0` stays on one TaskManager. `A.0` to `B.1` crosses to the other. Sharing a slot does not turn the hash edge into a chain: `A.0` and `B.0` still meet at a subpartition.
 
-```text
-| FRAME LENGTH (4) | MAGIC NUMBER (4) | ID (1) | message body |
-```
+### 2.1 Netty protocol
 
-```java
-static final int FRAME_HEADER_LENGTH =
-        4 + 4 + 1; // frame length (4), magic number (4), msg ID (1)
+Netty is the library a TaskManager uses to carry records to another TaskManager. `TaskExecutor` holds a `ShuffleEnvironment`. The default environment is a `NettyShuffleEnvironment`, created by `NettyShuffleServiceFactory`. The connection manager is a `NettyConnectionManager`.
 
-static final int MAGIC_NUMBER = 0xBADC0FFE;
+`NettyConnectionManager` runs two sides. `NettyServer` listens on the data port. A remote consumer connects to `NettyServer`, so the producer of a record is the server. `NettyClient` opens the outgoing connection: `NettyPartitionRequestClient` is the consumer, and the client sends the request for a subpartition. Many input channels share the TCP connection. `NettyProtocol` encodes and decodes the frames on both sides. The bytes Netty holds come from `NettyBufferPool`, which allocates the bytes off-heap.
 
-static class NettyMessageDecoder extends LengthFieldBasedFrameDecoder {
-    NettyMessageDecoder() {
-        // max frame, length at offset 0, 4-byte length, length includes itself, strip the length
-        super(Integer.MAX_VALUE, 0, 4, -4, 4);
-    }
 
-    // decode() reads the magic number, then switches on the message id
-}
-```
 
-The id selects the message. The consumer speaks first.
+The bytes on the connection to remote TaskManager are Netty frames. Every frame has the same front. The numbers above the boxes are the byte offsets.
 
-1. **`PartitionRequest`.** The consumer names the result partition, the subpartition indexes, its `InputChannelID`, and an initial **credit**. Credit is how many buffers the consumer can accept right now.
-2. **`BufferResponse`.** The producer sends one buffer, a sequence number, and the **backlog** (how many buffers are still waiting). It sends only while credit remains.
-3. **`AddCredit`.** The consumer frees a buffer and tells the producer it may send that many more.
-4. **`BacklogAnnouncement`.** The producer has buffers and zero credit, so it tells the consumer the backlog. The consumer grants credit when it has room again.
+![Netty frame. Byte 0 is the 4-byte frame length, byte 4 is the magic number 0xBADC0FFE, byte 8 is the 1-byte message id, and byte 9 starts the message body.](images/netty-frame.svg)
 
-That loop is the backpressure from section 1. Section 2.1 is the code that enforces the credit. A full input gate stops granting credit, the producer stops writing that subpartition, and the slowdown follows the pipelined edge back to the source. In the orders-per-minute job, `A.0` keeps a subpartition for `B.0` and another for `B.1`. Each of those is its own input channel, local or remote depending on which TaskManager runs `B`.
+The length counts every byte of the frame, including its own 4 bytes. The magic number is `0xBADC0FFE`. The id selects the message. The body follows, and its size depends on the id. The consumer speaks first.
+
+1. **`PartitionRequest`**, id 2. The consumer names the partition, the subpartitions, and the input channel. The message also says how many buffers the consumer can accept. The accepted count is the credit.
+2. **`BufferResponse`**, id 0. The producer sends one buffer and says how many buffers are still waiting. The waiting count is the backlog.
+3. **`AddCredit`**, id 6. The consumer has freed some buffers and tells the producer it may send more.
+4. **`BacklogAnnouncement`**, id 9. The producer has buffers and no credit, so it reports the backlog. The consumer grants credit when it has room.
 
 ```plantuml
 @startuml
@@ -167,19 +157,6 @@ class NettyProtocol {
   + getServerChannelHandlers() : ChannelHandler[]
   + getClientChannelHandlers() : ChannelHandler[]
 }
-
-class ResultPartitionManager {
-  + registerResultPartition(ResultPartition) : void
-  + createSubpartitionView(ResultPartitionID, ResultSubpartitionIndexSet, BufferAvailabilityListener) : ResultSubpartitionView
-}
-class ResultPartition
-class ResultSubpartition
-class SingleInputGate
-class InputChannel {
-  + requestSubpartitions() : void
-}
-class LocalInputChannel
-class RemoteInputChannel
 class NettyMessage
 class "NettyMessage.PartitionRequest" as PartitionRequest {
   - partitionId : ResultPartitionID
@@ -195,15 +172,18 @@ class "NettyMessage.AddCredit" as AddCredit {
   - credit : int
   - receiverId : InputChannelID
 }
+class "NettyMessage.BacklogAnnouncement" as BacklogAnnouncement {
+  ~ backlog : int
+  ~ receiverId : InputChannelID
+}
 
 NettyShuffleEnvironment -up-|> ShuffleEnvironment
 NettyConnectionManager -up-|> ConnectionManager
 NettyPartitionRequestClient -down-|> PartitionRequestClient
-LocalInputChannel -up-|> InputChannel
-RemoteInputChannel -up-|> InputChannel
 PartitionRequest -up-|> NettyMessage
 BufferResponse -up-|> NettyMessage
 AddCredit -up-|> NettyMessage
+BacklogAnnouncement -up-|> NettyMessage
 
 TaskExecutor -down-> TaskManagerServices : taskExecutorServices
 TaskManagerServices -down-> ShuffleEnvironment : shuffleEnvironment
@@ -211,313 +191,156 @@ TaskExecutor -down-> ShuffleEnvironment : shuffleEnvironment
 NettyShuffleServiceFactory --> NettyShuffleEnvironment : createShuffleEnvironment
 
 NettyShuffleEnvironment --> ConnectionManager
-NettyShuffleEnvironment --> ResultPartitionManager
-NettyShuffleEnvironment --> ResultPartition : createResultPartitionWriters
-NettyShuffleEnvironment --> SingleInputGate : createInputGates
-
 NettyConnectionManager --> NettyServer
 NettyConnectionManager --> NettyClient
 NettyConnectionManager --> NettyProtocol
 NettyClient --> NettyPartitionRequestClient
-
-ResultPartitionManager --> ResultPartition
-ResultPartition --> ResultSubpartition
-SingleInputGate --> InputChannel
-LocalInputChannel --> ResultPartitionManager : createSubpartitionView
-RemoteInputChannel --> NettyPartitionRequestClient
 NettyPartitionRequestClient --> PartitionRequest
 
 @enduml
 ```
 
-A local consumer takes a view of the subpartition in this process.
+### 2.2 Backpressure
 
-```java
-protected void requestSubpartitions() throws IOException {
-    checkState(toBeConsumedBuffers.isEmpty());
+The producer sends one data buffer for each credit. At zero credit, further buffers stay in the subpartition. A watermark or another event can still pass.
 
-    boolean retriggerRequest = false;
-    boolean notifyDataAvailable = false;
+The count that stops the write sits on the producer. The `PartitionRequest` carries the input channel's initial credit. The server stores the credit as `numCreditsAvailable` on the view reader. The partition request queue writes a buffer only while the count is positive, and each buffer spends one. When the consumer frees a buffer, the consumer sends `AddCredit` and the count goes up.
 
-    synchronized (requestLock) {
-        checkState(!isReleased, "LocalInputChannel has been released already");
+Waiting buffers fill the task's local buffer pool. The local buffer pool borrows memory from the network buffer pool, which is off-heap memory shared by the TaskManager. When the local pool has no free buffer, the task that writes the records waits, and the operator in the task slows down. The wait is the one in section 3.
 
-        if (subpartitionView == null) {
-            LOG.debug(
-                    "{}: Requesting LOCAL subpartitions {} of partition {}. {}",
-                    this,
-                    consumedSubpartitionIndexSet,
-                    partitionId,
-                    channelStatePersister);
+One TCP connection between two TaskManagers carries many input channels. `PartitionRequestClientFactory` keeps one `NettyPartitionRequestClient` for a remote address, and the `RemoteInputChannel`s for the remote address share the client. Each channel has an `InputChannelID`.
 
-            try {
-                ResultSubpartitionView subpartitionView =
-                        partitionManager.createSubpartitionView(
-                                partitionId, consumedSubpartitionIndexSet, this);
+On the server, the connection has one `PartitionRequestQueue`. A `PartitionRequest` adds one `CreditBasedSequenceNumberingViewReader` to `allReaders`, keyed by the channel id. `availableReaders` holds the readers that currently have something to send. The queue takes one reader, writes one `BufferResponse`, and returns. The next write can take another reader, so the channels share the socket one buffer at a time. The `BufferResponse` carries the channel id. On the client, `CreditBasedPartitionRequestClientHandler` maps the id to the `RemoteInputChannel` and delivers the buffer there.
 
-                if (subpartitionView == null) {
-                    throw new IOException("Error requesting subpartition.");
-                }
+Credit belongs to one reader. A reader with zero credit sends no data buffer. Readers with credit on the same connection still send. A checkpoint barrier is an event, so the barrier can still leave a reader with no credit. The socket window is a second gate on the shared connection. Netty holds the next frame while the socket window is closed.
 
-                this.subpartitionView = subpartitionView;
-
-                if (isReleased) {
-                    subpartitionView.releaseAllResources();
-                    this.subpartitionView = null;
-                } else {
-                    notifyDataAvailable = true;
-                    upstreamReady.countDown();
-                }
-            } catch (PartitionNotFoundException notFound) {
-                if (increaseBackoff()) {
-                    retriggerRequest = true;
-                } else {
-                    throw notFound;
-                }
-            }
-        }
-    }
-
-    if (notifyDataAvailable) {
-        notifyDataAvailable(this.subpartitionView);
-    }
-
-    // a missing partition is requested again outside the lock
-    if (retriggerRequest) {
-        inputGate.retriggerPartitionRequest(partitionId.getPartitionId(), channelInfo);
-    }
-}
-```
-
-A remote consumer first obtains a client for the producer's address, then sends the partition request on that TCP connection.
-
-```java
-public void requestSubpartitions() throws IOException, InterruptedException {
-    if (partitionRequestClient == null) {
-        LOG.debug(
-                "{}: Requesting REMOTE subpartitions {} of partition {}. {}",
-                this,
-                consumedSubpartitionIndexSet,
-                partitionId,
-                channelStatePersister);
-        try {
-            partitionRequestClient =
-                    connectionManager.createPartitionRequestClient(connectionId);
-        } catch (IOException e) {
-            throw new PartitionConnectionException(partitionId, e);
-        }
-
-        partitionRequestClient.requestSubpartition(
-                partitionId, consumedSubpartitionIndexSet, this, 0);
-    }
-}
-```
-
-```java
-public void requestSubpartition(
-        final ResultPartitionID partitionId,
-        final ResultSubpartitionIndexSet subpartitionIndexSet,
-        final RemoteInputChannel inputChannel,
-        int delayMs)
-        throws IOException {
-
-    checkNotClosed();
-
-    LOG.debug(
-            "Requesting subpartition {} of partition {} with {} ms delay.",
-            subpartitionIndexSet,
-            partitionId,
-            delayMs);
-
-    clientHandler.addInputChannel(inputChannel);
-
-    final PartitionRequest request =
-            new PartitionRequest(
-                    partitionId,
-                    subpartitionIndexSet,
-                    inputChannel.getInputChannelId(),
-                    inputChannel.getInitialCredit(),
-                    inputChannel.needsRecovery());
-
-    final ChannelFutureListener listener =
-            future -> {
-                if (!future.isSuccess()) {
-                    clientHandler.removeInputChannel(inputChannel);
-                    inputChannel.onError(
-                            new LocalTransportException(
-                                    String.format(
-                                            "Sending the partition request to '%s [%s] (#%d)' failed.",
-                                            connectionId.getAddress(),
-                                            connectionId
-                                                    .getResourceID()
-                                                    .getStringWithMetadata(),
-                                            connectionId.getConnectionIndex()),
-                                    future.channel().localAddress(),
-                                    future.cause()));
-                    sendToChannel(
-                            new ConnectionErrorMessage(
-                                    future.cause() == null
-                                            ? new RuntimeException(
-                                                    "Cannot send partition request.")
-                                            : future.cause()));
-                }
-            };
-
-    if (delayMs == 0) {
-        ChannelFuture f = tcpChannel.writeAndFlush(request);
-        f.addListener(listener);
-    } else {
-        final ChannelFuture[] f = new ChannelFuture[1];
-        tcpChannel
-                .eventLoop()
-                .schedule(
-                        () -> {
-                            f[0] = tcpChannel.writeAndFlush(request);
-                            f[0].addListener(listener);
-                        },
-                        delayMs,
-                        TimeUnit.MILLISECONDS);
-    }
-}
-```
-
-### 2.1 Backpressure
-
-The frames travel on the Netty TCP connection, and that socket keeps a TCP window. `PartitionRequestQueue` will not flush the next frame while the channel is not writable, and it tries again when the window opens. The decision to hold a record is the credit count, before that flush.
-
-`PartitionRequestServerHandler` builds a `CreditBasedSequenceNumberingViewReader` with the credit from the `PartitionRequest`. That reader is the producer-side gate for one input channel. `getNextBuffer` takes one buffer from the subpartition and spends one credit. `getNextDataType` reports the next buffer only while credit remains. An event still passes at zero credit. `PipelinedSubpartition.getAvailabilityAndBacklog` uses the same test: with no credit, the subpartition is available only when the next item is an event.
-
-`PartitionRequestQueue.enqueueAvailableReader` asks that availability before it queues a write. When the reader is not available and the backlog is positive, `needAnnounceBacklog` is true only if the channel started with zero credit and still has none. The queue then sends a `BacklogAnnouncement` and does not write a `BufferResponse`.
-
-The consumer gives the credit back. `RemoteInputChannel.notifyBufferAvailable` adds the number of freed buffers to `unannouncedCredit`. The first addition calls `NettyPartitionRequestClient.notifyCreditAvailable`, which fires an `AddCredit` on the TCP connection. The server handler runs `reader.addCredit`, and `addCreditOrResumeConsumption` enqueues the reader so the next `BufferResponse` can leave.
-
-Buffers that cannot be sent stay in the producer's subpartition and hold network buffers. `ResultPartition.getAvailableFuture` is the buffer pool's future, and `RecordWriter.getAvailableFuture` returns it. When the pool has no free buffer, the task thread suspends its default action. That wait is section 3. The slowdown then sits on the upstream operator.
-
-A local consumer does not send these messages. `LocalInputChannel` reads the subpartition in this process. Buffers it has not taken occupy the same pool, so the producer task waits on `getAvailableFuture` as well. In the orders-per-minute job, `A.0` to `B.1` is the remote credit path, and `A.0` to `B.0` is the local pool.
-
-![Credit stops the producer. PartitionRequest carries the initial credit to the view reader. BufferResponse leaves only while credit remains. AddCredit returns freed buffers. Zero credit keeps buffers in the subpartition, and an empty buffer pool stops the RecordWriter. A local consumer reads that subpartition in this process.](images/backpressure.svg)
+On the same TaskManager there is no credit message. Unread buffers fill the same pool, so the writer waits in the same way.
 
 ```plantuml
 @startuml
 
-class RecordWriter {
-  # targetPartition : ResultPartitionWriter
-  + getAvailableFuture() : CompletableFuture
+class ResultPartitionManager {
+  + registerResultPartition(ResultPartition) : void
+  + createSubpartitionView(ResultPartitionID, ResultSubpartitionIndexSet, BufferAvailabilityListener) : ResultSubpartitionView
 }
-class ResultPartitionWriter
 class ResultPartition {
   # bufferPool : BufferPool
-  + getAvailableFuture() : CompletableFuture
 }
 class BufferPool
-class PipelinedSubpartition {
-  + getAvailabilityAndBacklog(boolean) : AvailabilityWithBacklog
+class LocalBufferPool {
+  - networkBufferPool : NetworkBufferPool
+  - numberOfRequiredMemorySegments : int
+  - availableMemorySegments : ArrayDeque
+}
+class NetworkBufferPool {
+  - availableMemorySegments : ArrayDeque
 }
 class ResultSubpartition
-class PipelinedSubpartitionView {
-  - parent : PipelinedSubpartition
-  + getAvailabilityAndBacklog(boolean) : AvailabilityWithBacklog
-}
-class ResultSubpartitionView
-class NetworkSequenceViewReader {
-  + getNextBuffer() : BufferAndAvailability
-  + getAvailabilityAndBacklog() : AvailabilityWithBacklog
-  + addCredit(int) : void
-  + needAnnounceBacklog() : boolean
-}
 class CreditBasedSequenceNumberingViewReader {
   - numCreditsAvailable : int
   - initialCredit : int
-  - subpartitionView : ResultSubpartitionView
-  - requestQueue : PartitionRequestQueue
-  + addCredit(int) : void
-  + getNextBuffer() : BufferAndAvailability
 }
-class PartitionRequestQueue {
-  - availableReaders : ArrayDeque
-  + channelWritabilityChanged(ChannelHandlerContext) : void
-  ~ addCreditOrResumeConsumption(InputChannelID, Consumer) : void
+class PartitionRequestQueue
+class SingleInputGate
+class InputChannel {
+  + requestSubpartitions() : void
 }
+class LocalInputChannel
 class RemoteInputChannel {
-  - unannouncedCredit : AtomicInteger
   - initialCredit : int
-  - partitionRequestClient : PartitionRequestClient
-  + notifyBufferAvailable(int) : void
-  + onSenderBacklog(int) : void
-  + getInitialCredit() : int
-}
-class LocalInputChannel {
-  - subpartitionView : ResultSubpartitionView
-}
-class PartitionRequestClient {
-  + notifyCreditAvailable(RemoteInputChannel) : void
-}
-class NettyPartitionRequestClient {
-  - tcpChannel : Channel
-  + notifyCreditAvailable(RemoteInputChannel) : void
-}
-class NettyMessage
-class "NettyMessage.PartitionRequest" as PartitionRequest {
-  - credit : int
-}
-class "NettyMessage.BufferResponse" as BufferResponse {
-  - backlog : int
-}
-class "NettyMessage.AddCredit" as AddCredit {
-  - credit : int
-}
-class "NettyMessage.BacklogAnnouncement" as BacklogAnnouncement {
-  ~ backlog : int
-  ~ receiverId : InputChannelID
+  - unannouncedCredit : AtomicInteger
 }
 
-ResultPartition -up-|> ResultPartitionWriter
-PipelinedSubpartition -up-|> ResultSubpartition
-PipelinedSubpartitionView -up-|> ResultSubpartitionView
-CreditBasedSequenceNumberingViewReader -up-|> NetworkSequenceViewReader
-NettyPartitionRequestClient -down-|> PartitionRequestClient
-PartitionRequest -up-|> NettyMessage
-BufferResponse -up-|> NettyMessage
-AddCredit -up-|> NettyMessage
-BacklogAnnouncement -up-|> NettyMessage
+LocalInputChannel -up-|> InputChannel
+RemoteInputChannel -up-|> InputChannel
+LocalBufferPool -up-|> BufferPool
 
-RecordWriter -down-> ResultPartitionWriter : targetPartition
+ResultPartitionManager --> ResultPartition
 ResultPartition -down-> BufferPool : bufferPool
-PipelinedSubpartitionView --> PipelinedSubpartition : parent
-CreditBasedSequenceNumberingViewReader --> ResultSubpartitionView : subpartitionView
-CreditBasedSequenceNumberingViewReader -down-> PartitionRequestQueue : requestQueue
-PartitionRequestQueue --> NetworkSequenceViewReader : availableReaders
-LocalInputChannel --> ResultSubpartitionView : subpartitionView
-RemoteInputChannel -down-> PartitionRequestClient : partitionRequestClient
-NettyPartitionRequestClient --> AddCredit : notifyCreditAvailable
+LocalBufferPool --> NetworkBufferPool : networkBufferPool
+ResultPartition --> ResultSubpartition
+PartitionRequestQueue --> CreditBasedSequenceNumberingViewReader : availableReaders
+SingleInputGate --> InputChannel
+LocalInputChannel --> ResultPartitionManager : createSubpartitionView
 
 @enduml
 ```
 
 ```java
-@Override
-public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
-    writeAndFlushNextMessageIfPossible(ctx.channel());
-}
+// PartitionRequestServerHandler.channelRead0
+// Store the initial credit on a new view reader. Other message types sit between these two branches.
+if (msgClazz == PartitionRequest.class) {
+    PartitionRequest request = (PartitionRequest) msg;
 
-private void writeAndFlushNextMessageIfPossible(final Channel channel) throws IOException {
-    if (fatalError || !channel.isWritable()) {
-        return;
-    }
+    NetworkSequenceViewReader reader;
+    reader =
+            new CreditBasedSequenceNumberingViewReader(
+                    request.receiverId,
+                    request.credit, // buffers the consumer can accept now
+                    request.needsRecovery,
+                    outboundQueue);
 
-    // poll an available reader and write one BufferResponse
+    reader.requestSubpartitionViewOrRegisterListener(
+            partitionProvider, request.partitionId, request.queueIndexSet);
+} else if (msgClazz == AddCredit.class) {
+    AddCredit request = (AddCredit) msg;
+
+    // Add the buffers the consumer has freed.
+    outboundQueue.addCreditOrResumeConsumption(
+            request.receiverId, reader -> reader.addCredit(request.credit));
 }
 ```
 
 ```java
-private Buffer.DataType getNextDataType(BufferAndBacklog bufferAndBacklog) {
-    final Buffer.DataType nextDataType = bufferAndBacklog.getNextDataType();
-    if (numCreditsAvailable > 0 || nextDataType.isEvent()) {
-        return nextDataType;
-    }
-    return Buffer.DataType.NONE;
+// CreditBasedSequenceNumberingViewReader
+// numCreditsAvailable is how many data buffers the server may still send.
+private int numCreditsAvailable;
+
+// CreditBasedSequenceNumberingViewReader constructor
+CreditBasedSequenceNumberingViewReader(
+        InputChannelID receiverId,
+        int initialCredit,
+        boolean needsRecovery,
+        PartitionRequestQueue requestQueue) {
+    // The other fields are stored here as well.
+    // A recovery request starts with no credit.
+    this.numCreditsAvailable = needsRecovery ? 0 : initialCredit;
 }
 
+// CreditBasedSequenceNumberingViewReader.addCredit
+@Override
+public void addCredit(int creditDeltas) {
+    numCreditsAvailable += creditDeltas;
+}
+```
+
+```java
+// PipelinedSubpartition.getAvailabilityAndBacklog
+// With credit, a waiting buffer may leave. With none, only an event may leave.
+public ResultSubpartitionView.AvailabilityWithBacklog getAvailabilityAndBacklog(
+        boolean isCreditAvailable) {
+    synchronized (buffers) {
+        boolean isAvailable;
+        if (isCreditAvailable) {
+            isAvailable = isDataAvailableUnsafe();
+        } else {
+            isAvailable = getNextBufferTypeUnsafe().isEvent();
+        }
+        return new ResultSubpartitionView.AvailabilityWithBacklog(
+                isAvailable, getBuffersInBacklogUnsafe());
+    }
+}
+```
+
+```java
+// CreditBasedSequenceNumberingViewReader.getAvailabilityAndBacklog
+@Override
+public ResultSubpartitionView.AvailabilityWithBacklog getAvailabilityAndBacklog() {
+    return subpartitionView.getAvailabilityAndBacklog(numCreditsAvailable > 0);
+}
+
+// CreditBasedSequenceNumberingViewReader.getNextBuffer
+// A data buffer spends one credit. An event does not.
 @Nullable
 @Override
 public BufferAndAvailability getNextBuffer() throws IOException {
@@ -534,56 +357,98 @@ public BufferAndAvailability getNextBuffer() throws IOException {
         return null;
     }
 }
+
+// CreditBasedSequenceNumberingViewReader.getNextDataType
+// The following item is visible when credit remains, or when the item is an event.
+private Buffer.DataType getNextDataType(BufferAndBacklog bufferAndBacklog) {
+    final Buffer.DataType nextDataType = bufferAndBacklog.getNextDataType();
+    if (numCreditsAvailable > 0 || nextDataType.isEvent()) {
+        return nextDataType;
+    }
+    return Buffer.DataType.NONE;
+}
 ```
 
 ```java
-private void enqueueAvailableReader(final NetworkSequenceViewReader reader) throws Exception {
-    if (reader.isRegisteredAsAvailable()) {
+// PartitionRequestQueue.writeAndFlushNextMessageIfPossible
+// Send one BufferResponse. A closed socket window stops the write.
+private void writeAndFlushNextMessageIfPossible(final Channel channel) throws IOException {
+    if (fatalError || !channel.isWritable()) {
         return;
     }
 
-    ResultSubpartitionView.AvailabilityWithBacklog availabilityWithBacklog =
-            reader.getAvailabilityAndBacklog();
-    if (!availabilityWithBacklog.isAvailable()) {
-        int backlog = availabilityWithBacklog.getBacklog();
-        if (backlog > 0 && reader.needAnnounceBacklog()) {
-            announceBacklog(reader, backlog);
+    BufferAndAvailability next = null;
+    int nextSubpartitionId = -1;
+    try {
+        while (true) {
+            NetworkSequenceViewReader reader = pollAvailableReader();
+
+            if (reader == null) {
+                return;
+            }
+
+            nextSubpartitionId = reader.peekNextBufferSubpartitionId();
+            next = reader.getNextBuffer(); // spends one credit for a data buffer
+            if (next == null) {
+                if (!reader.isReleased()) {
+                    continue;
+                }
+
+                Throwable cause = reader.getFailureCause();
+                if (cause != null) {
+                    ErrorResponse msg = new ErrorResponse(cause, reader.getReceiverId());
+
+                    ctx.writeAndFlush(msg);
+                }
+            } else {
+                if (next.moreAvailable()) {
+                    registerAvailableReader(reader);
+                }
+
+                BufferResponse msg =
+                        new BufferResponse(
+                                next.buffer(),
+                                next.getSequenceNumber(),
+                                reader.getReceiverId(),
+                                nextSubpartitionId,
+                                next.buffer() instanceof FullyFilledBuffer
+                                        ? ((FullyFilledBuffer) next.buffer())
+                                                .getPartialBuffers()
+                                                .size()
+                                        : 0,
+                                next.buffersInBacklog());
+
+                // One buffer goes out. The listener calls the method again when the write finishes.
+                channel.writeAndFlush(msg).addListener(writeListener);
+
+                return;
+            }
         }
-        return;
-    }
-
-    // Queue an available reader for consumption. If the queue is empty,
-    // we try trigger the actual write. Otherwise this will be handled by
-    // the writeAndFlushNextMessageIfPossible calls.
-    boolean triggerWrite = availableReaders.isEmpty();
-    registerAvailableReader(reader);
-
-    if (triggerWrite) {
-        writeAndFlushNextMessageIfPossible(ctx.channel());
+    } catch (Throwable t) {
+        if (next != null) {
+            next.buffer().recycleBuffer();
+        }
+        throw new IOException(t.getMessage(), t);
     }
 }
 ```
 
 ```java
-@Override
+// RemoteInputChannel.notifyBufferAvailable
+// The first freed buffers of a batch trigger AddCredit.
 public void notifyBufferAvailable(int numAvailableBuffers) throws IOException {
     if (numAvailableBuffers > 0 && unannouncedCredit.getAndAdd(numAvailableBuffers) == 0) {
         notifyCreditAvailable();
     }
 }
-```
 
-```java
-@Override
-public void addCredit(int creditDeltas) {
-    numCreditsAvailable += creditDeltas;
-}
-```
-
-```java
-@Override
-public CompletableFuture<?> getAvailableFuture() {
-    return bufferPool.getAvailableFuture();
+// NettyPartitionRequestClient.AddCreditMessage.buildMessage
+// Copy the freed count into the message and clear it.
+Object buildMessage() {
+    int credits = inputChannel.getAndResetUnannouncedCredit();
+    return credits > 0
+            ? new NettyMessage.AddCredit(credits, inputChannel.getInputChannelId())
+            : null;
 }
 ```
 
@@ -781,7 +646,7 @@ public void runMailboxLoop() throws Exception {
 }
 ```
 
-`processInput` asks the input processor for one step. `MORE_AVAILABLE` means another record can be read on the next loop. `NOTHING_AVAILABLE` and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2.1, observed from inside the task thread. `END_OF_DATA` and `END_OF_INPUT` finish the input and suspend the default action so the loop can drain the remaining mail and leave `invoke`.
+`processInput` asks the input processor for one step. `MORE_AVAILABLE` means another record can be read on the next loop. `NOTHING_AVAILABLE` and a full output fall through to a wait: the default action is suspended until the input, the result writer, or the operator chain can accept more. That wait is the same backpressure as section 2, observed from inside the task thread. `END_OF_DATA` and `END_OF_INPUT` finish the input and suspend the default action so the loop can drain the remaining mail and leave `invoke`.
 
 ```java
 protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {

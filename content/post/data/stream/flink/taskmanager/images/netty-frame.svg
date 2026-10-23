@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="168" viewBox="0 0 920 168" role="img" aria-label="Netty frame layout. Byte 0 is the 4-byte frame length, byte 4 is the magic number 0xBADC0FFE, byte 8 is the 1-byte message id, and byte 9 starts the message body.">
+  <rect width="920" height="168" fill="#ffffff"/>
+
+  <text x="16" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#64748b">0</text>
+  <text x="200" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#64748b">4</text>
+  <text x="470" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#64748b">8</text>
+  <text x="590" y="26" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#64748b">9</text>
+  <line x1="16" y1="32" x2="16" y2="44" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="200" y1="32" x2="200" y2="44" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="470" y1="32" x2="470" y2="44" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="590" y1="32" x2="590" y2="44" stroke="#94a3b8" stroke-width="1.5"/>
+
+  <rect x="16" y="44" width="184" height="100" fill="#f3f4f6" stroke="#334155" stroke-width="1.5"/>
+  <rect x="200" y="44" width="270" height="100" fill="#fef9c3" stroke="#334155" stroke-width="1.5"/>
+  <rect x="470" y="44" width="120" height="100" fill="#dcfce7" stroke="#334155" stroke-width="1.5"/>
+  <rect x="590" y="44" width="314" height="100" fill="#dbeafe" stroke="#334155" stroke-width="1.5"/>
+
+  <text x="108" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">frame length</text>
+  <text x="108" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334155">4 bytes</text>
+
+  <text x="335" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">magic number</text>
+  <text x="335" y="102" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334155">0xBADC0FFE</text>
+  <text x="335" y="124" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334155">4 bytes</text>
+
+  <text x="530" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">id</text>
+  <text x="530" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334155">1 byte</text>
+
+  <text x="747" y="84" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">message body</text>
+  <text x="747" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334155">variable length</text>
+</svg>
