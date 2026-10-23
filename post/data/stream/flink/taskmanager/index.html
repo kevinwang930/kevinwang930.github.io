@@ -39,7 +39,7 @@ Task execution. Deployment starts one thread per task. That thread builds the op
   S1 --&gt;|&#34;hash(key) buffers&#34;| S3
 </code></pre><p>Backpressure is local: when a consumer’s input buffers fill, credit-based flow control slows the upstream output. That pressure propagates through pipelined edges until sources throttle or buffer timeouts fire.</p><p><strong>Orders-per-minute Example</strong> . It reads order records, parses each one into an <code>Order</code>, groups them by <code>userId</code>, counts them in a one-minute window, and writes the counts to Kafka: <code>orders → ParseOrder → keyBy(userId) → window → kafkaSink</code>.</p><p>At parallelism 2 that pipeline is two tasks. <code>A</code> is <code>orders → ParseOrder</code>, and <code>B</code> is <code>window → kafkaSink</code>. They are in one slot-sharing group, so each slot holds the pair with the same subtask index:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>Slot 0:  A.0 orders → ParseOrder     B.0 window → kafkaSink
 </span></span><span style=display:flex><span>Slot 1:  A.1 orders → ParseOrder     B.1 window → kafkaSink
-</span></span></code></pre></div><p>The job needs two slots, not four. The <code>keyBy(userId)</code> edge is still a hash from every <code>A</code> subtask to every <code>B</code> subtask.</p><h2 id=2-data-exchange-and-back-pressure>2. Data exchange and back pressure</h2><p>A TaskManager keeps two kinds of connection.</p><ul><li><strong>JobMaster.</strong> The JobMaster sends the task on the JobMaster connection. Section 3 is the submit call.</li><li><strong>Other TaskManagers.</strong> The record connection carries records from one task to another. The figure below is the record path.</li></ul><p>A record inside one chain of operators is a method call. On the record connection, the producer writes the record into a network buffer and appends the buffer to a result subpartition. The consumer reads the buffer through an input channel. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.</p><p>On the same TaskManager, the channel reads the subpartition in the local process. On another TaskManager, the channel opens a TCP connection to the producer&rsquo;s data port. Many channels share the TCP connection. Each message names an input channel, so the bytes reach the named channel.</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/images/backpressure.svg alt="Two TaskManagers. The ResultSubpartition sends buffers and announces the backlog size. The InputChannel adds credit. Local buffer pools borrow from the network buffer pool, which takes memory from off-heap. Netty carries the bytes over the sockets."></p><p>In the orders-per-minute job, <code>A.0</code> to <code>B.0</code> stays on one TaskManager. <code>A.0</code> to <code>B.1</code> crosses to the other. Sharing a slot does not turn the hash edge into a chain: <code>A.0</code> and <code>B.0</code> still meet at a subpartition.</p><h3 id=21-netty-protocol>2.1 Netty protocol</h3><p>Netty is the library a TaskManager uses to carry records to another TaskManager. <code>TaskExecutor</code> holds a <code>ShuffleEnvironment</code>. The default environment is a <code>NettyShuffleEnvironment</code>, created by <code>NettyShuffleServiceFactory</code>. The connection manager is a <code>NettyConnectionManager</code>.</p><p><code>NettyConnectionManager</code> runs two sides. <code>NettyServer</code> listens on the data port. A remote consumer connects to <code>NettyServer</code>, so the producer of a record is the server. <code>NettyClient</code> opens the outgoing connection: <code>NettyPartitionRequestClient</code> is the consumer, and the client sends the request for a subpartition. Many input channels share the TCP connection. <code>NettyProtocol</code> encodes and decodes the frames on both sides. The bytes Netty holds come from <code>NettyBufferPool</code>, which allocates the bytes off-heap.</p><p>The bytes on the connection to remote TaskManager are Netty frames. Every frame has the same front. The numbers above the boxes are the byte offsets.</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/images/netty-frame.svg alt="Netty frame. Byte 0 is the 4-byte frame length, byte 4 is the magic number 0xBADC0FFE, byte 8 is the 1-byte message id, and byte 9 starts the message body."></p><p>The length counts every byte of the frame, including its own 4 bytes. The magic number is <code>0xBADC0FFE</code>. The id selects the message. The body follows, and its size depends on the id. The consumer speaks first.</p><ol><li><strong><code>PartitionRequest</code></strong>, id 2. The consumer names the partition, the subpartitions, and the input channel. The message also says how many buffers the consumer can accept. The accepted count is the credit.</li><li><strong><code>BufferResponse</code></strong>, id 0. The producer sends one buffer and says how many buffers are still waiting. The waiting count is the backlog.</li><li><strong><code>AddCredit</code></strong>, id 6. The consumer has freed some buffers and tells the producer it may send more.</li><li><strong><code>BacklogAnnouncement</code></strong>, id 9. The producer has buffers and no credit, so it reports the backlog. The consumer grants credit when it has room.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>The job needs two slots, not four. The <code>keyBy(userId)</code> edge is still a hash from every <code>A</code> subtask to every <code>B</code> subtask.</p><h2 id=2-data-exchange-and-back-pressure>2. Data exchange and back pressure</h2><p>A TaskManager keeps two kinds of connection.</p><ul><li><strong>JobMaster.</strong> The JobMaster sends the task on the JobMaster connection. Section 3 is the submit call.</li><li><strong>Other TaskManagers.</strong> The record connection carries records from one task to another. The figure below is the record path.</li></ul><p>A record inside one chain of operators is a method call. On the remote connection, the producer writes the record into a network buffer and appends the buffer to a result subpartition. The consumer reads the buffer through an input channel. Which subpartition receives the record is the partitioner from section 1: forward, hash, or rebalance.</p><p>On the same TaskManager, the channel reads the subpartition in the local process. On another TaskManager, the channel opens a TCP connection to the producer&rsquo;s data port. Many channels share the TCP connection. Each message names an input channel, so the bytes reach the named channel.</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/images/backpressure.svg alt="Two TaskManagers. The ResultSubpartition sends buffers and announces the backlog size. The InputChannel adds credit. Local buffer pools borrow from the network buffer pool, which takes memory from off-heap. Netty carries the bytes over the sockets."></p><p>In the orders-per-minute job, <code>A.0</code> to <code>B.0</code> stays on one TaskManager. <code>A.0</code> to <code>B.1</code> crosses to the other. Sharing a slot does not turn the hash edge into a chain: <code>A.0</code> and <code>B.0</code> still meet at a subpartition.</p><h3 id=21-netty-protocol>2.1 Netty protocol</h3><p>Netty is the library a TaskManager uses to carry records to remote TaskManager. <code>TaskExecutor</code> holds a <code>ShuffleEnvironment</code>. The default environment is a <code>NettyShuffleEnvironment</code>, created by <code>NettyShuffleServiceFactory</code>. The connection manager is a <code>NettyConnectionManager</code>.</p><p><code>NettyConnectionManager</code> runs two sides. <code>NettyServer</code> listens on the data port. A remote consumer connects to <code>NettyServer</code>, so the producer of a record is the server. <code>NettyClient</code> opens the outgoing connection: <code>NettyPartitionRequestClient</code> is the consumer, and the client sends the request for a subpartition. Many input channels share the TCP connection. <code>NettyProtocol</code> encodes and decodes the frames on both sides. The bytes Netty holds come from <code>NettyBufferPool</code>, which allocates the bytes off-heap.</p><p>The bytes on the connection to remote TaskManager are Netty frames. Every frame has the same front. The numbers above the boxes are the byte offsets.</p><p><img src=https://kevinwang930.github.io/post/data/stream/flink/taskmanager/images/netty-frame.svg alt="Netty frame. Byte 0 is the 4-byte frame length, byte 4 is the magic number 0xBADC0FFE, byte 8 is the 1-byte message id, and byte 9 starts the message body."></p><p>The length counts every byte of the frame, including its own 4 bytes. The magic number is <code>0xBADC0FFE</code>. The id selects the message. The body follows, and its size depends on the id. The consumer speaks first.</p><ol><li><strong><code>PartitionRequest</code></strong>, id 2. The consumer names the partition, the subpartitions, and the input channel. The message also says how many buffers the consumer can accept. The accepted count is the credit.</li><li><strong><code>BufferResponse</code></strong>, id 0. The producer sends one buffer and says how many buffers are still waiting. The waiting count is the backlog.</li><li><strong><code>AddCredit</code></strong>, id 6. The consumer has freed some buffers and tells the producer it may send more.</li><li><strong><code>BacklogAnnouncement</code></strong>, id 9. The producer has buffers and no credit, so it reports the backlog. The consumer grants credit when it has room.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class TaskExecutor {
   - taskExecutorServices : TaskManagerServices
@@ -131,7 +131,15 @@ NettyClient --&gt; NettyPartitionRequestClient
 NettyPartitionRequestClient --&gt; PartitionRequest
 
 @enduml
-</code></pre><h3 id=22-backpressure>2.2 Backpressure</h3><p>The producer sends one data buffer for each credit. At zero credit, further buffers stay in the subpartition. A watermark or another event can still pass.</p><p>The count that stops the write sits on the producer. The <code>PartitionRequest</code> carries the input channel&rsquo;s initial credit. The server stores the credit as <code>numCreditsAvailable</code> on the view reader. The partition request queue writes a buffer only while the count is positive, and each buffer spends one. When the consumer frees a buffer, the consumer sends <code>AddCredit</code> and the count goes up.</p><p>Waiting buffers fill the task&rsquo;s local buffer pool. The local buffer pool borrows memory from the network buffer pool, which is off-heap memory shared by the TaskManager. When the local pool has no free buffer, the task that writes the records waits, and the operator in the task slows down. The wait is the one in section 3.</p><p>One TCP connection between two TaskManagers carries many input channels. <code>PartitionRequestClientFactory</code> keeps one <code>NettyPartitionRequestClient</code> for a remote address, and the <code>RemoteInputChannel</code>s for the remote address share the client. Each channel has an <code>InputChannelID</code>.</p><p>On the server, the connection has one <code>PartitionRequestQueue</code>. A <code>PartitionRequest</code> adds one <code>CreditBasedSequenceNumberingViewReader</code> to <code>allReaders</code>, keyed by the channel id. <code>availableReaders</code> holds the readers that currently have something to send. The queue takes one reader, writes one <code>BufferResponse</code>, and returns. The next write can take another reader, so the channels share the socket one buffer at a time. The <code>BufferResponse</code> carries the channel id. On the client, <code>CreditBasedPartitionRequestClientHandler</code> maps the id to the <code>RemoteInputChannel</code> and delivers the buffer there.</p><p>Credit belongs to one reader. A reader with zero credit sends no data buffer. Readers with credit on the same connection still send. A checkpoint barrier is an event, so the barrier can still leave a reader with no credit. The socket window is a second gate on the shared connection. Netty holds the next frame while the socket window is closed.</p><p>On the same TaskManager there is no credit message. Unread buffers fill the same pool, so the writer waits in the same way.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><h3 id=22-backpressure>2.2 Backpressure</h3><p>Backpressure slows a producer when the consumer cannot take more buffers. The consumer grants credit, and the producer sends one data buffer for each credit. At zero credit the data buffer stays in the subpartition. An event can still pass, including a checkpoint barrier and a watermark. Buffers that wait fill the task&rsquo;s local buffer pool. The local buffer pool borrows memory from the network buffer pool, which is off-heap memory shared by the TaskManager. When the local pool has no free buffer, the task that writes the records waits, and the operator in the task slows down. The wait is the one in section 3. On the same TaskManager there is no credit message. Unread buffers fill the same pool, so the writer waits in the same way.</p><p><code>PartitionRequest</code> is sent once per channel, from <code>RemoteInputChannel.requestSubpartitions</code>. The credit in the message is the first credit. After the channel is open, freed buffers are reported with <code>AddCredit</code> from <code>notifyCreditAvailable</code>, and the producer sends further <code>BufferResponse</code> messages. A <code>PartitionNotFound</code> answer is the path that sends <code>PartitionRequest</code> again, through <code>retriggerSubpartitionRequest</code>, until the partition is registered.</p><pre tabindex=0><code class=language-mermaid data-lang=mermaid>sequenceDiagram
+  participant Consumer as RemoteInputChannel
+  participant Producer as PartitionRequestQueue
+  Consumer-&gt;&gt;Producer: PartitionRequest (partitionId, subpartition, channelId, credit)
+  loop BufferResponse while credit remains, then AddCredit
+    Producer-&gt;&gt;Consumer: BufferResponse(buffer, sequenceNumber, channelId, backlog)
+    Consumer-&gt;&gt;Producer: AddCredit(channelId, credit)
+  end
+</code></pre><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 
 class ResultPartitionManager {
   + registerResultPartition(ResultPartition) : void
@@ -150,11 +158,25 @@ class NetworkBufferPool {
   - availableMemorySegments : ArrayDeque
 }
 class ResultSubpartition
+class ResultSubpartitionView
 class CreditBasedSequenceNumberingViewReader {
+  - receiverId : InputChannelID
+  - requestQueue : PartitionRequestQueue
+  - subpartitionView : ResultSubpartitionView
   - numCreditsAvailable : int
   - initialCredit : int
 }
-class PartitionRequestQueue
+class ChannelInboundHandlerAdapter
+class PartitionRequestQueue {
+  - availableReaders : ArrayDeque
+  - allReaders : ConcurrentMap
+}
+class PartitionRequestServerHandler {
+  - partitionProvider : ResultPartitionProvider
+  - taskEventPublisher : TaskEventPublisher
+  - outboundQueue : PartitionRequestQueue
+  # channelRead0(ChannelHandlerContext, NettyMessage) : void
+}
 class SingleInputGate
 class InputChannel {
   + requestSubpartitions() : void
@@ -164,7 +186,26 @@ class RemoteInputChannel {
   - initialCredit : int
   - unannouncedCredit : AtomicInteger
 }
+class &#34;NettyMessage.PartitionRequest&#34; as PartitionRequest {
+  - partitionId : ResultPartitionID
+  - receiverId : InputChannelID
+  - credit : int
+}
+class &#34;NettyMessage.AddCredit&#34; as AddCredit {
+  - credit : int
+  - receiverId : InputChannelID
+}
+class &#34;NettyMessage.BufferResponse&#34; as BufferResponse {
+  - buffer : Buffer
+  - receiverId : InputChannelID
+  - backlog : int
+}
+class &#34;NettyMessage.BacklogAnnouncement&#34; as BacklogAnnouncement {
+  ~ backlog : int
+  ~ receiverId : InputChannelID
+}
 
+PartitionRequestQueue -up-|&gt; ChannelInboundHandlerAdapter
 LocalInputChannel -up-|&gt; InputChannel
 RemoteInputChannel -up-|&gt; InputChannel
 LocalBufferPool -up-|&gt; BufferPool
@@ -173,7 +214,14 @@ ResultPartitionManager --&gt; ResultPartition
 ResultPartition -down-&gt; BufferPool : bufferPool
 LocalBufferPool --&gt; NetworkBufferPool : networkBufferPool
 ResultPartition --&gt; ResultSubpartition
-PartitionRequestQueue --&gt; CreditBasedSequenceNumberingViewReader : availableReaders
+ResultPartitionManager --&gt; ResultSubpartitionView : createSubpartitionView
+CreditBasedSequenceNumberingViewReader --&gt; ResultSubpartitionView : subpartitionView
+PartitionRequest --&gt; PartitionRequestServerHandler : channelRead0
+AddCredit --&gt; PartitionRequestServerHandler : channelRead0
+PartitionRequestServerHandler --&gt; PartitionRequestQueue : outboundQueue
+PartitionRequestQueue --&gt; CreditBasedSequenceNumberingViewReader : allReaders
+PartitionRequestQueue --&gt; BufferResponse : writeAndFlushNextMessageIfPossible
+PartitionRequestQueue --&gt; BacklogAnnouncement : announceBacklog
 SingleInputGate --&gt; InputChannel
 LocalInputChannel --&gt; ResultPartitionManager : createSubpartitionView
 
