@@ -108,110 +108,116 @@ BQ &lt;|.. ABQ
 </span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Waits on</th><th>Woken by</th></tr></thead><tbody><tr><td>producer in <code>put</code> / timed <code>offer</code></td><td><code>count == items.length</code></td><td><code>notFull</code></td><td><code>dequeue()</code> in <code>take</code> and <code>poll</code>; <code>removeAt</code> (used by <code>remove(Object)</code> and iterators); <code>clear</code> and <code>drainTo</code> signal once per freed slot while <code>lock.hasWaiters(notFull)</code></td></tr><tr><td>consumer in <code>take</code> / timed <code>poll</code></td><td><code>count == 0</code></td><td><code>notEmpty</code></td><td><code>enqueue()</code> in <code>put</code>, <code>offer</code>, <code>add</code></td></tr></tbody></table><p><code>enqueue</code> signals unconditionally, even when no consumer waits; <code>signal</code> on an empty condition queue only reads <code>firstWaiter</code> and returns. Both conditions belong to the same lock, so a producer and a consumer never run concurrently: the single lock is the throughput limit of this queue. <code>lockInterruptibly</code> and the interruptible <code>await</code> make every blocking method respond to interruption both while acquiring the lock and while waiting.</p><p><strong>Application profile:</strong> fixed worker pools, explicit back-pressure with a known upper bound (<code>ThreadPoolExecutor</code> with a bounded queue), workloads where per-element node allocation is undesirable.</p><h3 id=24-linkedblockingqueue>2.4 LinkedBlockingQueue</h3><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Waits on</th><th>Woken by</th></tr></thead><tbody><tr><td>producer in <code>put</code> / timed <code>offer</code></td><td><code>count == items.length</code></td><td><code>notFull</code></td><td><code>dequeue()</code> in <code>take</code> and <code>poll</code>; <code>removeAt</code> (used by <code>remove(Object)</code> and iterators); <code>clear</code> and <code>drainTo</code> signal once per freed slot while <code>lock.hasWaiters(notFull)</code></td></tr><tr><td>consumer in <code>take</code> / timed <code>poll</code></td><td><code>count == 0</code></td><td><code>notEmpty</code></td><td><code>enqueue()</code> in <code>put</code>, <code>offer</code>, <code>add</code></td></tr></tbody></table><p><code>enqueue</code> signals unconditionally, even when no consumer waits; <code>signal</code> on an empty condition queue only reads <code>firstWaiter</code> and returns. Both conditions belong to the same lock, so a producer and a consumer never run concurrently: the single lock is the throughput limit of this queue. <code>lockInterruptibly</code> and the interruptible <code>await</code> make every blocking method respond to interruption both while acquiring the lock and while waiting.</p><p><strong>Application profile:</strong> fixed worker pools, explicit back-pressure with a known upper bound (<code>ThreadPoolExecutor</code> with a bounded queue), workloads where per-element node allocation is undesirable.</p><h3 id=24-linkedblockingdeque>2.4 LinkedBlockingDeque</h3><p><code>LinkedBlockingDeque</code> is an optionally bounded double-ended queue over doubly linked nodes (<code>first</code>, <code>last</code>, <code>prev</code>, <code>next</code>). It cannot use the two-lock scheme of <code>LinkedBlockingQueue</code>, because operations at both ends may touch the same node when the deque holds zero or one element. It returns to the design of <code>ArrayBlockingQueue</code>: one <code>ReentrantLock</code> with <code>notEmpty</code> and <code>notFull</code>. <code>count</code> is a <code>volatile int</code> written only under the lock; it is volatile so that <code>pollFirst</code>, <code>pollLast</code> and similar fast paths can return <code>null</code> on an empty deque without locking.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface &#34;BlockingQueue&lt;E&gt;&#34; as BQ
+interface &#34;Deque&lt;E&gt;&#34; as Deque
+interface &#34;BlockingDeque&lt;E&gt;&#34; as BD
 abstract class &#34;AbstractQueue&lt;E&gt;&#34; as AQ
-class &#34;LinkedBlockingQueue&lt;E&gt;&#34; as LBQ {
+class &#34;LinkedBlockingDeque&lt;E&gt;&#34; as LBD {
+    ~ transient Node&lt;E&gt; first
+    ~ transient Node&lt;E&gt; last
+    - transient volatile int count
     - final int capacity
-    - final AtomicInteger count
-    ~ transient Node&lt;E&gt; head
-    - transient Node&lt;E&gt; last
-    - final ReentrantLock takeLock
+    ~ final ReentrantLock lock
     - final Condition notEmpty
-    - final ReentrantLock putLock
     - final Condition notFull
-    + put(E e) : void
-    + take() : E
-    - signalNotEmpty() : void
-    - signalNotFull() : void
-    - enqueue(Node&lt;E&gt; node) : void
-    - dequeue() : E
-    ~ fullyLock() : void
+    + putFirst(E e) : void
+    + putLast(E e) : void
+    + takeFirst() : E
+    + takeLast() : E
+    - linkFirst(Node&lt;E&gt; node) : boolean
+    - linkLast(Node&lt;E&gt; node) : boolean
+    - unlinkFirst() : E
+    - unlinkLast() : E
 }
-class &#34;LinkedBlockingQueue.Node&lt;E&gt;&#34; as Node {
+class &#34;LinkedBlockingDeque.Node&lt;E&gt;&#34; as Node {
     ~ E item
+    ~ Node&lt;E&gt; prev
     ~ Node&lt;E&gt; next
 }
-AQ &lt;|-- LBQ
-BQ &lt;|.. LBQ
-LBQ *-- Node : head .. last
-Node --&gt; Node : next
+BQ &lt;|-- BD
+Deque &lt;|-- BD
+AQ &lt;|-- LBD
+BD &lt;|.. LBD
+LBD *-- Node : first .. last
+Node --&gt; Node : prev, next
 @enduml
-</code></pre><p><code>LinkedBlockingQueue</code> partitions synchronization between producers and consumers:</p><table><thead><tr><th>Lock</th><th>Scope</th><th>Associated condition</th></tr></thead><tbody><tr><td><code>putLock</code></td><td>tail insertion; <code>notFull</code> wait set</td><td><code>notFull</code></td></tr><tr><td><code>takeLock</code></td><td>head removal; <code>notEmpty</code> wait set</td><td><code>notEmpty</code></td></tr><tr><td><code>AtomicInteger count</code></td><td>element count observable from either side</td><td>—</td></tr></tbody></table><p>The implementation comment states the rationale:</p><blockquote><p>The putLock gates entry to put (and offer), and has an associated condition for waiting puts. Similarly for the takeLock. The count field that they both rely on is maintained as an atomic to avoid needing to get both locks in most cases.</p></blockquote><p>A <code>put</code> holds only <code>putLock</code>. When the queue transitions from empty (<code>c == 0</code> before increment), it invokes <code>signalNotEmpty()</code>, which briefly acquires <code>takeLock</code> to wake a blocked consumer. A <code>take</code> that reduces occupancy from capacity invokes the symmetric <code>signalNotFull()</code>. This <strong>cascading signal</strong> permits the common case to proceed without holding both locks.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingQueue.put</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>put</span>(E e) <span style=color:#66d9ef>throws</span> InterruptedException {
+</code></pre><p><strong>Blocking and unblocking.</strong> The four primitive link operations make the state change and issue the wake-up; they return <code>false</code> or <code>null</code> instead of blocking, and the public methods wrap them in wait loops:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.linkFirst</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>linkFirst</span>(Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> node) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// assert lock.isHeldByCurrentThread();</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> c;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> ((c <span style=color:#f92672>=</span> count) <span style=color:#f92672>&gt;=</span> capacity)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
+</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> f <span style=color:#f92672>=</span> first;
+</span></span><span style=display:flex><span>    node.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> f;
+</span></span><span style=display:flex><span>    first <span style=color:#f92672>=</span> node;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (last <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        last <span style=color:#f92672>=</span> node;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span>
+</span></span><span style=display:flex><span>        f.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> node;
+</span></span><span style=display:flex><span>    count <span style=color:#f92672>=</span> c <span style=color:#f92672>+</span> 1;
+</span></span><span style=display:flex><span>    notEmpty.<span style=color:#a6e22e>signal</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.unlinkFirst</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> E <span style=color:#a6e22e>unlinkFirst</span>() {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// assert lock.isHeldByCurrentThread();</span>
+</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> f <span style=color:#f92672>=</span> first;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (f <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> n <span style=color:#f92672>=</span> f.<span style=color:#a6e22e>next</span>;
+</span></span><span style=display:flex><span>    E item <span style=color:#f92672>=</span> f.<span style=color:#a6e22e>item</span>;
+</span></span><span style=display:flex><span>    f.<span style=color:#a6e22e>item</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    f.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> f; <span style=color:#75715e>// help GC</span>
+</span></span><span style=display:flex><span>    first <span style=color:#f92672>=</span> n;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (n <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
+</span></span><span style=display:flex><span>        last <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span>
+</span></span><span style=display:flex><span>        n.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    <span style=color:#f92672>--</span>count;
+</span></span><span style=display:flex><span>    notFull.<span style=color:#a6e22e>signal</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> item;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.putFirst</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>putFirst</span>(E e) <span style=color:#66d9ef>throws</span> InterruptedException {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (e <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> NullPointerException();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>int</span> c;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> node <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span>(e);
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock putLock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>putLock</span>;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> AtomicInteger count <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>count</span>;
-</span></span><span style=display:flex><span>    putLock.<span style=color:#a6e22e>lockInterruptibly</span>();
+</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> node <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span>(e);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock lock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>lock</span>;
+</span></span><span style=display:flex><span>    lock.<span style=color:#a6e22e>lockInterruptibly</span>();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        <span style=color:#75715e>/*
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * Note that count is used in wait guard even though it is
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * not protected by lock. This works because count can
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * only decrease at this point (all other puts are shut
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * out by lock), and we (or some other waiting put) are
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * signalled if it ever changes from capacity. Similarly
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         * for all other uses of count in other wait guards.
-</span></span></span><span style=display:flex><span><span style=color:#75715e>         */</span>
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> (count.<span style=color:#a6e22e>get</span>() <span style=color:#f92672>==</span> capacity) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> (<span style=color:#f92672>!</span>linkFirst(node))
 </span></span><span style=display:flex><span>            notFull.<span style=color:#a6e22e>await</span>();
-</span></span><span style=display:flex><span>        }
-</span></span><span style=display:flex><span>        enqueue(node);
-</span></span><span style=display:flex><span>        c <span style=color:#f92672>=</span> count.<span style=color:#a6e22e>getAndIncrement</span>();
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>+</span> 1 <span style=color:#f92672>&lt;</span> capacity)
-</span></span><span style=display:flex><span>            notFull.<span style=color:#a6e22e>signal</span>();
 </span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        putLock.<span style=color:#a6e22e>unlock</span>();
+</span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
 </span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>==</span> 0)
-</span></span><span style=display:flex><span>        signalNotEmpty();
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><strong>Blocking and unblocking.</strong> The consumer side mirrors <code>put</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingQueue.take</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> E <span style=color:#a6e22e>take</span>() <span style=color:#66d9ef>throws</span> InterruptedException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> E x;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>int</span> c;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> AtomicInteger count <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>count</span>;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock takeLock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>takeLock</span>;
-</span></span><span style=display:flex><span>    takeLock.<span style=color:#a6e22e>lockInterruptibly</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.takeFirst</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> E <span style=color:#a6e22e>takeFirst</span>() <span style=color:#66d9ef>throws</span> InterruptedException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock lock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>lock</span>;
+</span></span><span style=display:flex><span>    lock.<span style=color:#a6e22e>lockInterruptibly</span>();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> (count.<span style=color:#a6e22e>get</span>() <span style=color:#f92672>==</span> 0) {
+</span></span><span style=display:flex><span>        E x;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> ( (x <span style=color:#f92672>=</span> unlinkFirst()) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
 </span></span><span style=display:flex><span>            notEmpty.<span style=color:#a6e22e>await</span>();
-</span></span><span style=display:flex><span>        }
-</span></span><span style=display:flex><span>        x <span style=color:#f92672>=</span> dequeue();
-</span></span><span style=display:flex><span>        c <span style=color:#f92672>=</span> count.<span style=color:#a6e22e>getAndDecrement</span>();
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>&gt;</span> 1)
-</span></span><span style=display:flex><span>            notEmpty.<span style=color:#a6e22e>signal</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> x;
 </span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        takeLock.<span style=color:#a6e22e>unlock</span>();
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (c <span style=color:#f92672>==</span> capacity)
-</span></span><span style=display:flex><span>        signalNotFull();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> x;
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingQueue.signalNotEmpty</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNotEmpty</span>() {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock takeLock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>takeLock</span>;
-</span></span><span style=display:flex><span>    takeLock.<span style=color:#a6e22e>lock</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        notEmpty.<span style=color:#a6e22e>signal</span>();
-</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        takeLock.<span style=color:#a6e22e>unlock</span>();
+</span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingQueue.signalNotFull</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>signalNotFull</span>() {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock putLock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>putLock</span>;
-</span></span><span style=display:flex><span>    putLock.<span style=color:#a6e22e>lock</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        notFull.<span style=color:#a6e22e>signal</span>();
-</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        putLock.<span style=color:#a6e22e>unlock</span>();
-</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.put</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>put</span>(E e) <span style=color:#66d9ef>throws</span> InterruptedException {
+</span></span><span style=display:flex><span>    putLast(e);
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>A <code>Condition</code> can be signalled only by the holder of its own lock, so <code>notEmpty</code> (a condition of <code>takeLock</code>) cannot be signalled from inside <code>put</code>, which holds <code>putLock</code>. The queue therefore uses two kinds of wake-up:</p><table><thead><tr><th>Wake-up</th><th>Where</th><th>When</th><th>Lock taken</th></tr></thead><tbody><tr><td><strong>same-side cascade</strong></td><td><code>put</code>: <code>notFull.signal()</code></td><td>after inserting, room remains (<code>c + 1 &lt; capacity</code>)</td><td><code>putLock</code>, already held</td></tr><tr><td></td><td><code>take</code>: <code>notEmpty.signal()</code></td><td>after removing, elements remain (<code>c > 1</code>)</td><td><code>takeLock</code>, already held</td></tr><tr><td><strong>cross-side signal</strong></td><td><code>put</code>: <code>signalNotEmpty()</code></td><td>the queue was empty before this insertion (<code>c == 0</code>)</td><td><code>takeLock</code>, acquired after releasing <code>putLock</code></td></tr><tr><td></td><td><code>take</code>: <code>signalNotFull()</code></td><td>the queue was full before this removal (<code>c == capacity</code>)</td><td><code>putLock</code>, acquired after releasing <code>takeLock</code></td></tr></tbody></table><p>A producer wakes at most one consumer, and only on the empty-to-non-empty transition. If many consumers are waiting and many elements arrive, the first woken consumer sees <code>c > 1</code> after its removal and wakes the next consumer itself. The waking work is thus spread over the consumers instead of being done by the producer under both locks. The cross-side signal is issued after the own-side lock is released, so no thread ever holds both locks except in <code>fullyLock</code>, and the two locks cannot deadlock.</p><p>The wait guards read <code>count</code> outside the other side&rsquo;s lock. This is safe because, while a producer holds <code>putLock</code>, <code>count</code> can only decrease, and any decrease from <code>capacity</code> is followed by <code>signalNotFull</code>; the symmetric argument holds for consumers. The source comment above states the same reasoning.</p><p>Operations requiring a consistent view of the structure (<code>remove(Object)</code>, <code>contains</code>, iteration) acquire both locks in fixed order via <code>fullyLock()</code> (<code>putLock</code>, then <code>takeLock</code>).</p><p><strong>Memory visibility:</strong> enqueuing occurs under <code>putLock</code>; dequeuing reads <code>count</code> under <code>takeLock</code> and traverses from <code>head</code>. This protocol ensures visibility of the first <code>count</code> nodes without dual-lock acquisition on every operation.</p><p><strong>Application profile:</strong> default queue for <code>Executors.newFixedThreadPool</code> and <code>newSingleThreadExecutor</code> (capacity <code>Integer.MAX_VALUE</code>); generally higher throughput than <code>ArrayBlockingQueue</code> under concurrent producers and consumers, at the cost of per-element node allocation and less deterministic latency.</p><h3 id=25-priorityblockingqueue>2.5 PriorityBlockingQueue</h3><p>A logically unbounded <strong>priority heap</strong> applying the same ordering contract as <code>PriorityQueue</code> (<code>Comparator</code> or <code>Comparable</code>). Insertion never blocks on capacity; <code>take</code> waits on <code>notEmpty</code> when the heap contains no elements.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.take</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> E <span style=color:#a6e22e>take</span>() <span style=color:#66d9ef>throws</span> InterruptedException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> takeFirst();
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p><code>linkLast</code>, <code>unlinkLast</code>, <code>putLast</code> and <code>takeLast</code> are symmetric. As in <code>PriorityBlockingQueue</code>, the wait predicate is the primitive itself: <code>while (!linkFirst(node))</code> both tests capacity and inserts. Producers at either end share <code>notFull</code> and consumers at either end share <code>notEmpty</code>, so a <code>takeLast</code> wakes a producer waiting in <code>putFirst</code>. Bulk operations wake more than one thread: <code>addAll</code> calls <code>notEmpty.signalAll()</code> after linking a whole chain, and <code>clear</code> calls <code>notFull.signalAll()</code>.</p><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Waits on</th><th>Woken by</th></tr></thead><tbody><tr><td>producer in <code>putFirst</code> / <code>putLast</code> / timed <code>offerFirst</code> / <code>offerLast</code></td><td><code>count >= capacity</code></td><td><code>notFull</code></td><td><code>unlinkFirst</code>, <code>unlinkLast</code>, <code>unlink</code> (removal of an inner node); <code>clear</code> (<code>signalAll</code>)</td></tr><tr><td>consumer in <code>takeFirst</code> / <code>takeLast</code> / timed <code>pollFirst</code> / <code>pollLast</code></td><td><code>first == null</code> (or <code>last == null</code>)</td><td><code>notEmpty</code></td><td><code>linkFirst</code>, <code>linkLast</code>; <code>addAll</code> (<code>signalAll</code>)</td></tr></tbody></table><p><strong>Application profile:</strong> work queues that need LIFO access for the owner and FIFO access for others, and pipelines that must re-insert an element at the head after a failed attempt.</p><h3 id=25-priorityblockingqueue>2.5 PriorityBlockingQueue</h3><p>A logically unbounded <strong>priority heap</strong> applying the same ordering contract as <code>PriorityQueue</code> (<code>Comparator</code> or <code>Comparable</code>). Insertion never blocks on capacity; <code>take</code> waits on <code>notEmpty</code> when the heap contains no elements.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface &#34;BlockingQueue&lt;E&gt;&#34; as BQ
 abstract class &#34;AbstractQueue&lt;E&gt;&#34; as AQ
 class &#34;PriorityBlockingQueue&lt;E&gt;&#34; as PBQ {
@@ -574,116 +580,7 @@ PQ o-- Delayed : elements
 </span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>All waiters share one condition, <code>available</code>, but wait in two different ways:</p><table><thead><tr><th>Waiter</th><th>Condition</th><th>Wait</th><th>Woken by</th></tr></thead><tbody><tr><td>any consumer, queue empty</td><td><code>q.peek() == null</code></td><td><code>available.await()</code></td><td><code>offer</code> of the first element (it becomes the head)</td></tr><tr><td>follower, head not yet expired</td><td><code>leader != null</code></td><td><code>available.await()</code>, untimed</td><td><code>offer</code> of a new head, or the <code>finally</code> hand-off of a returning consumer</td></tr><tr><td>leader, head not yet expired</td><td><code>leader == null</code>, becomes leader</td><td><code>available.awaitNanos(delay)</code></td><td>its own timeout when the head expires, or <code>offer</code> of a new head</td></tr></tbody></table><p>The three wake-up paths are:</p><ol><li><strong>Expiry.</strong> The leader&rsquo;s <code>awaitNanos(delay)</code> times out exactly when the head expires. The leader clears <code>leader</code>, loops, sees <code>delay &lt;= 0</code> and polls the head.</li><li><strong>Earlier head.</strong> <code>offer</code> signals only if the new element became the head, because only then is the leader&rsquo;s timer too long. It resets <code>leader = null</code> first, so the woken thread, which may be the old leader or a follower, re-runs the loop and becomes the new leader with the shorter delay.</li><li><strong>Hand-off.</strong> The <code>finally</code> block of <code>take</code> runs when a consumer returns an element or is interrupted. If no leader exists and elements remain, it signals one follower, which becomes the next leader for the new head. Without this signal, the followers would wait forever because nobody holds a timer for the new head.</li></ol><p>Insertion never waits: <code>put</code> and timed <code>offer</code> delegate to <code>offer</code>. <code>first = null</code> before waiting drops the reference to the head, so that a waiting thread does not keep an element alive after another thread removed it.</p><p><strong>Application profile:</strong> deferred execution, timeout management, and the scheduling substrate of <code>ScheduledExecutorService</code>.</p><h3 id=28-linkedblockingdeque>2.8 LinkedBlockingDeque</h3><p><code>LinkedBlockingDeque</code> is an optionally bounded double-ended queue over doubly linked nodes (<code>first</code>, <code>last</code>, <code>prev</code>, <code>next</code>). It cannot use the two-lock scheme of <code>LinkedBlockingQueue</code>, because operations at both ends may touch the same node when the deque holds zero or one element. It returns to the design of <code>ArrayBlockingQueue</code>: one <code>ReentrantLock</code> with <code>notEmpty</code> and <code>notFull</code>. <code>count</code> is a <code>volatile int</code> written only under the lock; it is volatile so that <code>pollFirst</code>, <code>pollLast</code> and similar fast paths can return <code>null</code> on an empty deque without locking.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-interface &#34;BlockingQueue&lt;E&gt;&#34; as BQ
-interface &#34;Deque&lt;E&gt;&#34; as Deque
-interface &#34;BlockingDeque&lt;E&gt;&#34; as BD
-abstract class &#34;AbstractQueue&lt;E&gt;&#34; as AQ
-class &#34;LinkedBlockingDeque&lt;E&gt;&#34; as LBD {
-    ~ transient Node&lt;E&gt; first
-    ~ transient Node&lt;E&gt; last
-    - transient volatile int count
-    - final int capacity
-    ~ final ReentrantLock lock
-    - final Condition notEmpty
-    - final Condition notFull
-    + putFirst(E e) : void
-    + putLast(E e) : void
-    + takeFirst() : E
-    + takeLast() : E
-    - linkFirst(Node&lt;E&gt; node) : boolean
-    - linkLast(Node&lt;E&gt; node) : boolean
-    - unlinkFirst() : E
-    - unlinkLast() : E
-}
-class &#34;LinkedBlockingDeque.Node&lt;E&gt;&#34; as Node {
-    ~ E item
-    ~ Node&lt;E&gt; prev
-    ~ Node&lt;E&gt; next
-}
-BQ &lt;|-- BD
-Deque &lt;|-- BD
-AQ &lt;|-- LBD
-BD &lt;|.. LBD
-LBD *-- Node : first .. last
-Node --&gt; Node : prev, next
-@enduml
-</code></pre><p><strong>Blocking and unblocking.</strong> The four primitive link operations make the state change and issue the wake-up; they return <code>false</code> or <code>null</code> instead of blocking, and the public methods wrap them in wait loops:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.linkFirst</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>boolean</span> <span style=color:#a6e22e>linkFirst</span>(Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> node) {
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// assert lock.isHeldByCurrentThread();</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>int</span> c;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> ((c <span style=color:#f92672>=</span> count) <span style=color:#f92672>&gt;=</span> capacity)
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>false</span>;
-</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> f <span style=color:#f92672>=</span> first;
-</span></span><span style=display:flex><span>    node.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> f;
-</span></span><span style=display:flex><span>    first <span style=color:#f92672>=</span> node;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (last <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
-</span></span><span style=display:flex><span>        last <span style=color:#f92672>=</span> node;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span>
-</span></span><span style=display:flex><span>        f.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> node;
-</span></span><span style=display:flex><span>    count <span style=color:#f92672>=</span> c <span style=color:#f92672>+</span> 1;
-</span></span><span style=display:flex><span>    notEmpty.<span style=color:#a6e22e>signal</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>true</span>;
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.unlinkFirst</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> E <span style=color:#a6e22e>unlinkFirst</span>() {
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// assert lock.isHeldByCurrentThread();</span>
-</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> f <span style=color:#f92672>=</span> first;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (f <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
-</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> n <span style=color:#f92672>=</span> f.<span style=color:#a6e22e>next</span>;
-</span></span><span style=display:flex><span>    E item <span style=color:#f92672>=</span> f.<span style=color:#a6e22e>item</span>;
-</span></span><span style=display:flex><span>    f.<span style=color:#a6e22e>item</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
-</span></span><span style=display:flex><span>    f.<span style=color:#a6e22e>next</span> <span style=color:#f92672>=</span> f; <span style=color:#75715e>// help GC</span>
-</span></span><span style=display:flex><span>    first <span style=color:#f92672>=</span> n;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (n <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
-</span></span><span style=display:flex><span>        last <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>else</span>
-</span></span><span style=display:flex><span>        n.<span style=color:#a6e22e>prev</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
-</span></span><span style=display:flex><span>    <span style=color:#f92672>--</span>count;
-</span></span><span style=display:flex><span>    notFull.<span style=color:#a6e22e>signal</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> item;
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.putFirst</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>putFirst</span>(E e) <span style=color:#66d9ef>throws</span> InterruptedException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (e <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> NullPointerException();
-</span></span><span style=display:flex><span>    Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span> node <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> Node<span style=color:#f92672>&lt;</span>E<span style=color:#f92672>&gt;</span>(e);
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock lock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>lock</span>;
-</span></span><span style=display:flex><span>    lock.<span style=color:#a6e22e>lockInterruptibly</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> (<span style=color:#f92672>!</span>linkFirst(node))
-</span></span><span style=display:flex><span>            notFull.<span style=color:#a6e22e>await</span>();
-</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.takeFirst</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> E <span style=color:#a6e22e>takeFirst</span>() <span style=color:#66d9ef>throws</span> InterruptedException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ReentrantLock lock <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>lock</span>;
-</span></span><span style=display:flex><span>    lock.<span style=color:#a6e22e>lockInterruptibly</span>();
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span> {
-</span></span><span style=display:flex><span>        E x;
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>while</span> ( (x <span style=color:#f92672>=</span> unlinkFirst()) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>)
-</span></span><span style=display:flex><span>            notEmpty.<span style=color:#a6e22e>await</span>();
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> x;
-</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>finally</span> {
-</span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.put</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>put</span>(E e) <span style=color:#66d9ef>throws</span> InterruptedException {
-</span></span><span style=display:flex><span>    putLast(e);
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// LinkedBlockingDeque.take</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> E <span style=color:#a6e22e>take</span>() <span style=color:#66d9ef>throws</span> InterruptedException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> takeFirst();
-</span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p><code>linkLast</code>, <code>unlinkLast</code>, <code>putLast</code> and <code>takeLast</code> are symmetric. As in <code>PriorityBlockingQueue</code>, the wait predicate is the primitive itself: <code>while (!linkFirst(node))</code> both tests capacity and inserts. Producers at either end share <code>notFull</code> and consumers at either end share <code>notEmpty</code>, so a <code>takeLast</code> wakes a producer waiting in <code>putFirst</code>. Bulk operations wake more than one thread: <code>addAll</code> calls <code>notEmpty.signalAll()</code> after linking a whole chain, and <code>clear</code> calls <code>notFull.signalAll()</code>.</p><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Waits on</th><th>Woken by</th></tr></thead><tbody><tr><td>producer in <code>putFirst</code> / <code>putLast</code> / timed <code>offerFirst</code> / <code>offerLast</code></td><td><code>count >= capacity</code></td><td><code>notFull</code></td><td><code>unlinkFirst</code>, <code>unlinkLast</code>, <code>unlink</code> (removal of an inner node); <code>clear</code> (<code>signalAll</code>)</td></tr><tr><td>consumer in <code>takeFirst</code> / <code>takeLast</code> / timed <code>pollFirst</code> / <code>pollLast</code></td><td><code>first == null</code> (or <code>last == null</code>)</td><td><code>notEmpty</code></td><td><code>linkFirst</code>, <code>linkLast</code>; <code>addAll</code> (<code>signalAll</code>)</td></tr></tbody></table><p><strong>Application profile:</strong> work queues that need LIFO access for the owner and FIFO access for others, and pipelines that must re-insert an element at the head after a failed attempt.</p><h3 id=29-linkedtransferqueue>2.9 LinkedTransferQueue</h3><p><code>LinkedTransferQueue</code> is an unbounded FIFO queue built on the same <code>DualNode</code> dual structure as <code>SynchronousQueue</code> (section 2.6), but it may also store elements. A node in the list is either a data node (an element waiting for a consumer) or a request node (a consumer waiting for an element), never a mix. The <code>ns</code> argument of <code>xfer</code> selects whether, and how long, the caller waits:</p><table><thead><tr><th><code>ns</code></th><th>Callers</th><th>Behavior when no complementary node exists</th></tr></thead><tbody><tr><td><code>-1</code> (async)</td><td><code>put</code>, <code>offer</code>, <code>add</code>, timed <code>offer</code></td><td>append a data node and return immediately; the producer never blocks</td></tr><tr><td><code>0</code> (immediate)</td><td><code>poll()</code>, <code>tryTransfer(e)</code></td><td>return without appending</td></tr><tr><td><code>> 0</code> (timed)</td><td><code>poll(timeout, unit)</code>, <code>tryTransfer(e, timeout, unit)</code></td><td>append a node and wait up to <code>ns</code></td></tr><tr><td><code>Long.MAX_VALUE</code> (sync)</td><td><code>take</code>, <code>transfer</code></td><td>append a node and wait until matched or interrupted</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>All waiters share one condition, <code>available</code>, but wait in two different ways:</p><table><thead><tr><th>Waiter</th><th>Condition</th><th>Wait</th><th>Woken by</th></tr></thead><tbody><tr><td>any consumer, queue empty</td><td><code>q.peek() == null</code></td><td><code>available.await()</code></td><td><code>offer</code> of the first element (it becomes the head)</td></tr><tr><td>follower, head not yet expired</td><td><code>leader != null</code></td><td><code>available.await()</code>, untimed</td><td><code>offer</code> of a new head, or the <code>finally</code> hand-off of a returning consumer</td></tr><tr><td>leader, head not yet expired</td><td><code>leader == null</code>, becomes leader</td><td><code>available.awaitNanos(delay)</code></td><td>its own timeout when the head expires, or <code>offer</code> of a new head</td></tr></tbody></table><p>The three wake-up paths are:</p><ol><li><strong>Expiry.</strong> The leader&rsquo;s <code>awaitNanos(delay)</code> times out exactly when the head expires. The leader clears <code>leader</code>, loops, sees <code>delay &lt;= 0</code> and polls the head.</li><li><strong>Earlier head.</strong> <code>offer</code> signals only if the new element became the head, because only then is the leader&rsquo;s timer too long. It resets <code>leader = null</code> first, so the woken thread, which may be the old leader or a follower, re-runs the loop and becomes the new leader with the shorter delay.</li><li><strong>Hand-off.</strong> The <code>finally</code> block of <code>take</code> runs when a consumer returns an element or is interrupted. If no leader exists and elements remain, it signals one follower, which becomes the next leader for the new head. Without this signal, the followers would wait forever because nobody holds a timer for the new head.</li></ol><p>Insertion never waits: <code>put</code> and timed <code>offer</code> delegate to <code>offer</code>. <code>first = null</code> before waiting drops the reference to the head, so that a waiting thread does not keep an element alive after another thread removed it.</p><p><strong>Application profile:</strong> deferred execution, timeout management, and the scheduling substrate of <code>ScheduledExecutorService</code>.</p><h3 id=28-linkedtransferqueue>2.8 LinkedTransferQueue</h3><p><code>LinkedTransferQueue</code> is an unbounded FIFO queue built on the same <code>DualNode</code> dual structure as <code>SynchronousQueue</code> (section 2.6), but it may also store elements. A node in the list is either a data node (an element waiting for a consumer) or a request node (a consumer waiting for an element), never a mix. The <code>ns</code> argument of <code>xfer</code> selects whether, and how long, the caller waits:</p><table><thead><tr><th><code>ns</code></th><th>Callers</th><th>Behavior when no complementary node exists</th></tr></thead><tbody><tr><td><code>-1</code> (async)</td><td><code>put</code>, <code>offer</code>, <code>add</code>, timed <code>offer</code></td><td>append a data node and return immediately; the producer never blocks</td></tr><tr><td><code>0</code> (immediate)</td><td><code>poll()</code>, <code>tryTransfer(e)</code></td><td>return without appending</td></tr><tr><td><code>> 0</code> (timed)</td><td><code>poll(timeout, unit)</code>, <code>tryTransfer(e, timeout, unit)</code></td><td>append a node and wait up to <code>ns</code></td></tr><tr><td><code>Long.MAX_VALUE</code> (sync)</td><td><code>take</code>, <code>transfer</code></td><td>append a node and wait until matched or interrupted</td></tr></tbody></table><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface &#34;BlockingQueue&lt;E&gt;&#34; as BQ
 interface &#34;TransferQueue&lt;E&gt;&#34; as TQ {
     + transfer(E e) : void
@@ -800,7 +697,7 @@ DN --&gt; DN : next
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> InterruptedException();
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>The unblocking path is the match branch: the arriving thread CASes the <code>item</code> of the first complementary node, advances <code>head</code> past it, and unparks the node&rsquo;s <code>waiter</code>. The blocking path is the append branch followed by <code>s.await</code>, the same spin-then-park protocol described in section 2.6.7. Traversal starts at <code>tail</code> when the tail has the caller&rsquo;s mode (a likely append) and at <code>head</code> otherwise (a likely match).</p><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Woken by</th></tr></thead><tbody><tr><td>consumer in <code>take</code> / timed <code>poll</code></td><td>no data node in the list</td><td>a producer&rsquo;s <code>xfer</code> matching its request node: <code>put</code>, <code>offer</code>, <code>transfer</code>, <code>tryTransfer</code></td></tr><tr><td>producer in <code>transfer</code> / timed <code>tryTransfer</code></td><td>no request node in the list</td><td>a consumer&rsquo;s <code>xfer</code> matching its data node: <code>take</code>, <code>poll</code></td></tr><tr><td>producer in <code>put</code> / <code>offer</code></td><td>never</td><td>—</td></tr></tbody></table><p>Because <code>put</code> never blocks, a <code>LinkedTransferQueue</code> used only through the <code>BlockingQueue</code> methods behaves like an unbounded <code>LinkedBlockingQueue</code> without locks. <code>transfer</code> adds the <code>SynchronousQueue</code> guarantee on demand: the producer returns only after a consumer has received its element.</p><p><strong>Application profile:</strong> message passing in which some producers must know that their element has been consumed, and lock-free unbounded hand-off between threads.</p><h3 id=210-delayedworkqueue>2.10 DelayedWorkQueue</h3><p><code>ScheduledThreadPoolExecutor.DelayedWorkQueue</code> combines the heap of <code>PriorityBlockingQueue</code> with the leader–follower wait of <code>DelayQueue</code>, specialized for <code>RunnableScheduledFuture</code>. Each <code>ScheduledFutureTask</code> stores its <code>heapIndex</code>, so <code>remove</code> on cancellation runs in O(log n). Section 3.10 describes how the executor uses it; this section covers only blocking.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><p>The unblocking path is the match branch: the arriving thread CASes the <code>item</code> of the first complementary node, advances <code>head</code> past it, and unparks the node&rsquo;s <code>waiter</code>. The blocking path is the append branch followed by <code>s.await</code>, the same spin-then-park protocol described in section 2.6.7. Traversal starts at <code>tail</code> when the tail has the caller&rsquo;s mode (a likely append) and at <code>head</code> otherwise (a likely match).</p><table><thead><tr><th>Thread</th><th>Blocks when</th><th>Woken by</th></tr></thead><tbody><tr><td>consumer in <code>take</code> / timed <code>poll</code></td><td>no data node in the list</td><td>a producer&rsquo;s <code>xfer</code> matching its request node: <code>put</code>, <code>offer</code>, <code>transfer</code>, <code>tryTransfer</code></td></tr><tr><td>producer in <code>transfer</code> / timed <code>tryTransfer</code></td><td>no request node in the list</td><td>a consumer&rsquo;s <code>xfer</code> matching its data node: <code>take</code>, <code>poll</code></td></tr><tr><td>producer in <code>put</code> / <code>offer</code></td><td>never</td><td>—</td></tr></tbody></table><p>Because <code>put</code> never blocks, a <code>LinkedTransferQueue</code> used only through the <code>BlockingQueue</code> methods behaves like an unbounded <code>LinkedBlockingQueue</code> without locks. <code>transfer</code> adds the <code>SynchronousQueue</code> guarantee on demand: the producer returns only after a consumer has received its element.</p><p><strong>Application profile:</strong> message passing in which some producers must know that their element has been consumed, and lock-free unbounded hand-off between threads.</p><h3 id=29-delayedworkqueue>2.9 DelayedWorkQueue</h3><p><code>ScheduledThreadPoolExecutor.DelayedWorkQueue</code> combines the heap of <code>PriorityBlockingQueue</code> with the leader–follower wait of <code>DelayQueue</code>, specialized for <code>RunnableScheduledFuture</code>. Each <code>ScheduledFutureTask</code> stores its <code>heapIndex</code>, so <code>remove</code> on cancellation runs in O(log n). Section 3.10 describes how the executor uses it; this section covers only blocking.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface &#34;BlockingQueue&lt;Runnable&gt;&#34; as BQ
 abstract class &#34;AbstractQueue&lt;Runnable&gt;&#34; as AQ
 class &#34;FutureTask&lt;V&gt;&#34; as FT
@@ -946,7 +843,7 @@ DWQ o-- RSF : queue[]
 </span></span><span style=display:flex><span>        lock.<span style=color:#a6e22e>unlock</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=211-selection-criteria>2.11 Selection criteria</h3><table><thead><tr><th>Requirement</th><th>Implementation</th></tr></thead><tbody><tr><td>Fixed capacity; minimal allocation overhead</td><td><code>ArrayBlockingQueue</code></td></tr><tr><td>High concurrency; multiple producers and consumers</td><td><code>LinkedBlockingQueue</code></td></tr><tr><td>Priority-ordered dispatch</td><td><code>PriorityBlockingQueue</code></td></tr><tr><td>Synchronous handoff without buffering</td><td><code>SynchronousQueue</code></td></tr><tr><td>Time-based deferral</td><td><code>DelayQueue</code></td></tr><tr><td>FIFO ordering among blocked waiters</td><td><code>ArrayBlockingQueue(fair)</code> or <code>SynchronousQueue(fair)</code></td></tr><tr><td>Insertion and removal at both ends</td><td><code>LinkedBlockingDeque</code></td></tr><tr><td>Unbounded lock-free queue; optional wait until consumed</td><td><code>LinkedTransferQueue</code></td></tr></tbody></table><p>The implementations block and unblock in one of two ways:</p><table><thead><tr><th>Mechanism</th><th>Queues</th><th>Block</th><th>Unblock</th></tr></thead><tbody><tr><td>lock and condition</td><td><code>ArrayBlockingQueue</code>, <code>LinkedBlockingQueue</code>, <code>LinkedBlockingDeque</code>, <code>PriorityBlockingQueue</code>, <code>DelayQueue</code>, <code>DelayedWorkQueue</code></td><td><code>Condition.await</code> / <code>awaitNanos</code> in a <code>while</code> loop over the wait predicate, releasing the lock</td><td><code>Condition.signal</code> by the thread that changed the state, while holding the same lock</td></tr><tr><td>dual node and park</td><td><code>SynchronousQueue</code>, <code>LinkedTransferQueue</code></td><td>append or push an own <code>DualNode</code>, spin, publish <code>waiter</code>, <code>LockSupport.park</code> while <code>item</code> is unchanged</td><td>CAS on the waiter&rsquo;s <code>item</code>, then <code>LockSupport.unpark(waiter)</code></td></tr></tbody></table><p>With the exception of <code>SynchronousQueue</code> and <code>LinkedTransferQueue</code>, standard implementations coordinate blocking through <code>ReentrantLock</code> and <code>Condition</code>. <code>SynchronousQueue</code> and <code>LinkedTransferQueue</code> pair producers and consumers via CAS-based dual structures and park unmatched threads with <code>LockSupport</code>. The synchronization model of each implementation directly governs its latency distribution, fairness properties, and memory characteristics under contention.</p><hr><h2 id=3-part-2--thread-pool>3. Part 2 — Thread pool</h2><h3 id=31-executor-hierarchy>3.1 Executor hierarchy</h3><p><code>Executor</code> defines the single method <code>execute(Runnable)</code>. <code>ExecutorService</code> adds lifecycle (<code>shutdown</code>, <code>shutdownNow</code>, <code>awaitTermination</code>) and result-bearing submission (<code>submit</code>, <code>invokeAll</code>, <code>invokeAny</code>). <code>AbstractExecutorService</code> implements <code>submit</code> by wrapping the task with <code>newTaskFor</code> into a <code>FutureTask</code> and passing it to <code>execute</code>, so a concrete pool only has to implement <code>execute</code> and the lifecycle methods.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><h3 id=210-selection-criteria>2.10 Selection criteria</h3><table><thead><tr><th>Requirement</th><th>Implementation</th></tr></thead><tbody><tr><td>Fixed capacity; minimal allocation overhead</td><td><code>ArrayBlockingQueue</code></td></tr><tr><td>High concurrency; multiple producers and consumers</td><td><code>LinkedBlockingQueue</code></td></tr><tr><td>Priority-ordered dispatch</td><td><code>PriorityBlockingQueue</code></td></tr><tr><td>Synchronous handoff without buffering</td><td><code>SynchronousQueue</code></td></tr><tr><td>Time-based deferral</td><td><code>DelayQueue</code></td></tr><tr><td>FIFO ordering among blocked waiters</td><td><code>ArrayBlockingQueue(fair)</code> or <code>SynchronousQueue(fair)</code></td></tr><tr><td>Insertion and removal at both ends</td><td><code>LinkedBlockingDeque</code></td></tr><tr><td>Unbounded lock-free queue; optional wait until consumed</td><td><code>LinkedTransferQueue</code></td></tr></tbody></table><p>The implementations block and unblock in one of two ways:</p><table><thead><tr><th>Mechanism</th><th>Queues</th><th>Block</th><th>Unblock</th></tr></thead><tbody><tr><td>lock and condition</td><td><code>ArrayBlockingQueue</code>, <code>LinkedBlockingQueue</code>, <code>LinkedBlockingDeque</code>, <code>PriorityBlockingQueue</code>, <code>DelayQueue</code>, <code>DelayedWorkQueue</code></td><td><code>Condition.await</code> / <code>awaitNanos</code> in a <code>while</code> loop over the wait predicate, releasing the lock</td><td><code>Condition.signal</code> by the thread that changed the state, while holding the same lock</td></tr><tr><td>dual node and park</td><td><code>SynchronousQueue</code>, <code>LinkedTransferQueue</code></td><td>append or push an own <code>DualNode</code>, spin, publish <code>waiter</code>, <code>LockSupport.park</code> while <code>item</code> is unchanged</td><td>CAS on the waiter&rsquo;s <code>item</code>, then <code>LockSupport.unpark(waiter)</code></td></tr></tbody></table><p>With the exception of <code>SynchronousQueue</code> and <code>LinkedTransferQueue</code>, standard implementations coordinate blocking through <code>ReentrantLock</code> and <code>Condition</code>. <code>SynchronousQueue</code> and <code>LinkedTransferQueue</code> pair producers and consumers via CAS-based dual structures and park unmatched threads with <code>LockSupport</code>. The synchronization model of each implementation directly governs its latency distribution, fairness properties, and memory characteristics under contention.</p><hr><h2 id=3-part-2--thread-pool>3. Part 2 — Thread pool</h2><h3 id=31-executor-hierarchy>3.1 Executor hierarchy</h3><p><code>Executor</code> defines the single method <code>execute(Runnable)</code>. <code>ExecutorService</code> adds lifecycle (<code>shutdown</code>, <code>shutdownNow</code>, <code>awaitTermination</code>) and result-bearing submission (<code>submit</code>, <code>invokeAll</code>, <code>invokeAny</code>). <code>AbstractExecutorService</code> implements <code>submit</code> by wrapping the task with <code>newTaskFor</code> into a <code>FutureTask</code> and passing it to <code>execute</code>, so a concrete pool only has to implement <code>execute</code> and the lifecycle methods.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 interface Executor {
     + execute(Runnable command) : void
 }
