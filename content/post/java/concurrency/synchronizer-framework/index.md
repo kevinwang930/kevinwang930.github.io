@@ -775,69 +775,90 @@ A read/write lock: many threads may hold the read lock together; the write lock 
 
 ```plantuml
 @startuml
-interface Lock {
-    + lock()
-    + unlock()
-    + newCondition() : Condition
+top to bottom direction
+
+class AbstractOwnableSynchronizer {
+    exclusiveOwnerThread : Thread
+    + getExclusiveOwnerThread() : Thread
+    # setExclusiveOwnerThread(Thread)
 }
 
-interface Condition {
-    + await()
-    + signal()
+abstract class AbstractQueuedLongSynchronizer {
+    state : long
+    head : Node
+    tail : Node
+    + acquire(long)
+    + release(long) : boolean
+    + acquireShared(long)
+    + releaseShared(long) : boolean
+    # compareAndSetState(long, long) : boolean
+    # tryAcquire(long) : boolean
+    # tryRelease(long) : boolean
+    # tryAcquireShared(long) : long
+    # tryReleaseShared(long) : boolean
 }
 
-class ConditionObject implements Condition
-
-interface ReadWriteLock {
-    + readLock() : Lock
-    + writeLock() : Lock
+abstract class Sync {
+    {static} SHARED_SHIFT : int = 32
+    {static} SHARED_UNIT : long
+    {static} EXCLUSIVE_MASK : long
+    firstReader : Thread
+    firstReaderHoldCount : int
+    readHolds : ThreadLocalHoldCounter
+    cachedHoldCounter : HoldCounter
+    {static} sharedCount(long) : int
+    {static} exclusiveCount(long) : int
+    # tryAcquire(long) : boolean
+    # tryRelease(long) : boolean
+    # tryAcquireShared(long) : long
+    # tryReleaseShared(long) : boolean
+    {abstract} readerShouldBlock() : boolean
+    {abstract} writerShouldBlock() : boolean
 }
 
-class ReentrantReadWriteLock implements ReadWriteLock {
+class NonfairSync {
+    writerShouldBlock() : boolean
+    readerShouldBlock() : boolean
+}
+
+class FairSync {
+    writerShouldBlock() : boolean
+    readerShouldBlock() : boolean
+}
+
+class ReentrantReadWriteLock {
     readerLock : ReadLock
     writerLock : WriteLock
     sync : Sync
 }
 
-class ReadLock implements Lock {
+class ReadLock {
     sync : Sync
+    + lock()
+    + unlock()
 }
 
-class WriteLock implements Lock {
+class WriteLock {
     sync : Sync
+    + lock()
+    + unlock()
 }
 
-abstract class "AbstractQueuedLongSynchronizer" as AQLS {
-    volatile long state
-}
-
-abstract class Sync extends AQLS {
-    + newCondition() : ConditionObject
-    readHolds : ThreadLocalHoldCounter
-    cachedHoldCounter : HoldCounter
-}
-
-class HoldCounter {
-    count : int
-}
-
-class ThreadLocalHoldCounter
-
-class NonfairSync extends Sync
-class FairSync extends Sync
-
+AbstractOwnableSynchronizer <|-- AbstractQueuedLongSynchronizer
+AbstractQueuedLongSynchronizer <|-- Sync
+Sync <|-- NonfairSync
+Sync <|-- FairSync
 ReentrantReadWriteLock *-- ReadLock
 ReentrantReadWriteLock *-- WriteLock
 ReentrantReadWriteLock *-- Sync
-WriteLock ..> ConditionObject : newCondition()
-Sync ..> ConditionObject
-note right of ReadLock : newCondition() throws\nUnsupportedOperationException
+ReadLock --> Sync
+WriteLock --> Sync
 @enduml
 ```
 
-Only **`writeLock().newCondition()`** is supported — `await` must release exclusive ownership. **`readLock().newCondition()`** throws `UnsupportedOperationException`.
+`AbstractQueuedLongSynchronizer` supplies `state`, the sync queue, and `acquire` / `release`. `Sync` packs the read count into the high 32 bits of `state` and the write count into the low 32. `tryAcquire` and `tryRelease` implement the write lock; `tryAcquireShared` and `tryReleaseShared` implement the read lock. `ReadLock.lock` calls `acquireShared`; `WriteLock.lock` calls `acquire`.
 
-`SHARED_SHIFT = 32`: low 32 bits hold write count, high 32 bits hold read count. `ReadLock` calls `acquireShared`; `WriteLock` calls `acquire`. Per-thread read recursion is tracked in `ThreadLocalHoldCounter`.
+`NonfairSync` lets a writer barge (`writerShouldBlock` returns false) and blocks a new reader only when the queue head appears to be a waiting writer. `FairSync` makes both `readerShouldBlock` and `writerShouldBlock` return `hasQueuedPredecessors()`. Per-thread read recursion is tracked by `firstReader` for the first reader and by `ThreadLocalHoldCounter` for the rest.
 
 #### Semaphore
 
