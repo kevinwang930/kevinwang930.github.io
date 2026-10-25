@@ -541,65 +541,86 @@ Sync ..&gt; ConditionObject : newCondition()
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> free;
 </span></span><span style=display:flex><span>}
 </span></span></code></pre></div><h4 id=reentrantreadwritelock>ReentrantReadWriteLock</h4><p>A read/write lock: many threads may hold the read lock together; the write lock excludes all readers and other writers. Both modes are reentrant. It fits read-heavy data — caches, config snapshots — where writes are infrequent but must see a consistent view.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-interface Lock {
-    + lock()
-    + unlock()
-    + newCondition() : Condition
+top to bottom direction
+
+class AbstractOwnableSynchronizer {
+    exclusiveOwnerThread : Thread
+    + getExclusiveOwnerThread() : Thread
+    # setExclusiveOwnerThread(Thread)
 }
 
-interface Condition {
-    + await()
-    + signal()
+abstract class AbstractQueuedLongSynchronizer {
+    state : long
+    head : Node
+    tail : Node
+    + acquire(long)
+    + release(long) : boolean
+    + acquireShared(long)
+    + releaseShared(long) : boolean
+    # compareAndSetState(long, long) : boolean
+    # tryAcquire(long) : boolean
+    # tryRelease(long) : boolean
+    # tryAcquireShared(long) : long
+    # tryReleaseShared(long) : boolean
 }
 
-class ConditionObject implements Condition
-
-interface ReadWriteLock {
-    + readLock() : Lock
-    + writeLock() : Lock
+abstract class Sync {
+    {static} SHARED_SHIFT : int = 32
+    {static} SHARED_UNIT : long
+    {static} EXCLUSIVE_MASK : long
+    firstReader : Thread
+    firstReaderHoldCount : int
+    readHolds : ThreadLocalHoldCounter
+    cachedHoldCounter : HoldCounter
+    {static} sharedCount(long) : int
+    {static} exclusiveCount(long) : int
+    # tryAcquire(long) : boolean
+    # tryRelease(long) : boolean
+    # tryAcquireShared(long) : long
+    # tryReleaseShared(long) : boolean
+    {abstract} readerShouldBlock() : boolean
+    {abstract} writerShouldBlock() : boolean
 }
 
-class ReentrantReadWriteLock implements ReadWriteLock {
+class NonfairSync {
+    writerShouldBlock() : boolean
+    readerShouldBlock() : boolean
+}
+
+class FairSync {
+    writerShouldBlock() : boolean
+    readerShouldBlock() : boolean
+}
+
+class ReentrantReadWriteLock {
     readerLock : ReadLock
     writerLock : WriteLock
     sync : Sync
 }
 
-class ReadLock implements Lock {
+class ReadLock {
     sync : Sync
+    + lock()
+    + unlock()
 }
 
-class WriteLock implements Lock {
+class WriteLock {
     sync : Sync
+    + lock()
+    + unlock()
 }
 
-abstract class &#34;AbstractQueuedLongSynchronizer&#34; as AQLS {
-    volatile long state
-}
-
-abstract class Sync extends AQLS {
-    + newCondition() : ConditionObject
-    readHolds : ThreadLocalHoldCounter
-    cachedHoldCounter : HoldCounter
-}
-
-class HoldCounter {
-    count : int
-}
-
-class ThreadLocalHoldCounter
-
-class NonfairSync extends Sync
-class FairSync extends Sync
-
+AbstractOwnableSynchronizer &lt;|-- AbstractQueuedLongSynchronizer
+AbstractQueuedLongSynchronizer &lt;|-- Sync
+Sync &lt;|-- NonfairSync
+Sync &lt;|-- FairSync
 ReentrantReadWriteLock *-- ReadLock
 ReentrantReadWriteLock *-- WriteLock
 ReentrantReadWriteLock *-- Sync
-WriteLock ..&gt; ConditionObject : newCondition()
-Sync ..&gt; ConditionObject
-note right of ReadLock : newCondition() throws\nUnsupportedOperationException
+ReadLock --&gt; Sync
+WriteLock --&gt; Sync
 @enduml
-</code></pre><p>Only <strong><code>writeLock().newCondition()</code></strong> is supported — <code>await</code> must release exclusive ownership. <strong><code>readLock().newCondition()</code></strong> throws <code>UnsupportedOperationException</code>.</p><p><code>SHARED_SHIFT = 32</code>: low 32 bits hold write count, high 32 bits hold read count. <code>ReadLock</code> calls <code>acquireShared</code>; <code>WriteLock</code> calls <code>acquire</code>. Per-thread read recursion is tracked in <code>ThreadLocalHoldCounter</code>.</p><h4 id=semaphore>Semaphore</h4><p>A counting semaphore tracks a pool of permits. <code>acquire</code> takes one and blocks when the pool is empty; <code>release</code> returns one. There is no owner — any thread may release. Typical uses are connection pools, rate limiters, and any cap of <em>N</em> concurrent workers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><p><code>AbstractQueuedLongSynchronizer</code> supplies <code>state</code>, the sync queue, and <code>acquire</code> / <code>release</code>. <code>Sync</code> packs the read count into the high 32 bits of <code>state</code> and the write count into the low 32. <code>tryAcquire</code> and <code>tryRelease</code> implement the write lock; <code>tryAcquireShared</code> and <code>tryReleaseShared</code> implement the read lock. <code>ReadLock.lock</code> calls <code>acquireShared</code>; <code>WriteLock.lock</code> calls <code>acquire</code>.</p><p><code>NonfairSync</code> lets a writer barge (<code>writerShouldBlock</code> returns false) and blocks a new reader only when the queue head appears to be a waiting writer. <code>FairSync</code> makes both <code>readerShouldBlock</code> and <code>writerShouldBlock</code> return <code>hasQueuedPredecessors()</code>. Per-thread read recursion is tracked by <code>firstReader</code> for the first reader and by <code>ThreadLocalHoldCounter</code> for the rest.</p><h4 id=semaphore>Semaphore</h4><p>A counting semaphore tracks a pool of permits. <code>acquire</code> takes one and blocks when the pool is empty; <code>release</code> returns one. There is no owner — any thread may release. Typical uses are connection pools, rate limiters, and any cap of <em>N</em> concurrent workers.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 class Semaphore {
     final Sync sync
     + acquire()
