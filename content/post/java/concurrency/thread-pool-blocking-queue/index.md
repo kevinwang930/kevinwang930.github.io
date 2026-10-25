@@ -275,154 +275,135 @@ public E poll(long timeout, TimeUnit unit) throws InterruptedException {
 
 **Application profile:** fixed worker pools, explicit back-pressure with a known upper bound (`ThreadPoolExecutor` with a bounded queue), workloads where per-element node allocation is undesirable.
 
-### 2.4 LinkedBlockingQueue
+### 2.4 LinkedBlockingDeque
+
+`LinkedBlockingDeque` is an optionally bounded double-ended queue over doubly linked nodes (`first`, `last`, `prev`, `next`). It cannot use the two-lock scheme of `LinkedBlockingQueue`, because operations at both ends may touch the same node when the deque holds zero or one element. It returns to the design of `ArrayBlockingQueue`: one `ReentrantLock` with `notEmpty` and `notFull`. `count` is a `volatile int` written only under the lock; it is volatile so that `pollFirst`, `pollLast` and similar fast paths can return `null` on an empty deque without locking.
 
 ```plantuml
 @startuml
 interface "BlockingQueue<E>" as BQ
+interface "Deque<E>" as Deque
+interface "BlockingDeque<E>" as BD
 abstract class "AbstractQueue<E>" as AQ
-class "LinkedBlockingQueue<E>" as LBQ {
+class "LinkedBlockingDeque<E>" as LBD {
+    ~ transient Node<E> first
+    ~ transient Node<E> last
+    - transient volatile int count
     - final int capacity
-    - final AtomicInteger count
-    ~ transient Node<E> head
-    - transient Node<E> last
-    - final ReentrantLock takeLock
+    ~ final ReentrantLock lock
     - final Condition notEmpty
-    - final ReentrantLock putLock
     - final Condition notFull
-    + put(E e) : void
-    + take() : E
-    - signalNotEmpty() : void
-    - signalNotFull() : void
-    - enqueue(Node<E> node) : void
-    - dequeue() : E
-    ~ fullyLock() : void
+    + putFirst(E e) : void
+    + putLast(E e) : void
+    + takeFirst() : E
+    + takeLast() : E
+    - linkFirst(Node<E> node) : boolean
+    - linkLast(Node<E> node) : boolean
+    - unlinkFirst() : E
+    - unlinkLast() : E
 }
-class "LinkedBlockingQueue.Node<E>" as Node {
+class "LinkedBlockingDeque.Node<E>" as Node {
     ~ E item
+    ~ Node<E> prev
     ~ Node<E> next
 }
-AQ <|-- LBQ
-BQ <|.. LBQ
-LBQ *-- Node : head .. last
-Node --> Node : next
+BQ <|-- BD
+Deque <|-- BD
+AQ <|-- LBD
+BD <|.. LBD
+LBD *-- Node : first .. last
+Node --> Node : prev, next
 @enduml
 ```
 
-`LinkedBlockingQueue` partitions synchronization between producers and consumers:
-
-| Lock | Scope | Associated condition |
-|------|-------|----------------------|
-| `putLock` | tail insertion; `notFull` wait set | `notFull` |
-| `takeLock` | head removal; `notEmpty` wait set | `notEmpty` |
-| `AtomicInteger count` | element count observable from either side | — |
-
-The implementation comment states the rationale:
-
-> The putLock gates entry to put (and offer), and has an associated condition for waiting puts. Similarly for the takeLock. The count field that they both rely on is maintained as an atomic to avoid needing to get both locks in most cases.
-
-A `put` holds only `putLock`. When the queue transitions from empty (`c == 0` before increment), it invokes `signalNotEmpty()`, which briefly acquires `takeLock` to wake a blocked consumer. A `take` that reduces occupancy from capacity invokes the symmetric `signalNotFull()`. This **cascading signal** permits the common case to proceed without holding both locks.
+**Blocking and unblocking.** The four primitive link operations make the state change and issue the wake-up; they return `false` or `null` instead of blocking, and the public methods wrap them in wait loops:
 
 ```java
-// LinkedBlockingQueue.put
-public void put(E e) throws InterruptedException {
+// LinkedBlockingDeque.linkFirst
+private boolean linkFirst(Node<E> node) {
+    // assert lock.isHeldByCurrentThread();
+    int c;
+    if ((c = count) >= capacity)
+        return false;
+    Node<E> f = first;
+    node.next = f;
+    first = node;
+    if (last == null)
+        last = node;
+    else
+        f.prev = node;
+    count = c + 1;
+    notEmpty.signal();
+    return true;
+}
+
+// LinkedBlockingDeque.unlinkFirst
+private E unlinkFirst() {
+    // assert lock.isHeldByCurrentThread();
+    Node<E> f = first;
+    if (f == null)
+        return null;
+    Node<E> n = f.next;
+    E item = f.item;
+    f.item = null;
+    f.next = f; // help GC
+    first = n;
+    if (n == null)
+        last = null;
+    else
+        n.prev = null;
+    --count;
+    notFull.signal();
+    return item;
+}
+
+// LinkedBlockingDeque.putFirst
+public void putFirst(E e) throws InterruptedException {
     if (e == null) throw new NullPointerException();
-    final int c;
-    final Node<E> node = new Node<E>(e);
-    final ReentrantLock putLock = this.putLock;
-    final AtomicInteger count = this.count;
-    putLock.lockInterruptibly();
+    Node<E> node = new Node<E>(e);
+    final ReentrantLock lock = this.lock;
+    lock.lockInterruptibly();
     try {
-        /*
-         * Note that count is used in wait guard even though it is
-         * not protected by lock. This works because count can
-         * only decrease at this point (all other puts are shut
-         * out by lock), and we (or some other waiting put) are
-         * signalled if it ever changes from capacity. Similarly
-         * for all other uses of count in other wait guards.
-         */
-        while (count.get() == capacity) {
+        while (!linkFirst(node))
             notFull.await();
-        }
-        enqueue(node);
-        c = count.getAndIncrement();
-        if (c + 1 < capacity)
-            notFull.signal();
     } finally {
-        putLock.unlock();
+        lock.unlock();
     }
-    if (c == 0)
-        signalNotEmpty();
 }
-```
 
-**Blocking and unblocking.** The consumer side mirrors `put`:
-
-```java
-// LinkedBlockingQueue.take
-public E take() throws InterruptedException {
-    final E x;
-    final int c;
-    final AtomicInteger count = this.count;
-    final ReentrantLock takeLock = this.takeLock;
-    takeLock.lockInterruptibly();
+// LinkedBlockingDeque.takeFirst
+public E takeFirst() throws InterruptedException {
+    final ReentrantLock lock = this.lock;
+    lock.lockInterruptibly();
     try {
-        while (count.get() == 0) {
+        E x;
+        while ( (x = unlinkFirst()) == null)
             notEmpty.await();
-        }
-        x = dequeue();
-        c = count.getAndDecrement();
-        if (c > 1)
-            notEmpty.signal();
+        return x;
     } finally {
-        takeLock.unlock();
-    }
-    if (c == capacity)
-        signalNotFull();
-    return x;
-}
-
-// LinkedBlockingQueue.signalNotEmpty
-private void signalNotEmpty() {
-    final ReentrantLock takeLock = this.takeLock;
-    takeLock.lock();
-    try {
-        notEmpty.signal();
-    } finally {
-        takeLock.unlock();
+        lock.unlock();
     }
 }
 
-// LinkedBlockingQueue.signalNotFull
-private void signalNotFull() {
-    final ReentrantLock putLock = this.putLock;
-    putLock.lock();
-    try {
-        notFull.signal();
-    } finally {
-        putLock.unlock();
-    }
+// LinkedBlockingDeque.put
+public void put(E e) throws InterruptedException {
+    putLast(e);
+}
+
+// LinkedBlockingDeque.take
+public E take() throws InterruptedException {
+    return takeFirst();
 }
 ```
 
-A `Condition` can be signalled only by the holder of its own lock, so `notEmpty` (a condition of `takeLock`) cannot be signalled from inside `put`, which holds `putLock`. The queue therefore uses two kinds of wake-up:
+`linkLast`, `unlinkLast`, `putLast` and `takeLast` are symmetric. As in `PriorityBlockingQueue`, the wait predicate is the primitive itself: `while (!linkFirst(node))` both tests capacity and inserts. Producers at either end share `notFull` and consumers at either end share `notEmpty`, so a `takeLast` wakes a producer waiting in `putFirst`. Bulk operations wake more than one thread: `addAll` calls `notEmpty.signalAll()` after linking a whole chain, and `clear` calls `notFull.signalAll()`.
 
-| Wake-up | Where | When | Lock taken |
-|---------|-------|------|------------|
-| **same-side cascade** | `put`: `notFull.signal()` | after inserting, room remains (`c + 1 < capacity`) | `putLock`, already held |
-| | `take`: `notEmpty.signal()` | after removing, elements remain (`c > 1`) | `takeLock`, already held |
-| **cross-side signal** | `put`: `signalNotEmpty()` | the queue was empty before this insertion (`c == 0`) | `takeLock`, acquired after releasing `putLock` |
-| | `take`: `signalNotFull()` | the queue was full before this removal (`c == capacity`) | `putLock`, acquired after releasing `takeLock` |
+| Thread | Blocks when | Waits on | Woken by |
+|--------|-------------|----------|----------|
+| producer in `putFirst` / `putLast` / timed `offerFirst` / `offerLast` | `count >= capacity` | `notFull` | `unlinkFirst`, `unlinkLast`, `unlink` (removal of an inner node); `clear` (`signalAll`) |
+| consumer in `takeFirst` / `takeLast` / timed `pollFirst` / `pollLast` | `first == null` (or `last == null`) | `notEmpty` | `linkFirst`, `linkLast`; `addAll` (`signalAll`) |
 
-A producer wakes at most one consumer, and only on the empty-to-non-empty transition. If many consumers are waiting and many elements arrive, the first woken consumer sees `c > 1` after its removal and wakes the next consumer itself. The waking work is thus spread over the consumers instead of being done by the producer under both locks. The cross-side signal is issued after the own-side lock is released, so no thread ever holds both locks except in `fullyLock`, and the two locks cannot deadlock.
-
-The wait guards read `count` outside the other side's lock. This is safe because, while a producer holds `putLock`, `count` can only decrease, and any decrease from `capacity` is followed by `signalNotFull`; the symmetric argument holds for consumers. The source comment above states the same reasoning.
-
-Operations requiring a consistent view of the structure (`remove(Object)`, `contains`, iteration) acquire both locks in fixed order via `fullyLock()` (`putLock`, then `takeLock`).
-
-**Memory visibility:** enqueuing occurs under `putLock`; dequeuing reads `count` under `takeLock` and traverses from `head`. This protocol ensures visibility of the first `count` nodes without dual-lock acquisition on every operation.
-
-**Application profile:** default queue for `Executors.newFixedThreadPool` and `newSingleThreadExecutor` (capacity `Integer.MAX_VALUE`); generally higher throughput than `ArrayBlockingQueue` under concurrent producers and consumers, at the cost of per-element node allocation and less deterministic latency.
+**Application profile:** work queues that need LIFO access for the owner and FIFO access for others, and pipelines that must re-insert an element at the head after a failed attempt.
 
 ### 2.5 PriorityBlockingQueue
 
@@ -995,137 +976,7 @@ Insertion never waits: `put` and timed `offer` delegate to `offer`. `first = nul
 
 **Application profile:** deferred execution, timeout management, and the scheduling substrate of `ScheduledExecutorService`.
 
-### 2.8 LinkedBlockingDeque
-
-`LinkedBlockingDeque` is an optionally bounded double-ended queue over doubly linked nodes (`first`, `last`, `prev`, `next`). It cannot use the two-lock scheme of `LinkedBlockingQueue`, because operations at both ends may touch the same node when the deque holds zero or one element. It returns to the design of `ArrayBlockingQueue`: one `ReentrantLock` with `notEmpty` and `notFull`. `count` is a `volatile int` written only under the lock; it is volatile so that `pollFirst`, `pollLast` and similar fast paths can return `null` on an empty deque without locking.
-
-```plantuml
-@startuml
-interface "BlockingQueue<E>" as BQ
-interface "Deque<E>" as Deque
-interface "BlockingDeque<E>" as BD
-abstract class "AbstractQueue<E>" as AQ
-class "LinkedBlockingDeque<E>" as LBD {
-    ~ transient Node<E> first
-    ~ transient Node<E> last
-    - transient volatile int count
-    - final int capacity
-    ~ final ReentrantLock lock
-    - final Condition notEmpty
-    - final Condition notFull
-    + putFirst(E e) : void
-    + putLast(E e) : void
-    + takeFirst() : E
-    + takeLast() : E
-    - linkFirst(Node<E> node) : boolean
-    - linkLast(Node<E> node) : boolean
-    - unlinkFirst() : E
-    - unlinkLast() : E
-}
-class "LinkedBlockingDeque.Node<E>" as Node {
-    ~ E item
-    ~ Node<E> prev
-    ~ Node<E> next
-}
-BQ <|-- BD
-Deque <|-- BD
-AQ <|-- LBD
-BD <|.. LBD
-LBD *-- Node : first .. last
-Node --> Node : prev, next
-@enduml
-```
-
-**Blocking and unblocking.** The four primitive link operations make the state change and issue the wake-up; they return `false` or `null` instead of blocking, and the public methods wrap them in wait loops:
-
-```java
-// LinkedBlockingDeque.linkFirst
-private boolean linkFirst(Node<E> node) {
-    // assert lock.isHeldByCurrentThread();
-    int c;
-    if ((c = count) >= capacity)
-        return false;
-    Node<E> f = first;
-    node.next = f;
-    first = node;
-    if (last == null)
-        last = node;
-    else
-        f.prev = node;
-    count = c + 1;
-    notEmpty.signal();
-    return true;
-}
-
-// LinkedBlockingDeque.unlinkFirst
-private E unlinkFirst() {
-    // assert lock.isHeldByCurrentThread();
-    Node<E> f = first;
-    if (f == null)
-        return null;
-    Node<E> n = f.next;
-    E item = f.item;
-    f.item = null;
-    f.next = f; // help GC
-    first = n;
-    if (n == null)
-        last = null;
-    else
-        n.prev = null;
-    --count;
-    notFull.signal();
-    return item;
-}
-
-// LinkedBlockingDeque.putFirst
-public void putFirst(E e) throws InterruptedException {
-    if (e == null) throw new NullPointerException();
-    Node<E> node = new Node<E>(e);
-    final ReentrantLock lock = this.lock;
-    lock.lockInterruptibly();
-    try {
-        while (!linkFirst(node))
-            notFull.await();
-    } finally {
-        lock.unlock();
-    }
-}
-
-// LinkedBlockingDeque.takeFirst
-public E takeFirst() throws InterruptedException {
-    final ReentrantLock lock = this.lock;
-    lock.lockInterruptibly();
-    try {
-        E x;
-        while ( (x = unlinkFirst()) == null)
-            notEmpty.await();
-        return x;
-    } finally {
-        lock.unlock();
-    }
-}
-
-// LinkedBlockingDeque.put
-public void put(E e) throws InterruptedException {
-    putLast(e);
-}
-
-// LinkedBlockingDeque.take
-public E take() throws InterruptedException {
-    return takeFirst();
-}
-```
-
-`linkLast`, `unlinkLast`, `putLast` and `takeLast` are symmetric. As in `PriorityBlockingQueue`, the wait predicate is the primitive itself: `while (!linkFirst(node))` both tests capacity and inserts. Producers at either end share `notFull` and consumers at either end share `notEmpty`, so a `takeLast` wakes a producer waiting in `putFirst`. Bulk operations wake more than one thread: `addAll` calls `notEmpty.signalAll()` after linking a whole chain, and `clear` calls `notFull.signalAll()`.
-
-| Thread | Blocks when | Waits on | Woken by |
-|--------|-------------|----------|----------|
-| producer in `putFirst` / `putLast` / timed `offerFirst` / `offerLast` | `count >= capacity` | `notFull` | `unlinkFirst`, `unlinkLast`, `unlink` (removal of an inner node); `clear` (`signalAll`) |
-| consumer in `takeFirst` / `takeLast` / timed `pollFirst` / `pollLast` | `first == null` (or `last == null`) | `notEmpty` | `linkFirst`, `linkLast`; `addAll` (`signalAll`) |
-
-**Application profile:** work queues that need LIFO access for the owner and FIFO access for others, and pipelines that must re-insert an element at the head after a failed attempt.
-
-### 2.9 LinkedTransferQueue
+### 2.8 LinkedTransferQueue
 
 `LinkedTransferQueue` is an unbounded FIFO queue built on the same `DualNode` dual structure as `SynchronousQueue` (section 2.6), but it may also store elements. A node in the list is either a data node (an element waiting for a consumer) or a request node (a consumer waiting for an element), never a mix. The `ns` argument of `xfer` selects whether, and how long, the caller waits:
 
@@ -1271,7 +1122,7 @@ Because `put` never blocks, a `LinkedTransferQueue` used only through the `Block
 
 **Application profile:** message passing in which some producers must know that their element has been consumed, and lock-free unbounded hand-off between threads.
 
-### 2.10 DelayedWorkQueue
+### 2.9 DelayedWorkQueue
 
 `ScheduledThreadPoolExecutor.DelayedWorkQueue` combines the heap of `PriorityBlockingQueue` with the leader–follower wait of `DelayQueue`, specialized for `RunnableScheduledFuture`. Each `ScheduledFutureTask` stores its `heapIndex`, so `remove` on cancellation runs in O(log n). Section 3.10 describes how the executor uses it; this section covers only blocking.
 
@@ -1435,7 +1286,7 @@ public RunnableScheduledFuture<?> poll(long timeout, TimeUnit unit)
 }
 ```
 
-### 2.11 Selection criteria
+### 2.10 Selection criteria
 
 | Requirement | Implementation |
 |-------------|----------------|
