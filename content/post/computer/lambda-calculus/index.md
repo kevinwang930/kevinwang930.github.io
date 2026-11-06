@@ -368,29 +368,62 @@ Predecessor of zero is zero. The term threads the shifting function through the 
 
 ## 3. Recursion and the Y combinator
 
-Recursion is the ingredient that completes the calculus. Without it, terms express only what a fixed finite tower of abstraction and application can write down; with it, they express every function that a Turing machine computes, because a loop in the machine becomes a recursive definition in the calculus. The fixed-point combinator supplies recursion without adding a recursive binding to the language.
+Recursion is what makes the calculus a general-purpose language rather than a notation for finite expressions. A loop and a recursive function both need a name that the body can use to refer to itself, and the pure calculus has no names: a term can mention only the parameters of the abstractions that enclose it.
 
-The pure calculus has no names for terms. A variable refers to a parameter of an enclosing abstraction and to nothing else, so an abstraction cannot mention itself. A recursive definition such as \(F(n) = n \times F(n-1)\) therefore has no direct term: the body would have to contain the term that is being defined, which would make the term infinitely large. The calculus recovers recursion by passing a function to itself.
+The **Y combinator** supplies that name as an ordinary term. It takes a description of one step and returns the function that repeats the step, so it is the calculus form of a loop.
 
-Start from the functional that closes over the recursive call as a parameter \(r\):
+**Deduction.** recursion can be done  in five rewrites. The body never changes; only what stands where the recursive call belongs.
+
+```racket
+#lang racket
+
+;; (1) a placeholder that never returns, so no wrong answer is produced
+(define (eternity n) (eternity n))
+(define length0 (lambda (n) (if (zero? n) 0 (add1 (eternity (sub1 n))))))
+(length0 0)                                    ; => 0
+
+;; (2) write the body out again in place of the placeholder
+(define length1
+  (lambda (n)
+    (if (zero? n) 0
+        (add1 ((lambda (n) (if (zero? n) 0 (add1 (eternity (sub1 n))))) (sub1 n))))))
+(length1 1)                                    ; => 1
+
+;; (3) name the body, and nest it once per element
+(define (make-length length)
+  (lambda (n) (if (zero? n) 0 (add1 (length (sub1 n))))))
+((make-length (make-length (make-length eternity))) 2)   ; => 2
+
+;; (4) let the body receive itself, so no copy is written by hand
+(define (make-length-self mk)
+  (lambda (n) (if (zero? n) 0 (add1 ((mk mk) (sub1 n))))))
+(((lambda (mk) (mk mk)) make-length-self) 3)   ; => 3
+
+;; (5) factor the self-application out: the plain body works again
+(define Y
+  (lambda (le)
+    ((lambda (f) (f f))
+     (lambda (f) (le (lambda (x) ((f f) x)))))))
+(define length
+  (Y (lambda (f) (lambda (n) (if (zero? n) 0 (add1 (f (sub1 n))))))))
+(map length '(0 1 2 3 4))                      ; => '(0 1 2 3 4)
+```
+
+Step (4) is the one that removes the copies: `make-length-self` applies its argument to itself, so `(mk mk)` rebuilds the whole function at each call. Step (5) hides that self-application inside `Y`, and then the body of step (1) is enough. The inner `(lambda (x) ((f f) x))` in `Y` delays the self-application behind an abstraction, which is why this form works under call by value as well as under normal order.
+
+**Why the equation holds.** The combinator satisfies a fixed-point equation rather than merely producing a recursive value. If \(r\) were the function \(F\) being defined, then \(G\, F\) would also be \(F\), because \(G\, F\) is the function that multiplies \(n\) by \(F(n-1)\). The equation \(F = G\, F\) says that \(F\) is a **fixed point** of \(G\), and a **fixed-point combinator** is a term that produces such a fixed point for any functional: \(Y\, G = G\, (Y\, G)\). So \(Y\, G\) is the recursive function, and every occurrence of \(r\) in the body of \(G\) becomes a call to \(Y\, G\) again. Factorial is the same pattern with a different body:
 
 \[
 G = \lambda r.\, \lambda n.\, (\mathrm{if}\; n = 0 \;\mathrm{then}\; 1 \;\mathrm{else}\; n \times (r\, (n - 1)))
 \]
 
-If \(r\) were \(F\), then \(G\, F\) would also be \(F\), since \(G\, F\) is the function that multiplies \(n\) by \(F(n-1)\). The equation \(F = G\, F\) says that \(F\) is a **fixed point** of \(G\). A **fixed-point combinator** is a term \(Y\) that produces such a fixed point for any functional: it satisfies
-
-\[
-Y\, G = G\, (Y\, G)
-\]
-
-so \(Y\, G\) is the recursive function, and every occurrence of \(r\) in the body of \(G\) becomes a call to \(Y\, G\) again. The standard term is
+The shorter form
 
 \[
 Y = \lambda g.\, (\lambda x.\, g\, (x\, x))\, (\lambda x.\, g\, (x\, x))
 \]
 
-The self-application \(x\, x\) is what supplies the term to itself. Reducing \(Y\, G\) shows how it works:
+is the standard presentation. Reducing \(Y\, G\) shows how the self-application supplies the term to itself:
 
 \[
 \begin{align*}
@@ -492,58 +525,11 @@ The distinction is visible in the surface forms. A `let` binding is not in scope
 
 ---
 
-## 4. Combinators and abstraction elimination
+## 4. Execution frames and closures
 
-Certain terms have commonly accepted names. They are closed terms, and they form a notation in which variables are eliminated entirely.
+The calculus substitutes an argument into the body of an abstraction, so the body is evaluated with the parameter replaced by the argument term. A Racket program does not rewrite its body. It records the parameter's value in a table of bindings and records where evaluation is to continue. The table is an **execution frame**, and the pair of a function's code with the frame in which it was created is a **closure**. In that order the two structures explain how the substitution rule is carried out at run time.
 
-| Combinator | Term | Effect |
-|------------|------|--------|
-| \(I\) | \(\lambda x.\, x\) | Identity |
-| \(K\) | \(\lambda x.\, \lambda y.\, x\) | Constant function |
-| \(S\) | \(\lambda x.\, \lambda y.\, \lambda z.\, x\, z\, (y\, z)\) | Distributes an argument over an application |
-| \(B\) | \(\lambda x.\, \lambda y.\, \lambda z.\, x\, (y\, z)\) | Composition |
-| \(C\) | \(\lambda x.\, \lambda y.\, \lambda z.\, x\, z\, y\) | Flips the first two arguments |
-| \(W\) | \(\lambda x.\, \lambda y.\, x\, y\, y\) | Duplicates an argument |
-| \(\omega\) | \(\lambda x.\, x\, x\) | Self-application |
-| \(\Omega\) | \(\omega\, \omega\) | The smallest term with no normal form |
-
-\(S K K\) reduces to the identity. Expanding gives \((K\, z)\, (K\, z)\), and \(K\, z\) is the constant function that returns \(z\), so the whole term returns \(z\).
-
-```racket
-(define I (lambda (x) x))
-(define K (lambda (x) (lambda (y) x)))
-(define S (lambda (x) (lambda (y) (lambda (z) ((x z) (y z))))))
-(define B (lambda (x) (lambda (y) (lambda (z) (x (y z))))))
-(define C (lambda (x) (lambda (y) (lambda (z) ((x z) y)))))
-(define W (lambda (x) (lambda (y) ((x y) y))))
-
-(((S K) K) 'a)       ; => 'a
-(((B I) I) 'b)       ; => 'b
-(((C K) 'c) 'k)      ; => 'k
-((W K) 'ignored)     ; => 'ignored
-```
-
-\(S\) and \(K\) together form a complete basis: every lambda term is equivalent to a term built from \(S\) and \(K\) alone, applied to each other, with no variables. \(B\), \(C\), \(K\), and \(W\) form an alternative basis. The construction is **abstraction elimination**: a term \(N\) without abstractions is transformed into a term \(T(x, N)\) equivalent to \(\lambda x.\, N\), by three rules.
-
-\[
-\begin{align*}
-T(x, x) &= I \\
-T(x, N) &= K\, N && \text{if } x \text{ is not free in } N \\
-T(x, M\, N) &= S\, T(x, M)\, T(x, N)
-\end{align*}
-\]
-
-A term \(T(x, N)\, P\) then reduces by having \(I\), \(K\), or \(S\) take the argument \(P\), exactly as the β-reduction of \((\lambda x.\, N)\, P\) would. \(I\) returns \(P\), \(K\, N\) discards it, and \(S\) passes it to both subterms. Adding the rule \(T(x,\, N\, x) = N\) when \(x\) is not free in \(N\) expresses η-conversion, since \((\lambda x.\, N\, x)\, P\) and \(N\, P\) agree.
-
-Combinatory logic is the notation that results: a system of terms built from \(S\) and \(K\) with application, no variables, and no substitution rule beyond the reductions of the combinators themselves. It is equivalent in power to the lambda calculus, which is why the calculus can be presented without variables at all.
-
----
-
-## 5. Closures and execution frames
-
-The calculus substitutes an argument into the body of an abstraction, so the body is evaluated with the parameter replaced by the argument term. A Racket program does not rewrite its body; it records the parameter's value in an **environment**, and it records where evaluation is to continue. A closure and an execution frame are the two structures that carry out the substitution rule at run time.
-
-**The substitution model.** For a closed application, the two accounts agree. Applying \((\lambda x.\, (+ x 1))\) to 41 substitutes 41 for \(x\) in the body and leaves \((+ 41)\), which evaluates to 42. The value of a function in this model is the abstraction itself, and there is no state.
+**The substitution model.** For a closed application, substitution and the machine agree. Applying \((\lambda x.\, (+ x 1))\) to 41 substitutes 41 for \(x\) in the body and leaves \((+ 41)\), which evaluates to 42. The value of a function in this model is the abstraction itself, and there is no state.
 
 \[
 ((\lambda x.\, (+ x\, 1))\, 41) \rightarrow (+ 41) \rightarrow 42
@@ -553,11 +539,7 @@ The calculus substitutes an argument into the body of an abstraction, so the bod
 ((lambda (x) (+ x 1)) 41)   ; => 42
 ```
 
-**Closure.** An abstraction with a free variable cannot be evaluated by substitution alone, because the free variable has no value inside the term. The value of such an abstraction is a **closure**: its code (the parameter and body), together with the environment in which the abstraction was evaluated. Applying the closure extends that stored environment with a binding of the parameter, and evaluates the body in the extended environment. The closure's environment therefore supplies exactly the values that substitution would have copied into the body.
-
-\[
-(\lambda y.\, (+ x\, y)) \text{ at } \rho = \{x \mapsto 2\} \;\leadsto\; \langle \lambda y.\, (+ x\, y),\ \rho \rangle
-\]
+**Execution frame.** A frame is a table of bindings with one extra entry: a pointer to the frame in which it was created, called its parent. An environment is a sequence of frames followed through those parent pointers. Evaluating a call creates a frame whose table holds the parameters bound to the arguments, whose parent is the frame of the operator, and whose body is then evaluated in that new environment. A name is looked up in the frame that defines it, following parents outward, which is why an inner binding hides an outer one and why a caller's bindings are visible only when they are on the chain.
 
 ```racket
 (define (make-adder n) (lambda (x) (+ x n)))
@@ -565,7 +547,19 @@ The calculus substitutes an argument into the body of an abstraction, so the bod
 (add2 5)   ; => 7
 ```
 
-`add2` holds a closure whose stored environment binds `n` to 2. The body of the inner `lambda` contains the free `n`, and the closure supplies it at each call. Two calls to `make-adder` return two closures with the same code and different environments, which is why two of them behave differently:
+The call `(make-adder 2)` creates a frame that binds `n` to 2. The body of `make-adder` is a `lambda`, so evaluating it produces a function value, and the frame is not discarded: the value that `make-adder` returns refers to that frame. The figure shows the result.
+
+![Execution frame and closure](images/frame-closure.svg)
+
+Two frames are visible. The global frame binds `make-adder` and `add2`. Frame E1 was created by the call `(make-adder 2)`; it binds `n` to 2 and points to the global frame as its parent. `add2` is bound to a function value rather than to a number, and that value is the closure on the right.
+
+**Closure.** An abstraction with a free variable cannot be evaluated by substitution alone, because the free variable has no value inside the term. The value of such an abstraction is a closure: its code, which is the parameter and the body, together with a pointer to the frame in which the abstraction was evaluated. The closure in the figure holds `params: (x)`, the body `(+ x n)`, and a pointer to E1.
+
+Applying the closure creates a new frame below the one it points to, binds the parameter there, and evaluates the body in that environment. The call `(add2 5)` therefore creates a frame binding `x` to 5 whose parent is E1, and the body `(+ x n)` reads `x` from the new frame and `n` from E1. The result is 7, and the call's frame is discarded when the call returns. E1 survives, because the closure still points to it, which is how `n` remains available to later calls.
+
+The closure's pointer is what substitution would have copied into the body. Substituting 2 for `n` in `(+ x n)` gives `(+ x 2)`, and reading `n` through the closure's frame gives the same value. The two accounts agree; one is written in the term, and the other is a pointer.
+
+Two calls to `make-adder` yield two closures with the same code and different frames, which is why they behave differently:
 
 ```racket
 (define (make-adder n) (lambda (x) (+ x n)))
@@ -574,7 +568,7 @@ The calculus substitutes an argument into the body of an abstraction, so the bod
 (list (add2 1) (add5 1))   ; => '(3 6)
 ```
 
-**Capture is decided where the closure is created.** Because the environment is stored at the abstraction, a free variable takes its value from that environment, not from the environment of the caller. A caller that rebinds the name cannot change what the closure sees, which is the run-time form of the lexical-scope rule that α-conversion protects.
+**Capture is decided where the frame is created.** Because the closure holds the frame of its creation, a free variable takes its value from that frame and not from the frame of the caller. A caller that rebinds the name cannot change what the closure sees, which is the run-time form of the lexical-scope rule that α-conversion protects.
 
 ```racket
 (define x 'outer)
@@ -583,7 +577,7 @@ The calculus substitutes an argument into the body of an abstraction, so the bod
 (shadowed)   ; => 'outer
 ```
 
-**The stored environment is shared, so a closure can carry state.** The environment is a set of locations, not a copy of values, so a closure that assigns its free variable mutates the location that every invocation of that closure reads. The two closures returned by two calls to `make-counter` hold distinct environments, and each count advances independently.
+**The frame holds locations, so a closure can carry state.** The bindings in a frame are locations that can be assigned, not copies of values. A closure that assigns its free variable mutates the location that every invocation of that closure reads. Two closures created by two calls to `make-counter` point to two different frames, so each count advances independently.
 
 ```racket
 (define (make-counter)
@@ -597,15 +591,7 @@ The calculus substitutes an argument into the body of an abstraction, so the bod
 
 State is outside the pure calculus. The substitutions of section 1 cannot observe it, and this is the point at which an environment machine and a substitution machine describe different objects: the substitution machine copies values into a term, while the environment machine names a location that can be assigned.
 
-**Execution frame.** Evaluating a call needs more than the new bindings: it must also record where the result is to be used. An **execution frame** holds both parts, the environment for the body and the continuation, the pending computation of the caller. Racket allocates a frame for each active call. Entering the body of a closure pushes a frame that binds the parameters and points to the rest of the expression; returning from the call pops it and hands the value to the continuation.
-
-| Structure | Holds | Calculus counterpart |
-|-----------|-------|----------------------|
-| Closure | Code, and the environment of its free variables | The term, plus the values that substitution would insert |
-| Execution frame | Parameter bindings for one call, and the continuation | The substitution instance of the body, plus the surrounding context |
-| Environment | Locations for the visible bindings | The set of free-variable values in scope |
-
-**Frames and the continuation.** A frame's continuation is the rest of the computation in the calculus sense, the term that surrounds the application. A non-tail call keeps the frame alive because its continuation has more work to do; a tail call replaces the current frame, because the continuation of the callee is the continuation of the caller. That is why a loop written as a tail call runs in constant space, while a non-tail recursion of the same depth builds a frame per level. Racket requires tail calls to be safe for space in this sense.
+**Frames and the continuation.** A frame records one more thing: where the value is to be used. That pending computation is the continuation, the term surrounding the application in the calculus sense. A non-tail call keeps its frame alive because the continuation has more work to do; a tail call replaces the current frame, because the continuation of the callee is the continuation of the caller. That is why a loop written as a tail call runs in constant space, while a non-tail recursion of the same depth builds a frame per level. Racket requires tail calls to be safe for space in this sense.
 
 ```racket
 (define (loop n) (if (zero? n) 'done (loop (sub1 n))))
@@ -620,7 +606,7 @@ State is outside the pure calculus. The substitutions of section 1 cannot observ
 (safe-div 6 0)   ; => 'undefined
 ```
 
-**Recursive frames.** A recursive definition needs a frame in which the name is already bound. `letrec` creates one environment for all the right-hand sides and evaluates each in it, which is what the extra abstraction in \(Z\) achieves inside a pure term: the recursive value exists before it is applied.
+**Recursive frames.** A recursive definition needs a frame in which the name is already bound. `letrec` creates the frame first and evaluates the right-hand sides inside it, so the name is visible in its own definition. That is what the extra abstraction in \(Z\) arranges inside a pure term: the recursive value exists before it is applied.
 
 ```racket
 (letrec ([fact (lambda (n) (if (zero? n) 1 (* n (fact (sub1 n)))))])
@@ -640,7 +626,7 @@ Effects and mutable state sit outside the calculus. Substitution of a term that 
 
 ---
 
-## 6. References
+## 5. References
 
 - [*Structure and Interpretation of Computer Programs*](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/6515/sicp.zip/full-text/book/book.html) — Harold Abelson and Gerald Jay Sussman, with Julie Sussman. 2nd ed. MIT Press, 1996.
 - [*The Little Schemer*](https://vpb.smallyu.net/%5BType%5D%20books/The%20Little%20Schemer.pdf) — Daniel P. Friedman and Matthias Felleisen. 4th ed. MIT Press, 1996.
