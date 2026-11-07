@@ -525,50 +525,53 @@ The distinction is visible in the surface forms. A `let` binding is not in scope
 
 ---
 
-## 4. Execution frames and closures
+## 4. The environment model of evaluation
 
-The calculus substitutes an argument into the body of an abstraction, so the body is evaluated with the parameter replaced by the argument term. A Racket program does not rewrite its body. It records the parameter's value in a table of bindings and records where evaluation is to continue. The table is an **execution frame**, and the pair of a function's code with the frame in which it was created is a **closure**. In that order the two structures explain how the substitution rule is carried out at run time.
+The calculus substitutes an argument into the body of an abstraction, so the body is evaluated with the parameter replaced by the argument term. A Racket program does not rewrite its body. SICP calls the replacement rule the **substitution model**, and it introduces a second account for the same computations, the **environment model of evaluation**. The environment model replaces the substitution model for one purpose: it specifies what it means to apply a compound procedure to arguments. Its objects are environments, frames, bindings, and procedure objects.
 
-**The substitution model.** For a closed application, substitution and the machine agree. Applying \((\lambda x.\, (+ x 1))\) to 41 substitutes 41 for \(x\) in the body and leaves \((+ 41)\), which evaluates to 42. The value of a function in this model is the abstraction itself, and there is no state.
+**The substitution model.** For a closed application, substitution and the machine agree. Applying \((\lambda x.\, (+ x 1))\) to 41 substitutes 41 for \(x\) in the body and leaves \((+ 41\ 1)\), which evaluates to 42. The value of a function in this model is the abstraction itself, and there is no state.
 
 \[
-((\lambda x.\, (+ x\, 1))\, 41) \rightarrow (+ 41) \rightarrow 42
+((\lambda x.\, (+ x\, 1))\, 41) \rightarrow (+ 41\ 1) \rightarrow 42
 \]
 
 ```racket
 ((lambda (x) (+ x 1)) 41)   ; => 42
 ```
 
-**Execution frame.** A frame is a table of bindings with one extra entry: a pointer to the frame in which it was created, called its parent. An environment is a sequence of frames followed through those parent pointers. Evaluating a call creates a frame whose table holds the parameters bound to the arguments, whose parent is the frame of the operator, and whose body is then evaluated in that new environment. A name is looked up in the frame that defines it, following parents outward, which is why an inner binding hides an outer one and why a caller's bindings are visible only when they are on the chain.
+**Environment and frame.** An environment is a sequence of frames. A frame is a table of bindings, together with a pointer to the enclosing environment; that pointer is what makes the sequence an environment. A binding associates a name with a value, and `define` adds a binding to a frame.
+
+**Procedure object.** In the environment model a procedure is always a pair: some code and a pointer to an environment. Procedures are created in exactly one way, by evaluating a `lambda` expression. The code comes from the text of the expression, and the environment part is the environment in which the `lambda` was evaluated. A procedure definition is sugar for an implicit `lambda`:
 
 ```racket
-(define (make-adder n) (lambda (x) (+ x n)))
+;; (define (make-adder n) (lambda (x) (+ x n))) is sugar for
+(define make-adder (lambda (n) (lambda (x) (+ x n))))
+
 (define add2 (make-adder 2))
 (add2 5)   ; => 7
 ```
 
-The call `(make-adder 2)` creates a frame that binds `n` to 2. The body of `make-adder` is a `lambda`, so evaluating it produces a function value, and the frame is not discarded: the value that `make-adder` returns refers to that frame. The figure shows the result.
+The environment part is not optional. `make-adder` itself is a procedure whose environment part is the global environment, because its `lambda` was evaluated there. Its body evaluates to a second `lambda`, and the environment in which that second `lambda` is evaluated is the frame created by the call `(make-adder 2)`. So the value returned by `(make-adder 2)` is a procedure object whose environment part points to that frame.
 
-![Execution frame and closure](images/frame-closure.svg)
+![Environment model: procedure objects, frames, and bindings](images/frame-closure.svg)
 
-Two frames are visible. The global frame binds `make-adder` and `add2`. Frame E1 was created by the call `(make-adder 2)`; it binds `n` to 2 and points to the global frame as its parent. `add2` is bound to a function value rather than to a number, and that value is the closure on the right.
+**Applying a procedure.** The environment model states the rule in one sentence: to apply a procedure to arguments, construct a frame that binds the formal parameters to the arguments, make the enclosing environment of that frame the environment part of the procedure, and evaluate the body in the resulting environment. For `(add2 5)` that means a frame with `x : 5` whose enclosing environment is E1, and the body `(+ x n)` then reads `x` in E2 and `n` in E1. The result is 7, and E2 is discarded when the call returns while E1 remains.
 
-**Closure.** An abstraction with a free variable cannot be evaluated by substitution alone, because the free variable has no value inside the term. The value of such an abstraction is a closure: its code, which is the parameter and the body, together with a pointer to the frame in which the abstraction was evaluated. The closure in the figure holds `params: (x)`, the body `(+ x n)`, and a pointer to E1.
-
-Applying the closure creates a new frame below the one it points to, binds the parameter there, and evaluates the body in that environment. The call `(add2 5)` therefore creates a frame binding `x` to 5 whose parent is E1, and the body `(+ x n)` reads `x` from the new frame and `n` from E1. The result is 7, and the call's frame is discarded when the call returns. E1 survives, because the closure still points to it, which is how `n` remains available to later calls.
-
-The closure's pointer is what substitution would have copied into the body. Substituting 2 for `n` in `(+ x n)` gives `(+ x 2)`, and reading `n` through the closure's frame gives the same value. The two accounts agree; one is written in the term, and the other is a pointer.
-
-Two calls to `make-adder` yield two closures with the same code and different frames, which is why they behave differently:
+Two calls to `make-adder` create two frames, so the two returned procedure objects have the same code and different environment parts. Each call frame binds only `x`, and each closure reads `n` from its own frame:
 
 ```racket
-(define (make-adder n) (lambda (x) (+ x n)))
-(define add2 (make-adder 2))
-(define add5 (make-adder 5))
-(list (add2 1) (add5 1))   ; => '(3 6)
+(define make-adder (lambda (n) (lambda (x) (+ x n))))
+
+(define add2 (make-adder 2))   ; frame E1 binds n to 2
+(define add5 (make-adder 5))   ; frame E2 binds n to 5
+
+(add2 10)   ; => 12: x is 10 in the call frame, n is 2 in E1
+(add5 10)   ; => 15: x is 10 in the call frame, n is 5 in E2
 ```
 
-**Capture is decided where the frame is created.** Because the closure holds the frame of its creation, a free variable takes its value from that frame and not from the frame of the caller. A caller that rebinds the name cannot change what the closure sees, which is the run-time form of the lexical-scope rule that α-conversion protects.
+`n` is not bound in the global environment at all. Only the frames created by the two calls to `make-adder` bind it, and each closure reads the binding in the frame its environment part names.
+
+**The environment part is fixed at creation.** Because a procedure object carries the environment in which its `lambda` was evaluated, a free variable takes its value from that environment and not from the environment of the caller. A caller that rebinds the name cannot change what the procedure sees, which is the run-time form of the lexical-scope rule that α-conversion protects.
 
 ```racket
 (define x 'outer)
@@ -577,7 +580,7 @@ Two calls to `make-adder` yield two closures with the same code and different fr
 (shadowed)   ; => 'outer
 ```
 
-**The frame holds locations, so a closure can carry state.** The bindings in a frame are locations that can be assigned, not copies of values. A closure that assigns its free variable mutates the location that every invocation of that closure reads. Two closures created by two calls to `make-counter` point to two different frames, so each count advances independently.
+**A frame holds locations, so a procedure can carry state.** The bindings in a frame are locations that can be assigned, not copies of values, and SICP introduces assignment into the environment model on exactly this basis. A procedure that assigns a free variable mutates the location that every application of that procedure reads. Two procedure objects created by two calls to `make-counter` point to two different frames, so each count advances independently.
 
 ```racket
 (define (make-counter)
@@ -589,21 +592,13 @@ Two calls to `make-adder` yield two closures with the same code and different fr
 (list (c1) (c1) (c2))   ; => '(1 2 1)
 ```
 
-State is outside the pure calculus. The substitutions of section 1 cannot observe it, and this is the point at which an environment machine and a substitution machine describe different objects: the substitution machine copies values into a term, while the environment machine names a location that can be assigned.
+State is outside the pure calculus. The substitutions of section 1 cannot observe it, and this is the point at which the environment model and the substitution model describe different objects: the substitution model copies values into a term, while the environment model names a location that can be assigned.
 
 **Frames and the continuation.** A frame records one more thing: where the value is to be used. That pending computation is the continuation, the term surrounding the application in the calculus sense. A non-tail call keeps its frame alive because the continuation has more work to do; a tail call replaces the current frame, because the continuation of the callee is the continuation of the caller. That is why a loop written as a tail call runs in constant space, while a non-tail recursion of the same depth builds a frame per level. Racket requires tail calls to be safe for space in this sense.
 
 ```racket
 (define (loop n) (if (zero? n) 'done (loop (sub1 n))))
 (loop 1000000)   ; => 'done, in constant space
-```
-
-**`call/cc` reifies a frame's continuation.** The continuation of a call is usually implicit in the frame. `call/cc` captures it as an ordinary procedure, so the rest of the computation becomes a value that the program can call, store, or discard.
-
-```racket
-(define (safe-div a b)
-  (call/cc (lambda (escape) (if (zero? b) (escape 'undefined) (/ a b)))))
-(safe-div 6 0)   ; => 'undefined
 ```
 
 **Recursive frames.** A recursive definition needs a frame in which the name is already bound. `letrec` creates the frame first and evaluates the right-hand sides inside it, so the name is visible in its own definition. That is what the extra abstraction in \(Z\) arranges inside a pure term: the recursive value exists before it is applied.
@@ -613,7 +608,7 @@ State is outside the pure calculus. The substitutions of section 1 cannot observ
   (fact 5))   ; => 120
 ```
 
-**Deferred evaluation.** A frame is also the device that postpones work. A thunk is a nullary closure whose body is evaluated when the thunk is called, so an argument can be passed as a frame rather than as a value. `#lang lazy` uses this to evaluate an argument only when the body demands it, which is the non-strict rule from section 1.
+**Deferred evaluation.** A frame is also the device that postpones work. A thunk is a procedure object with no parameters whose body is evaluated when the thunk is applied, so an argument can be passed as a frame rather than as a value. `#lang lazy` uses this to evaluate an argument only when the body demands it, which is the non-strict rule from section 1.
 
 ```racket
 #lang lazy
@@ -626,7 +621,73 @@ Effects and mutable state sit outside the calculus. Substitution of a term that 
 
 ---
 
-## 5. References
+## 5. Continuations and continuation-passing style
+
+A continuation is the rest of a computation, taken as a value. The previous section met it as the pending work stored in a frame. This section makes it a parameter of every function, which is the **continuation-passing style**, or CPS, and then relates the two accounts.
+
+**Direct style.** The usual definition of factorial returns a value to its caller, and the caller does something with it. The multiplication `* n (fact (sub1 n))` is performed after the recursive call returns, so the frame of each call must stay alive until then.
+
+```racket
+(define (fact n) (if (zero? n) 1 (* n (fact (sub1 n)))))
+(fact 5)   ; => 120
+```
+
+**Continuation-passing style.** In CPS the function takes an extra argument `k`, the continuation, and calls `k` with its result instead of returning it. The multiplication moves into a continuation that is built by the caller:
+
+```racket
+(define (fact-cps n k)
+  (if (zero? n)
+      (k 1)
+      (fact-cps (sub1 n) (lambda (v) (k (* n v))))))
+
+(fact-cps 5 (lambda (v) v))   ; => 120
+```
+
+Two properties follow from the rewrite. Every call in `fact-cps` is in tail position, because the result of the recursive call is returned directly to `k`; the frame chain therefore stays flat for any depth. And the continuation is now an ordinary procedure, so the caller decides what happens after the value is computed.
+
+```racket
+(define (fact-cps n k)
+  (if (zero? n) (k 1) (fact-cps (sub1 n) (lambda (v) (k (* n v))))))
+
+(fact-cps 5 (lambda (v) (list 'result v)))   ; => '(result 120)
+(fact-cps 5 (lambda (v) (* v v)))            ; => 14400
+```
+
+The same computation with two continuations gives two different answers, because the continuation is a value like any other.
+
+**CPS and the λ-calculus.** A CPS function is a λ-term whose continuation argument is used exactly as a function parameter, so it needs no operator beyond application. Substitution stays the rule, and recursion is still the fixed point, only with a curried continuation argument:
+
+```racket
+(define Y (lambda (g) ((lambda (f) (f f)) (lambda (f) (g (lambda (x) (lambda (y) (((f f) x) y))))))))
+
+(define fact
+  (Y (lambda (self)
+       (lambda (n)
+         (lambda (k)
+           (if (zero? n)
+               (k 1)
+               ((self (sub1 n)) (lambda (v) (k (* n v))))))))))
+
+((fact 5) (lambda (v) v))   ; => 120
+```
+
+`self` has the type of a curried two-argument function because the continuation is the second argument, which is why `Y` here applies `(f f)` and then waits for the second argument.
+
+**Where CPS is used.** A CPS function never returns, so the caller's frame is not reused for the answer, and the stack can be eliminated by a trampoline. That is the basis of compilers for languages with deep recursion, of defunctionalized interpreters, and of implementations that must suspend a computation. Exceptions and generators are also expressible in CPS: an exception is a second continuation that is called instead of `k`, and a generator is a suspension that stores `k`.
+
+**`call/cc` reifies a frame's continuation.** The continuation of a call is usually implicit in the frame. `call/cc` captures it as an ordinary procedure, so the rest of the computation becomes a value that the program can call, store, or discard.
+
+```racket
+(define (safe-div a b)
+  (call/cc (lambda (escape) (if (zero? b) (escape 'undefined) (/ a b)))))
+(safe-div 6 0)   ; => 'undefined
+```
+
+The relation between the two accounts is that CPS makes the continuation an explicit parameter, while `call/cc` extracts the implicit one from the frame. A program written in CPS needs no `call/cc`, because every continuation is already a variable in scope.
+
+---
+
+## 6. References
 
 - [*Structure and Interpretation of Computer Programs*](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/6515/sicp.zip/full-text/book/book.html) — Harold Abelson and Gerald Jay Sussman, with Julie Sussman. 2nd ed. MIT Press, 1996.
 - [*The Little Schemer*](https://vpb.smallyu.net/%5BType%5D%20books/The%20Little%20Schemer.pdf) — Daniel P. Friedman and Matthias Felleisen. 4th ed. MIT Press, 1996.
