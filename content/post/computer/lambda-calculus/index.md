@@ -645,27 +645,32 @@ g = countdown(3)
 print(next(g), next(g), next(g))   # 3 2 1
 ```
 
-An async function suspends at `await` and is resumed by the event loop. A goroutine or virtual thread suspends at a blocking call, and the runtime moves its frames aside while another task runs. None of these captures an arbitrary point: each has one designated place where suspension happens.
 
-**CPS in a compiler.** Continuation-passing style is a rewrite of the program in which no function returns. Each function takes an extra parameter, its continuation, and instead of producing a value it calls that parameter with the value. Every call is therefore the last thing the function does, and the rest of the computation travels as an argument.
+**Async function.** An async function suspends at `await` and is resumed by the event loop rather than by the caller. The state saved at each `await` is the continuation of that expression, which is why the function can be written as a sequence of steps while the thread is free between them.
 
-A compiler can perform that rewrite on the whole program. The result has two properties it can use.
+```javascript
+async function load() {
+  console.log("load: start");
+  const a = await Promise.resolve("a");   // suspends here
+  console.log("load: after first await");
+  const b = await Promise.resolve("b");   // and here
+  console.log("load: after second await");
+  return [a, b];
+}
 
-No call needs a return address, because no call is followed by work in the caller. The compiler emits a jump for each call and passes the continuation as an argument, so the machine never pushes a frame to return to. A tail call in the source and an ordinary call after the rewrite are the same jump.
-
-The continuation is an ordinary value, so it can be kept in a heap object rather than on a stack. That is how a Scheme implementation provides first-class continuations, and why a program can call the same continuation more than once.
-
-```racket
-;; Direct style: * 3 and + 1 are pending in the caller's frames.
-(+ 1 (* 3 100))   ; => 301
-
-;; CPS: no function returns; each passes its result to the next.
-(define (times3-then k) (k (* 3 100)))
-(define (plus1-then k) (k (+ 1 (times3-then values))))
-(plus1-then values)   ; => 301
+load().then(r => console.log("result:", r.join("")));
+console.log("main: continues");
 ```
 
-In the second version the call to `times3-then` is in tail position and its result is delivered through `values`, the identity continuation. Compiling that form needs no stack: `plus1-then` jumps to `times3-then` with `k` in a register, and `times3-then` jumps to `k`.
+```
+load: start
+main: continues
+load: after first await
+load: after second await
+result: ab
+```
+
+The `main: continues` line appears before the second half of `load`, because `await` returns control to the caller instead of blocking. Each `await` is a fixed suspension point, so the runtime only has to save the state of `load` at those two places.
 
 **Goroutine.** A goroutine suspends in the middle of a function and resumes later, possibly on another operating-system thread. The frames that must stay alive are the continuation, and the runtime keeps them as data it can move.
 
@@ -712,6 +717,26 @@ virtual thread: end
 ```
 
 The code differs from an ordinary thread only in `Thread.ofVirtual()`. The suspension point is `Thread.sleep`, and the continuation, which is the whole call stack at that point, is stored by the JVM so that the carrier thread can run something else meanwhile.
+
+**CPS in a compiler.** Continuation-passing style is a rewrite of the program in which no function returns. Each function takes an extra parameter, its continuation, and instead of producing a value it calls that parameter with the value. Every call is therefore the last thing the function does, and the rest of the computation travels as an argument.
+
+A compiler can perform that rewrite on the whole program. The result has two properties it can use.
+
+No call needs a return address, because no call is followed by work in the caller. The compiler emits a jump for each call and passes the continuation as an argument, so the machine never pushes a frame to return to. A tail call in the source and an ordinary call after the rewrite are the same jump.
+
+The continuation is an ordinary value, so it can be kept in a heap object rather than on a stack. That is how a Scheme implementation provides first-class continuations, and why a program can call the same continuation more than once.
+
+```racket
+;; Direct style: * 3 and + 1 are pending in the caller's frames.
+(+ 1 (* 3 100))   ; => 301
+
+;; CPS: no function returns; each passes its result to the next.
+(define (times3-then k) (k (* 3 100)))
+(define (plus1-then k) (k (+ 1 (times3-then values))))
+(plus1-then values)   ; => 301
+```
+
+In the second version the call to `times3-then` is in tail position and its result is delivered through `values`, the identity continuation. Compiling that form needs no stack: `plus1-then` jumps to `times3-then` with `k` in a register, and `times3-then` jumps to `k`.
 
 ## 6. References
 
