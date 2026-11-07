@@ -621,71 +621,158 @@ Effects and mutable state sit outside the calculus. Substitution of a term that 
 
 ---
 
-## 5. Continuations and continuation-passing style
+## 5. Continuations
 
-A continuation is the rest of a computation, taken as a value. The previous section met it as the pending work stored in a frame. This section makes it a parameter of every function, which is the **continuation-passing style**, or CPS, and then relates the two accounts.
-
-**Direct style.** The usual definition of factorial returns a value to its caller, and the caller does something with it. The multiplication `* n (fact (sub1 n))` is performed after the recursive call returns, so the frame of each call must stay alive until then.
+A continuation is the rest of a computation, taken as a value. The previous section met it as the pending work recorded in a frame. A frame's continuation is normally invisible: the program cannot name it, pass it, or save it. `call/cc` makes it visible, by taking the continuation of the point where it appears and handing it to the procedure it is given. The procedure that `call/cc` supplies is itself a continuation, so calling it abandons the current computation and resumes the captured one.
 
 ```racket
-(define (fact n) (if (zero? n) 1 (* n (fact (sub1 n)))))
-(fact 5)   ; => 120
+(define captured #f)
+(+ 1 (* 3 (call/cc (lambda (k) (set! captured k) 100))))   ; => 301
+(captured 2)                                                ; => 7, the same two frames run again
 ```
 
-**Continuation-passing style.** In CPS the function takes an extra argument `k`, the continuation, and calls `k` with its result instead of returning it. The multiplication moves into a continuation that is built by the caller:
+The second call does not recompute `* 3` and `+ 1` from a stored list of numbers. It resumes the frames themselves, which is why `captured` can be called any number of times and why each call yields a different result. No variable holding `100` or a list of remaining work would produce that.
+
+**Suspension is the continuation.** A generator is the standard use: the producer stops in the middle of its own code and continues there on the next request. The suspension is the continuation captured at the `yield` point, and no other state is stored.
 
 ```racket
-(define (fact-cps n k)
-  (if (zero? n)
-      (k 1)
-      (fact-cps (sub1 n) (lambda (v) (k (* n v))))))
+(struct leaf (v) #:transparent)
+(struct node (l r) #:transparent)
 
-(fact-cps 5 (lambda (v) v))   ; => 120
+(define (make-generator body)
+  (define producer-k #f)   ; continuation of the suspended producer
+  (define consumer-k #f)   ; continuation of the waiting caller
+  (define (yield v)
+    (call/cc (lambda (here)
+               (set! producer-k here)     ; stop here; resume at this point
+               (consumer-k v))))          ; hand v to the caller
+  (define (start) (body yield) (yield 'done))
+  (lambda ()
+    (call/cc (lambda (k)
+               (set! consumer-k k)
+               (if producer-k (producer-k #f) (start))))))
+
+(define (tree-gen t)
+  (make-generator
+   (lambda (yield)
+     (let loop ([n t])
+       (cond [(leaf? n) (yield (leaf-v n))]
+             [else (loop (node-l n)) (loop (node-r n))])))))
+
+(define g (tree-gen (node (leaf 1) (node (leaf 2) (leaf 3)))))
+(list (g) (g))   ; => '(1 2)
+(list (g) (g))   ; => '(3 done)
 ```
 
-Two properties follow from the rewrite. Every call in `fact-cps` is in tail position, because the result of the recursive call is returned directly to `k`; the frame chain therefore stays flat for any depth. And the continuation is now an ordinary procedure, so the caller decides what happens after the value is computed.
+The body of the generator is an ordinary recursive traversal. It has no stack variable, no phase flag, and no knowledge that it will be suspended: `yield` captures the continuation of the call to `yield`, and `producer-k` holds it. When the second `list` calls `g`, `producer-k` is invoked and the loop continues inside `loop`, on the right-hand branch of the node, exactly where it stopped. The state that a hand-written version would have to store as a list of pending nodes lives in the frames themselves.
+
+**Continuation usage in programming languages.** A continuation is the rest of a computation taken as a value, and a language either exposes that value or hides it and supplies a fixed place where it may be captured. The distinction matters because the exposed form is general and the hidden form is not: a captured continuation can be resumed any number of times, from any point in the program, while a `yield`, an `await`, or a blocked call resumes once, at the place the language chose. The mechanisms below are the ways languages provide the hidden form, and `call/cc` is the general one.
+
+**CPS in a compiler.** Continuation-passing style is a rewrite of the program in which no function returns. Each function takes an extra parameter, its continuation, and instead of producing a value it calls that parameter with the value. Every call is therefore the last thing the function does, and the rest of the computation travels as an argument.
+
+A compiler can perform that rewrite on the whole program. The result has two properties it can use.
+
+No call needs a return address, because no call is followed by work in the caller. The compiler emits a jump for each call and passes the continuation as an argument, so the machine never pushes a frame to return to. A tail call in the source and an ordinary call after the rewrite are the same jump.
+
+The continuation is an ordinary value, so it can be kept in a heap object rather than on a stack. That is how a Scheme implementation provides first-class continuations, and why a program can call the same continuation more than once.
 
 ```racket
-(define (fact-cps n k)
-  (if (zero? n) (k 1) (fact-cps (sub1 n) (lambda (v) (k (* n v))))))
+;; Direct style: * 3 and + 1 are pending in the caller's frames.
+(+ 1 (* 3 100))   ; => 301
 
-(fact-cps 5 (lambda (v) (list 'result v)))   ; => '(result 120)
-(fact-cps 5 (lambda (v) (* v v)))            ; => 14400
+;; CPS: no function returns; each passes its result to the next.
+(define (times3-then k) (k (* 3 100)))
+(define (plus1-then k) (k (+ 1 (times3-then values))))
+(plus1-then values)   ; => 301
 ```
 
-The same computation with two continuations gives two different answers, because the continuation is a value like any other.
+In the second version the call to `times3-then` is in tail position and its result is delivered through `values`, the identity continuation. Compiling that form needs no stack: `plus1-then` jumps to `times3-then` with `k` in a register, and `times3-then` jumps to `k`.
 
-**CPS and the λ-calculus.** A CPS function is a λ-term whose continuation argument is used exactly as a function parameter, so it needs no operator beyond application. Substitution stays the rule, and recursion is still the fixed point, only with a curried continuation argument:
+**Goroutine.** A goroutine suspends in the middle of a function and resumes later, possibly on another operating-system thread. The frames that must stay alive are the continuation, and the runtime keeps them as data it can move.
+
+```go
+func worker(done chan bool) {
+	fmt.Println("goroutine: start")
+	time.Sleep(20 * time.Millisecond)   // suspends here
+	fmt.Println("goroutine: end")
+	done <- true
+}
+
+func main() {
+	done := make(chan bool)
+	go worker(done)                     // runs concurrently
+	fmt.Println("main: continues")
+	<-done                              // wait for the goroutine
+}
+```
+
+```
+main: continues
+goroutine: start
+goroutine: end
+```
+
+The function is straight-line code, and `time.Sleep` marks where the suspension happens. The runtime, not the program, holds the continuation; it grows the goroutine's stack and moves it when the goroutine resumes on another thread.
+
+**Virtual thread.** A virtual thread is the same mechanism in the JVM. It is scheduled by the runtime rather than the operating system, and when it blocks its stack is moved off the carrier thread.
+
+```java
+Thread vt = Thread.ofVirtual().start(() -> {
+    System.out.println("virtual thread: start");
+    try { Thread.sleep(20); } catch (InterruptedException e) { }  // unmounts
+    System.out.println("virtual thread: end");
+});
+System.out.println("main: continues");
+vt.join();
+```
+
+```
+main: continues
+virtual thread: start
+virtual thread: end
+```
+
+The code differs from an ordinary thread only in `Thread.ofVirtual()`. The suspension point is `Thread.sleep`, and the continuation, which is the whole call stack at that point, is stored by the JVM so that the carrier thread can run something else meanwhile.
+
+**Generator.** A generator restricts suspension to explicit points, so the compiler only has to save state where `yield` appears.
+
+```python
+def countdown(n):
+    while n > 0:
+        yield n          # suspends here, resumes on the next call
+        n -= 1
+
+g = countdown(3)
+print(next(g), next(g), next(g))
+```
+
+```
+3 2 1
+```
+
+`next(g)` resumes the function at the line after the previous `yield`, with all local variables intact. The compiler does not have to capture an arbitrary continuation, because `yield` is the only place where the function may stop.
+
+**Async function.** An async function is the same mechanism with `await` in place of `yield`, and its continuation is resumed by the event loop rather than by a caller.
+
+```javascript
+async function load() {
+  const a = await fetch("/a.json");   // suspends, resumes in the event loop
+  const b = await fetch("/b.json");
+  return [a.status, b.status];
+}
+```
+
+The two `await` expressions are the only suspension points. The runtime stores the state of `load` at each one, so the function reads as a sequence of steps while the thread is free between them.
+
+**Saved continuation.** The unrestricted form is available when the language exposes `call/cc`, and it resumes at any point, any number of times:
 
 ```racket
-(define Y (lambda (g) ((lambda (f) (f f)) (lambda (f) (g (lambda (x) (lambda (y) (((f f) x) y))))))))
-
-(define fact
-  (Y (lambda (self)
-       (lambda (n)
-         (lambda (k)
-           (if (zero? n)
-               (k 1)
-               ((self (sub1 n)) (lambda (v) (k (* n v))))))))))
-
-((fact 5) (lambda (v) v))   ; => 120
+(define saved #f)
+(call/cc (lambda (k) (set! saved k) 'first))   ; => 'first
+(saved 'second)                                ; => 'second
 ```
 
-`self` has the type of a curried two-argument function because the continuation is the second argument, which is why `Y` here applies `(f f)` and then waits for the second argument.
-
-**Where CPS is used.** A CPS function never returns, so the caller's frame is not reused for the answer, and the stack can be eliminated by a trampoline. That is the basis of compilers for languages with deep recursion, of defunctionalized interpreters, and of implementations that must suspend a computation. Exceptions and generators are also expressible in CPS: an exception is a second continuation that is called instead of `k`, and a generator is a suspension that stores `k`.
-
-**`call/cc` reifies a frame's continuation.** The continuation of a call is usually implicit in the frame. `call/cc` captures it as an ordinary procedure, so the rest of the computation becomes a value that the program can call, store, or discard.
-
-```racket
-(define (safe-div a b)
-  (call/cc (lambda (escape) (if (zero? b) (escape 'undefined) (/ a b)))))
-(safe-div 6 0)   ; => 'undefined
-```
-
-The relation between the two accounts is that CPS makes the continuation an explicit parameter, while `call/cc` extracts the implicit one from the frame. A program written in CPS needs no `call/cc`, because every continuation is already a variable in scope.
-
----
+The difference from the previous four is scope. `yield`, `await`, `sleep`, and an unmounted virtual thread resume once, at the place the language chose. `saved` can be called from anywhere, and each call re-enters the same expression.
 
 ## 6. References
 
