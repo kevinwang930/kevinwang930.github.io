@@ -623,50 +623,29 @@ Effects and mutable state sit outside the calculus. Substitution of a term that 
 
 ## 5. Continuations
 
-A continuation is the rest of a computation, taken as a value. The previous section met it as the pending work recorded in a frame. A frame's continuation is normally invisible: the program cannot name it, pass it, or save it. `call/cc` makes it visible, by taking the continuation of the point where it appears and handing it to the procedure it is given. The procedure that `call/cc` supplies is itself a continuation, so calling it abandons the current computation and resumes the captured one.
+A **continuation** is the rest of a computation with respect to a point in it: the pending operations that will consume the value produced at that point, and the steps that follow them, up to the end of the program. It is evaluated state, not source code, and it exists at every point of every evaluation whether or not a program can refer to it. A program can name it only if the language provides an operator that captures it as a value.
+
+**Racket** provides `call/cc` for that. It captures the continuation of the `call/cc` expression, passes it to the given procedure, and calls that procedure. The captured continuation is itself a procedure: calling it abandons the current computation and resumes at the captured point.
 
 ```racket
 (define captured #f)
 (+ 1 (* 3 (call/cc (lambda (k) (set! captured k) 100))))   ; => 301
-(captured 2)                                                ; => 7, the same two frames run again
+(captured 2)                                                ; => 7, the two frames run again
 ```
 
-The second call does not recompute `* 3` and `+ 1` from a stored list of numbers. It resumes the frames themselves, which is why `captured` can be called any number of times and why each call yields a different result. No variable holding `100` or a list of remaining work would produce that.
+**Other languages** capture continuations only at fixed points. Python's `yield` suspends a generator and resumes it on the next call, with the local variables intact:
 
-**Suspension is the continuation.** A generator is the standard use: the producer stops in the middle of its own code and continues there on the next request. The suspension is the continuation captured at the `yield` point, and no other state is stored.
+```python
+def countdown(n):
+    while n > 0:
+        yield n          # the only place the function may stop
+        n -= 1
 
-```racket
-(struct leaf (v) #:transparent)
-(struct node (l r) #:transparent)
-
-(define (make-generator body)
-  (define producer-k #f)   ; continuation of the suspended producer
-  (define consumer-k #f)   ; continuation of the waiting caller
-  (define (yield v)
-    (call/cc (lambda (here)
-               (set! producer-k here)     ; stop here; resume at this point
-               (consumer-k v))))          ; hand v to the caller
-  (define (start) (body yield) (yield 'done))
-  (lambda ()
-    (call/cc (lambda (k)
-               (set! consumer-k k)
-               (if producer-k (producer-k #f) (start))))))
-
-(define (tree-gen t)
-  (make-generator
-   (lambda (yield)
-     (let loop ([n t])
-       (cond [(leaf? n) (yield (leaf-v n))]
-             [else (loop (node-l n)) (loop (node-r n))])))))
-
-(define g (tree-gen (node (leaf 1) (node (leaf 2) (leaf 3)))))
-(list (g) (g))   ; => '(1 2)
-(list (g) (g))   ; => '(3 done)
+g = countdown(3)
+print(next(g), next(g), next(g))   # 3 2 1
 ```
 
-The body of the generator is an ordinary recursive traversal. It has no stack variable, no phase flag, and no knowledge that it will be suspended: `yield` captures the continuation of the call to `yield`, and `producer-k` holds it. When the second `list` calls `g`, `producer-k` is invoked and the loop continues inside `loop`, on the right-hand branch of the node, exactly where it stopped. The state that a hand-written version would have to store as a list of pending nodes lives in the frames themselves.
-
-**Continuation usage in programming languages.** A continuation is the rest of a computation taken as a value, and a language either exposes that value or hides it and supplies a fixed place where it may be captured. The distinction matters because the exposed form is general and the hidden form is not: a captured continuation can be resumed any number of times, from any point in the program, while a `yield`, an `await`, or a blocked call resumes once, at the place the language chose. The mechanisms below are the ways languages provide the hidden form, and `call/cc` is the general one.
+An async function suspends at `await` and is resumed by the event loop. A goroutine or virtual thread suspends at a blocking call, and the runtime moves its frames aside while another task runs. None of these captures an arbitrary point: each has one designated place where suspension happens.
 
 **CPS in a compiler.** Continuation-passing style is a rewrite of the program in which no function returns. Each function takes an extra parameter, its continuation, and instead of producing a value it calls that parameter with the value. Every call is therefore the last thing the function does, and the rest of the computation travels as an argument.
 
@@ -733,46 +712,6 @@ virtual thread: end
 ```
 
 The code differs from an ordinary thread only in `Thread.ofVirtual()`. The suspension point is `Thread.sleep`, and the continuation, which is the whole call stack at that point, is stored by the JVM so that the carrier thread can run something else meanwhile.
-
-**Generator.** A generator restricts suspension to explicit points, so the compiler only has to save state where `yield` appears.
-
-```python
-def countdown(n):
-    while n > 0:
-        yield n          # suspends here, resumes on the next call
-        n -= 1
-
-g = countdown(3)
-print(next(g), next(g), next(g))
-```
-
-```
-3 2 1
-```
-
-`next(g)` resumes the function at the line after the previous `yield`, with all local variables intact. The compiler does not have to capture an arbitrary continuation, because `yield` is the only place where the function may stop.
-
-**Async function.** An async function is the same mechanism with `await` in place of `yield`, and its continuation is resumed by the event loop rather than by a caller.
-
-```javascript
-async function load() {
-  const a = await fetch("/a.json");   // suspends, resumes in the event loop
-  const b = await fetch("/b.json");
-  return [a.status, b.status];
-}
-```
-
-The two `await` expressions are the only suspension points. The runtime stores the state of `load` at each one, so the function reads as a sequence of steps while the thread is free between them.
-
-**Saved continuation.** The unrestricted form is available when the language exposes `call/cc`, and it resumes at any point, any number of times:
-
-```racket
-(define saved #f)
-(call/cc (lambda (k) (set! saved k) 'first))   ; => 'first
-(saved 'second)                                ; => 'second
-```
-
-The difference from the previous four is scope. `yield`, `await`, `sleep`, and an unmounted virtual thread resume once, at the place the language chose. `saved` can be called from anywhere, and each call re-enters the same expression.
 
 ## 6. References
 
