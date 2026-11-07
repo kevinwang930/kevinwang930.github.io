@@ -1,61 +1,64 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="940" height="560" viewBox="0 0 940 560" role="img" aria-label="Environment frames and a closure for (define add2 (make-adder 2))">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="640" viewBox="0 0 860 640" role="img" aria-label="Environment model: two calls to make-adder produce two frames">
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-      <polygon points="0,0 10,4 0,8" fill="#37474f"/>
+    <marker id="solid" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <polygon points="0,0 9,3.5 0,7" fill="#000000"/>
+    </marker>
+    <marker id="dash" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <polygon points="0,0 9,3.5 0,7" fill="#000000"/>
     </marker>
   </defs>
 
-  <rect width="940" height="560" fill="#f7f9fb"/>
+  <rect width="860" height="640" fill="#ffffff"/>
 
-  <text x="470" y="30" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#263238">Execution frame and closure</text>
-  <text x="470" y="52" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.5" fill="#607d8b">(define (make-adder n) (lambda (x) (+ x n)))   then   (define add2 (make-adder 2))</text>
+  <text x="30" y="28" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">(define (make-adder n) (lambda (x) (+ x n)))</text>
+  <text x="30" y="48" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">(define add2 (make-adder 2))</text>
+  <text x="30" y="68" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">(define add5 (make-adder 5))</text>
+  <text x="30" y="88" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">(add2 10)   (add5 10)</text>
 
-  <!-- Global environment frame -->
-  <rect x="40" y="96" width="360" height="188" fill="#ffffff" stroke="#1565c0" stroke-width="1.6" rx="4"/>
-  <line x1="40" y1="126" x2="400" y2="126" stroke="#1565c0" stroke-width="1.6"/>
-  <text x="220" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0d47a1">global environment</text>
+  <!-- global environment -->
+  <rect x="30" y="130" width="760" height="160" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="42" y="122" font-family="Courier New, Courier, monospace" font-size="12.5" font-weight="700" fill="#000000">global env</text>
 
-  <text x="56" y="152" font-family="Consolas, monospace" font-size="11.5" fill="#1b5e20">make-adder</text>
-  <text x="150" y="152" font-family="Consolas, monospace" font-size="11.5" fill="#37474f">params: (n)</text>
-  <text x="150" y="170" font-family="Consolas, monospace" font-size="11.5" fill="#37474f">body: (lambda (x) (+ x n))</text>
+  <text x="46" y="178" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">make-adder : (lambda (n) (lambda (x) (+ x n)))</text>
+  <text x="46" y="228" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">add2 : (lambda (x) (+ x n))</text>
+  <text x="46" y="278" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">add5 : (lambda (x) (+ x n))</text>
 
-  <line x1="40" y1="188" x2="400" y2="188" stroke="#cfd8dc" stroke-width="1"/>
-  <text x="56" y="212" font-family="Consolas, monospace" font-size="11.5" fill="#1b5e20">add2</text>
+  <!-- add2's environment part points at E1 -->
+  <circle cx="262" cy="223" r="3.5" fill="#000000"/>
+  <line x1="266" y1="223" x2="176" y2="342" stroke="#000000" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#dash)"/>
 
-  <!-- pointer stub from add2 to the closure -->
-  <line x1="112" y1="207" x2="470" y2="207" stroke="#37474f" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <circle cx="108" cy="207" r="3.5" fill="#37474f"/>
+  <!-- add5's environment part points at E2 -->
+  <circle cx="262" cy="273" r="3.5" fill="#000000"/>
+  <line x1="266" y1="273" x2="560" y2="342" stroke="#000000" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#dash)"/>
 
-  <!-- Closure -->
-  <rect x="478" y="150" width="400" height="116" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
-  <line x1="478" y1="178" x2="878" y2="178" stroke="#2e7d32" stroke-width="1.6"/>
-  <text x="678" y="169" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">closure: the value of (lambda (x) (+ x n))</text>
+  <!-- frame E1: (make-adder 2) -->
+  <rect x="40" y="346" width="250" height="90" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="52" y="338" font-family="Courier New, Courier, monospace" font-size="12.5" font-weight="700" fill="#000000">E1   (make-adder 2)</text>
+  <text x="56" y="396" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">n : 2</text>
+  <line x1="100" y1="346" x2="100" y2="296" stroke="#000000" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="110" y="322" font-family="Courier New, Courier, monospace" font-size="11" fill="#000000">enclosing env</text>
 
-  <text x="494" y="199" font-family="Consolas, monospace" font-size="11.5" fill="#37474f">params: (x)</text>
-  <text x="494" y="218" font-family="Consolas, monospace" font-size="11.5" fill="#37474f">body: (+ x n)</text>
-  <text x="494" y="245" font-family="Consolas, monospace" font-size="11.5" fill="#1b5e20">env:</text>
+  <!-- frame E2: (make-adder 5) -->
+  <rect x="560" y="346" width="250" height="90" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="572" y="338" font-family="Courier New, Courier, monospace" font-size="12.5" font-weight="700" fill="#000000">E2   (make-adder 5)</text>
+  <text x="576" y="396" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">n : 5</text>
+  <line x1="620" y1="346" x2="620" y2="296" stroke="#000000" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="630" y="322" font-family="Courier New, Courier, monospace" font-size="11" fill="#000000">enclosing env</text>
 
-  <!-- arrow from the closure's env slot down to frame E1 -->
-  <path d="M 540 241 L 640 241 L 640 348" fill="none" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <!-- the call (add2 10) -->
+  <rect x="40" y="500" width="250" height="90" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="52" y="492" font-family="Courier New, Courier, monospace" font-size="12.5" font-weight="700" fill="#000000">E3   (add2 10)</text>
+  <text x="56" y="550" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">x : 10</text>
+  <line x1="100" y1="500" x2="100" y2="442" stroke="#000000" stroke-width="1.4" marker-end="url(#solid)"/>
 
-  <!-- Frame E1 -->
-  <rect x="536" y="356" width="260" height="96" fill="#ffffff" stroke="#2e7d32" stroke-width="1.6" rx="4"/>
-  <line x1="536" y1="384" x2="796" y2="384" stroke="#2e7d32" stroke-width="1.6"/>
-  <text x="666" y="375" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1b5e20">frame E1: (make-adder 2)</text>
-  <text x="552" y="408" font-family="Consolas, monospace" font-size="11.5" fill="#1b5e20">n</text>
-  <text x="586" y="408" font-family="Consolas, monospace" font-size="11.5" fill="#37474f">2</text>
-  <text x="552" y="436" font-family="Consolas, monospace" font-size="11.5" fill="#1b5e20">parent</text>
+  <!-- the call (add5 10) -->
+  <rect x="560" y="500" width="250" height="90" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+  <text x="572" y="492" font-family="Courier New, Courier, monospace" font-size="12.5" font-weight="700" fill="#000000">E4   (add5 10)</text>
+  <text x="576" y="550" font-family="Courier New, Courier, monospace" font-size="12" fill="#000000">x : 10</text>
+  <line x1="620" y1="500" x2="620" y2="442" stroke="#000000" stroke-width="1.4" marker-end="url(#solid)"/>
 
-  <!-- arrow from E1 parent slot back to the global frame -->
-  <path d="M 610 431 L 610 470 L 220 470 L 220 300" fill="none" stroke="#455a64" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
-
-  <!-- note -->
-  <rect x="40" y="470" width="452" height="62" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4" rx="4"/>
-  <text x="56" y="492" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6d4c41">The closure holds the frame E1 itself, not a copy of the number 2.</text>
-  <text x="56" y="512" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6d4c41">(add2 5) extends E1 with x : 5 for the duration of the call, then discards it.</text>
-
-  <!-- call illustration -->
-  <text x="536" y="492" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">(add2 5): x : 5 in a new frame below E1, body (+ x n) reads both.</text>
-  <text x="536" y="512" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#37474f">Result 7. The frame for the call is popped; E1 survives for the next call.</text>
+  <!-- key -->
+  <text x="330" y="600" font-family="Courier New, Courier, monospace" font-size="11" fill="#000000">solid: enclosing env</text>
+  <text x="330" y="620" font-family="Courier New, Courier, monospace" font-size="11" fill="#000000">dashed: environment part of a value</text>
 </svg>
