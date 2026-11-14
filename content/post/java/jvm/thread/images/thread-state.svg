@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" role="img" aria-label="Thread.State as seen by a program, and JavaThreadState as read by the VM during a safepoint, with which states count as stopped">
+  <rect width="960" height="470" fill="#ffffff"/>
+  <defs>
+    <marker id="tr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#37474f"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="252" y="28" text-anchor="middle" font-size="13" font-weight="700" fill="#0d47a1">Thread.State, what a program sees</text>
+    <text x="720" y="28" text-anchor="middle" font-size="13" font-weight="700" fill="#1b5e20">JavaThreadState, what the VM stops on</text>
+
+    <rect x="36" y="44" width="432" height="250" rx="4" fill="#f5fbff" stroke="#1565c0"/>
+    <rect x="60" y="62" width="112" height="34" rx="17" fill="#ffffff" stroke="#90a4ae"/>
+    <text x="116" y="84" text-anchor="middle" font-size="11" fill="#37474f">NEW</text>
+    <rect x="198" y="62" width="130" height="34" rx="17" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="263" y="84" text-anchor="middle" font-size="11" font-weight="700" fill="#1b5e20">RUNNABLE</text>
+    <rect x="352" y="62" width="104" height="34" rx="17" fill="#ffcdd2" stroke="#c62828"/>
+    <text x="404" y="84" text-anchor="middle" font-size="11" fill="#b71c1c">TERMINATED</text>
+
+    <line x1="172" y1="79" x2="194" y2="79" stroke="#37474f" marker-end="url(#tr)"/>
+    <line x1="328" y1="79" x2="348" y2="79" stroke="#37474f" marker-end="url(#tr)"/>
+
+    <rect x="60" y="118" width="112" height="34" rx="17" fill="#ffe0b2" stroke="#ef6c00"/>
+    <text x="116" y="140" text-anchor="middle" font-size="11" fill="#e65100">BLOCKED</text>
+    <rect x="198" y="118" width="130" height="34" rx="17" fill="#fff9c4" stroke="#f9a825"/>
+    <text x="263" y="140" text-anchor="middle" font-size="11" fill="#f57f17">WAITING</text>
+    <rect x="352" y="118" width="104" height="34" rx="17" fill="#fff9c4" stroke="#f9a825"/>
+    <text x="404" y="140" text-anchor="middle" font-size="10" fill="#f57f17">TIMED_WAITING</text>
+
+    <line x1="263" y1="96" x2="150" y2="114" stroke="#37474f" marker-end="url(#tr)"/>
+    <line x1="263" y1="96" x2="263" y2="114" stroke="#37474f" marker-end="url(#tr)"/>
+    <line x1="263" y1="96" x2="392" y2="114" stroke="#37474f" marker-end="url(#tr)"/>
+
+    <rect x="60" y="168" width="404" height="108" rx="3" fill="#ffffff" stroke="#90a4ae"/>
+    <text x="76" y="190" font-size="10" fill="#37474f">RUNNABLE covers three different situations:</text>
+    <rect x="76" y="200" width="116" height="26" rx="3" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="134" y="217" text-anchor="middle" font-size="9" fill="#1b5e20">on a CPU</text>
+    <rect x="200" y="200" width="124" height="26" rx="3" fill="#c8e6c9" stroke="#2e7d32"/>
+    <text x="262" y="217" text-anchor="middle" font-size="9" fill="#1b5e20">ready, not scheduled</text>
+    <rect x="332" y="200" width="120" height="26" rx="3" fill="#a5d6a7" stroke="#2e7d32"/>
+    <text x="392" y="217" text-anchor="middle" font-size="9" fill="#1b5e20">inside native code</text>
+    <text x="76" y="248" font-size="10" fill="#37474f">So it cannot tell a safepoint where the thread is.</text>
+    <text x="76" y="266" font-size="10" fill="#78909c">getState, profilers and thread dumps report this word.</text>
+
+    <rect x="492" y="44" width="432" height="250" rx="4" fill="#f5fff7" stroke="#2e7d32"/>
+    <rect x="512" y="62" width="216" height="30" rx="3" fill="#ffffff" stroke="#c62828"/>
+    <text x="526" y="82" font-size="10" fill="#37474f">_thread_in_Java</text>
+    <text x="742" y="82" font-size="9" font-weight="700" fill="#c62828">running, needs a poll</text>
+
+    <rect x="512" y="98" width="216" height="30" rx="3" fill="#ffffff" stroke="#c62828"/>
+    <text x="526" y="118" font-size="10" fill="#37474f">_thread_in_vm</text>
+    <text x="742" y="118" font-size="9" font-weight="700" fill="#c62828">running, may block</text>
+
+    <rect x="512" y="134" width="216" height="30" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="526" y="154" font-size="10" fill="#1b5e20">_thread_in_native</text>
+    <text x="742" y="154" font-size="9" font-weight="700" fill="#1b5e20">stopped, walkable</text>
+
+    <rect x="512" y="170" width="216" height="30" rx="3" fill="#ffffff" stroke="#c62828"/>
+    <text x="526" y="190" font-size="10" fill="#37474f">_thread_in_native_trans</text>
+    <text x="742" y="190" font-size="9" font-weight="700" fill="#c62828">running, keep waiting</text>
+
+    <rect x="512" y="206" width="216" height="30" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="526" y="226" font-size="10" fill="#1b5e20">_thread_blocked</text>
+    <text x="742" y="226" font-size="9" font-weight="700" fill="#1b5e20">stopped, walkable</text>
+
+    <text x="512" y="258" font-size="9" fill="#78909c">written only by the owning thread,</text>
+    <text x="512" y="274" font-size="9" fill="#78909c">read by the VM under Threads_lock</text>
+
+    <rect x="36" y="312" width="888" height="112" rx="4" fill="#fafafa" stroke="#b0b0b0"/>
+    <text x="52" y="334" font-size="11" font-weight="700" fill="#263238">How a safe state is published</text>
+    <rect x="52" y="344" width="130" height="30" rx="3" fill="#ffffff" stroke="#90a4ae"/>
+    <text x="117" y="363" text-anchor="middle" font-size="9" fill="#37474f">_thread_in_vm</text>
+    <line x1="182" y1="359" x2="212" y2="359" stroke="#37474f" marker-end="url(#tr)"/>
+    <rect x="216" y="344" width="150" height="30" rx="3" fill="#ffffff" stroke="#90a4ae"/>
+    <text x="291" y="363" text-anchor="middle" font-size="9" fill="#37474f">make_walkable()</text>
+    <line x1="366" y1="359" x2="396" y2="359" stroke="#37474f" marker-end="url(#tr)"/>
+    <rect x="400" y="344" width="140" height="30" rx="3" fill="#ffffff" stroke="#90a4ae"/>
+    <text x="470" y="363" text-anchor="middle" font-size="9" fill="#37474f">storestore barrier</text>
+    <line x1="540" y1="359" x2="570" y2="359" stroke="#37474f" marker-end="url(#tr)"/>
+    <rect x="574" y="344" width="180" height="30" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+    <text x="664" y="363" text-anchor="middle" font-size="9" fill="#1b5e20">write _thread_in_native</text>
+    <line x1="754" y1="359" x2="784" y2="359" stroke="#37474f" marker-end="url(#tr)"/>
+    <rect x="788" y="344" width="120" height="30" rx="3" fill="#e8f5e9" stroke="#2e7d32"/>
+    <text x="848" y="363" text-anchor="middle" font-size="9" fill="#1b5e20">GC can walk</text>
+
+    <text x="52" y="400" font-size="10" fill="#37474f">A returning JNI call writes _thread_in_native_trans before it reads the safepoint poll,</text>
+    <text x="52" y="416" font-size="10" fill="#37474f">so it cannot sample a closed safepoint and then re-enter Java after the VM counted it stopped.</text>
+  </g>
+</svg>

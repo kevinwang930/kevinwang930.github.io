@@ -351,7 +351,7 @@ static bool G1CollectedHeap::is_humongous(size_t word_size) {
 
 ## 3. Safepoint
 
-A safepoint is a stretch of time in which every Java thread is stopped in a state the VM can account for. Its stack can be walked, and it is not changing the heap. The VM thread is the only thread that opens and closes a safepoint. While the safepoint is held, that thread runs one VM operation.
+A safepoint is a stretch of time in which every Java thread is stopped in a state the VM can account for. Its stack can be walked, and it is not changing the heap. That state is `JavaThreadState` on the HotSpot `JavaThread`: the thread writes it, and the VM thread reads it. `_thread_in_Java` and `_thread_in_vm` are still running. `_thread_in_native`, once its Java frame can be walked, and `_thread_blocked` are already stopped. The states, the transitions that publish them, and the thread list are described in [JVM thread internals](/post/java/jvm/thread/). The VM thread is the only thread that opens and closes a safepoint. While the safepoint is held, that thread runs one VM operation.
 
 G1 uses a safepoint for every stop-the-world pause: a young collection, a mixed collection, Remark, Cleanup, and a full collection. Concurrent marking and card refinement are not safepoints. Those threads keep running beside the mutators and only yield for as long as a safepoint is open.
 
@@ -487,7 +487,7 @@ JavaThread ..> SafepointSynchronize : block
 
 ### 3.2 Blocking user threads
 
-The VM thread does not preempt a user thread, and the user thread does not call `SafepointSynchronize` by name. Between checks it keeps running, even after the poll is armed. It looks only at these points, all on its own thread:
+The VM thread does not preempt a user thread, and the user thread does not call `SafepointSynchronize` by name. Between checks it keeps running, even after the poll is armed. It reaches `SafepointSynchronize::block` from a poll while `_thread_in_Java`, or from the check on the way back to Java from the VM or from native code. The checks are:
 
 - A loop back-edge or a return in the interpreter or in compiled code. The interpreter return is `TemplateTable::_return`: it reads this thread's polling word and, if the poll bit is set, calls `InterpreterRuntime::at_safepoint` on this thread.
 - The return from that slow path into Java. `transition_from_vm` calls `process_if_requested_with_exit_check`.
@@ -2088,3 +2088,4 @@ HeapWord* G1CollectedHeap::attempt_allocation_humongous(size_t word_size) {
 - [JEP 248: Make G1 the Default Garbage Collector](https://openjdk.org/jeps/248)
 - [JEP 523: Make G1 the Default Garbage Collector in All Environments](https://openjdk.org/jeps/523)
 - [Inspecting the Java heap](/post/java/jvm/gc/inspect/)
+- [JVM thread internals](/post/java/jvm/thread/)
