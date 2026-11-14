@@ -878,16 +878,133 @@ The VM thread, the service thread, and the monitor deflation thread are single l
 
 Virtual-thread carriers are the one pool of Java threads the JDK keeps ready. That pool is a `ForkJoinPool`, described with virtual threads below. Each carrier is still an ordinary `JavaThread` on the VM list while it is alive.
 
-## 6. Memory ordering
+## 6. Memory ordering in x86
 
 Threads share memory, but a write in one thread becomes visible in another only along a defined edge. The Java Memory Model defines those edges: program order within a thread, and a synchronizes-with edge between threads, such as an unlock and a later lock of the same monitor, a volatile write and a later read of the same variable, or a thread start and that thread's first action. The relation is transitive, and each edge is a release on the writing side and an acquire on the reading side.
 
-HotSpot implements this with `OrderAccess`. On x86 the hardware already keeps loads with loads, stores with stores, and a load with a later store, so most barriers stay compiler barriers. The one order x86 leaves unordered is a store followed by a load, so that barrier, and a full fence, emit a locked instruction.
+HotSpot implements this with `OrderAccess`, where each operation is a barrier between the accesses before it and the accesses after it. A barrier constrains only the thread that runs it; the edge between two threads comes from the release and acquire pair on the same variable. The compiler also has to be held: the C++ front end is free to move a load above a preceding load or a store below a preceding store, and `compiler_barrier()` is what stops it. On x86 that compiler barrier is all that `LoadLoad`, `StoreStore`, `LoadStore`, `acquire`, and `release` emit, because the processor already keeps those orders. `StoreLoad` is the one the processor leaves free, and its mechanism is the subject of 6.1.
 
-| Operation | x86 |
-|---|---|
-| `LoadLoad`, `StoreStore`, `LoadStore`, `acquire`, `release` | compiler barrier |
-| `StoreLoad`, `fence` | `lock addl $0, (%rsp)` |
+| Operation | What it orders | x86 |
+|---|---|---|
+| `LoadLoad` | a load finishes, and has its value, before a later load | compiler barrier |
+| `StoreStore` | a store is visible to other processors before a later store | compiler barrier |
+| `LoadStore` | a load finishes before a later store | compiler barrier |
+| `StoreLoad` | a store is visible before a later load | `lock addl $0, (%rsp)` |
+| `acquire` | the synchronizing load stays before every access that follows it | compiler barrier |
+| `release` | every access before the barrier stays before the synchronizing store | compiler barrier |
+| `fence` | every access before the barrier stays before every access after it | `lock addl $0, (%rsp)` |
+
+### 6.1 StoreLoad mechanism
+
+A core does not write to memory when an instruction retires. The store enters the core's store buffer, a small queue visible only to that core, and the core continues. The buffer drains into that core's L1, then L2, both private. The cores agree on a value at the level they share, L3. That shared level is the coherency point: a line becomes visible to another core there, and a private copy is invalidated when one core takes the line exclusively. Main memory sits below L3 and sees a line only when L3 evicts it.
+
+![Each core has a private store buffer, L1 and L2 above a shared L3 that is the coherency point, and main memory below it](images/x86-store-buffer.svg)
+
+Two properties of that queue matter here:
+
+- a load by the same core may read the buffer, so the core sees its own stores immediately;
+- no other core can read the buffer, so a store is invisible to the rest of the machine until it leaves.
+
+A load behind a store does not wait for the buffer:
+
+```text
+store data            -> store buffer
+store ready           -> store buffer
+load  other           -> runs, sees memory without the two stores above
+```
+
+The stores reach the cache later, in program order, but the load has already read its value. A thread that uses that value to decide whether it may proceed reads stale state.
+
+`OrderAccess::fence()` closes that window with one instruction:
+
+```cpp
+inline void OrderAccess::fence() {
+  // always use locked addl since mfence is sometimes expensive
+  __asm__ volatile ("lock; addl $0,0(%%rsp)" : : : "cc", "memory");
+  compiler_barrier();
+}
+```
+
+`addl $0, 0(%rsp)` adds zero to the word at the top of the stack. The arithmetic result is nothing. The `lock` prefix is what matters:
+
+- the instruction becomes a full read-modify-write on that line, so the core must hold the line exclusively at the coherency point, and every private copy is invalidated;
+- exclusive ownership is granted only after the core's prior stores have left the store buffer and reached that point;
+- the load below cannot execute until the locked instruction completes.
+
+After the barrier the stores above are visible to the whole machine, and the load below reads the current state.
+
+```text
+store data            -> store buffer
+store ready           -> store buffer
+lock addl $0, (%rsp)  -> drains both stores, takes the line exclusive
+load  other           -> reads the coherency point, which now has both stores
+```
+
+`mfence` gives the same guarantee and says it more directly. It is slower on several microarchitectures, which the comment in the source records, so HotSpot uses the locked add. The stack pointer is the target because the thread already owns that line exclusively: the barrier pays for the drain, not for taking a shared line away from another core. The `"memory"` clobber keeps the compiler from moving the load of `other` above it, and `asm volatile` keeps the statement itself from being removed.
+
+In the example below, `thread1` publishes a payload and `thread2` consumes it, and each barrier appears once where that flow needs it.
+
+```cpp
+int msg[4] = {0, 0, 0, 0};  // payload, written only by thread1
+int count  = 0;             // number of published entries
+int acked  = 0;             // thread2 has consumed the payload
+int mine   = 0;             // thread1's half of the handshake
+int yours  = 0;             // thread2's half of the handshake
+
+void thread1() {
+  msg[0] = 11;
+  msg[1] = 22;
+  msg[2] = 33;
+  msg[3] = 44;
+
+  // StoreStore: the four stores must be visible before count is set,
+  // so a reader that sees count == 4 also sees the payload
+  OrderAccess::storestore();
+  count = 4;
+
+  // StoreLoad: the store of `mine` must be visible before the load of
+  // `yours`. Without it both threads can read 0 and both go first
+  mine = 1;
+  OrderAccess::storeload();
+  if (yours == 0) {
+    // thread1 won the handshake
+  }
+
+  // acquire: the reads below must not move above the read of `acked`,
+  // which pairs with thread2's release
+  int a = acked;
+  OrderAccess::acquire();
+
+  // LoadStore: read count before overwriting it, so a reader that sees
+  // count == 0 already observed the 4
+  int seen = count;
+  OrderAccess::loadstore();
+  count = 0;
+}
+
+void thread2() {
+  // LoadLoad: read count, then the payload. Seeing count == 4 means the
+  // load of msg[0] cannot be older than the load of count
+  int c = count;
+  OrderAccess::loadload();
+  if (c != 4) {
+    return;
+  }
+  int first = msg[0];
+
+  // release: publish the acknowledgement. thread1's acquire pairs with it
+  acked = 1;
+  OrderAccess::release();
+
+  // fence: both directions of the handshake in one barrier. The store of
+  // `yours` cannot pass the load of `mine`, and nothing else crosses it
+  yours = 1;
+  OrderAccess::fence();
+  if (mine == 0) {
+    // thread2 won the handshake
+  }
+}
+```
 
 ```cpp
 inline void OrderAccess::loadload()   { compiler_barrier(); }
@@ -956,19 +1073,3 @@ The default scheduler is a `ForkJoinPool` whose workers are carrier threads. Its
 Starting a virtual thread schedules a task rather than starting an OS thread. `start` moves its state from `NEW` to `STARTED` with a compare-and-set, so a second start fails, and submits the continuation to the scheduler. A carrier that picks the task up sets the state to `RUNNING`, mounts, and runs the continuation. Mounting binds the pair for the duration of the slice: the virtual thread records its carrier, and the carrier's `JavaThread` records the virtual thread, so `Thread.currentThread()` on the carrier returns the virtual thread and stack walks see its frames. Unmounting clears both and returns the carrier to the pool.
 
 The value of the model comes from what happens when a virtual thread would block. A `LockSupport.park`, an `Object.wait`, a blocked monitor entry, or a `Thread.yield` makes the continuation yield, and the carrier goes back to the pool to run another virtual thread. `afterYield` then inspects the virtual thread's state and decides what happens next: a parked thread becomes `PARKED` and waits for an `unpark`, a thread blocked on a monitor waits in `BLOCKED`, and a yielded thread is resubmitted immediately. If an `unpark` or an unblock arrived while the thread was in transition, the permit is consumed and the thread is resubmitted at once, so the wakeup stays pending across the handoff.
-
-## 8. Pinning
-
-Some blocks stall the continuation. A continuation stays frozen-out while it sits inside a native method, and also inside a section the JDK pins explicitly, for example while a `ForkJoinPool` task is submitted from a virtual thread. In that case the yield reports failure, the virtual thread stays mounted, and it parks the carrier thread instead. This is **pinning**: an unpark then goes to the carrier, and the carrier serves that virtual thread for the whole block.
-
-Blocking on a monitor now belongs on the yielding side. Since JDK 24 ([JEP 491](https://openjdk.org/jeps/491)) a virtual thread blocked on `monitorenter` unmounts like any other blocked virtual thread, because the monitor records the waiting virtual thread in place of holding a mounted carrier.
-
-Pinning is a throughput problem rather than a correctness one, and the VM records a park that had to stay mounted as the `jdk.VirtualThreadPinned` JFR event. A program that blocks through a library calling back into native code while holding a lock still finds the carrier count a limit on concurrency.
-
-## 9. What changes for the programmer
-
-Thread identity is the first difference. `Thread.currentThread()` returns the virtual thread while it is mounted, in place of the carrier, and the mapping changes on every mount: two calls in the same virtual thread may run on different carriers. Code that captures the current thread and compares it later must account for that.
-
-The second is `ThreadLocal`. Its values live on the thread object, so a virtual thread's locals follow it across carriers rather than appearing in another virtual thread that shares a carrier. That is what makes thread-local state safe here, and it also means a virtual thread with a large `ThreadLocal` map keeps that memory for its lifetime.
-
-The third is blocking behaviour. A virtual thread that blocks where the scheduler can see it, such as a socket read or a queue take, frees its carrier and keeps only its heap frames while parked. A virtual thread that blocks where the continuation stays frozen-out keeps a carrier occupied. The first is the case virtual threads are built for; the second is where a program that used to scale by adding threads hits the carrier count.
