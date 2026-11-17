@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="770" viewBox="0 0 960 770" role="img" aria-label="Dubbo architecture: consumer stack, dubbo wire protocol, provider stack, MetadataService, and application-level service discovery through Nacos">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2f4358"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a8761a"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="770" fill="#ffffff"/>
+
+  <!-- zone frames -->
+  <rect x="16" y="54" width="328" height="446" rx="9" fill="#f6f9fd" stroke="#cfdce9"/>
+  <rect x="360" y="54" width="240" height="446" rx="9" fill="#fbfbfd" stroke="#dde3e9" stroke-dasharray="6 5"/>
+  <rect x="616" y="54" width="328" height="446" rx="9" fill="#f3faf5" stroke="#cfe3d5"/>
+  <rect x="16" y="540" width="928" height="164" rx="9" fill="#fdfaf2" stroke="#e3d5b8"/>
+
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#5b7186">
+    <text x="26" y="44">CONSUMER</text>
+    <text x="370" y="44">WIRE</text>
+    <text x="626" y="44">PROVIDER</text>
+  </g>
+
+  <!-- ================= consumer stack ================= -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <rect x="32" y="72" width="296" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="180" y="91" font-size="14.5" font-weight="600" fill="#1c2a38">Business interface proxy</text>
+    <text x="180" y="107" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">InvokerInvocationHandler</text>
+
+    <rect x="32" y="132" width="296" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="180" y="151" font-size="14.5" font-weight="600" fill="#1c2a38">Consumer filter chain</text>
+    <text x="180" y="167" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">reference.filter</text>
+
+    <rect x="32" y="192" width="296" height="44" rx="5" fill="#d9e8f6" stroke="#5f93c4"/>
+    <text x="180" y="211" font-size="14.5" font-weight="600" fill="#1c2a38">Cluster: Failover</text>
+    <text x="180" y="227" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">retry, sticky</text>
+
+    <rect x="32" y="252" width="140" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="102" y="271" font-size="14" font-weight="600" fill="#1c2a38">Router chain</text>
+    <text x="102" y="287" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#65798c">tag, condition</text>
+
+    <rect x="188" y="252" width="140" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="258" y="271" font-size="14" font-weight="600" fill="#1c2a38">Load balance</text>
+    <text x="258" y="287" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#65798c">random, weight</text>
+
+    <rect x="32" y="312" width="296" height="44" rx="5" fill="#d9e8f6" stroke="#5f93c4"/>
+    <text x="180" y="331" font-size="14.5" font-weight="600" fill="#1c2a38">Directory</text>
+    <text x="180" y="347" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">invoker map</text>
+
+    <rect x="32" y="372" width="296" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="180" y="391" font-size="14.5" font-weight="600" fill="#1c2a38">Protocol: DubboProtocol</text>
+    <text x="180" y="407" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">refer returns DubboInvoker</text>
+
+    <rect x="32" y="432" width="296" height="44" rx="5" fill="#e7f0fa" stroke="#7ba7d0"/>
+    <text x="180" y="451" font-size="14.5" font-weight="600" fill="#1c2a38">Transport: NettyClient</text>
+    <text x="180" y="467" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">DubboCountCodec</text>
+  </g>
+
+  <!-- ================= provider stack ================= -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <rect x="632" y="72" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="91" font-size="14.5" font-weight="600" fill="#1c2a38">Service implementation</text>
+    <text x="780" y="107" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">the exported ref</text>
+
+    <rect x="632" y="132" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="151" font-size="14.5" font-weight="600" fill="#1c2a38">Provider filter chain</text>
+    <text x="780" y="167" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">service.filter</text>
+
+    <rect x="632" y="192" width="296" height="44" rx="5" fill="#d3ecdc" stroke="#5f9c70"/>
+    <text x="780" y="211" font-size="14.5" font-weight="600" fill="#1c2a38">Protocol: DubboProtocol</text>
+    <text x="780" y="227" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">reply, exporterMap</text>
+
+    <rect x="632" y="252" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="271" font-size="14.5" font-weight="600" fill="#1c2a38">Exchanger: HeaderExchange</text>
+    <text x="780" y="287" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">handleRequest</text>
+
+    <rect x="632" y="312" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="331" font-size="14.5" font-weight="600" fill="#1c2a38">DecodeHandler</text>
+    <text x="780" y="347" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">decode request</text>
+
+    <rect x="632" y="372" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="391" font-size="14.5" font-weight="600" fill="#1c2a38">Dispatcher all, ThreadPool</text>
+    <text x="780" y="407" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">reject when full</text>
+
+    <rect x="632" y="432" width="296" height="44" rx="5" fill="#e6f3eb" stroke="#7fb08a"/>
+    <text x="780" y="451" font-size="14.5" font-weight="600" fill="#1c2a38">Transport: NettyServer</text>
+    <text x="780" y="467" font-family="Menlo, Consolas, monospace" font-size="11.5" fill="#65798c">DubboCodec</text>
+  </g>
+
+  <!-- call path inside consumer -->
+  <g stroke="#2f4358" stroke-width="1.4" fill="none" marker-end="url(#a)">
+    <path d="M180,116 L180,130"/>
+    <path d="M180,176 L180,190"/>
+    <path d="M180,236 L180,244 L102,244 L102,250"/>
+    <path d="M180,244 L258,244 L258,250"/>
+    <path d="M102,296 L102,304 L180,304"/>
+    <path d="M258,296 L258,304 L180,304"/>
+    <path d="M180,304 L180,310"/>
+    <path d="M180,356 L180,370"/>
+    <path d="M180,416 L180,430"/>
+  </g>
+
+  <!-- call path inside provider, bottom-up -->
+  <g stroke="#2f4358" stroke-width="1.4" fill="none" marker-end="url(#a)">
+    <path d="M780,432 L780,418"/>
+    <path d="M780,372 L780,358"/>
+    <path d="M780,312 L780,298"/>
+    <path d="M780,252 L780,238"/>
+    <path d="M780,192 L780,178"/>
+    <path d="M780,132 L780,118"/>
+  </g>
+
+  <!-- ================= wire column ================= -->
+  <g text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <rect x="372" y="72" width="216" height="140" rx="5" fill="#ffffff" stroke="#dde3e9"/>
+    <g font-family="Menlo, Consolas, monospace" font-size="11" fill="#5b7186" text-anchor="start">
+      <text x="383" y="93">magic 0xdabb</text>
+      <text x="383" y="111">request / twoway / event</text>
+      <text x="383" y="129">serialization id, 5 bits</text>
+      <text x="383" y="147">status byte</text>
+      <text x="383" y="165">request id</text>
+      <text x="383" y="183">body length</text>
+      <text x="383" y="203" fill="#8c6f2f">Hessian2 body</text>
+    </g>
+
+    <text x="480" y="256" font-size="12.5" font-weight="600" fill="#1c2a38">one TCP connection</text>
+    <text x="480" y="273" font-family="Menlo, Consolas, monospace" font-size="11" fill="#65798c">DefaultFuture by request id</text>
+  </g>
+
+  <!-- request / response across the gap -->
+  <g stroke="#2f4358" stroke-width="1.5" fill="none">
+    <path d="M332,440 L628,440" marker-end="url(#a)"/>
+    <path d="M628,466 L332,466" marker-end="url(#a)"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="#2f4358" text-anchor="middle">
+    <text x="480" y="432">request</text>
+    <text x="480" y="484">response</text>
+  </g>
+
+  <!-- provider: address + revision to discovery, definitions into its own metadata service -->
+  <g stroke="#a8761a" stroke-width="1.5" fill="none">
+    <path d="M860,476 L860,492 L246,492 L246,574" marker-end="url(#b)"/>
+    <path d="M900,476 L900,528 L700,528 L700,574" marker-end="url(#b)"/>
+  </g>
+
+  <!-- consumer subscribes to the address directory -->
+  <g stroke="#a8761a" stroke-width="1.5" fill="none">
+    <path d="M110,476 L110,574" marker-end="url(#b)"/>
+    <path d="M134,574 L134,476" marker-end="url(#b)"/>
+  </g>
+
+  <!-- consumer takes the revision from the record and swaps it for the definition -->
+  <g stroke="#a8761a" stroke-width="1.5" fill="none" stroke-dasharray="5 4">
+    <path d="M300,476 L300,556 L620,556 L620,574" marker-start="url(#b)" marker-end="url(#b)"/>
+  </g>
+
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="#8c6f2f">
+    <text x="102" y="540" text-anchor="end">subscribe</text>
+    <text x="142" y="540">notify</text>
+    <text x="560" y="486" text-anchor="middle">register address + revision</text>
+    <text x="800" y="522" text-anchor="middle">MetadataInfo</text>
+    <text x="460" y="550" text-anchor="middle">revision / definition</text>
+  </g>
+
+  <!-- ================= discovery band ================= -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <text x="26" y="566" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">SERVICE DISCOVERY</text>
+    <text x="494" y="566" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">METADATA</text>
+
+    <!-- left: who and where -->
+    <rect x="26" y="574" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
+    <text x="246" y="593" font-size="13" font-weight="600" fill="#1c2a38">ServiceDiscovery (SPI)</text>
+    <text x="246" y="609" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">address + revision, nothing else</text>
+
+    <!-- right: what it looks like -->
+    <rect x="494" y="574" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
+    <text x="714" y="593" font-size="13" font-weight="600" fill="#1c2a38">MetadataService (per provider)</text>
+    <text x="714" y="609" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">method signatures and types</text>
+
+    <g stroke="#c9ab6d" stroke-width="1.2" fill="none">
+      <path d="M156,618 L156,640"/>
+      <path d="M336,618 L336,640"/>
+      <path d="M624,618 L624,640"/>
+      <path d="M804,618 L804,640"/>
+    </g>
+
+    <rect x="26" y="640" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
+    <text x="156" y="661" font-size="13.5" font-weight="700" fill="#54400f">NacosServiceDiscovery</text>
+    <text x="156" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">NacosNamingServiceWrapper</text>
+
+    <rect x="296" y="640" width="140" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
+    <text x="366" y="661" font-size="12" font-weight="600" fill="#1c2a38">Zookeeper</text>
+    <text x="366" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">same SPI</text>
+
+    <rect x="494" y="640" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
+    <text x="624" y="661" font-size="13.5" font-weight="700" fill="#54400f">MetadataService</text>
+    <text x="624" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">own port and protocol</text>
+
+    <rect x="764" y="640" width="170" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
+    <text x="849" y="661" font-size="12" font-weight="600" fill="#1c2a38">MetadataServiceV2</text>
+    <text x="849" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">over Triple</text>
+  </g>
+
+  <!-- legend -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#5b7186">
+    <path d="M26,734 L62,734" stroke="#2f4358" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
+    <text x="72" y="738">call path</text>
+    <path d="M158,734 L194,734" stroke="#a8761a" stroke-width="1.5" fill="none" marker-end="url(#b)"/>
+    <text x="204" y="738">control path</text>
+  </g>
+</svg>
