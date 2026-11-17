@@ -225,25 +225,7 @@ private void loadClass(..., Map<String, Class<?>> extensionClasses, ..., Class<?
 }
 ```
 
-Calling `getAdaptiveExtension()` returns an instance of `cachedAdaptiveClass` if one is hand-written, or generates `<Interface>$Adaptive` via `AdaptiveClassCodeGenerator` and compiles it at runtime through the `Compiler` SPI (cached once per loader in a `Holder`):
-
-```java
-public class Protocol$Adaptive implements Protocol {
-    public Exporter export(Invoker arg0) {
-        URL url = arg0.getUrl();                       // URL extracted from argument
-        String extName = (url.getProtocol() == null ? "dubbo" : url.getProtocol());
-        Protocol extension = (Protocol) ScopeModelUtil
-                .getOrDefault(url.getScopeModel(), Protocol.class)
-                .getExtensionLoader(Protocol.class)
-                .getExtension(extName);
-        return extension.export(arg0);
-    }
-}
-```
-
-The parameter key read from the `URL` comes from `@Adaptive({"key1", "key2"})`, or, when omitted, from splitting the interface's camel-case name with dots (`YyyInvokerWrapper` -> `yyy.invoker.wrapper`). When the method signature includes `Invocation`, lookup goes through `url.getMethodParameter(methodName, key, defaultValue)` so method-level configuration overrides service-level settings (as `LoadBalance` does for `@Adaptive("loadbalance")`). `Protocol` is a special case whose derived key `protocol` reads `url.getProtocol()` directly rather than a query parameter. Methods without `@Adaptive` throw `UnsupportedOperationException` on the generated proxy.
-
-When a concrete name is finally resolved through `getExtension(name)`, `createExtension` runs a fixed instantiation pipeline. First, it constructs the target class. Second, `injectExtension` iterates over public setters: for non-primitive parameters not marked `@DisableInject`, it queries `AdaptiveExtensionInjector` — which delegates across `SpiExtensionInjector`, `ScopeBeanExtensionInjector`, and `SpringExtensionInjector` — and passes the collaborator's adaptive instance (for example, injecting `ProxyFactory$Adaptive` into `AbstractProxyProtocol.setProxyFactory`); unresolved setters are skipped so optional dependencies require no special wiring, and `ScopeModelAware` / `ExtensionAccessorAware` callbacks supply the owning scope. Third, every matching class in `cachedWrapperClasses` (filtered by `@Wrapper(matches, mismatches, order)` and sorted by `WrapperComparator`) wraps the instance in turn, with setter injection repeated on each wrapper layer. Fourth, `initExtension` invokes `Lifecycle.initialize()` on the outermost object. For multi-element pipelines rather than single named targets, `getActivateExtension(url, key, group)` evaluates `@Activate(group, value, before, after, order)` against the `URL` and merges explicit additions or removals from the `URL` parameter named by `key` (`service.filter` on `provider`, `reference.filter` on `consumer`).
+When a concrete name is resolved through `getExtension(name)`, `createExtension` instantiates the target class, runs `injectExtension` across public setters (querying `AdaptiveExtensionInjector` across `SpiExtensionInjector`, `ScopeBeanExtensionInjector`, and `SpringExtensionInjector`, skipping unresolved setters and `@DisableInject`, and supplying `ScopeModelAware` / `ExtensionAccessorAware` callbacks), applies matching wrappers, and invokes `Lifecycle.initialize()` on the outermost object. For multi-element pipelines rather than single named targets, `getActivateExtension(url, key, group)` evaluates `@Activate(group, value, before, after, order)` against the `URL` and merges explicit additions or removals from the `URL` parameter named by `key` (`service.filter` on `provider`, `reference.filter` on `consumer`).
 
 ```java
 public T getExtension(String name, boolean wrap) {
@@ -310,6 +292,92 @@ private T injectExtension(T instance) {
     }
     return instance;
 }
+```
+
+### Example: Adaptive and Wrapper
+
+```java
+package com.example.spi;
+
+import org.apache.dubbo.common.URL;
+import org.apache.dubbo.common.extension.Adaptive;
+import org.apache.dubbo.common.extension.SPI;
+
+@SPI("stripe")
+public interface PaymentGateway {
+    @Adaptive("gateway")
+    String pay(URL url, int amountCents);
+}
+```
+
+```java
+package com.example.spi;
+
+import org.apache.dubbo.common.URL;
+
+public class StripeGateway implements PaymentGateway {
+    @Override
+    public String pay(URL url, int amountCents) {
+        return "Stripe charged " + amountCents + " cents";
+    }
+}
+
+public class PaypalGateway implements PaymentGateway {
+    @Override
+    public String pay(URL url, int amountCents) {
+        return "PayPal charged " + amountCents + " cents";
+    }
+}
+```
+
+```java
+package com.example.spi;
+
+import org.apache.dubbo.common.URL;
+
+public class LoggingPaymentWrapper implements PaymentGateway {
+    private final PaymentGateway delegate;
+
+    public LoggingPaymentWrapper(PaymentGateway delegate) {
+        this.delegate = delegate;
+    }
+
+    @Override
+    public String pay(URL url, int amountCents) {
+        System.out.println("[Before] paying " + amountCents);
+        String receipt = delegate.pay(url, amountCents);
+        System.out.println("[After]  result = " + receipt);
+        return receipt;
+    }
+}
+```
+
+`META-INF/dubbo/com.example.spi.PaymentGateway`:
+
+```properties
+stripe=com.example.spi.StripeGateway
+paypal=com.example.spi.PaypalGateway
+logging=com.example.spi.LoggingPaymentWrapper
+```
+
+```java
+ExtensionLoader<PaymentGateway> loader = ApplicationModel.defaultModel()
+        .getExtensionLoader(PaymentGateway.class);
+
+PaymentGateway gateway = loader.getAdaptiveExtension();
+
+URL url1 = URL.valueOf("test://localhost/order");
+gateway.pay(url1, 500);
+
+URL url2 = URL.valueOf("test://localhost/order?gateway=paypal");
+gateway.pay(url2, 1200);
+```
+
+```text
+[Before] paying 500
+[After]  result = Stripe charged 500 cents
+[Before] paying 1200
+[After]  result = PayPal charged 1200 cents
 ```
 
 ### 2.1 Protocol
