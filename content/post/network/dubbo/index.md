@@ -95,7 +95,6 @@ Dubbo is structured around a microkernel and plugin design pattern. The framewor
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface ExtensionAccessor {
   + getExtensionDirector(): ExtensionDirector
@@ -496,7 +495,6 @@ Dubbo ships the following `Protocol` implementations across its modules:
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Protocol {
   + getDefaultPort(): int
@@ -548,29 +546,28 @@ Dubbo models registry integration as an implementation of `Protocol` (`service-d
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Invoker {
-  Class getInterface()
-  Result invoke(Invocation)
+  + getInterface(): Class
+  + invoke(Invocation): Result
 }
 class DubboInvoker implements Invoker
 interface ClusterInvoker extends Invoker
 class FailoverClusterInvoker implements ClusterInvoker
 
 interface Directory {
-  List list(Invocation)
+  + list(Invocation): List
 }
 class RegistryDirectory implements Directory
 class ServiceDiscoveryRegistryDirectory implements Directory
 
 interface Cluster {
-  Invoker join(Directory)
+  + join(Directory): Invoker
 }
 class FailoverCluster implements Cluster
 
 interface LoadBalance {
-  Invoker select(List, URL, Invocation)
+  + select(List, URL, Invocation): Invoker
 }
 
 FailoverCluster ..> FailoverClusterInvoker
@@ -581,57 +578,244 @@ FailoverClusterInvoker ..> LoadBalance
 
 #### Export: the provider runtime
 
-Export begins in `ServiceConfig`, which builds one URL per protocol configuration and per registry, then hands the URL to the configured proxy factory and to the adaptive `Protocol`.
+`export` turns a local service implementation into a remotely reachable endpoint and announces it to the cluster. Each `@DubboService` (or programmatic service definition) is represented at runtime by one `ServiceConfig<T>` instance, which sits at the boundary between declarative configuration and the SPI runtime: its inheritance chain (`AbstractConfig` -> `AbstractMethodConfig` -> `AbstractInterfaceConfig` -> `AbstractServiceConfig` -> `ServiceConfigBase<T>` -> `ServiceConfig<T>`) aggregates method-, interface-, registry-, and protocol-level settings into `ServiceConfigURL`s, holds `protocolSPI` (`Protocol$Adaptive`) and `proxyFactory` (`ProxyFactory$Adaptive`), and tracks the resulting `Exporter` list for shutdown.
 
-```java
-Invoker<?> invoker = proxyFactory.getInvoker(ref, interfaceClass, url);
-Exporter<?> exporter = protocolSPI.export(invoker);
+Application code rarely instantiates or invokes `ServiceConfig` directly; Dubbo's deployer drives it through two entry paths that converge on the same startup pipeline:
+
+- **Spring / `@DubboService` path**: `ServiceAnnotationPostProcessor` (`BeanDefinitionRegistryPostProcessor`) scans `@DubboService` classes and registers `ServiceBean<T>` bean definitions; during bean initialization, `ServiceBean.afterPropertiesSet()` (`InitializingBean`) adds itself to `ModuleConfigManager`. When Spring finishes refreshing and publishes `ContextRefreshedEvent`, `DubboDeployApplicationListener` (`ApplicationListener`) catches the event and invokes `moduleModel.getDeployer().start()` (`DefaultModuleDeployer.start()` -> `applicationDeployer.initialize()` -> `startSync()`).
+- **Programmatic `DubboBootstrap` path**: `DubboBootstrap.getInstance().service(serviceConfig).start()` registers `ServiceConfig<T>` in `ModuleConfigManager` and calls `DefaultApplicationDeployer.start()`, which starts each module's `DefaultModuleDeployer`.
+
+`DefaultModuleDeployer.startSync()` first runs `exportServices()`, calling `serviceConfig.export()` to wrap `ref` into an `Invoker` and bind the local wire server via `RegistryProtocol.export`, and then runs `registerServices()` followed by `applicationDeployer.refreshServiceInstance()` so consumers never discover an unready port.
+
+Services belong to a `ModuleModel` rather than directly to `ApplicationModel`. While `ApplicationModel` represents one logical Dubbo application (`dubbo.application.name`) and owns shared infrastructure (`RegistryConfig`, `ProtocolConfig`, `ExecutorRepository`, and the Nacos `ServiceDiscovery` client), a `ModuleModel` is an independently deployable unit of `@DubboService` and `@DubboReference` definitions with its own `ClassLoader` set, `ModuleConfigManager`, and `ModuleDeployer`. Every `ApplicationModel` maintains at least two modules: an `internalModule` (hosting framework services such as `MetadataService`) and a `defaultModule` (bound to the primary Spring `ApplicationContext`). Multi-context Spring setups or dynamic plugin containers create additional `ModuleModel`s via `applicationModel.newModule()`, allowing a single module's services and `ClassLoader` to start or stop without tearing down the rest of the application.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface BeanDefinitionRegistryPostProcessor {
+  + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
+}
+class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProcessor {
+  - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
+}
+
+interface InitializingBean {
+  + afterPropertiesSet()
+}
+interface ApplicationListener<E> {
+  + onApplicationEvent(E)
+}
+class DubboDeployApplicationListener implements ApplicationListener {
+  - applicationModel: ApplicationModel
+  - moduleModel: ModuleModel
+  + onApplicationEvent(ApplicationContextEvent)
+  - onContextRefreshedEvent(ContextRefreshedEvent)
+}
+
+abstract class AbstractConfig {
+  # scopeModel: ScopeModel
+  + refresh()
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+  # loadbalance: String
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # application: ApplicationConfig
+  # registries: List<RegistryConfig>
+}
+abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
+  # version: String
+  # group: String
+  # protocols: List<ProtocolConfig>
+}
+abstract class ServiceConfigBase<T> extends AbstractServiceConfig {
+  # interfaceClass: Class<?>
+  # ref: T
+  + export()
+  + unexport()
+}
+class ServiceConfig<T> extends ServiceConfigBase {
+  - protocolSPI: Protocol
+  - proxyFactory: ProxyFactory
+  - providerModel: ProviderModel
+  - exporters: ConcurrentHashMap<RegisterTypeEnum, List<Exporter<?>>>
+  + export()
+  # doExport()
+  - doExportUrls()
+}
+class ServiceBean<T> extends ServiceConfig implements InitializingBean {
+  + afterPropertiesSet()
+  + destroy()
+}
+
+abstract class ScopeModel {
+  - parent: ScopeModel
+  - scope: ExtensionScope
+  - classLoaders: Set<ClassLoader>
+}
+class FrameworkModel extends ScopeModel {
+  - applicationModels: List<ApplicationModel>
+}
+class ApplicationModel extends ScopeModel {
+  - internalModule: ModuleModel
+  - defaultModule: ModuleModel
+  - moduleModels: List<ModuleModel>
+}
+class ModuleModel extends ScopeModel {
+  - applicationModel: ApplicationModel
+  - moduleConfigManager: ModuleConfigManager
+  - deployer: ModuleDeployer
+  + getConfigManager(): ModuleConfigManager
+  + getDeployer(): ModuleDeployer
+}
+
+class ModuleConfigManager {
+  + addService(ServiceConfigBase)
+  + getServices(): Collection<ServiceConfigBase>
+}
+interface ModuleDeployer {
+  + start(): Future
+  + setPending()
+}
+class DefaultModuleDeployer implements ModuleDeployer {
+  - configManager: ModuleConfigManager
+  - applicationDeployer: ApplicationDeployer
+  + start(): Future
+  - startSync(): Future
+  - exportServices()
+  - registerServices()
+}
+
+interface Protocol {
+  + export(Invoker<T>): Exporter<T>
+}
+interface ProxyFactory {
+  + getInvoker(T, Class<T>, URL): Invoker<T>
+}
+
+FrameworkModel *-- ApplicationModel
+ApplicationModel *-- ModuleModel
+ServiceAnnotationPostProcessor ..> ServiceBean
+ServiceBean ..> ModuleModel
+DubboDeployApplicationListener o-- ModuleModel
+ModuleModel *-- ModuleConfigManager
+ModuleModel *-- ModuleDeployer
+DefaultModuleDeployer --> ModuleConfigManager
+ModuleConfigManager o-- ServiceConfigBase
+DefaultModuleDeployer ..> ServiceConfig
+ServiceConfig --> ProxyFactory
+ServiceConfig --> Protocol
+@enduml
 ```
 
-`proxyFactory` is `JavassistProxyFactory` by default. `getInvoker` does not use reflection: it obtains a generated `Wrapper` for the service class and produces an `AbstractProxyInvoker` whose `doInvoke` calls the generated `invokeMethod` with the argument array. The provider-side invocation therefore costs a virtual dispatch plus generated argument casting, not `Method.invoke`.
+```java
+// 1. Scan & register ServiceBean: @DubboService -> ServiceAnnotationPostProcessor -> ServiceBean.afterPropertiesSet()
+public void afterPropertiesSet() {
+    ModuleModel moduleModel = DubboBeanUtils.getModuleModel(applicationContext);
+    moduleModel.getConfigManager().addService(this);            // register ServiceBean into ModuleConfigManager
+    moduleModel.getDeployer().setPending();
+}
 
-The URL passed to `export` is a `registry://...` URL, so the adaptive dispatch reaches `RegistryProtocol.export`. That method performs three distinct actions, in order:
+// 2. ContextRefreshedEvent -> DubboDeployApplicationListener.onContextRefreshedEvent() -> DefaultModuleDeployer.start()
+private void onContextRefreshedEvent(ContextRefreshedEvent event) {
+    ModuleDeployer deployer = moduleModel.getDeployer();
+    Future future = deployer.start();                           // calls applicationDeployer.initialize() -> startSync()
+}
 
-1. `doLocalExport` exports the service through the real wire protocol (`dubbo://...`), producing the local exporter that owns the server socket.
-2. `registry.register(...)` publishes the record: a service instance under application-level discovery, or a provider URL under the interface-level compatibility mode.
-3. For the interface-level mode only, it subscribes to `configurators` override rules for the provider URL, so a later configuration change re-exports the service with new parameters. The application-level path handles configuration through the revision instead.
+private void exportServices() {
+    for (ServiceConfigBase sc : configManager.getServices()) {
+        exportServiceInternal(sc);                              // invokes serviceConfig.export() -> doExport()
+    }
+}
+
+// 3. Build URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -> service-discovery-registry:// and nest dubbo://
+private void doExportUrls(RegisterTypeEnum registerType) {
+    // Rewrites nacos://127.0.0.1:8848 -> service-discovery-registry://127.0.0.1:8848?registry=nacos
+    List<URL> registryURLs = ConfigValidationUtils.loadRegistries(this, true);
+    for (ProtocolConfig protocolConfig : protocols) {
+        URL url = buildUrl(protocolConfig, map);                // wire URL: dubbo://10.0.0.7:20880/GreetingService?...
+        exportLocal(url);                                       // export injvm://127.0.0.1/... for in-process calls
+        for (URL registryURL : registryURLs) {
+            // Attach wire URL under EXPORT_KEY; outer scheme is "service-discovery-registry"
+            doExportUrl(registryURL.putAttribute(EXPORT_KEY, url), true, registerType);
+        }
+    }
+}
+
+// 4. Wrap ref as Invoker and dispatch via Protocol$Adaptive: scheme selects RegistryProtocol
+private void doExportUrl(URL url, boolean withMetaData, RegisterTypeEnum registerType) {
+    Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, url); // Javassist Wrapper, no reflection
+    if (withMetaData) {
+        invoker = new DelegateProviderMetaDataInvoker(invoker, this);
+    }
+    Exporter<?> exporter = protocolSPI.export(invoker);         // url.getProtocol() -> RegistryProtocol.export()
+    exporters.computeIfAbsent(registerType, k -> new CopyOnWriteArrayList<>()).add(exporter);
+}
+
+// 5. RegistryProtocol.export(): unwrap EXPORT_KEY, bind local Netty server, and register in Nacos
+public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
+    URL registryUrl = getRegistryUrl(originInvoker);            // unwrap nacos://127.0.0.1:8848
+    URL providerUrl = getProviderUrl(originInvoker);            // read EXPORT_KEY -> dubbo://10.0.0.7:20880/...
+
+    // 5a. Second adaptive hop: url.getProtocol() == "dubbo" -> DubboProtocol.export() (opens Netty port)
+    final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl);
+
+    // 5b. Resolve Registry SPI and publish provider record
+    final Registry registry = getRegistry(registryUrl);
+    final URL registeredProviderUrl = customizeURL(providerUrl, registryUrl);
+    if (providerUrl.getParameter(REGISTER_KEY, true) && registryUrl.getParameter(REGISTER_KEY, true)) {
+        register(registry, registeredProviderUrl);
+    }
+
+    // 5c. Interface-level compatibility only: subscribe to 2.6.x configurators overrides
+    if (!registry.isServiceDiscovery()) {
+        registry.subscribe(overrideSubscribeUrl, overrideSubscribeListener);
+    }
+    return new DestroyableExporter<>(exporter);
+}
+```
 
 #### Refer: the consumer side
 
-`ReferenceConfig` builds the consumer URL, then calls the adaptive protocol with the registry URL:
+`refer` turns a service interface and registry `URL` into a local proxy backed by a live set of remote providers. `RegistryProtocol.refer` subscribes a `Directory` to the registry, joins all discovered provider `Invoker`s behind a single fault-tolerant `ClusterInvoker`, and `ReferenceConfig` wraps that `ClusterInvoker` in a dynamic proxy for the caller:
 
 ```java
+// 1. ReferenceConfig refers the registry URL and wraps the returned Invoker in a dynamic proxy
 invoker = protocolSPI.refer(interfaceClass, registryUrl);
 return (T) proxyFactory.getProxy(invoker, ProtocolUtils.isGeneric(generic));
-```
 
-Dispatch reaches `RegistryProtocol.refer`, which resolves the registry (the `registry://` wrapper is unwrapped by `InterfaceCompatibleRegistryProtocol.getRegistryUrl`, turning `registry://host:port?registry=nacos` into `nacos://host:port`), builds a consumer URL, and creates the migration invoker. The application-level cluster invoker is produced by `cluster.join(directory, true)` over a `ServiceDiscoveryRegistryDirectory`, which subscribes to the application names the interface maps to:
-
-```java
-directory.setRegisteredConsumerUrl(urlToRegistry);
-if (directory.isShouldRegister()) {
-    registry.register(directory.getRegisteredConsumerUrl());
+// 2. RegistryProtocol.refer -> doRefer resolves Registry + Cluster and builds MigrationInvoker
+public <T> Invoker<T> refer(Class<T> type, URL url) throws RpcException {
+    url = getRegistryUrl(url);                                  // unwrap nacos://...
+    Registry registry = getRegistry(url);
+    Cluster cluster = Cluster.getCluster(url.getScopeModel(), qs.get(CLUSTER_KEY));
+    return doRefer(cluster, registry, type, url, qs);           // creates ServiceDiscoveryMigrationInvoker
 }
-directory.buildRouterChain(urlToRegistry);
-directory.subscribe(toSubscribeUrl(urlToRegistry));
-```
 
-The subscription carries only address and revision information, because that is all the registry holds; the interface definitions arrive separately through `MetadataService` and are attached to each `InstanceAddressURL` before the invoker is built.
+// 3. RegistryProtocol.doCreateInvoker wires Directory, RouterChain, subscription, and ClusterInvoker
+protected <T> ClusterInvoker<T> doCreateInvoker(
+        DynamicDirectory<T> directory, Cluster cluster, Registry registry, Class<T> type) {
+    directory.setRegistry(registry);
+    directory.setProtocol(protocol);                            // Protocol$Adaptive for per-instance refer
+    if (directory.isShouldRegister()) {
+        registry.register(urlToRegistry);                       // optional consumer registration
+    }
+    directory.buildRouterChain(urlToRegistry);                  // assemble activated StateRouters
+    directory.subscribe(toSubscribeUrl(urlToRegistry));         // subscribe addresses + revisions
+    return (ClusterInvoker<T>) cluster.join(directory, true);   // wrap Directory in ClusterInvoker
+}
 
-The final object returned to the application is a JDK dynamic proxy (`JdkProxyFactory`) or a generated one (`JavassistProxyFactory`, the default, which falls back to JDK proxies when code generation fails). Both attach an `InvokerInvocationHandler`:
-
-```java
+// 4. InvokerInvocationHandler intercepts application calls on the generated proxy
 RpcInvocation rpcInvocation = new RpcInvocation(serviceModel, method.getName(),
         invoker.getInterface().getName(), protocolServiceKey,
         method.getParameterTypes(), args);
-return InvocationUtil.invoke(invoker, rpcInvocation);
+return InvocationUtil.invoke(invoker, rpcInvocation);           // sets RpcContext, invokes, calls recreate()
 ```
 
-`InvocationUtil.invoke` stores the consumer URL in `RpcContext`, calls `invoker.invoke(rpcInvocation)`, and converts the `Result` back to a return value with `recreate()`, which rethrows the provider's exception on the caller thread. `toString`, `hashCode`, `equals`, and `$destroy` are intercepted before this point so they never reach the network.
-
 #### Directory refresh
-
-`ServiceDiscoveryRegistryDirectory.notify` is the boundary between registry data and invokers.
 
 ```mermaid
 flowchart LR
@@ -645,36 +829,31 @@ flowchart LR
     H --> I["refresh router chain"]
 ```
 
-Conversion is incremental. Provider URLs already present in the previous map with unchanged parameters are reused, so a notification that adds one instance does not rebuild every client connection. URLs that disappeared are destroyed. The map swap is a single volatile write, and `list(invocation)` reads under a read lock into a clone before applying routers, so an in-flight call never observes a half-built map.
-
-The `empty://` protocol is the explicit "no providers" signal: a single such URL sets the directory to forbidden and destroys all invokers, so callers fail immediately with "no provider available". An ordinary empty list is not treated as the same event — the directory keeps the previous addresses and logs it as empty protection, because an empty notification is far more often a transient registry or network fault than a real scale-to-zero.
+An ordinary empty notification list triggers empty protection (retaining the previous `urlInvokerMap`), whereas a single `empty://` URL explicitly forbids the service and destroys all invokers.
 
 #### Cluster invocation
 
-`Cluster` is also an SPI, default `failover`. `FailoverClusterInvoker.doInvoke` is the default execution strategy:
-
 ```java
-int len = calculateInvokeTimes(methodName);        // retries + 1, default 3 attempts
+// FailoverClusterInvoker.doInvoke (default Cluster = "failover")
+int len = calculateInvokeTimes(methodName);                     // retries + 1 (default 3 attempts)
+List<Invoker<T>> invoked = new ArrayList<>(copyInvokers.size());
 for (int i = 0; i < len; i++) {
-    if (i > 0) { copyInvokers = list(invocation); checkInvokers(copyInvokers, invocation); }
+    if (i > 0) {
+        copyInvokers = list(invocation);                        // re-fetch routed candidates before retry
+        checkInvokers(copyInvokers, invocation);
+    }
+    // select applies sticky check, availablecheck, LoadBalance (default weighted random), and skips invoked
     Invoker<T> invoker = select(loadbalance, invocation, copyInvokers, invoked);
     invoked.add(invoker);
     try {
-        return invokeWithContext(invoker, invocation);
+        return invokeWithContext(invoker, invocation);          // runs ClusterFilter + reference.filter chains
     } catch (RpcException e) {
-        if (e.isBiz()) throw e;                    // business exception: never retried
-        le = e;
+        if (e.isBiz()) throw e;                                 // business exception: never retried
+        le = e;                                                 // framework exception: failover to next node
     }
 }
+throw le;
 ```
-
-Three properties follow from this loop. The candidate list is re-fetched before each retry, so a retry can use a provider registered after the first failure. The `invoked` list is passed to `select`, which reselects when the load balancer returns an address already tried in this call. Business exceptions are rethrown immediately — retrying a method that already executed would duplicate its side effects, which is why only framework-level `RpcException`s are failover-eligible.
-
-`select` adds two refinements on top of the load balancer. With `sticky=true` it reuses the last successful invoker for the same method while it remains available. And `doSelect` invalidates an invoker found unavailable (`availablecheck`, default true) so that subsequent calls skip it until the transport recovers.
-
-Load balancing is `random` by default, weighted: weights are read from each provider URL (`weight`, default 100) and scaled down during the first ten minutes of a provider's life (`warmup`), so a freshly started instance does not receive its full share while its JIT is still cold. The weighted selection uses a cumulative prefix array with binary search for more than four candidates, and falls back to uniform selection when all weights are equal. `roundrobin`, `leastactive`, `shortestresponse`, `consistenthash`, and `adaptive` are available by name.
-
-Filters bracket the whole consumer call. `ProtocolFilterWrapper.refer` builds the consumer chain from the `reference.filter` `@Activate` extensions, and `AbstractCluster.join` additionally wraps the cluster invoker in the `ClusterFilter` chain selected by the same key with group `consumer`. `ConsumerContextFilter` (order `Integer.MIN_VALUE`) propagates attachments to the provider and `RouterSnapshotFilter` records the routing decision for diagnostics. The provider chain is assembled the same way from `service.filter` with group `provider`: `ContextFilter` restores incoming attachments into the server-side `RpcContext`, `ExceptionFilter` decides how an exception is wrapped before it becomes a `Response`, and `TimeoutFilter` logs a warning when the `TIME_COUNTDOWN` attachment shows the caller's budget already expired while the method was running.
 
 ### 3.2 DubboProtocol
 
@@ -833,7 +1012,6 @@ public interface Exchanger {
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Exchanger {
   + bind(URL, ExchangeHandler): ExchangeServer
@@ -886,7 +1064,6 @@ public interface Transporter {
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Transporter {
   + bind(URL, ChannelHandler): RemotingServer
@@ -942,7 +1119,6 @@ The adaptive key is `codec`, but the transport does not require it: `AbstractEnd
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Codec2 {
   + encode(Channel, ChannelBuffer, Object)
@@ -991,7 +1167,6 @@ public interface Serialization {
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface Serialization {
   + getContentTypeId(): byte
@@ -1030,7 +1205,6 @@ Four implementations differ only in the queue and the sizing: `fixed` uses a fix
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface ThreadPool {
   + getExecutor(URL): Executor
@@ -1070,7 +1244,6 @@ Six implementations: `random`, `roundrobin`, `leastactive`, `shortestresponse`, 
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface LoadBalance {
   + select(List, URL, Invocation): Invoker
@@ -1107,7 +1280,6 @@ Factories registered in this tree are `condition`, `tag`, `script-app`, `app`, `
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface StateRouterFactory {
   + getRouter(Class, URL): StateRouter
@@ -1158,7 +1330,6 @@ A filter is a pair of callbacks, not a single method: `invoke` runs before the n
 ```plantuml
 @startuml
 top to bottom direction
-skinparam classAttributeIconSize 0
 
 interface BaseFilter {
   + invoke(Invoker, Invocation): Result
