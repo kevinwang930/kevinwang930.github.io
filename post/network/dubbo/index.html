@@ -360,13 +360,18 @@ AbstractProtocol *-- Exporter
 AbstractProtocol *-- Invoker
 AbstractExporter o-- Invoker
 @enduml
-</code></pre><h3 id=31-export-the-provider-runtime>3.1 Export: the provider runtime</h3><p><code>export</code> turns a local service implementation into a remotely reachable endpoint and announces it to the cluster. Each <code>@DubboService</code> (or programmatic service definition) is represented at runtime by one <code>ServiceConfig&lt;T></code> instance, which sits at the boundary between declarative configuration and the SPI runtime: its inheritance chain (<code>AbstractConfig</code> -> <code>AbstractMethodConfig</code> -> <code>AbstractInterfaceConfig</code> -> <code>AbstractServiceConfig</code> -> <code>ServiceConfigBase&lt;T></code> -> <code>ServiceConfig&lt;T></code>) aggregates method-, interface-, registry-, and protocol-level settings into <code>ServiceConfigURL</code>s, holds <code>protocolSPI</code> (<code>Protocol$Adaptive</code>) and <code>proxyFactory</code> (<code>ProxyFactory$Adaptive</code>), and tracks the resulting <code>Exporter</code> list for shutdown.</p><p>Application code rarely instantiates or invokes <code>ServiceConfig</code> directly; Dubbo&rsquo;s deployer drives it through two entry paths that converge on the same startup pipeline:</p><ul><li><strong>Spring / <code>@DubboService</code> path</strong>: <code>DubboSpringInitializer.initialize(registry)</code> binds a <code>ModuleModel</code> to the Spring container and registers <code>DubboDeployApplicationListener</code> (via <code>DubboBeanUtils.registerCommonBeans</code>); <code>ServiceAnnotationPostProcessor</code> (<code>BeanDefinitionRegistryPostProcessor</code>) scans <code>@DubboService</code> classes and registers <code>ServiceBean&lt;T></code> bean definitions; during bean initialization, <code>ServiceBean.afterPropertiesSet()</code> (<code>InitializingBean</code>) adds itself to <code>ModuleConfigManager</code>. When Spring finishes refreshing and publishes <code>ContextRefreshedEvent</code>, <code>DubboDeployApplicationListener</code> (<code>ApplicationListener</code>) catches the event and invokes <code>moduleModel.getDeployer().start()</code> (<code>DefaultModuleDeployer.start()</code> -> <code>applicationDeployer.initialize()</code> -> <code>startSync()</code>).</li><li><strong>Programmatic <code>DubboBootstrap</code> path</strong>: <code>DubboBootstrap.getInstance().service(serviceConfig).start()</code> registers <code>ServiceConfig&lt;T></code> in <code>ModuleConfigManager</code> and calls <code>DefaultApplicationDeployer.start()</code>, which starts each module&rsquo;s <code>DefaultModuleDeployer</code>.</li></ul><p><code>DefaultModuleDeployer.startSync()</code> first runs <code>exportServices()</code>, calling <code>serviceConfig.export()</code> to wrap <code>ref</code> into an <code>Invoker</code> and bind the local wire server via <code>RegistryProtocol.export</code>, and then runs <code>registerServices()</code> followed by <code>applicationDeployer.refreshServiceInstance()</code> so consumers never discover an unready port.</p><p>Services belong to a <code>ModuleModel</code> rather than directly to <code>ApplicationModel</code>. While <code>ApplicationModel</code> represents one logical Dubbo application (<code>dubbo.application.name</code>) and owns shared infrastructure (<code>RegistryConfig</code>, <code>ProtocolConfig</code>, <code>ExecutorRepository</code>, and the Nacos <code>ServiceDiscovery</code> client), a <code>ModuleModel</code> is an independently deployable unit of <code>@DubboService</code> and <code>@DubboReference</code> definitions with its own <code>ClassLoader</code> set, <code>ModuleConfigManager</code>, and <code>ModuleDeployer</code>. Every <code>ApplicationModel</code> maintains at least two modules: an <code>internalModule</code> (hosting framework services such as <code>MetadataService</code>) and a <code>defaultModule</code> (bound to the primary Spring <code>ApplicationContext</code>). Multi-context Spring setups or dynamic plugin containers create additional <code>ModuleModel</code>s via <code>applicationModel.newModule()</code>, allowing a single module&rsquo;s services and <code>ClassLoader</code> to start or stop without tearing down the rest of the application.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><h3 id=31-startup-deployer>3.1 Startup deployer</h3><p>A Dubbo process is typically both a provider and a consumer at the same time, and its configuration and lifecycle are split across two scopes rather than managed in a single flat container:</p><ul><li><strong>Application scope (<code>ApplicationModel</code>, <code>ConfigManager</code>, <code>DefaultApplicationDeployer</code>)</strong>: owns process-wide infrastructure shared across every module — <code>ApplicationConfig</code>, <code>ProtocolConfig</code>, <code>ExecutorRepository</code>, the <code>ServiceDiscovery</code> client, and <strong><code>RegistryConfig</code></strong>. During <code>DefaultApplicationDeployer.initialize()</code>, <code>ConfigManager.loadConfigs()</code> binds <code>dubbo.registry.*</code> and <code>dubbo.registries.&lt;id>.*</code> properties (alongside Spring <code>RegistryConfig</code> beans loaded by <code>DubboConfigBeanInitializer</code>). Each <code>RegistryConfig</code> specifies the registry endpoint and registration policy (<code>address</code>, <code>protocol</code>, <code>group</code>, <code>registerMode</code>, <code>simplified</code>). Because <code>RegistryConfig</code> is optional (<code>isRequired == false</code>, permitting <code>injvm</code>-only or direct-URL deployments), Dubbo never synthesizes a blank <code>RegistryConfig</code> when none is configured; conversely, when <code>RegistryConfig</code> is present and <code>useAsConfigCenter</code> or <code>useAsMetadataCenter</code> is unset (<code>null</code> or <code>true</code>), <code>DefaultApplicationDeployer</code> reuses that <code>RegistryConfig</code> address to bootstrap the dynamic config center and <code>MetadataReport</code> store when no dedicated center is declared.</li><li><strong>Module scope (<code>ModuleModel</code>, <code>ModuleConfigManager</code>, <code>DefaultModuleDeployer</code>)</strong>: isolates each deployable unit of <code>@DubboService</code> and <code>@DubboReference</code> definitions with its own <code>ClassLoader</code> set, separating framework-internal services (<code>internalModule</code>, hosting <code>MetadataService</code>) from user modules (<code>defaultModule</code> for the primary Spring <code>ApplicationContext</code>, plus optional child modules created via <code>applicationModel.newModule()</code>). <code>ModuleConfigManager</code> stores module-local configs (<code>ModuleConfig</code>, <code>ServiceConfigBase</code>, <code>ReferenceConfigBase</code>, <code>ConsumerConfig</code>, and <strong><code>ProviderConfig</code></strong>) while delegating application-scoped queries such as <code>getDefaultRegistries()</code> and <code>getDefaultProtocols()</code> up to <code>ConfigManager</code>. During <code>DefaultModuleDeployer.initialize()</code>, <code>ModuleConfigManager.loadConfigs()</code> loads <code>dubbo.provider.*</code> and <code>dubbo.providers.&lt;id>.*</code> and runs <code>checkDefaultAndValidateConfigs(ProviderConfig.class)</code>. Because <code>ProviderConfig</code> is required (<code>isRequired == true</code>), Dubbo automatically instantiates a default <code>ProviderConfig</code> (<code>getDefaultProvider()</code>) if none was declared. All attribute fields on a fresh <code>ProviderConfig</code> — invocation defaults (<code>timeout</code>, <code>retries</code>, <code>loadbalance</code>), service defaults (<code>version</code>, <code>group</code>, <code>protocols</code>, <code>registries</code>), and server defaults (<code>host</code>, <code>port</code>, <code>threadpool</code>, <code>threads</code>, <code>dispatcher</code>) — start as <code>null</code> so exported URLs remain compact and downstream protocol/cluster components apply their built-in constants unless overridden. When <code>ServiceConfig.refresh()</code> runs, every <code>@DubboService</code> without an explicit <code>provider</code> ID attaches this default <code>ProviderConfig</code> (<code>preProcessRefresh()</code>) and inherits its <code>protocols</code> and <code>registries</code>, falling back to <code>ConfigManager.getDefaultRegistries()</code> if <code>ProviderConfig</code> also leaves <code>registries</code> unset.</li></ul><p>Whether started by Spring (<code>DubboSpringInitializer</code> + <code>DubboDeployApplicationListener</code> on <code>ContextRefreshedEvent</code>) or programmatically (<code>DubboBootstrap.start()</code>), startup first initializes <code>DefaultApplicationDeployer</code> and <code>DefaultModuleDeployer</code> to populate <code>ConfigManager</code> and <code>ModuleConfigManager</code>, and then converges on <code>DefaultModuleDeployer.startSync()</code>, which executes three phases in strict order:</p><ol><li><strong><code>exportServices()</code></strong>: binds the local wire server and <code>injvm</code> endpoints using defaults resolved from <code>ProviderConfig</code> and <code>ProtocolConfig</code>, without registering in the registry yet.</li><li><strong><code>referServices()</code></strong>: subscribes all <code>@DubboReference</code> dependencies to the target <code>RegistryConfig</code> endpoints and initializes downstream client invokers.</li><li><strong><code>registerServices()</code></strong>: publishes <code>MetadataInfo</code> and registers the provider instance in the registry last, ensuring incoming traffic never reaches a service whose own downstream <code>@DubboReference</code> dependencies are still uninitialized.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 class DubboSpringInitializer {
   - REGISTRY_CONTEXT_MAP: Map&lt;BeanDefinitionRegistry, DubboSpringInitContext&gt;
   + initialize(BeanDefinitionRegistry)
   - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
+}
+class DubboConfigBeanInitializer {
+  - configManager: ConfigManager
+  - moduleModel: ModuleModel
+  - prepareDubboConfigBeans()
 }
 
 interface BeanDefinitionRegistryPostProcessor {
@@ -376,9 +381,6 @@ class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProces
   - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
 }
 
-interface InitializingBean {
-  + afterPropertiesSet()
-}
 interface ApplicationListener&lt;E&gt; {
   + onApplicationEvent(E)
 }
@@ -387,6 +389,169 @@ class DubboDeployApplicationListener implements ApplicationListener {
   - moduleModel: ModuleModel
   + onApplicationEvent(ApplicationContextEvent)
   - onContextRefreshedEvent(ContextRefreshedEvent)
+}
+
+abstract class ScopeModel {
+  - parent: ScopeModel
+  - scope: ExtensionScope
+  - classLoaders: Set&lt;ClassLoader&gt;
+}
+class FrameworkModel extends ScopeModel {
+  - applicationModels: List&lt;ApplicationModel&gt;
+}
+class ApplicationModel extends ScopeModel {
+  - configManager: ConfigManager
+  - deployer: ApplicationDeployer
+  - internalModule: ModuleModel
+  - defaultModule: ModuleModel
+  - moduleModels: List&lt;ModuleModel&gt;
+  + getApplicationConfigManager(): ConfigManager
+}
+class ModuleModel extends ScopeModel {
+  - applicationModel: ApplicationModel
+  - moduleConfigManager: ModuleConfigManager
+  - deployer: ModuleDeployer
+  + getConfigManager(): ModuleConfigManager
+  + getDeployer(): ModuleDeployer
+}
+
+abstract class AbstractConfigManager {
+  ~ configsCache: ConcurrentHashMap&lt;String, Map&lt;String, AbstractConfig&gt;&gt;
+  + loadConfigs()
+  # checkDefaultAndValidateConfigs(Class&lt;T&gt;)
+}
+class ConfigManager extends AbstractConfigManager {
+  + addRegistry(RegistryConfig)
+  + getDefaultRegistries(): List&lt;RegistryConfig&gt;
+  + getDefaultProtocols(): List&lt;ProtocolConfig&gt;
+}
+class ModuleConfigManager extends AbstractConfigManager {
+  - applicationConfigManager: ConfigManager
+  + addProvider(ProviderConfig)
+  + getDefaultProvider(): Optional&lt;ProviderConfig&gt;
+  + addService(ServiceConfigBase)
+  + addReference(ReferenceConfigBase)
+}
+
+abstract class AbstractConfig {
+  - id: String
+  # isDefault: Boolean
+  + refresh()
+}
+class RegistryConfig extends AbstractConfig {
+  - address: String
+  - protocol: String
+  - group: String
+  - registerMode: String
+  - useAsConfigCenter: Boolean
+  - useAsMetadataCenter: Boolean
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # registries: List&lt;RegistryConfig&gt;
+}
+abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
+  # version: String
+  # group: String
+  # protocols: List&lt;ProtocolConfig&gt;
+}
+class ProviderConfig extends AbstractServiceConfig {
+  - host: String
+  - port: Integer
+  - threadpool: String
+  - threads: Integer
+  - dispatcher: String
+}
+
+interface Deployer&lt;E&gt; {
+  + initialize()
+  + start(): Future
+  + stop()
+}
+abstract class AbstractDeployer&lt;E&gt; implements Deployer
+interface ApplicationDeployer extends Deployer {
+  + registerServiceInstance()
+  + refreshServiceInstance()
+  + exportMetadataService()
+}
+interface ModuleDeployer extends Deployer {
+  + setPending()
+}
+class DefaultApplicationDeployer extends AbstractDeployer implements ApplicationDeployer {
+  - configManager: ConfigManager
+  + initialize()
+  - startConfigCenter()
+  - loadApplicationConfigs()
+  - startMetadataCenter()
+}
+class DefaultModuleDeployer extends AbstractDeployer implements ModuleDeployer {
+  - configManager: ModuleConfigManager
+  - applicationDeployer: ApplicationDeployer
+  + initialize()
+  + start(): Future
+  - startSync(): Future
+  - exportServices()
+  - referServices()
+  - registerServices()
+}
+
+FrameworkModel *-- ApplicationModel
+ApplicationModel *-- ModuleModel
+ApplicationModel *-- ConfigManager
+ApplicationModel *-- ApplicationDeployer
+ModuleModel *-- ModuleConfigManager
+ModuleModel *-- ModuleDeployer
+ModuleConfigManager --&gt; ConfigManager
+ConfigManager o-- RegistryConfig
+ModuleConfigManager o-- ProviderConfig
+AbstractInterfaceConfig o-- RegistryConfig
+DubboSpringInitializer ..&gt; DubboConfigBeanInitializer
+DubboSpringInitializer ..&gt; DubboDeployApplicationListener
+DubboSpringInitializer ..&gt; ModuleModel
+DubboConfigBeanInitializer --&gt; ConfigManager
+DubboConfigBeanInitializer ..&gt; ModuleConfigManager
+ServiceAnnotationPostProcessor ..&gt; ModuleConfigManager
+DubboDeployApplicationListener o-- ModuleModel
+DefaultApplicationDeployer --&gt; ConfigManager
+DefaultModuleDeployer --&gt; ModuleConfigManager
+DefaultModuleDeployer --&gt; ApplicationDeployer
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Bind ModuleModel and register common beans: DubboSpringInitializer.initContext()</span>
+</span></span><span style=display:flex><span>ModuleModel moduleModel <span style=color:#f92672>=</span> applicationModel.<span style=color:#a6e22e>getDefaultModule</span>();
+</span></span><span style=display:flex><span>context.<span style=color:#a6e22e>setModuleModel</span>(moduleModel);
+</span></span><span style=display:flex><span>DubboBeanUtils.<span style=color:#a6e22e>registerCommonBeans</span>(registry);                   <span style=color:#75715e>// registers DubboConfigBeanInitializer &amp; DubboDeployApplicationListener</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 2. Register ServiceBean / ReferenceBean into ModuleConfigManager during Spring bean initialization</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>afterPropertiesSet</span>() {                              <span style=color:#75715e>// ServiceBean.afterPropertiesSet()</span>
+</span></span><span style=display:flex><span>    ModuleModel moduleModel <span style=color:#f92672>=</span> DubboBeanUtils.<span style=color:#a6e22e>getModuleModel</span>(applicationContext);
+</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getConfigManager</span>().<span style=color:#a6e22e>addService</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>setPending</span>();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 3. ContextRefreshedEvent -&gt; DubboDeployApplicationListener -&gt; initialize configs &amp; start module</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onContextRefreshedEvent</span>(ContextRefreshedEvent event) {
+</span></span><span style=display:flex><span>    ModuleDeployer deployer <span style=color:#f92672>=</span> moduleModel.<span style=color:#a6e22e>getDeployer</span>();
+</span></span><span style=display:flex><span>    Future future <span style=color:#f92672>=</span> deployer.<span style=color:#a6e22e>start</span>();                           <span style=color:#75715e>// applicationDeployer.initialize() loads RegistryConfig into ConfigManager</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 4. DefaultModuleDeployer.startSync(): init ProviderConfig -&gt; bind server -&gt; warm references -&gt; register last</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>synchronized</span> Future <span style=color:#a6e22e>startSync</span>() {
+</span></span><span style=display:flex><span>    initialize();                                               <span style=color:#75715e>// ModuleConfigManager.loadConfigs() loads/creates default ProviderConfig</span>
+</span></span><span style=display:flex><span>    exportServices();                                           <span style=color:#75715e>// 1. bind local server + injvm (register=false)</span>
+</span></span><span style=display:flex><span>    prepareInternalModule();                                    <span style=color:#75715e>// 2. start internal module (MetadataService)</span>
+</span></span><span style=display:flex><span>    referServices();                                            <span style=color:#75715e>// 3. subscribe &amp; connect all @DubboReference beans</span>
+</span></span><span style=display:flex><span>    onModuleStarted();                                          <span style=color:#75715e>// 4. prepareApplicationInstance() -&gt; registerServiceInstance()</span>
+</span></span><span style=display:flex><span>    registerServices();                                         <span style=color:#75715e>// 5. populate MetadataInfo + refresh registry instance</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> startFuture;
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h3 id=32-export-the-provider-runtime>3.2 Export: the provider runtime</h3><p><code>export</code> is the provider-side pipeline that turns a <code>ServiceConfig</code> declaration into a live, discoverable RPC endpoint across three functions:</p><ul><li><strong>Endpoint exposure</strong>: adapts the business object into a reflection-free <code>Invoker</code> and binds the local wire server (alongside an in-process <code>injvm</code> endpoint) to accept incoming requests.</li><li><strong>Metadata publication</strong>: aggregates the exported service&rsquo;s interface, version, group, and method signatures into the application&rsquo;s <code>MetadataInfo</code> (served by the local <code>MetadataService</code> or uploaded to a remote metadata center) and publishes the interface-to-application mapping.</li><li><strong>Instance registration</strong>: computes the metadata revision digest over all exported services and registers a single application instance record (host, port, and revision) with the registry.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface InitializingBean {
+  + afterPropertiesSet()
 }
 
 abstract class AbstractConfig {
@@ -419,6 +584,7 @@ class ServiceConfig&lt;T&gt; extends ServiceConfigBase {
   - providerModel: ProviderModel
   - exporters: ConcurrentHashMap&lt;RegisterTypeEnum, List&lt;Exporter&lt;?&gt;&gt;&gt;
   + export()
+  + register(boolean)
   # doExport()
   - doExportUrls()
 }
@@ -427,42 +593,19 @@ class ServiceBean&lt;T&gt; extends ServiceConfig implements InitializingBean {
   + destroy()
 }
 
-abstract class ScopeModel {
-  - parent: ScopeModel
-  - scope: ExtensionScope
-  - classLoaders: Set&lt;ClassLoader&gt;
-}
-class FrameworkModel extends ScopeModel {
-  - applicationModels: List&lt;ApplicationModel&gt;
-}
-class ApplicationModel extends ScopeModel {
-  - internalModule: ModuleModel
-  - defaultModule: ModuleModel
-  - moduleModels: List&lt;ModuleModel&gt;
-}
+abstract class ScopeModel
 class ModuleModel extends ScopeModel {
-  - applicationModel: ApplicationModel
-  - moduleConfigManager: ModuleConfigManager
-  - deployer: ModuleDeployer
-  + getConfigManager(): ModuleConfigManager
-  + getDeployer(): ModuleDeployer
+  - serviceRepository: ModuleServiceRepository
+  + getServiceRepository(): ModuleServiceRepository
 }
 
-class ModuleConfigManager {
-  + addService(ServiceConfigBase)
-  + getServices(): Collection&lt;ServiceConfigBase&gt;
-}
-interface ModuleDeployer {
-  + start(): Future
-  + setPending()
-}
-class DefaultModuleDeployer implements ModuleDeployer {
-  - configManager: ModuleConfigManager
-  - applicationDeployer: ApplicationDeployer
-  + start(): Future
-  - startSync(): Future
-  - exportServices()
-  - registerServices()
+class ModuleServiceRepository {
+  - services: ConcurrentMap&lt;String, List&lt;ServiceDescriptor&gt;&gt;
+  - providers: ConcurrentMap&lt;String, ProviderModel&gt;
+  - consumers: ConcurrentMap&lt;String, List&lt;ConsumerModel&gt;&gt;
+  + registerService(Class&lt;?&gt;): ServiceDescriptor
+  + registerProvider(ProviderModel)
+  + registerConsumer(ConsumerModel)
 }
 
 class ServiceModel {
@@ -489,48 +632,71 @@ interface ProxyFactory {
   + getInvoker(T, Class&lt;T&gt;, URL): Invoker&lt;T&gt;
 }
 
-FrameworkModel *-- ApplicationModel
-ApplicationModel *-- ModuleModel
-DubboSpringInitializer ..&gt; DubboDeployApplicationListener
-DubboSpringInitializer ..&gt; ModuleModel
-ServiceAnnotationPostProcessor ..&gt; ServiceBean
-ServiceBean ..&gt; ModuleModel
-DubboDeployApplicationListener o-- ModuleModel
-ModuleModel *-- ModuleConfigManager
-ModuleModel *-- ModuleDeployer
+AbstractConfig o-- ScopeModel
+ModuleModel *-- ModuleServiceRepository
 ModuleModel --o ServiceModel
-DefaultModuleDeployer --&gt; ModuleConfigManager
-ModuleConfigManager o-- ServiceConfigBase
-DefaultModuleDeployer ..&gt; ServiceConfig
+ModuleServiceRepository o-- ProviderModel
+ModuleServiceRepository o-- ConsumerModel
 ServiceConfig *-- ProviderModel
 ServiceConfig --&gt; ProxyFactory
 ServiceConfig --&gt; Protocol
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Scan &amp; register ServiceBean: @DubboService -&gt; ServiceAnnotationPostProcessor -&gt; ServiceBean.afterPropertiesSet()</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>afterPropertiesSet</span>() {
-</span></span><span style=display:flex><span>    ModuleModel moduleModel <span style=color:#f92672>=</span> DubboBeanUtils.<span style=color:#a6e22e>getModuleModel</span>(applicationContext);
-</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getConfigManager</span>().<span style=color:#a6e22e>addService</span>(<span style=color:#66d9ef>this</span>);            <span style=color:#75715e>// register ServiceBean into ModuleConfigManager</span>
-</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>setPending</span>();
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Entry point: ServiceConfig.export() refreshes config, initializes metadata, and delegates to doExport()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>export</span>(RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>exported</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (<span style=color:#66d9ef>this</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>isRefreshed</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>refresh</span>();                                     <span style=color:#75715e>// binds YAML/properties -&gt; calls postProcessRefresh()</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>shouldExport</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>init</span>();                                        <span style=color:#75715e>// assemble ServiceMetadata and sub-configs</span>
+</span></span><span style=display:flex><span>            doExport(registerType);                             <span style=color:#75715e>// calls doExportUrls(registerType) -&gt; exported()</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 2. ContextRefreshedEvent -&gt; DubboDeployApplicationListener.onContextRefreshedEvent() -&gt; DefaultModuleDeployer.start()</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onContextRefreshedEvent</span>(ContextRefreshedEvent event) {
-</span></span><span style=display:flex><span>    ModuleDeployer deployer <span style=color:#f92672>=</span> moduleModel.<span style=color:#a6e22e>getDeployer</span>();
-</span></span><span style=display:flex><span>    Future future <span style=color:#f92672>=</span> deployer.<span style=color:#a6e22e>start</span>();                           <span style=color:#75715e>// calls applicationDeployer.initialize() -&gt; startSync()</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 2. Populate registries &amp; protocols during refresh(): postProcessRefresh() -&gt; checkAndUpdateSubConfigs()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>checkAndUpdateSubConfigs</span>() {
+</span></span><span style=display:flex><span>    completeCompoundConfigs();                                  <span style=color:#75715e>// inherit registries / protocols from ProviderConfig or ModuleConfig</span>
+</span></span><span style=display:flex><span>    checkProtocol();                                            <span style=color:#75715e>// populate protocols from protocolIds or ConfigManager.getDefaultProtocols()</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isOnlyInJvm()) {
+</span></span><span style=display:flex><span>        checkRegistry();                                        <span style=color:#75715e>// calls AbstractInterfaceConfig.convertRegistryIdsToRegistries()</span>
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>synchronized</span> Future <span style=color:#a6e22e>startSync</span>() {
-</span></span><span style=display:flex><span>    exportServices();                                           <span style=color:#75715e>// Phase A: bind local server + publish service definition</span>
-</span></span><span style=display:flex><span>    prepareInternalModule();                                    <span style=color:#75715e>// ensure internal module (MetadataService) is ready</span>
-</span></span><span style=display:flex><span>    referServices();
-</span></span><span style=display:flex><span>    onModuleStarted();                                          <span style=color:#75715e>// triggers prepareApplicationInstance() -&gt; registerServiceInstance()</span>
-</span></span><span style=display:flex><span>    registerServices();                                         <span style=color:#75715e>// Phase B: populate MetadataInfo + refresh registry instance</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> startFuture;
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>convertRegistryIdsToRegistries</span>() {                 <span style=color:#75715e>// AbstractInterfaceConfig: resolves protected List&lt;RegistryConfig&gt; registries</span>
+</span></span><span style=display:flex><span>    computeValidRegistryIds();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isEmpty</span>(registryIds)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (CollectionUtils.<span style=color:#a6e22e>isEmpty</span>(registries)) {
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Pull application-level default RegistryConfig (e.g. dubbo.registry.address: nacos://127.0.0.1:8848)</span>
+</span></span><span style=display:flex><span>            setRegistries(<span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(getConfigManager().<span style=color:#a6e22e>getDefaultRegistries</span>()));
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// Resolve explicit @DubboService(registry = {&#34;...&#34;}) IDs from ConfigManager</span>
+</span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>RegistryConfig<span style=color:#f92672>&gt;</span> tmpRegistries <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (String id : COMMA_SPLIT_PATTERN.<span style=color:#a6e22e>split</span>(registryIds)) {
+</span></span><span style=display:flex><span>            getConfigManager().<span style=color:#a6e22e>getRegistry</span>(id).<span style=color:#a6e22e>ifPresent</span>(tmpRegistries::add);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        setRegistries(tmpRegistries);
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 3. Build URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -&gt; service-discovery-registry:// and publish definition</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>synchronized</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExport</span>(RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    doExportUrls(registerType);
+</span></span><span style=display:flex><span>    exported();
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 3. Build ProviderModel and URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -&gt; service-discovery-registry://</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExportUrls</span>(RegisterTypeEnum registerType) {
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// Rewrites nacos://127.0.0.1:8848 -&gt; service-discovery-registry://127.0.0.1:8848?registry=nacos</span>
+</span></span><span style=display:flex><span>    ModuleServiceRepository repository <span style=color:#f92672>=</span> getScopeModel().<span style=color:#a6e22e>getServiceRepository</span>();
+</span></span><span style=display:flex><span>    ServiceDescriptor serviceDescriptor <span style=color:#f92672>=</span> repository.<span style=color:#a6e22e>registerService</span>(getInterfaceClass());
+</span></span><span style=display:flex><span>    providerModel <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ProviderModel(
+</span></span><span style=display:flex><span>            serviceMetadata.<span style=color:#a6e22e>getServiceKey</span>(), ref, serviceDescriptor, getScopeModel(), serviceMetadata, interfaceClassLoader);
+</span></span><span style=display:flex><span>    repository.<span style=color:#a6e22e>registerProvider</span>(providerModel);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Reads this.registries and rewrites nacos://127.0.0.1:8848 -&gt; service-discovery-registry://127.0.0.1:8848?registry=nacos</span>
 </span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs <span style=color:#f92672>=</span> ConfigValidationUtils.<span style=color:#a6e22e>loadRegistries</span>(<span style=color:#66d9ef>this</span>, <span style=color:#66d9ef>true</span>);
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ProtocolConfig protocolConfig : protocols) {
 </span></span><span style=display:flex><span>        URL url <span style=color:#f92672>=</span> buildUrl(protocolConfig, map);                <span style=color:#75715e>// wire URL: dubbo://10.0.0.7:20880/GreetingService?...</span>
@@ -568,15 +734,8 @@ ServiceConfig --&gt; Protocol
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DestroyableExporter<span style=color:#f92672>&lt;&gt;</span>(exporter);
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 6. Accumulate exported service URLs into MetadataInfo: registerServices() -&gt; sc.register(true) -&gt; AbstractServiceDiscovery</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>registerServices</span>() {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ServiceConfigBase sc : configManager.<span style=color:#a6e22e>getServices</span>()) {
-</span></span><span style=display:flex><span>        sc.<span style=color:#a6e22e>register</span>(<span style=color:#66d9ef>true</span>);                                      <span style=color:#75715e>// exporter.register() -&gt; ServiceDiscoveryRegistry.doRegister(url)</span>
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    applicationDeployer.<span style=color:#a6e22e>refreshServiceInstance</span>();               <span style=color:#75715e>// recompute revision, upload MetadataInfo, update Nacos instance</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(URL url) {                                 <span style=color:#75715e>// AbstractServiceDiscovery.register(URL)</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 6. Accumulate exported service URLs into MetadataInfo: sc.register(true) -&gt; AbstractServiceDiscovery.register(URL)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(URL url) {
 </span></span><span style=display:flex><span>    metadataInfo.<span style=color:#a6e22e>addService</span>(url);                               <span style=color:#75715e>// record interface, version, group, protocol, and method params</span>
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
@@ -599,7 +758,7 @@ ServiceConfig --&gt; Protocol
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    metadataInfos.<span style=color:#a6e22e>put</span>(metadataInfo.<span style=color:#a6e22e>getRevision</span>(), <span style=color:#66d9ef>new</span> MetadataInfoStat(metadataInfo.<span style=color:#a6e22e>clone</span>())); <span style=color:#75715e>// served by MetadataService</span>
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=32-refer-the-consumer-side>3.2 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which subscribes a <code>Directory</code> to the registry and joins all discovered provider <code>Invoker</code>s behind a single fault-tolerant <code>ClusterInvoker</code> before wrapping it in a dynamic proxy for the caller:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><h3 id=33-refer-the-consumer-side>3.3 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which subscribes a <code>Directory</code> to the registry and joins all discovered provider <code>Invoker</code>s behind a single fault-tolerant <code>ClusterInvoker</code> before wrapping it in a dynamic proxy for the caller:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 interface Invoker {
@@ -687,7 +846,7 @@ FailoverClusterInvoker ..&gt; LoadBalance
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span><span style=color:#66d9ef>throw</span> le;
-</span></span></code></pre></div><h3 id=33-registryprotocol>3.3 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><h3 id=34-dubboprotocol>3.4 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
+</span></span></code></pre></div><h3 id=34-registryprotocol>3.4 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><h3 id=35-dubboprotocol>3.5 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
 </span></span><span style=display:flex><span>DubboExporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> exporter <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> DubboExporter<span style=color:#f92672>&lt;&gt;</span>(invoker, key, exporterMap);
 </span></span><span style=display:flex><span>openServer(url);
 </span></span></code></pre></div><p><code>openServer</code> keeps one server per <code>host:port</code> in <code>serverMap</code>, so all services sharing a port share a single Netty server; <code>server.reset(url)</code> applies URL changes to the existing server. <code>createServer</code> binds through <code>Exchangers.bind(url, requestHandler)</code>, which resolves the <code>Exchanger</code> SPI (<code>header</code> by default), whose <code>HeaderExchanger.bind</code> wraps the handler as <code>DecodeHandler(HeaderExchangeHandler(handler))</code> and delegates to <code>Transporters.bind</code> — <code>NettyServer</code> with the <code>DubboCountCodec</code> on the pipeline. The <code>EventLoop</code> and <code>ChannelPipeline</code> mechanics underneath are those of <a href=https://kevinwang930.github.io/post/java/netty/>Netty</a>; Dubbo adds one codec and one handler chain on top of a standard bootstrap.</p><p>The <code>exporterMap</code> key is what the provider uses to route an incoming request. <code>AbstractProtocol.serviceKey</code> composes <code>group/path:version:port</code>, with the port included so two services with the same interface on different ports do not collide.</p><h4 id=provider-side-dispatch-and-threading>Provider-side dispatch and threading</h4><p>An arriving frame is decoded on the Netty I/O thread into a <code>Request</code> whose payload is a <code>DecodeableRpcInvocation</code>; the argument bytes are not yet deserialized. The handler chain installed by <code>ChannelHandlers.wrap</code> is:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MultiMessageHandler -&gt; HeartbeatHandler -&gt; Dispatcher(all) -&gt; DecodeHandler -&gt; HeaderExchangeHandler
