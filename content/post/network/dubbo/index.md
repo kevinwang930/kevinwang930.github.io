@@ -539,50 +539,13 @@ AbstractExporter o-- Invoker
 @enduml
 ```
 
-### 3.1 RegistryProtocol
-
-Dubbo models registry integration as an implementation of `Protocol` (`service-discovery-registry=RegistryProtocol`, `registry=InterfaceCompatibleRegistryProtocol`) rather than having `ServiceConfig` or `ReferenceConfig` call a registry client directly. Both `export` and `refer` enter `RegistryProtocol` first on a registry-scheme `URL`; `RegistryProtocol` coordinates registration and subscription through the `Registry` / `ServiceDiscovery` SPI and delegates actual socket binding and remote invoker creation back through `Protocol$Adaptive` to the inner wire protocol. On the consumer side, `RegistryProtocol.refer` joins a `Directory` of provider `Invoker`s behind a single `ClusterInvoker` before handing the proxy back to the caller:
-
-```plantuml
-@startuml
-top to bottom direction
-
-interface Invoker {
-  + getInterface(): Class
-  + invoke(Invocation): Result
-}
-class DubboInvoker implements Invoker
-interface ClusterInvoker extends Invoker
-class FailoverClusterInvoker implements ClusterInvoker
-
-interface Directory {
-  + list(Invocation): List
-}
-class RegistryDirectory implements Directory
-class ServiceDiscoveryRegistryDirectory implements Directory
-
-interface Cluster {
-  + join(Directory): Invoker
-}
-class FailoverCluster implements Cluster
-
-interface LoadBalance {
-  + select(List, URL, Invocation): Invoker
-}
-
-FailoverCluster ..> FailoverClusterInvoker
-FailoverClusterInvoker o-- Directory
-FailoverClusterInvoker ..> LoadBalance
-@enduml
-```
-
-#### Export: the provider runtime
+### 3.1 Export: the provider runtime
 
 `export` turns a local service implementation into a remotely reachable endpoint and announces it to the cluster. Each `@DubboService` (or programmatic service definition) is represented at runtime by one `ServiceConfig<T>` instance, which sits at the boundary between declarative configuration and the SPI runtime: its inheritance chain (`AbstractConfig` -> `AbstractMethodConfig` -> `AbstractInterfaceConfig` -> `AbstractServiceConfig` -> `ServiceConfigBase<T>` -> `ServiceConfig<T>`) aggregates method-, interface-, registry-, and protocol-level settings into `ServiceConfigURL`s, holds `protocolSPI` (`Protocol$Adaptive`) and `proxyFactory` (`ProxyFactory$Adaptive`), and tracks the resulting `Exporter` list for shutdown.
 
 Application code rarely instantiates or invokes `ServiceConfig` directly; Dubbo's deployer drives it through two entry paths that converge on the same startup pipeline:
 
-- **Spring / `@DubboService` path**: `ServiceAnnotationPostProcessor` (`BeanDefinitionRegistryPostProcessor`) scans `@DubboService` classes and registers `ServiceBean<T>` bean definitions; during bean initialization, `ServiceBean.afterPropertiesSet()` (`InitializingBean`) adds itself to `ModuleConfigManager`. When Spring finishes refreshing and publishes `ContextRefreshedEvent`, `DubboDeployApplicationListener` (`ApplicationListener`) catches the event and invokes `moduleModel.getDeployer().start()` (`DefaultModuleDeployer.start()` -> `applicationDeployer.initialize()` -> `startSync()`).
+- **Spring / `@DubboService` path**: `DubboSpringInitializer.initialize(registry)` binds a `ModuleModel` to the Spring container and registers `DubboDeployApplicationListener` (via `DubboBeanUtils.registerCommonBeans`); `ServiceAnnotationPostProcessor` (`BeanDefinitionRegistryPostProcessor`) scans `@DubboService` classes and registers `ServiceBean<T>` bean definitions; during bean initialization, `ServiceBean.afterPropertiesSet()` (`InitializingBean`) adds itself to `ModuleConfigManager`. When Spring finishes refreshing and publishes `ContextRefreshedEvent`, `DubboDeployApplicationListener` (`ApplicationListener`) catches the event and invokes `moduleModel.getDeployer().start()` (`DefaultModuleDeployer.start()` -> `applicationDeployer.initialize()` -> `startSync()`).
 - **Programmatic `DubboBootstrap` path**: `DubboBootstrap.getInstance().service(serviceConfig).start()` registers `ServiceConfig<T>` in `ModuleConfigManager` and calls `DefaultApplicationDeployer.start()`, which starts each module's `DefaultModuleDeployer`.
 
 `DefaultModuleDeployer.startSync()` first runs `exportServices()`, calling `serviceConfig.export()` to wrap `ref` into an `Invoker` and bind the local wire server via `RegistryProtocol.export`, and then runs `registerServices()` followed by `applicationDeployer.refreshServiceInstance()` so consumers never discover an unready port.
@@ -592,6 +555,12 @@ Services belong to a `ModuleModel` rather than directly to `ApplicationModel`. W
 ```plantuml
 @startuml
 top to bottom direction
+
+class DubboSpringInitializer {
+  - REGISTRY_CONTEXT_MAP: Map<BeanDefinitionRegistry, DubboSpringInitContext>
+  + initialize(BeanDefinitionRegistry)
+  - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
+}
 
 interface BeanDefinitionRegistryPostProcessor {
   + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
@@ -689,6 +658,23 @@ class DefaultModuleDeployer implements ModuleDeployer {
   - registerServices()
 }
 
+class ServiceModel {
+  - serviceKey: String
+  - proxyObject: Object
+  - moduleModel: ModuleModel
+  - serviceModel: ServiceDescriptor
+  - serviceMetadata: ServiceMetadata
+}
+class ProviderModel extends ServiceModel {
+  - urls: List<RegisterStatedURL>
+  - methods: Map<String, List<ProviderMethodModel>>
+  - serviceUrls: List<URL>
+}
+class ConsumerModel extends ServiceModel {
+  - apps: Set<String>
+  - methodModels: Map<Method, ConsumerMethodModel>
+}
+
 interface Protocol {
   + export(Invoker<T>): Exporter<T>
 }
@@ -698,14 +684,18 @@ interface ProxyFactory {
 
 FrameworkModel *-- ApplicationModel
 ApplicationModel *-- ModuleModel
+DubboSpringInitializer ..> DubboDeployApplicationListener
+DubboSpringInitializer ..> ModuleModel
 ServiceAnnotationPostProcessor ..> ServiceBean
 ServiceBean ..> ModuleModel
 DubboDeployApplicationListener o-- ModuleModel
 ModuleModel *-- ModuleConfigManager
 ModuleModel *-- ModuleDeployer
+ModuleModel --o ServiceModel
 DefaultModuleDeployer --> ModuleConfigManager
 ModuleConfigManager o-- ServiceConfigBase
 DefaultModuleDeployer ..> ServiceConfig
+ServiceConfig *-- ProviderModel
 ServiceConfig --> ProxyFactory
 ServiceConfig --> Protocol
 @enduml
@@ -725,13 +715,16 @@ private void onContextRefreshedEvent(ContextRefreshedEvent event) {
     Future future = deployer.start();                           // calls applicationDeployer.initialize() -> startSync()
 }
 
-private void exportServices() {
-    for (ServiceConfigBase sc : configManager.getServices()) {
-        exportServiceInternal(sc);                              // invokes serviceConfig.export() -> doExport()
-    }
+private synchronized Future startSync() {
+    exportServices();                                           // Phase A: bind local server + publish service definition
+    prepareInternalModule();                                    // ensure internal module (MetadataService) is ready
+    referServices();
+    onModuleStarted();                                          // triggers prepareApplicationInstance() -> registerServiceInstance()
+    registerServices();                                         // Phase B: populate MetadataInfo + refresh registry instance
+    return startFuture;
 }
 
-// 3. Build URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -> service-discovery-registry:// and nest dubbo://
+// 3. Build URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -> service-discovery-registry:// and publish definition
 private void doExportUrls(RegisterTypeEnum registerType) {
     // Rewrites nacos://127.0.0.1:8848 -> service-discovery-registry://127.0.0.1:8848?registry=nacos
     List<URL> registryURLs = ConfigValidationUtils.loadRegistries(this, true);
@@ -739,48 +732,107 @@ private void doExportUrls(RegisterTypeEnum registerType) {
         URL url = buildUrl(protocolConfig, map);                // wire URL: dubbo://10.0.0.7:20880/GreetingService?...
         exportLocal(url);                                       // export injvm://127.0.0.1/... for in-process calls
         for (URL registryURL : registryURLs) {
-            // Attach wire URL under EXPORT_KEY; outer scheme is "service-discovery-registry"
+            // Attach wire URL under EXPORT_KEY; AUTO_REGISTER_BY_DEPLOYER defers registry.register to registerServices()
             doExportUrl(registryURL.putAttribute(EXPORT_KEY, url), true, registerType);
         }
+        // Upload per-service FullServiceDefinition to remote MetadataReport (when configured)
+        MetadataUtils.publishServiceDefinition(url, providerModel.getServiceModel(), getApplicationModel());
     }
 }
 
-// 4. Wrap ref as Invoker and dispatch via Protocol$Adaptive: scheme selects RegistryProtocol
+// 4. Wrap ref as Invoker, dispatch to RegistryProtocol.export() for local Netty bind, then map interface -> app
 private void doExportUrl(URL url, boolean withMetaData, RegisterTypeEnum registerType) {
-    Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, url); // Javassist Wrapper, no reflection
-    if (withMetaData) {
-        invoker = new DelegateProviderMetaDataInvoker(invoker, this);
+    if (registerType == RegisterTypeEnum.AUTO_REGISTER_BY_DEPLOYER) {
+        url = url.addParameter(REGISTER_KEY, false);            // defer registration until all services finish binding
     }
-    Exporter<?> exporter = protocolSPI.export(invoker);         // url.getProtocol() -> RegistryProtocol.export()
+    Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, url); // Javassist Wrapper, no reflection
+    Exporter<?> exporter = protocolSPI.export(new DelegateProviderMetaDataInvoker(invoker, this));
     exporters.computeIfAbsent(registerType, k -> new CopyOnWriteArrayList<>()).add(exporter);
 }
 
-// 5. RegistryProtocol.export(): unwrap EXPORT_KEY, bind local Netty server, and register in Nacos
+protected void exported() {
+    serviceNameMapping.map(url);                                // upload interface -> applicationName mapping
+    getScopeModel().getDeployer().getApplicationDeployer().exportMetadataService(); // export local MetadataService
+}
+
+// 5. RegistryProtocol.export(): unwrap EXPORT_KEY and bind local Netty port via DubboProtocol
 public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
     URL registryUrl = getRegistryUrl(originInvoker);            // unwrap nacos://127.0.0.1:8848
     URL providerUrl = getProviderUrl(originInvoker);            // read EXPORT_KEY -> dubbo://10.0.0.7:20880/...
-
-    // 5a. Second adaptive hop: url.getProtocol() == "dubbo" -> DubboProtocol.export() (opens Netty port)
-    final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl);
-
-    // 5b. Resolve Registry SPI and publish provider record
-    final Registry registry = getRegistry(registryUrl);
-    final URL registeredProviderUrl = customizeURL(providerUrl, registryUrl);
-    if (providerUrl.getParameter(REGISTER_KEY, true) && registryUrl.getParameter(REGISTER_KEY, true)) {
-        register(registry, registeredProviderUrl);
-    }
-
-    // 5c. Interface-level compatibility only: subscribe to 2.6.x configurators overrides
-    if (!registry.isServiceDiscovery()) {
-        registry.subscribe(overrideSubscribeUrl, overrideSubscribeListener);
-    }
+    final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl); // DubboProtocol.export()
+    exporter.setRegisterUrl(customizeURL(providerUrl, registryUrl));
     return new DestroyableExporter<>(exporter);
+}
+
+// 6. Accumulate exported service URLs into MetadataInfo: registerServices() -> sc.register(true) -> AbstractServiceDiscovery
+private void registerServices() {
+    for (ServiceConfigBase sc : configManager.getServices()) {
+        sc.register(true);                                      // exporter.register() -> ServiceDiscoveryRegistry.doRegister(url)
+    }
+    applicationDeployer.refreshServiceInstance();               // recompute revision, upload MetadataInfo, update Nacos instance
+}
+
+public void register(URL url) {                                 // AbstractServiceDiscovery.register(URL)
+    metadataInfo.addService(url);                               // record interface, version, group, protocol, and method params
+}
+
+// 7. Upload MetadataInfo and register ServiceInstance in Nacos: AbstractServiceDiscovery.register() / update()
+public synchronized void register() throws RuntimeException {
+    if (this.serviceInstance == null) {
+        this.serviceInstance = createServiceInstance(this.metadataInfo); // host, port, app name, endpoints
+    }
+    boolean revisionUpdated = calOrUpdateInstanceRevision(this.serviceInstance); // compute dubbo.metadata.revision digest
+    if (revisionUpdated) {
+        reportMetadata(this.metadataInfo);                      // upload MetadataInfo + snapshot for local MetadataService
+        doRegister(this.serviceInstance);                       // NacosServiceDiscovery -> namingService.registerInstance(...)
+    }
+}
+
+protected void reportMetadata(MetadataInfo metadataInfo) {
+    if (metadataReport != null) {
+        SubscriberMetadataIdentifier id = new SubscriberMetadataIdentifier(serviceName, metadataInfo.getRevision());
+        metadataReport.publishAppMetadata(id, metadataInfo);    // remote MetadataReport upload (when configured)
+    }
+    metadataInfos.put(metadataInfo.getRevision(), new MetadataInfoStat(metadataInfo.clone())); // served by MetadataService
 }
 ```
 
-#### Refer: the consumer side
+### 3.2 Refer: the consumer side
 
-`refer` turns a service interface and registry `URL` into a local proxy backed by a live set of remote providers. `RegistryProtocol.refer` subscribes a `Directory` to the registry, joins all discovered provider `Invoker`s behind a single fault-tolerant `ClusterInvoker`, and `ReferenceConfig` wraps that `ClusterInvoker` in a dynamic proxy for the caller:
+`refer` turns a service interface and target `URL` into a local proxy backed by remote providers. When backed by a registry, `ReferenceConfig` delegates through `Protocol$Adaptive` to `RegistryProtocol.refer`, which subscribes a `Directory` to the registry and joins all discovered provider `Invoker`s behind a single fault-tolerant `ClusterInvoker` before wrapping it in a dynamic proxy for the caller:
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface Invoker {
+  + getInterface(): Class
+  + invoke(Invocation): Result
+}
+class DubboInvoker implements Invoker
+interface ClusterInvoker extends Invoker
+class FailoverClusterInvoker implements ClusterInvoker
+
+interface Directory {
+  + list(Invocation): List
+}
+class RegistryDirectory implements Directory
+class ServiceDiscoveryRegistryDirectory implements Directory
+
+interface Cluster {
+  + join(Directory): Invoker
+}
+class FailoverCluster implements Cluster
+
+interface LoadBalance {
+  + select(List, URL, Invocation): Invoker
+}
+
+FailoverCluster ..> FailoverClusterInvoker
+FailoverClusterInvoker o-- Directory
+FailoverClusterInvoker ..> LoadBalance
+@enduml
+```
 
 ```java
 // 1. ReferenceConfig refers the registry URL and wraps the returned Invoker in a dynamic proxy
@@ -855,7 +907,14 @@ for (int i = 0; i < len; i++) {
 throw le;
 ```
 
-### 3.2 DubboProtocol
+### 3.3 RegistryProtocol
+
+`RegistryProtocol` (`service-discovery-registry`) and its subclass `InterfaceCompatibleRegistryProtocol` (`registry`) do no socket framing or network transport themselves; they implement `Protocol` solely to bridge `ServiceConfig` and `ReferenceConfig` to the `Registry` / `ServiceDiscovery` SPI without special-casing registry logic in the config layer:
+
+- **On `export`**: unwraps the registry `URL` (`getRegistryUrl`) and the nested wire `URL` (`EXPORT_KEY`), delegates local port binding to `protocol.export(...)` (`ExporterChangeableWrapper`), and hands the provider `URL` to `registry.register(...)` (wrapped in `DestroyableExporter` so `unexport()` unregisters before closing).
+- **On `refer`**: resolves the `Registry` and `Cluster` SPIs, constructs a `ServiceDiscoveryMigrationInvoker` (capable of switching between application-level `ServiceDiscoveryRegistryDirectory` and interface-level `RegistryDirectory`), and subscribes the `Directory` to provider address changes. When a direct point-to-point `URL` (`dubbo://host:port`) is configured instead of a registry, `Protocol$Adaptive` bypasses `RegistryProtocol` completely and dispatches straight to the wire protocol.
+
+### 3.4 DubboProtocol
 
 `DubboProtocol` is Dubbo's default wire protocol (`dubbo://`, port `20880`), pairing `DubboExporter` on the provider with `DubboInvoker` on the consumer over persistent Netty TCP channels.
 
