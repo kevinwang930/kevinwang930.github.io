@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="770" viewBox="0 0 960 770" role="img" aria-label="Dubbo architecture: consumer stack, dubbo wire protocol, provider stack, MetadataService, and application-level service discovery through Nacos">
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="804" viewBox="0 0 960 804" role="img" aria-label="Dubbo architecture: consumer stack, dubbo wire protocol, provider stack, MetadataService, and application-level service discovery through Nacos">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#2f4358"/>
@@ -8,13 +8,13 @@
     </marker>
   </defs>
 
-  <rect width="960" height="770" fill="#ffffff"/>
+  <rect width="960" height="804" fill="#ffffff"/>
 
   <!-- zone frames -->
-  <rect x="16" y="54" width="328" height="446" rx="9" fill="#f6f9fd" stroke="#cfdce9"/>
-  <rect x="360" y="54" width="240" height="446" rx="9" fill="#fbfbfd" stroke="#dde3e9" stroke-dasharray="6 5"/>
-  <rect x="616" y="54" width="328" height="446" rx="9" fill="#f3faf5" stroke="#cfe3d5"/>
-  <rect x="16" y="540" width="928" height="164" rx="9" fill="#fdfaf2" stroke="#e3d5b8"/>
+  <rect x="16" y="54" width="328" height="440" rx="9" fill="#f6f9fd" stroke="#cfdce9"/>
+  <rect x="360" y="54" width="240" height="440" rx="9" fill="#fbfbfd" stroke="#dde3e9" stroke-dasharray="6 5"/>
+  <rect x="616" y="54" width="328" height="440" rx="9" fill="#f3faf5" stroke="#cfe3d5"/>
+  <rect x="16" y="584" width="928" height="166" rx="9" fill="#fdfaf2" stroke="#e3d5b8"/>
 
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#5b7186">
     <text x="26" y="44">CONSUMER</text>
@@ -94,8 +94,8 @@
     <path d="M180,176 L180,190"/>
     <path d="M180,236 L180,244 L102,244 L102,250"/>
     <path d="M180,244 L258,244 L258,250"/>
-    <path d="M102,296 L102,304 L180,304"/>
-    <path d="M258,296 L258,304 L180,304"/>
+    <path d="M102,296 L102,304 L180,304" marker-end="none"/>
+    <path d="M258,296 L258,304 L180,304" marker-end="none"/>
     <path d="M180,304 L180,310"/>
     <path d="M180,356 L180,370"/>
     <path d="M180,416 L180,430"/>
@@ -130,83 +130,84 @@
 
   <!-- request / response across the gap -->
   <g stroke="#2f4358" stroke-width="1.5" fill="none">
-    <path d="M332,440 L628,440" marker-end="url(#a)"/>
+    <path d="M332,442 L628,442" marker-end="url(#a)"/>
     <path d="M628,466 L332,466" marker-end="url(#a)"/>
   </g>
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="#2f4358" text-anchor="middle">
-    <text x="480" y="432">request</text>
-    <text x="480" y="484">response</text>
+    <text x="480" y="434">request</text>
+    <text x="480" y="482">response</text>
   </g>
 
-  <!-- provider: address + revision to discovery, definitions into its own metadata service -->
+  <!-- ================= control path routing (y = 494..584) ================= -->
+  <!-- consumer <-> ServiceDiscovery: subscribe / notify -->
   <g stroke="#a8761a" stroke-width="1.5" fill="none">
-    <path d="M860,476 L860,492 L246,492 L246,574" marker-end="url(#b)"/>
-    <path d="M900,476 L900,528 L700,528 L700,574" marker-end="url(#b)"/>
+    <path d="M196,476 L196,616" marker-end="url(#b)"/>
+    <path d="M232,616 L232,476" marker-end="url(#b)"/>
   </g>
 
-  <!-- consumer subscribes to the address directory -->
-  <g stroke="#a8761a" stroke-width="1.5" fill="none">
-    <path d="M110,476 L110,574" marker-end="url(#b)"/>
-    <path d="M134,574 L134,476" marker-end="url(#b)"/>
-  </g>
-
-  <!-- consumer takes the revision from the record and swaps it for the definition -->
+  <!-- consumer <-> MetadataService: revision / definition -->
   <g stroke="#a8761a" stroke-width="1.5" fill="none" stroke-dasharray="5 4">
-    <path d="M300,476 L300,556 L620,556 L620,574" marker-start="url(#b)" marker-end="url(#b)"/>
+    <path d="M304,476 L304,518 L640,518 L640,616" marker-start="url(#b)" marker-end="url(#b)"/>
+  </g>
+
+  <!-- provider -> ServiceDiscovery (register) and MetadataService (MetadataInfo) -->
+  <g stroke="#a8761a" stroke-width="1.5" fill="none">
+    <path d="M740,476 L740,558 L360,558 L360,616" marker-end="url(#b)"/>
+    <path d="M836,476 L836,616" marker-end="url(#b)"/>
   </g>
 
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="#8c6f2f">
-    <text x="102" y="540" text-anchor="end">subscribe</text>
-    <text x="142" y="540">notify</text>
-    <text x="560" y="486" text-anchor="middle">register address + revision</text>
-    <text x="800" y="522" text-anchor="middle">MetadataInfo</text>
-    <text x="460" y="550" text-anchor="middle">revision / definition</text>
+    <text x="188" y="544" text-anchor="end">subscribe</text>
+    <text x="240" y="544" text-anchor="start">notify</text>
+    <text x="472" y="511" text-anchor="middle">revision / definition</text>
+    <text x="500" y="551" text-anchor="middle">register address + revision</text>
+    <text x="844" y="544" text-anchor="start">MetadataInfo</text>
   </g>
 
   <!-- ================= discovery band ================= -->
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" text-anchor="middle">
-    <text x="26" y="566" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">SERVICE DISCOVERY</text>
-    <text x="494" y="566" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">METADATA</text>
+    <text x="26" y="605" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">SERVICE DISCOVERY</text>
+    <text x="494" y="605" font-size="11.5" font-weight="bold" letter-spacing="1.6" fill="#8c6f2f" text-anchor="start">METADATA</text>
 
     <!-- left: who and where -->
-    <rect x="26" y="574" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
-    <text x="246" y="593" font-size="13" font-weight="600" fill="#1c2a38">ServiceDiscovery (SPI)</text>
-    <text x="246" y="609" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">address + revision, nothing else</text>
+    <rect x="26" y="616" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
+    <text x="246" y="635" font-size="13" font-weight="600" fill="#1c2a38">ServiceDiscovery (SPI)</text>
+    <text x="246" y="651" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">address + revision, nothing else</text>
 
     <!-- right: what it looks like -->
-    <rect x="494" y="574" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
-    <text x="714" y="593" font-size="13" font-weight="600" fill="#1c2a38">MetadataService (per provider)</text>
-    <text x="714" y="609" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">method signatures and types</text>
+    <rect x="494" y="616" width="440" height="44" rx="5" fill="#f3e9d2" stroke="#c9ab6d"/>
+    <text x="714" y="635" font-size="13" font-weight="600" fill="#1c2a38">MetadataService (per provider)</text>
+    <text x="714" y="651" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">method signatures and types</text>
 
     <g stroke="#c9ab6d" stroke-width="1.2" fill="none">
-      <path d="M156,618 L156,640"/>
-      <path d="M336,618 L336,640"/>
-      <path d="M624,618 L624,640"/>
-      <path d="M804,618 L804,640"/>
+      <path d="M156,660 L156,682"/>
+      <path d="M381,660 L381,682"/>
+      <path d="M624,660 L624,682"/>
+      <path d="M849,660 L849,682"/>
     </g>
 
-    <rect x="26" y="640" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
-    <text x="156" y="661" font-size="13.5" font-weight="700" fill="#54400f">NacosServiceDiscovery</text>
-    <text x="156" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">NacosNamingServiceWrapper</text>
+    <rect x="26" y="682" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
+    <text x="156" y="703" font-size="13.5" font-weight="700" fill="#54400f">NacosServiceDiscovery</text>
+    <text x="156" y="721" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">NacosNamingServiceWrapper</text>
 
-    <rect x="296" y="640" width="140" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
-    <text x="366" y="661" font-size="12" font-weight="600" fill="#1c2a38">Zookeeper</text>
-    <text x="366" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">same SPI</text>
+    <rect x="296" y="682" width="170" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
+    <text x="381" y="703" font-size="12" font-weight="600" fill="#1c2a38">Zookeeper</text>
+    <text x="381" y="721" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">same SPI</text>
 
-    <rect x="494" y="640" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
-    <text x="624" y="661" font-size="13.5" font-weight="700" fill="#54400f">MetadataService</text>
-    <text x="624" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">own port and protocol</text>
+    <rect x="494" y="682" width="260" height="52" rx="5" fill="#fff4d6" stroke="#c9962b" stroke-width="2.4"/>
+    <text x="624" y="703" font-size="13.5" font-weight="700" fill="#54400f">MetadataService</text>
+    <text x="624" y="721" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">own port and protocol</text>
 
-    <rect x="764" y="640" width="170" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
-    <text x="849" y="661" font-size="12" font-weight="600" fill="#1c2a38">MetadataServiceV2</text>
-    <text x="849" y="679" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">over Triple</text>
+    <rect x="764" y="682" width="170" height="52" rx="5" fill="#fdf8ea" stroke="#d3b273"/>
+    <text x="849" y="703" font-size="12" font-weight="600" fill="#1c2a38">MetadataServiceV2</text>
+    <text x="849" y="721" font-family="Menlo, Consolas, monospace" font-size="10.5" fill="#8a7340">over Triple</text>
   </g>
 
   <!-- legend -->
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#5b7186">
-    <path d="M26,734 L62,734" stroke="#2f4358" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
-    <text x="72" y="738">call path</text>
-    <path d="M158,734 L194,734" stroke="#a8761a" stroke-width="1.5" fill="none" marker-end="url(#b)"/>
-    <text x="204" y="738">control path</text>
+    <path d="M26,778 L62,778" stroke="#2f4358" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
+    <text x="72" y="782">call path</text>
+    <path d="M158,778 L194,778" stroke="#a8761a" stroke-width="1.5" fill="none" marker-end="url(#b)"/>
+    <text x="204" y="782">control path</text>
   </g>
 </svg>
