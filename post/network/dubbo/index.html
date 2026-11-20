@@ -49,6 +49,7 @@ class ExtensionDirector implements ExtensionAccessor {
 class ExtensionLoader&lt;T&gt; {
   - type: Class&lt;T&gt;
   - scopeModel: ScopeModel
+  - injector: ExtensionInjector
   - cachedClasses: Holder&lt;Map&lt;String, Class&gt;&gt;
   - cachedInstances: ConcurrentMap&lt;String, Holder&lt;Object&gt;&gt;
   - cachedAdaptiveClass: Class&lt;?&gt;
@@ -87,9 +88,9 @@ class SpringExtensionInjector implements ExtensionInjector
 ScopeModel *-- ExtensionDirector
 ExtensionDirector *-- ExtensionLoader
 ScopeModel --o ExtensionLoader
-ExtensionLoader ..&gt; AdaptiveClassCodeGenerator
-ExtensionLoader ..&gt; Compiler
-ExtensionLoader ..&gt; ExtensionInjector
+ExtensionLoader o-- ExtensionInjector
+ExtensionLoader --&gt; AdaptiveClassCodeGenerator
+ExtensionLoader --&gt; AdaptiveCompiler
 @enduml
 </code></pre><p>Both <code>ScopeModel</code> and <code>ExtensionDirector</code> implement <code>ExtensionAccessor</code>, exposing a uniform entry point (<code>getExtensionLoader</code>, <code>getExtension</code>, <code>getAdaptiveExtension</code>) at every tier of the container.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>ExtensionAccessor</span> {
 </span></span><span style=display:flex><span>    ExtensionDirector <span style=color:#a6e22e>getExtensionDirector</span>();
@@ -302,7 +303,392 @@ ExtensionLoader ..&gt; ExtensionInjector
 </span></span><span style=display:flex><span>[After]  result = Stripe charged 500 cents
 </span></span><span style=display:flex><span>[Before] paying 1200
 </span></span><span style=display:flex><span>[After]  result = PayPal charged 1200 cents
-</span></span></code></pre></div><hr><h2 id=3-protocol>3. Protocol</h2><p><code>Protocol</code> is the core RPC boundary extension in Dubbo. It reduces remote service exposure and consumption to two operations: <code>export</code> turns a provider-side <code>Invoker</code> into a reachable <code>Exporter</code>, and <code>refer</code> turns a target <code>URL</code> into a consumer-side <code>Invoker</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;dubbo&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</span></span></code></pre></div><hr><h2 id=3-startup-deployer>3. Startup deployer</h2><p>A Dubbo process is typically both a service provider and a downstream consumer at the same time. Before it can safely accept live traffic, startup has to complete four ordered tasks across the process:</p><ol><li><strong>Configuration assembly</strong>: pull remote dynamic configuration (when a config center is enabled) and merge it with local properties and annotations into validated application-wide settings (registries, wire protocols, metadata store, metrics) and module-scoped defaults (provider/consumer templates, service and reference definitions).</li><li><strong>Local service exposure</strong>: adapt provider implementations into executable invokers, bind local server ports (alongside in-process <code>injvm</code> endpoints), and start the internal <code>MetadataService</code> — while keeping the node hidden from service discovery.</li><li><strong>Downstream reference warming</strong>: subscribe all declared consumer references to the registry, resolve upstream provider metadata, assemble routing and cluster failover chains, and establish outbound client connections.</li><li><strong>Service discovery publication</strong>: compute the metadata revision over all exported services and register the live application instance in the registry last, ensuring incoming requests never land on a node whose own downstream dependencies are still uninitialized (with graceful shutdown running the exact reverse order: unregister first, drain in-flight calls, unexport services, and close clients and servers).</li></ol><p>Rather than hard-coding those four tasks into a monolithic bootstrap class, Dubbo structures startup around its three-tier <code>ScopeModel</code> hierarchy (<code>FrameworkModel</code> $\rightarrow$ <code>ApplicationModel</code> $\rightarrow$ <code>ModuleModel</code>). Constructing each scope triggers SPI bootstrap hooks declared under <code>META-INF/dubbo/internal/</code> to attach its configuration store and deployer; deployer initialization populates two-tier configuration (<code>ConfigManager</code> at application scope and <code>ModuleConfigManager</code> at module scope); and the module deployer then drives export, reference subscription, and instance registration through <code>@Adaptive</code> proxies, <code>Wrapper</code> decorator chains, and <code>@Activate</code> pipelines.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface ScopeModelInitializer {
+  + initializeFrameworkModel(FrameworkModel)
+  + initializeApplicationModel(ApplicationModel)
+  + initializeModuleModel(ModuleModel)
+}
+class ConfigScopeModelInitializer implements ScopeModelInitializer
+interface ApplicationExt
+interface ModuleExt
+
+class DubboSpringInitializer {
+  - REGISTRY_CONTEXT_MAP: Map&lt;BeanDefinitionRegistry, DubboSpringInitContext&gt;
+  + initialize(BeanDefinitionRegistry)
+  - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
+}
+class DubboSpringInitContext {
+  - moduleModel: ModuleModel
+}
+interface InitializingBean {
+  + afterPropertiesSet()
+}
+class DubboConfigBeanInitializer implements InitializingBean {
+  - configManager: ConfigManager
+  - moduleModel: ModuleModel
+  - prepareDubboConfigBeans()
+}
+
+interface BeanDefinitionRegistryPostProcessor {
+  + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
+}
+class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProcessor {
+  - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
+}
+
+interface ApplicationListener&lt;E&gt; {
+  + onApplicationEvent(E)
+}
+class DubboDeployApplicationListener implements ApplicationListener {
+  - applicationModel: ApplicationModel
+  - moduleModel: ModuleModel
+  + onApplicationEvent(ApplicationContextEvent)
+  - onContextRefreshedEvent(ContextRefreshedEvent)
+}
+
+abstract class ScopeModel {
+  - parent: ScopeModel
+  - scope: ExtensionScope
+  - classLoaders: Set&lt;ClassLoader&gt;
+}
+class FrameworkModel extends ScopeModel {
+  - applicationModels: List&lt;ApplicationModel&gt;
+}
+class ApplicationModel extends ScopeModel {
+  - configManager: ConfigManager
+  - deployer: ApplicationDeployer
+  - internalModule: ModuleModel
+  - defaultModule: ModuleModel
+  - moduleModels: List&lt;ModuleModel&gt;
+  + getApplicationConfigManager(): ConfigManager
+}
+class ModuleModel extends ScopeModel {
+  - applicationModel: ApplicationModel
+  - moduleConfigManager: ModuleConfigManager
+  - deployer: ModuleDeployer
+  + getConfigManager(): ModuleConfigManager
+  + getDeployer(): ModuleDeployer
+}
+
+abstract class AbstractConfigManager {
+  ~ configsCache: ConcurrentHashMap&lt;String, Map&lt;String, AbstractConfig&gt;&gt;
+  + loadConfigs()
+  # checkDefaultAndValidateConfigs(Class&lt;T&gt;)
+}
+class ConfigManager extends AbstractConfigManager implements ApplicationExt {
+  + addRegistry(RegistryConfig)
+  + addProtocol(ProtocolConfig)
+  + getDefaultRegistries(): List&lt;RegistryConfig&gt;
+  + getDefaultProtocols(): List&lt;ProtocolConfig&gt;
+}
+class ModuleConfigManager extends AbstractConfigManager implements ModuleExt {
+  - applicationConfigManager: ConfigManager
+  + addProvider(ProviderConfig)
+  + getDefaultProvider(): Optional&lt;ProviderConfig&gt;
+  + addService(ServiceConfigBase)
+  + addReference(ReferenceConfigBase)
+}
+
+abstract class AbstractConfig {
+  - id: String
+  # isDefault: Boolean
+  + refresh()
+}
+class RegistryConfig extends AbstractConfig {
+  - address: String
+  - protocol: String
+  - group: String
+  - registerMode: String
+  - useAsConfigCenter: Boolean
+  - useAsMetadataCenter: Boolean
+}
+class ProtocolConfig extends AbstractConfig {
+  - name: String
+  - host: String
+  - port: Integer
+  - threadpool: String
+  - threads: Integer
+  - serialization: String
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # registries: List&lt;RegistryConfig&gt;
+}
+abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
+  # version: String
+  # group: String
+  # protocols: List&lt;ProtocolConfig&gt;
+}
+class ProviderConfig extends AbstractServiceConfig {
+  - host: String
+  - port: Integer
+  - threadpool: String
+  - threads: Integer
+  - dispatcher: String
+}
+abstract class ServiceConfigBase&lt;T&gt; extends AbstractServiceConfig {
+  # interfaceClass: Class&lt;?&gt;
+  # ref: T
+  # provider: ProviderConfig
+  + export()
+}
+class ServiceConfig&lt;T&gt; extends ServiceConfigBase {
+  - protocolSPI: Protocol
+  - proxyFactory: ProxyFactory
+  + export(RegisterTypeEnum)
+  + register(boolean)
+}
+class ServiceBean&lt;T&gt; extends ServiceConfig implements InitializingBean {
+  - beanName: String
+  + afterPropertiesSet()
+  + destroy()
+}
+
+interface Deployer&lt;E&gt; {
+  + initialize()
+  + start(): Future
+  + stop()
+}
+abstract class AbstractDeployer&lt;E&gt; implements Deployer
+interface ApplicationDeployer extends Deployer {
+  + registerServiceInstance()
+  + refreshServiceInstance()
+  + exportMetadataService()
+}
+interface ModuleDeployer extends Deployer {
+  + setPending()
+}
+class DefaultApplicationDeployer extends AbstractDeployer implements ApplicationDeployer {
+  - configManager: ConfigManager
+  + initialize()
+  - startConfigCenter()
+  - loadApplicationConfigs()
+  - startMetadataCenter()
+}
+class DefaultModuleDeployer extends AbstractDeployer implements ModuleDeployer {
+  - configManager: ModuleConfigManager
+  - applicationDeployer: ApplicationDeployer
+  - exportedServices: List&lt;ServiceConfigBase&lt;?&gt;&gt;
+  + initialize()
+  + start(): Future
+  - startSync(): Future
+  - exportServices()
+  - referServices()
+  - registerServices()
+}
+
+FrameworkModel *-- ApplicationModel
+ApplicationModel *-- ModuleModel
+ApplicationModel *-- ConfigManager
+ApplicationModel *-- ApplicationDeployer
+ModuleModel *-- ModuleConfigManager
+ModuleModel *-- ModuleDeployer
+ConfigScopeModelInitializer --&gt; ApplicationDeployer
+ConfigScopeModelInitializer --&gt; ModuleDeployer
+ModuleConfigManager o-- ConfigManager
+ConfigManager o-- RegistryConfig
+ConfigManager o-- ProtocolConfig
+ModuleConfigManager o-- ProviderConfig
+ModuleConfigManager o-- ServiceConfigBase
+AbstractInterfaceConfig o-- RegistryConfig
+AbstractServiceConfig o-- ProtocolConfig
+ServiceConfigBase o-- ProviderConfig
+DubboSpringInitializer *-- DubboSpringInitContext
+DubboSpringInitContext o-- ModuleModel
+DubboConfigBeanInitializer o-- ConfigManager
+DubboConfigBeanInitializer o-- ModuleModel
+ServiceAnnotationPostProcessor --&gt; ServiceBean
+DubboDeployApplicationListener o-- ApplicationModel
+DubboDeployApplicationListener o-- ModuleModel
+DefaultApplicationDeployer o-- ConfigManager
+DefaultModuleDeployer o-- ModuleConfigManager
+DefaultModuleDeployer o-- ApplicationDeployer
+DefaultModuleDeployer o-- ServiceConfigBase
+@enduml
+</code></pre><h3 id=31-extension-declarations-and-startup-activation>3.1 Extension declarations and startup activation</h3><p>Every extension loaded during startup is registered as <code>name=implementationClass</code> under <code>META-INF/dubbo/internal/&lt;interface></code> and bound to one of the three <code>ScopeModel</code> tiers:</p><ul><li><p><strong>Framework level (<code>FrameworkModel</code>)</strong>:</p><ul><li><strong><code>ExtensionInjector</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.common.extension.ExtensionInjector</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>adaptive</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.extension.inject.AdaptiveExtensionInjector</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>spi</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.extension.inject.SpiExtensionInjector</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>scopeBean</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.beans.ScopeBeanExtensionInjector</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>spring</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.spring.extension.SpringExtensionInjector</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// AdaptiveExtensionInjector.initialize() (called from ScopeModel.initialize() -&gt; ExtensionDirector)</span>
+</span></span><span style=display:flex><span>ExtensionLoader<span style=color:#f92672>&lt;</span>ExtensionInjector<span style=color:#f92672>&gt;</span> loader <span style=color:#f92672>=</span> extensionAccessor.<span style=color:#a6e22e>getExtensionLoader</span>(ExtensionInjector.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>injectors <span style=color:#f92672>=</span> loader.<span style=color:#a6e22e>getSupportedExtensions</span>().<span style=color:#a6e22e>stream</span>()
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>map</span>(loader::getExtension)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>collect</span>(Collectors.<span style=color:#a6e22e>toList</span>());
+</span></span></code></pre></div></li><li><strong><code>ScopeModelInitializer</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.rpc.model.ScopeModelInitializer</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>dubbo-common</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.CommonScopeModelInitializer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo-config-api</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.ConfigScopeModelInitializer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo-registry-api</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.RegistryScopeModelInitializer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo-metadata-api</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.metadata.report.MetadataScopeModelInitializer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo-cluster</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.ClusterScopeModelInitializer</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// FrameworkModel.&lt;init&gt;()</span>
+</span></span><span style=display:flex><span>Set<span style=color:#f92672>&lt;</span>ScopeModelInitializer<span style=color:#f92672>&gt;</span> initializers <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ScopeModelInitializer.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getSupportedExtensionInstances</span>();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (ScopeModelInitializer initializer : initializers) {
+</span></span><span style=display:flex><span>    initializer.<span style=color:#a6e22e>initializeFrameworkModel</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div></li><li><strong><code>Compiler</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.common.compiler.Compiler</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>adaptive</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.compiler.support.AdaptiveCompiler</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>javassist</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.compiler.support.JavassistCompiler</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>jdk</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.compiler.support.JdkCompiler</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ExtensionLoader.createAdaptiveExtensionClass()</span>
+</span></span><span style=display:flex><span>String code <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> AdaptiveClassCodeGenerator(type, cachedDefaultName).<span style=color:#a6e22e>generate</span>();
+</span></span><span style=display:flex><span>Compiler compiler <span style=color:#f92672>=</span> extensionDirector.<span style=color:#a6e22e>getExtensionLoader</span>(Compiler.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> compiler.<span style=color:#a6e22e>compile</span>(type, code, classLoader);
+</span></span></code></pre></div></li><li><strong><code>Protocol</code> and <code>ProxyFactory</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.rpc.Protocol</code> and <code>ProxyFactory</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.Protocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.dubbo.DubboProtocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>tri</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.tri.TripleProtocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>injvm</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.injvm.InjvmProtocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>service-discovery-registry</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.integration.RegistryProtocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>registry</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.integration.InterfaceCompatibleRegistryProtocol</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>filter</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.filter.ProtocolFilterWrapper</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>listener</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.ProtocolListenerWrapper</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>qos</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.qos.protocol.QosProtocolWrapper</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.ProxyFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>javassist</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.proxy.javassist.JavassistProxyFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>jdk</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.proxy.jdk.JdkProxyFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>stub</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.proxy.wrapper.StubProxyFactoryWrapper</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ServiceConfig / ReferenceConfig.postProcessAfterScopeModelChanged()</span>
+</span></span><span style=display:flex><span>protocolSPI <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(Protocol.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span><span style=display:flex><span>proxyFactory <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ProxyFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span></code></pre></div></li><li><strong>Transport, framing, serialization, and threading (<code>Exchanger</code>, <code>Transporter</code>, <code>Codec2</code>, <code>Serialization</code>, <code>ThreadPool</code>, <code>Dispatcher</code>)</strong>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.remoting.exchange.Exchanger</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>header</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.remoting.exchange.support.header.HeaderExchanger</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.remoting.Transporter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>netty</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.remoting.transport.netty4.NettyTransporter</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.remoting.Codec2</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>dubbo</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.dubbo.DubboCountCodec</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.common.serialize.Serialization</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>hessian2</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.serialize.hessian2.Hessian2Serialization</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>fastjson2</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.serialize.fastjson2.FastJson2Serialization</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.common.threadpool.ThreadPool</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>fixed</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.threadpool.support.fixed.FixedThreadPool</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>limited</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.threadpool.support.limited.LimitedThreadPool</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.remoting.Dispatcher</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>all</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.remoting.transport.dispatcher.all.AllDispatcher</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// Validated eagerly in ConfigValidationUtils.validateProtocolConfig() / validateProviderConfig():</span>
+</span></span><span style=display:flex><span>scopeModel.<span style=color:#a6e22e>getExtensionLoader</span>(Transporter.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>hasExtension</span>(config.<span style=color:#a6e22e>getTransporter</span>());
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// Loaded lazily when DubboProtocol binds a server or connects a client:</span>
+</span></span><span style=display:flex><span>Exchanger exchanger <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getOrDefaultFrameworkModel</span>().<span style=color:#a6e22e>getExtensionLoader</span>(Exchanger.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getExtension</span>(type);
+</span></span><span style=display:flex><span>Transporter transporter <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getOrDefaultFrameworkModel</span>().<span style=color:#a6e22e>getExtensionLoader</span>(Transporter.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span><span style=display:flex><span>Codec2 codec <span style=color:#f92672>=</span> frameworkModel.<span style=color:#a6e22e>getExtensionLoader</span>(Codec2.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getExtension</span>(codecName);
+</span></span><span style=display:flex><span>Serialization serialization <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getOrDefaultFrameworkModel</span>().<span style=color:#a6e22e>getExtensionLoader</span>(Serialization.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getExtension</span>(s);
+</span></span><span style=display:flex><span>ExecutorService executor <span style=color:#f92672>=</span> (ExecutorService) extensionAccessor.<span style=color:#a6e22e>getExtensionLoader</span>(ThreadPool.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>().<span style=color:#a6e22e>getExecutor</span>(url);
+</span></span><span style=display:flex><span>ChannelHandler wrapped <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getOrDefaultFrameworkModel</span>().<span style=color:#a6e22e>getExtensionLoader</span>(Dispatcher.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>().<span style=color:#a6e22e>dispatch</span>(handler, url);
+</span></span></code></pre></div></li></ul></li><li><p><strong>Application level (<code>ApplicationModel</code> & <code>DefaultApplicationDeployer</code>)</strong>:</p><ul><li><strong><code>ApplicationExt</code> and <code>DefaultApplicationDeployer</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.common.context.ApplicationExt</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>config</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.context.ConfigManager</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>environment</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.config.Environment</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ApplicationModel.&lt;init&gt;() -&gt; initApplicationExts() &amp; ConfigScopeModelInitializer.initializeApplicationModel()</span>
+</span></span><span style=display:flex><span>Set<span style=color:#f92672>&lt;</span>ApplicationExt<span style=color:#f92672>&gt;</span> exts <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ApplicationExt.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getSupportedExtensionInstances</span>();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (ApplicationExt ext : exts) {
+</span></span><span style=display:flex><span>    ext.<span style=color:#a6e22e>initialize</span>();                                       <span style=color:#75715e>// Environment, ConfigManager</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>ApplicationDeployer applicationDeployer <span style=color:#f92672>=</span> beanFactory.<span style=color:#a6e22e>registerBean</span>(DefaultApplicationDeployer.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>applicationModel.<span style=color:#a6e22e>setDeployer</span>(applicationDeployer);
+</span></span></code></pre></div></li><li><strong><code>DynamicConfigurationFactory</code> and application config initialization</strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.common.config.configcenter.DynamicConfigurationFactory</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>nop</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.config.configcenter.nop.NopDynamicConfigurationFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>nacos</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.configcenter.support.nacos.NacosDynamicConfigurationFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>zookeeper</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.configcenter.support.zookeeper.ZookeeperDynamicConfigurationFactory</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DefaultApplicationDeployer.initialize() -&gt; startConfigCenter() &amp; loadApplicationConfigs()</span>
+</span></span><span style=display:flex><span>configManager.<span style=color:#a6e22e>loadConfigsOfTypeFromProps</span>(ApplicationConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>configManager.<span style=color:#a6e22e>loadConfigsOfTypeFromProps</span>(ConfigCenterConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>useRegistryAsConfigCenterIfNecessary();                     <span style=color:#75715e>// checks getExtensionLoader(DynamicConfigurationFactory.class).hasExtension(protocol)</span>
+</span></span><span style=display:flex><span>DynamicConfigurationFactory factory <span style=color:#f92672>=</span> applicationModel
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>getExtensionLoader</span>(DynamicConfigurationFactory.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>getOrDefaultExtension</span>(protocol);
+</span></span><span style=display:flex><span>environment.<span style=color:#a6e22e>setDynamicConfiguration</span>(factory.<span style=color:#a6e22e>getDynamicConfiguration</span>(configCenter.<span style=color:#a6e22e>toUrl</span>()));
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>configManager.<span style=color:#a6e22e>loadConfigs</span>();                                <span style=color:#75715e>// binds ProtocolConfig, RegistryConfig (isRequired == false), MetadataReportConfig</span>
+</span></span></code></pre></div></li><li><strong><code>MetadataReportFactory</code> and metrics (<code>MetricsReporterFactory</code>, <code>MetricsServiceExporter</code>)</strong>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.metadata.report.MetadataReportFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>nacos</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.metadata.store.nacos.NacosMetadataReportFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>zookeeper</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.metadata.store.zookeeper.ZookeeperMetadataReportFactory</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.metrics.report.MetricsReporterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>default</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.metrics.report.DefaultMetricsReporterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>prometheus</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.metrics.prometheus.PrometheusMetricsReporterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.metrics.service.MetricsServiceExporter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>default</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.deploy.DefaultMetricsServiceExporter</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DefaultApplicationDeployer.initMetricsReporter() / initMetricsService() / startMetadataCenter()</span>
+</span></span><span style=display:flex><span>MetricsReporterFactory reporterFactory <span style=color:#f92672>=</span> getExtensionLoader(MetricsReporterFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span><span style=display:flex><span>MetricsServiceExporter metricsExporter <span style=color:#f92672>=</span> getExtensionLoader(MetricsServiceExporter.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getDefaultExtension</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>useRegistryAsMetadataCenterIfNecessary();                   <span style=color:#75715e>// checks getExtensionLoader(MetadataReportFactory.class).hasExtension(protocol)</span>
+</span></span><span style=display:flex><span>MetadataReportFactory metadataReportFactory <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        applicationModel.<span style=color:#a6e22e>getExtensionLoader</span>(MetadataReportFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>();
+</span></span><span style=display:flex><span>MetadataReport metadataReport <span style=color:#f92672>=</span> metadataReportFactory.<span style=color:#a6e22e>getMetadataReport</span>(url);
+</span></span></code></pre></div></li><li><strong>Discovery, mapping, clustering, and instance customization (<code>RegistryFactory</code>, <code>ServiceDiscoveryFactory</code>, <code>ServiceNameMapping</code>, <code>Cluster</code>, <code>LoadBalance</code>, <code>ServiceInstanceCustomizer</code>)</strong>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.registry.RegistryFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>service-discovery-registry</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.client.ServiceDiscoveryRegistryFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>nacos</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.nacos.NacosRegistryFactory</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.registry.client.ServiceDiscoveryFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>nacos</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.nacos.NacosServiceDiscoveryFactory</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.metadata.ServiceNameMapping</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>metadata</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.client.metadata.MetadataServiceNameMapping</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.Cluster</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>mock</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.support.wrapper.MockClusterWrapper</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>failover</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.support.FailoverCluster</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>zone-aware</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.support.registry.ZoneAwareCluster</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.LoadBalance</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>random</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.loadbalance.RandomLoadBalance</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.registry.client.ServiceInstanceCustomizer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>protocol-ports</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.client.metadata.ProtocolPortsMetadataCustomizer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>instance-metadata</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.registry.client.metadata.ServiceInstanceMetadataCustomizer</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>metadata-url</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.metadata.MetadataServiceURLParamsMetadataCustomizer</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// RegistryProtocol, ServiceConfig, ReferenceConfig, and ServiceInstanceMetadataUtils</span>
+</span></span><span style=display:flex><span>Registry registry <span style=color:#f92672>=</span> applicationModel.<span style=color:#a6e22e>getExtensionLoader</span>(RegistryFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>().<span style=color:#a6e22e>getRegistry</span>(registryUrl);
+</span></span><span style=display:flex><span>ServiceDiscovery discovery <span style=color:#f92672>=</span> applicationModel.<span style=color:#a6e22e>getExtensionLoader</span>(ServiceDiscoveryFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getAdaptiveExtension</span>().<span style=color:#a6e22e>getServiceDiscovery</span>(registryURL);
+</span></span><span style=display:flex><span>ServiceNameMapping.<span style=color:#a6e22e>getDefaultExtension</span>(scopeModel).<span style=color:#a6e22e>map</span>(url);
+</span></span><span style=display:flex><span>Invoker<span style=color:#f92672>&lt;?&gt;</span> clusterInvoker <span style=color:#f92672>=</span> Cluster.<span style=color:#a6e22e>getCluster</span>(scopeModel, clusterName).<span style=color:#a6e22e>join</span>(directory, <span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>LoadBalance lb <span style=color:#f92672>=</span> ScopeModelUtil.<span style=color:#a6e22e>getExtensionLoader</span>(LoadBalance.<span style=color:#a6e22e>class</span>, moduleModel).<span style=color:#a6e22e>getExtension</span>(loadbalanceName);
+</span></span><span style=display:flex><span>applicationModel.<span style=color:#a6e22e>getExtensionLoader</span>(ServiceInstanceCustomizer.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>getSupportedExtensionInstances</span>()
+</span></span><span style=display:flex><span>        .<span style=color:#a6e22e>forEach</span>(customizer <span style=color:#f92672>-&gt;</span> customizer.<span style=color:#a6e22e>customize</span>(instance, applicationModel));
+</span></span></code></pre></div></li></ul></li><li><p><strong>Module level (<code>ModuleModel</code> & <code>DefaultModuleDeployer</code>)</strong>:</p><ul><li><strong><code>ModuleExt</code> and <code>DefaultModuleDeployer</code></strong> — <code>META-INF/dubbo/internal/org.apache.dubbo.common.context.ModuleExt</code>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#a6e22e>moduleEnvironment</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.common.config.ModuleEnvironment</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>moduleConfig</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.config.context.ModuleConfigManager</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ModuleModel.&lt;init&gt;() -&gt; initModuleExt() &amp; ConfigScopeModelInitializer.initializeModuleModel()</span>
+</span></span><span style=display:flex><span>Set<span style=color:#f92672>&lt;</span>ModuleExt<span style=color:#f92672>&gt;</span> exts <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ModuleExt.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getSupportedExtensionInstances</span>();
+</span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (ModuleExt ext : exts) {
+</span></span><span style=display:flex><span>    ext.<span style=color:#a6e22e>initialize</span>();                                       <span style=color:#75715e>// ModuleEnvironment, ModuleConfigManager (delegates shared lookups to ConfigManager)</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>ModuleDeployer moduleDeployer <span style=color:#f92672>=</span> beanFactory.<span style=color:#a6e22e>registerBean</span>(DefaultModuleDeployer.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>moduleModel.<span style=color:#a6e22e>setDeployer</span>(moduleDeployer);
+</span></span></code></pre></div></li><li><strong>Module config initialization (<code>DefaultModuleDeployer.initialize()</code> $\rightarrow$ <code>ModuleConfigManager.loadConfigs()</code>)</strong>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// ModuleConfigManager.loadConfigs(): ProviderConfig has isRequired == true (synthesizes blank default with null fields if absent)</span>
+</span></span><span style=display:flex><span>loadConfigsOfTypeFromProps(ProviderConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>loadConfigsOfTypeFromProps(ConsumerConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>loadConfigsOfTypeFromProps(ModuleConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>checkDefaultAndValidateConfigs(ProviderConfig.<span style=color:#a6e22e>class</span>);       <span style=color:#75715e>// inherited in ServiceConfig.preProcessRefresh() via getDefaultProvider()</span>
+</span></span><span style=display:flex><span>checkDefaultAndValidateConfigs(ConsumerConfig.<span style=color:#a6e22e>class</span>);
+</span></span><span style=display:flex><span>checkDefaultAndValidateConfigs(ModuleConfig.<span style=color:#a6e22e>class</span>);
+</span></span></code></pre></div></li><li><strong><code>Filter</code>, <code>ClusterFilter</code>, <code>StateRouterFactory</code>, and <code>GovernanceRuleRepository</code> during <code>DefaultModuleDeployer.startSync()</code></strong>:<div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-properties data-lang=properties><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.Filter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>context</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.filter.ContextFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>echo</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.filter.EchoFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>generic</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.filter.GenericFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>timeout</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.filter.TimeoutFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>exception</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.filter.ExceptionFilter</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.filter.ClusterFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>consumercontext</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.filter.support.ConsumerContextFilter</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>future</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.protocol.dubbo.filter.FutureFilter</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.router.state.StateRouterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condition</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.router.condition.ConditionStateRouterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>tag</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.router.tag.TagStateRouterFactory</span>
+</span></span><span style=display:flex><span><span style=color:#75715e># META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.governance.GovernanceRuleRepository</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>default</span><span style=color:#f92672>=</span><span style=color:#e6db74>org.apache.dubbo.rpc.cluster.governance.DefaultGovernanceRuleRepositoryImpl</span>
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// DefaultModuleDeployer.startSync() -&gt; DefaultFilterChainBuilder, RouterChain, and AbstractStateRouter</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>synchronized</span> Future <span style=color:#a6e22e>startSync</span>() {
+</span></span><span style=display:flex><span>    initialize();
+</span></span><span style=display:flex><span>    exportServices();                                       <span style=color:#75715e>// 1. bind local server + injvm (register=false)</span>
+</span></span><span style=display:flex><span>    prepareInternalModule();                                <span style=color:#75715e>// 2. start internalModule (MetadataService)</span>
+</span></span><span style=display:flex><span>    referServices();                                        <span style=color:#75715e>// 3. subscribe &amp; connect @DubboReference beans</span>
+</span></span><span style=display:flex><span>    onModuleStarted();                                      <span style=color:#75715e>// 4. customize &amp; register ServiceInstance</span>
+</span></span><span style=display:flex><span>    registerServices();                                     <span style=color:#75715e>// 5. publish MetadataInfo + refresh instance last</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> startFuture;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>Filter<span style=color:#f92672>&gt;</span> filters <span style=color:#f92672>=</span> ScopeModelUtil.<span style=color:#a6e22e>getExtensionLoader</span>(Filter.<span style=color:#a6e22e>class</span>, moduleModel).<span style=color:#a6e22e>getActivateExtension</span>(url, key, group);
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>ClusterFilter<span style=color:#f92672>&gt;</span> clusterFilters <span style=color:#f92672>=</span> ScopeModelUtil.<span style=color:#a6e22e>getExtensionLoader</span>(ClusterFilter.<span style=color:#a6e22e>class</span>, moduleModel).<span style=color:#a6e22e>getActivateExtension</span>(url, key, group);
+</span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>StateRouterFactory<span style=color:#f92672>&gt;</span> routers <span style=color:#f92672>=</span> moduleModel.<span style=color:#a6e22e>getExtensionLoader</span>(StateRouterFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getActivateExtension</span>(url, ROUTER_KEY);
+</span></span><span style=display:flex><span>GovernanceRuleRepository ruleRepo <span style=color:#f92672>=</span> moduleModel.<span style=color:#a6e22e>getExtensionLoader</span>(GovernanceRuleRepository.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>getDefaultExtension</span>();
+</span></span></code></pre></div></li></ul></li></ul><hr><h2 id=4-protocol>4. Protocol</h2><p><code>Protocol</code> is the core RPC boundary extension in Dubbo. It reduces remote service exposure and consumption to two operations: <code>export</code> turns a provider-side <code>Invoker</code> into a reachable <code>Exporter</code>, and <code>refer</code> turns a target <code>URL</code> into a consumer-side <code>Invoker</code>.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;dubbo&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Protocol</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Exporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>export</span>(Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> invoker) <span style=color:#66d9ef>throws</span> RpcException;
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>refer</span>(Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type, URL url) <span style=color:#66d9ef>throws</span> RpcException;
@@ -360,194 +746,7 @@ AbstractProtocol *-- Exporter
 AbstractProtocol *-- Invoker
 AbstractExporter o-- Invoker
 @enduml
-</code></pre><h3 id=31-startup-deployer>3.1 Startup deployer</h3><p>A Dubbo process is typically both a provider and a consumer at the same time, and its configuration and lifecycle are split across two scopes rather than managed in a single flat container:</p><ul><li><strong>Application scope (<code>ApplicationModel</code>, <code>ConfigManager</code>, <code>DefaultApplicationDeployer</code>)</strong>: owns process-wide infrastructure shared across every module — <code>ApplicationConfig</code>, <code>ProtocolConfig</code>, <code>ExecutorRepository</code>, the <code>ServiceDiscovery</code> client, and <strong><code>RegistryConfig</code></strong>. During <code>DefaultApplicationDeployer.initialize()</code>, <code>ConfigManager.loadConfigs()</code> binds <code>dubbo.registry.*</code> and <code>dubbo.registries.&lt;id>.*</code> properties (alongside Spring <code>RegistryConfig</code> beans loaded by <code>DubboConfigBeanInitializer</code>). Each <code>RegistryConfig</code> specifies the registry endpoint and registration policy (<code>address</code>, <code>protocol</code>, <code>group</code>, <code>registerMode</code>, <code>simplified</code>). Because <code>RegistryConfig</code> is optional (<code>isRequired == false</code>, permitting <code>injvm</code>-only or direct-URL deployments), Dubbo never synthesizes a blank <code>RegistryConfig</code> when none is configured; conversely, when <code>RegistryConfig</code> is present and <code>useAsConfigCenter</code> or <code>useAsMetadataCenter</code> is unset (<code>null</code> or <code>true</code>), <code>DefaultApplicationDeployer</code> reuses that <code>RegistryConfig</code> address to bootstrap the dynamic config center and <code>MetadataReport</code> store when no dedicated center is declared.</li><li><strong>Module scope (<code>ModuleModel</code>, <code>ModuleConfigManager</code>, <code>DefaultModuleDeployer</code>)</strong>: isolates each deployable unit of <code>@DubboService</code> and <code>@DubboReference</code> definitions with its own <code>ClassLoader</code> set, separating framework-internal services (<code>internalModule</code>, hosting <code>MetadataService</code>) from user modules (<code>defaultModule</code> for the primary Spring <code>ApplicationContext</code>, plus optional child modules created via <code>applicationModel.newModule()</code>). <code>ModuleConfigManager</code> stores module-local configs (<code>ModuleConfig</code>, <code>ServiceConfigBase</code>, <code>ReferenceConfigBase</code>, <code>ConsumerConfig</code>, and <strong><code>ProviderConfig</code></strong>) while delegating application-scoped queries such as <code>getDefaultRegistries()</code> and <code>getDefaultProtocols()</code> up to <code>ConfigManager</code>. During <code>DefaultModuleDeployer.initialize()</code>, <code>ModuleConfigManager.loadConfigs()</code> loads <code>dubbo.provider.*</code> and <code>dubbo.providers.&lt;id>.*</code> and runs <code>checkDefaultAndValidateConfigs(ProviderConfig.class)</code>. Because <code>ProviderConfig</code> is required (<code>isRequired == true</code>), Dubbo automatically instantiates a default <code>ProviderConfig</code> (<code>getDefaultProvider()</code>) if none was declared. All attribute fields on a fresh <code>ProviderConfig</code> — invocation defaults (<code>timeout</code>, <code>retries</code>, <code>loadbalance</code>), service defaults (<code>version</code>, <code>group</code>, <code>protocols</code>, <code>registries</code>), and server defaults (<code>host</code>, <code>port</code>, <code>threadpool</code>, <code>threads</code>, <code>dispatcher</code>) — start as <code>null</code> so exported URLs remain compact and downstream protocol/cluster components apply their built-in constants unless overridden. When <code>ServiceConfig.refresh()</code> runs, every <code>@DubboService</code> without an explicit <code>provider</code> ID attaches this default <code>ProviderConfig</code> (<code>preProcessRefresh()</code>) and inherits its <code>protocols</code> and <code>registries</code>, falling back to <code>ConfigManager.getDefaultRegistries()</code> if <code>ProviderConfig</code> also leaves <code>registries</code> unset.</li></ul><p>Whether started by Spring (<code>DubboSpringInitializer</code> + <code>DubboDeployApplicationListener</code> on <code>ContextRefreshedEvent</code>) or programmatically (<code>DubboBootstrap.start()</code>), startup first initializes <code>DefaultApplicationDeployer</code> and <code>DefaultModuleDeployer</code> to populate <code>ConfigManager</code> and <code>ModuleConfigManager</code>, and then converges on <code>DefaultModuleDeployer.startSync()</code>, which executes three phases in strict order:</p><ol><li><strong><code>exportServices()</code></strong>: binds the local wire server and <code>injvm</code> endpoints using defaults resolved from <code>ProviderConfig</code> and <code>ProtocolConfig</code>, without registering in the registry yet.</li><li><strong><code>referServices()</code></strong>: subscribes all <code>@DubboReference</code> dependencies to the target <code>RegistryConfig</code> endpoints and initializes downstream client invokers.</li><li><strong><code>registerServices()</code></strong>: publishes <code>MetadataInfo</code> and registers the provider instance in the registry last, ensuring incoming traffic never reaches a service whose own downstream <code>@DubboReference</code> dependencies are still uninitialized.</li></ol><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
-top to bottom direction
-
-class DubboSpringInitializer {
-  - REGISTRY_CONTEXT_MAP: Map&lt;BeanDefinitionRegistry, DubboSpringInitContext&gt;
-  + initialize(BeanDefinitionRegistry)
-  - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
-}
-class DubboConfigBeanInitializer {
-  - configManager: ConfigManager
-  - moduleModel: ModuleModel
-  - prepareDubboConfigBeans()
-}
-
-interface BeanDefinitionRegistryPostProcessor {
-  + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
-}
-class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProcessor {
-  - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
-}
-
-interface ApplicationListener&lt;E&gt; {
-  + onApplicationEvent(E)
-}
-class DubboDeployApplicationListener implements ApplicationListener {
-  - applicationModel: ApplicationModel
-  - moduleModel: ModuleModel
-  + onApplicationEvent(ApplicationContextEvent)
-  - onContextRefreshedEvent(ContextRefreshedEvent)
-}
-
-abstract class ScopeModel {
-  - parent: ScopeModel
-  - scope: ExtensionScope
-  - classLoaders: Set&lt;ClassLoader&gt;
-}
-class FrameworkModel extends ScopeModel {
-  - applicationModels: List&lt;ApplicationModel&gt;
-}
-class ApplicationModel extends ScopeModel {
-  - configManager: ConfigManager
-  - deployer: ApplicationDeployer
-  - internalModule: ModuleModel
-  - defaultModule: ModuleModel
-  - moduleModels: List&lt;ModuleModel&gt;
-  + getApplicationConfigManager(): ConfigManager
-}
-class ModuleModel extends ScopeModel {
-  - applicationModel: ApplicationModel
-  - moduleConfigManager: ModuleConfigManager
-  - deployer: ModuleDeployer
-  + getConfigManager(): ModuleConfigManager
-  + getDeployer(): ModuleDeployer
-}
-
-abstract class AbstractConfigManager {
-  ~ configsCache: ConcurrentHashMap&lt;String, Map&lt;String, AbstractConfig&gt;&gt;
-  + loadConfigs()
-  # checkDefaultAndValidateConfigs(Class&lt;T&gt;)
-}
-class ConfigManager extends AbstractConfigManager {
-  + addRegistry(RegistryConfig)
-  + getDefaultRegistries(): List&lt;RegistryConfig&gt;
-  + getDefaultProtocols(): List&lt;ProtocolConfig&gt;
-}
-class ModuleConfigManager extends AbstractConfigManager {
-  - applicationConfigManager: ConfigManager
-  + addProvider(ProviderConfig)
-  + getDefaultProvider(): Optional&lt;ProviderConfig&gt;
-  + addService(ServiceConfigBase)
-  + addReference(ReferenceConfigBase)
-}
-
-abstract class AbstractConfig {
-  - id: String
-  # isDefault: Boolean
-  + refresh()
-}
-class RegistryConfig extends AbstractConfig {
-  - address: String
-  - protocol: String
-  - group: String
-  - registerMode: String
-  - useAsConfigCenter: Boolean
-  - useAsMetadataCenter: Boolean
-}
-abstract class AbstractMethodConfig extends AbstractConfig {
-  # timeout: Integer
-  # retries: Integer
-}
-abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
-  # registries: List&lt;RegistryConfig&gt;
-}
-abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
-  # version: String
-  # group: String
-  # protocols: List&lt;ProtocolConfig&gt;
-}
-class ProviderConfig extends AbstractServiceConfig {
-  - host: String
-  - port: Integer
-  - threadpool: String
-  - threads: Integer
-  - dispatcher: String
-}
-
-interface Deployer&lt;E&gt; {
-  + initialize()
-  + start(): Future
-  + stop()
-}
-abstract class AbstractDeployer&lt;E&gt; implements Deployer
-interface ApplicationDeployer extends Deployer {
-  + registerServiceInstance()
-  + refreshServiceInstance()
-  + exportMetadataService()
-}
-interface ModuleDeployer extends Deployer {
-  + setPending()
-}
-class DefaultApplicationDeployer extends AbstractDeployer implements ApplicationDeployer {
-  - configManager: ConfigManager
-  + initialize()
-  - startConfigCenter()
-  - loadApplicationConfigs()
-  - startMetadataCenter()
-}
-class DefaultModuleDeployer extends AbstractDeployer implements ModuleDeployer {
-  - configManager: ModuleConfigManager
-  - applicationDeployer: ApplicationDeployer
-  + initialize()
-  + start(): Future
-  - startSync(): Future
-  - exportServices()
-  - referServices()
-  - registerServices()
-}
-
-FrameworkModel *-- ApplicationModel
-ApplicationModel *-- ModuleModel
-ApplicationModel *-- ConfigManager
-ApplicationModel *-- ApplicationDeployer
-ModuleModel *-- ModuleConfigManager
-ModuleModel *-- ModuleDeployer
-ModuleConfigManager --&gt; ConfigManager
-ConfigManager o-- RegistryConfig
-ModuleConfigManager o-- ProviderConfig
-AbstractInterfaceConfig o-- RegistryConfig
-DubboSpringInitializer ..&gt; DubboConfigBeanInitializer
-DubboSpringInitializer ..&gt; DubboDeployApplicationListener
-DubboSpringInitializer ..&gt; ModuleModel
-DubboConfigBeanInitializer --&gt; ConfigManager
-DubboConfigBeanInitializer ..&gt; ModuleConfigManager
-ServiceAnnotationPostProcessor ..&gt; ModuleConfigManager
-DubboDeployApplicationListener o-- ModuleModel
-DefaultApplicationDeployer --&gt; ConfigManager
-DefaultModuleDeployer --&gt; ModuleConfigManager
-DefaultModuleDeployer --&gt; ApplicationDeployer
-@enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Bind ModuleModel and register common beans: DubboSpringInitializer.initContext()</span>
-</span></span><span style=display:flex><span>ModuleModel moduleModel <span style=color:#f92672>=</span> applicationModel.<span style=color:#a6e22e>getDefaultModule</span>();
-</span></span><span style=display:flex><span>context.<span style=color:#a6e22e>setModuleModel</span>(moduleModel);
-</span></span><span style=display:flex><span>DubboBeanUtils.<span style=color:#a6e22e>registerCommonBeans</span>(registry);                   <span style=color:#75715e>// registers DubboConfigBeanInitializer &amp; DubboDeployApplicationListener</span>
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 2. Register ServiceBean / ReferenceBean into ModuleConfigManager during Spring bean initialization</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>afterPropertiesSet</span>() {                              <span style=color:#75715e>// ServiceBean.afterPropertiesSet()</span>
-</span></span><span style=display:flex><span>    ModuleModel moduleModel <span style=color:#f92672>=</span> DubboBeanUtils.<span style=color:#a6e22e>getModuleModel</span>(applicationContext);
-</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getConfigManager</span>().<span style=color:#a6e22e>addService</span>(<span style=color:#66d9ef>this</span>);
-</span></span><span style=display:flex><span>    moduleModel.<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>setPending</span>();
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 3. ContextRefreshedEvent -&gt; DubboDeployApplicationListener -&gt; initialize configs &amp; start module</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>onContextRefreshedEvent</span>(ContextRefreshedEvent event) {
-</span></span><span style=display:flex><span>    ModuleDeployer deployer <span style=color:#f92672>=</span> moduleModel.<span style=color:#a6e22e>getDeployer</span>();
-</span></span><span style=display:flex><span>    Future future <span style=color:#f92672>=</span> deployer.<span style=color:#a6e22e>start</span>();                           <span style=color:#75715e>// applicationDeployer.initialize() loads RegistryConfig into ConfigManager</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 4. DefaultModuleDeployer.startSync(): init ProviderConfig -&gt; bind server -&gt; warm references -&gt; register last</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>synchronized</span> Future <span style=color:#a6e22e>startSync</span>() {
-</span></span><span style=display:flex><span>    initialize();                                               <span style=color:#75715e>// ModuleConfigManager.loadConfigs() loads/creates default ProviderConfig</span>
-</span></span><span style=display:flex><span>    exportServices();                                           <span style=color:#75715e>// 1. bind local server + injvm (register=false)</span>
-</span></span><span style=display:flex><span>    prepareInternalModule();                                    <span style=color:#75715e>// 2. start internal module (MetadataService)</span>
-</span></span><span style=display:flex><span>    referServices();                                            <span style=color:#75715e>// 3. subscribe &amp; connect all @DubboReference beans</span>
-</span></span><span style=display:flex><span>    onModuleStarted();                                          <span style=color:#75715e>// 4. prepareApplicationInstance() -&gt; registerServiceInstance()</span>
-</span></span><span style=display:flex><span>    registerServices();                                         <span style=color:#75715e>// 5. populate MetadataInfo + refresh registry instance</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> startFuture;
-</span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=32-export-the-provider-runtime>3.2 Export: the provider runtime</h3><p><code>export</code> is the provider-side pipeline that turns a <code>ServiceConfig</code> declaration into a live, discoverable RPC endpoint across three functions:</p><ul><li><strong>Endpoint exposure</strong>: adapts the business object into a reflection-free <code>Invoker</code> and binds the local wire server (alongside an in-process <code>injvm</code> endpoint) to accept incoming requests.</li><li><strong>Metadata publication</strong>: aggregates the exported service&rsquo;s interface, version, group, and method signatures into the application&rsquo;s <code>MetadataInfo</code> (served by the local <code>MetadataService</code> or uploaded to a remote metadata center) and publishes the interface-to-application mapping.</li><li><strong>Instance registration</strong>: computes the metadata revision digest over all exported services and registers a single application instance record (host, port, and revision) with the registry.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</code></pre><h3 id=41-export-the-provider-runtime>4.1 Export: the provider runtime</h3><p><code>export</code> is the provider-side pipeline that turns a <code>ServiceConfig</code> declaration into a live, discoverable RPC endpoint across three functions:</p><ul><li><strong>Endpoint exposure</strong>: adapts the business object into a reflection-free <code>Invoker</code> and binds the local wire server (alongside an in-process <code>injvm</code> endpoint) to accept incoming requests.</li><li><strong>Metadata publication</strong>: aggregates the exported service&rsquo;s interface, version, group, and method signatures into the application&rsquo;s <code>MetadataInfo</code> (served by the local <code>MetadataService</code> or uploaded to a remote metadata center) and publishes the interface-to-application mapping.</li><li><strong>Instance registration</strong>: computes the metadata revision digest over all exported services and registers a single application instance record (host, port, and revision) with the registry.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 interface InitializingBean {
@@ -638,8 +837,8 @@ ModuleModel --o ServiceModel
 ModuleServiceRepository o-- ProviderModel
 ModuleServiceRepository o-- ConsumerModel
 ServiceConfig *-- ProviderModel
-ServiceConfig --&gt; ProxyFactory
-ServiceConfig --&gt; Protocol
+ServiceConfig o-- ProxyFactory
+ServiceConfig o-- Protocol
 @enduml
 </code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Entry point: ServiceConfig.export() refreshes config, initializes metadata, and delegates to doExport()</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>export</span>(RegisterTypeEnum registerType) {
@@ -758,7 +957,7 @@ ServiceConfig --&gt; Protocol
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    metadataInfos.<span style=color:#a6e22e>put</span>(metadataInfo.<span style=color:#a6e22e>getRevision</span>(), <span style=color:#66d9ef>new</span> MetadataInfoStat(metadataInfo.<span style=color:#a6e22e>clone</span>())); <span style=color:#75715e>// served by MetadataService</span>
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=33-refer-the-consumer-side>3.3 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which subscribes a <code>Directory</code> to the registry and joins all discovered provider <code>Invoker</code>s behind a single fault-tolerant <code>ClusterInvoker</code> before wrapping it in a dynamic proxy for the caller:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><h3 id=42-refer-the-consumer-side>4.2 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which subscribes a <code>Directory</code> to the registry and joins all discovered provider <code>Invoker</code>s behind a single fault-tolerant <code>ClusterInvoker</code> before wrapping it in a dynamic proxy for the caller:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
 interface Invoker {
@@ -784,9 +983,7 @@ interface LoadBalance {
   + select(List, URL, Invocation): Invoker
 }
 
-FailoverCluster ..&gt; FailoverClusterInvoker
 FailoverClusterInvoker o-- Directory
-FailoverClusterInvoker ..&gt; LoadBalance
 @enduml
 </code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. ReferenceConfig refers the registry URL and wraps the returned Invoker in a dynamic proxy</span>
 </span></span><span style=display:flex><span>invoker <span style=color:#f92672>=</span> protocolSPI.<span style=color:#a6e22e>refer</span>(interfaceClass, registryUrl);
@@ -846,7 +1043,7 @@ FailoverClusterInvoker ..&gt; LoadBalance
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span><span style=color:#66d9ef>throw</span> le;
-</span></span></code></pre></div><h3 id=34-registryprotocol>3.4 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><h3 id=35-dubboprotocol>3.5 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
+</span></span></code></pre></div><h3 id=43-registryprotocol>4.3 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><h3 id=44-dubboprotocol>4.4 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
 </span></span><span style=display:flex><span>DubboExporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> exporter <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> DubboExporter<span style=color:#f92672>&lt;&gt;</span>(invoker, key, exporterMap);
 </span></span><span style=display:flex><span>openServer(url);
 </span></span></code></pre></div><p><code>openServer</code> keeps one server per <code>host:port</code> in <code>serverMap</code>, so all services sharing a port share a single Netty server; <code>server.reset(url)</code> applies URL changes to the existing server. <code>createServer</code> binds through <code>Exchangers.bind(url, requestHandler)</code>, which resolves the <code>Exchanger</code> SPI (<code>header</code> by default), whose <code>HeaderExchanger.bind</code> wraps the handler as <code>DecodeHandler(HeaderExchangeHandler(handler))</code> and delegates to <code>Transporters.bind</code> — <code>NettyServer</code> with the <code>DubboCountCodec</code> on the pipeline. The <code>EventLoop</code> and <code>ChannelPipeline</code> mechanics underneath are those of <a href=https://kevinwang930.github.io/post/java/netty/>Netty</a>; Dubbo adds one codec and one handler chain on top of a standard bootstrap.</p><p>The <code>exporterMap</code> key is what the provider uses to route an incoming request. <code>AbstractProtocol.serviceKey</code> composes <code>group/path:version:port</code>, with the port included so two services with the same interface on different ports do not collide.</p><h4 id=provider-side-dispatch-and-threading>Provider-side dispatch and threading</h4><p>An arriving frame is decoded on the Netty I/O thread into a <code>Request</code> whose payload is a <code>DecodeableRpcInvocation</code>; the argument bytes are not yet deserialized. The handler chain installed by <code>ChannelHandlers.wrap</code> is:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MultiMessageHandler -&gt; HeartbeatHandler -&gt; Dispatcher(all) -&gt; DecodeHandler -&gt; HeaderExchangeHandler
@@ -887,7 +1084,7 @@ FailoverClusterInvoker ..&gt; LoadBalance
     Inv--&gt;&gt;Cl: AsyncRpcResult
     Cl--&gt;&gt;Px: Result
     Px--&gt;&gt;App: recreate returns value
-</code></pre><p>The provider filter chain runs inside <code>invoker.invoke(inv)</code> on the business thread, so the service key resolution, the context class loader switch, and the filters all precede the business method, while the response is written from the completion callback that <code>HeaderExchangeHandler</code> attaches to the returned stage — on the business thread for a synchronous service method, and on whichever thread completes the future otherwise.</p><hr><h2 id=4-exchanger>4. Exchanger</h2><p><code>Exchanger</code> sits between the protocol and the transport, and it is where request/response semantics enter. The transport moves bytes and knows nothing about correlation; the exchanger adds request identity, two-way versus one-way, event frames, and futures.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> HeaderExchanger.<span style=color:#a6e22e>NAME</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</code></pre><p>The provider filter chain runs inside <code>invoker.invoke(inv)</code> on the business thread, so the service key resolution, the context class loader switch, and the filters all precede the business method, while the response is written from the completion callback that <code>HeaderExchangeHandler</code> attaches to the returned stage — on the business thread for a synchronous service method, and on whichever thread completes the future otherwise.</p><hr><h2 id=5-exchanger>5. Exchanger</h2><p><code>Exchanger</code> sits between the protocol and the transport, and it is where request/response semantics enter. The transport moves bytes and knows nothing about correlation; the exchanger adds request identity, two-way versus one-way, event frames, and futures.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> HeaderExchanger.<span style=color:#a6e22e>NAME</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Exchanger</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span> ExchangeServer <span style=color:#a6e22e>bind</span>(URL url, ExchangeHandler handler);
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span> ExchangeClient <span style=color:#a6e22e>connect</span>(URL url, ExchangeHandler handler);
@@ -920,12 +1117,8 @@ class DefaultFuture {
   - FUTURES: Map&lt;Long, DefaultFuture&gt;
   + received(Channel, Response)
 }
-
-HeaderExchanger ..&gt; HeaderExchangeServer
-HeaderExchanger ..&gt; HeaderExchangeClient
-HeaderExchangeHandler ..&gt; DefaultFuture
 @enduml
-</code></pre><hr><h2 id=5-transporter>5. Transporter</h2><p><code>Transporter</code> is the network implementation: it opens server sockets and client connections. The name is chosen by <code>server</code> for binding and <code>client</code> for connecting, both falling back to <code>transporter</code>, with <code>netty</code> as the default.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;netty&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</code></pre><hr><h2 id=6-transporter>6. Transporter</h2><p><code>Transporter</code> is the network implementation: it opens server sockets and client connections. The name is chosen by <code>server</code> for binding and <code>client</code> for connecting, both falling back to <code>transporter</code>, with <code>netty</code> as the default.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;netty&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Transporter</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>({SERVER_KEY, TRANSPORTER_KEY}) RemotingServer <span style=color:#a6e22e>bind</span>(URL url, ChannelHandler handler);
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>({CLIENT_KEY, TRANSPORTER_KEY}) Client <span style=color:#a6e22e>connect</span>(URL url, ChannelHandler handler);
@@ -961,11 +1154,8 @@ abstract class AbstractClient implements Client {
   + send(Object)
 }
 class NettyClient extends AbstractClient
-
-NettyTransporter ..&gt; NettyServer
-NettyTransporter ..&gt; NettyClient
 @enduml
-</code></pre><hr><h2 id=6-codec2>6. Codec2</h2><p><code>Codec2</code> converts between a <code>ChannelBuffer</code> and a message object. It is a separate extension from the protocol so that the framing can be reused: the <code>dubbo</code> protocol&rsquo;s codec also serves the telnet path through inheritance.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</code></pre><hr><h2 id=7-codec2>7. Codec2</h2><p><code>Codec2</code> converts between a <code>ChannelBuffer</code> and a message object. It is a separate extension from the protocol so that the framing can be reused: the <code>dubbo</code> protocol&rsquo;s codec also serves the telnet path through inheritance.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Codec2</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>({CODEC_KEY}) <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>encode</span>(Channel channel, ChannelBuffer buffer, Object message) <span style=color:#66d9ef>throws</span> IOException;
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>({CODEC_KEY}) Object <span style=color:#a6e22e>decode</span>(Channel channel, ChannelBuffer buffer) <span style=color:#66d9ef>throws</span> IOException;
@@ -998,7 +1188,7 @@ class DubboCountCodec implements Codec2 {
 
 DubboCountCodec *-- DubboCodec
 @enduml
-</code></pre><hr><h2 id=7-serialization>7. Serialization</h2><p><code>Serialization</code> is the body format, and it is the one extension chosen per request rather than per connection. Its two methods return stream wrappers rather than byte arrays, so a large argument can be written without materialising it.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</code></pre><hr><h2 id=8-serialization>8. Serialization</h2><p><code>Serialization</code> is the body format, and it is the one extension chosen per request rather than per connection. Its two methods return stream wrappers rather than byte arrays, so a large argument can be written without materialising it.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Serialization</span> {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>byte</span> <span style=color:#a6e22e>getContentTypeId</span>();
 </span></span><span style=display:flex><span>    String <span style=color:#a6e22e>getContentType</span>();
@@ -1023,9 +1213,8 @@ class DefaultSerializationSelector {
 }
 
 DefaultSerializationExceptionWrapper o-- Serialization
-DefaultSerializationSelector ..&gt; Serialization
 @enduml
-</code></pre><hr><h2 id=8-threadpool>8. ThreadPool</h2><p><code>ThreadPool</code> decides how a decoded request reaches business code. Its single method returns a <code>java.util.concurrent.Executor</code> configured from the URL.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;fixed&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
+</code></pre><hr><h2 id=9-threadpool>9. ThreadPool</h2><p><code>ThreadPool</code> decides how a decoded request reaches business code. Its single method returns a <code>java.util.concurrent.Executor</code> configured from the URL.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(value <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;fixed&#34;</span>, scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>FRAMEWORK</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>ThreadPool</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>({THREADPOOL_KEY}) Executor <span style=color:#a6e22e>getExecutor</span>(URL url);
 </span></span><span style=display:flex><span>}
@@ -1041,16 +1230,17 @@ class LimitedThreadPool implements ThreadPool
 class EagerThreadPool implements ThreadPool
 class AbortPolicyWithReport
 
-class DefaultExecutorRepository {
+interface ExecutorRepository {
+  + createExecutorIfAbsent(URL): ExecutorService
+  + getExecutor(URL): ExecutorService
+}
+class DefaultExecutorRepository implements ExecutorRepository {
   - data: ConcurrentMap&lt;String, ExecutorService&gt;
   + createExecutorIfAbsent(URL): ExecutorService
   + getExecutor(URL): ExecutorService
 }
-
-FixedThreadPool ..&gt; AbortPolicyWithReport
-DefaultExecutorRepository ..&gt; ThreadPool
 @enduml
-</code></pre><hr><h2 id=9-loadbalance>9. LoadBalance</h2><p><code>LoadBalance</code> picks one invoker from the candidates routing left behind.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(RandomLoadBalance.<span style=color:#a6e22e>NAME</span>)
+</code></pre><hr><h2 id=10-loadbalance>10. LoadBalance</h2><p><code>LoadBalance</code> picks one invoker from the candidates routing left behind.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(RandomLoadBalance.<span style=color:#a6e22e>NAME</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>LoadBalance</span> {
 </span></span><span style=display:flex><span>    <span style=color:#a6e22e>@Adaptive</span>(<span style=color:#e6db74>&#34;loadbalance&#34;</span>) <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>select</span>(List<span style=color:#f92672>&lt;</span>Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;&gt;</span> invokers, URL url, Invocation invocation);
 </span></span><span style=display:flex><span>}
@@ -1072,7 +1262,7 @@ class ShortestResponseLoadBalance extends AbstractLoadBalance
 class ConsistentHashLoadBalance extends AbstractLoadBalance
 class AdaptiveLoadBalance extends AbstractLoadBalance
 @enduml
-</code></pre><hr><h2 id=10-staterouterfactory>10. StateRouterFactory</h2><p>Routing narrows the candidate list before load balancing sees it, and in this version the live interface is <code>StateRouterFactory</code> rather than the older <code>RouterFactory</code>, which is kept only for compatibility.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>
+</code></pre><hr><h2 id=11-staterouterfactory>11. StateRouterFactory</h2><p>Routing narrows the candidate list before load balancing sees it, and in this version the live interface is <code>StateRouterFactory</code> rather than the older <code>RouterFactory</code>, which is kept only for compatibility.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>StateRouterFactory</span> {
 </span></span><span style=display:flex><span>    <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> StateRouter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>getRouter</span>(Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> interfaceClass, URL url);
 </span></span><span style=display:flex><span>}
@@ -1106,11 +1296,9 @@ class RouterChain {
   + buildSingleChain(Class, URL): SingleRouterChain
 }
 
-ConditionStateRouterFactory ..&gt; ConditionStateRouter
 RouterChain o-- StateRouter
-RouterChain ..&gt; StateRouterFactory
 @enduml
-</code></pre><hr><h2 id=11-filter>11. Filter</h2><p><code>Filter</code> is the extension with the most implementations, and the only one applied twice per call — once on the consumer side and once on the provider side.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>MODULE</span>)
+</code></pre><hr><h2 id=12-filter>12. Filter</h2><p><code>Filter</code> is the extension with the most implementations, and the only one applied twice per call — once on the consumer side and once on the provider side.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#a6e22e>@SPI</span>(scope <span style=color:#f92672>=</span> ExtensionScope.<span style=color:#a6e22e>MODULE</span>)
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>Filter</span> <span style=color:#66d9ef>extends</span> BaseFilter {}
 </span></span></code></pre></div><p>A filter is a pair of callbacks, not a single method: <code>invoke</code> runs before the next node, and the <code>Listener</code> methods <code>onResponse</code> and <code>onError</code> run after it. Eighteen are registered in the core module, among them <code>echo</code>, <code>generic</code>, <code>token</code>, <code>accesslog</code>, <code>classloader</code>, <code>context</code>, <code>exception</code>, <code>timeout</code>, and <code>tps</code>. Selection is entirely by <code>@Activate</code>: the consumer chain takes group <code>consumer</code> filtered by the <code>reference.filter</code> parameter, the provider chain takes group <code>provider</code> filtered by <code>service.filter</code>, and order comes from the annotation&rsquo;s <code>order</code>. A filter therefore never appears at a call site by name.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
@@ -1134,16 +1322,17 @@ class TimeoutFilter implements Filter, Listener
 class TokenFilter implements Filter
 class AccessLogFilter implements Filter
 
-class DefaultFilterChainBuilder {
+interface FilterChainBuilder {
   + buildInvokerChain(Invoker, String, String): Invoker
 }
-
-DefaultFilterChainBuilder ..&gt; Filter
+class DefaultFilterChainBuilder implements FilterChainBuilder {
+  + buildInvokerChain(Invoker, String, String): Invoker
+}
 @enduml
-</code></pre><hr><h2 id=12-the-registry>12. The registry</h2><p>The registry answers one question: which provider processes are running and where do they listen. It holds no interface definitions, only an address and a revision per instance.</p><p><code>NacosServiceDiscovery</code> extends <code>AbstractServiceDiscovery</code>, which extends <code>AbstractRegistry</code>, which <code>FailbackRegistry</code> builds on. The layering is inherited from the interface-level registry that predates application-level discovery, and it is still where the useful mechanics live: <code>AbstractRegistry</code> maintains the registered/subscribed/notified maps and a local disk cache, <code>FailbackRegistry</code> retries failed operations, and <code>NacosServiceDiscovery</code> maps Dubbo concepts onto Nacos naming.</p><h3 id=121-the-address-model>12.1 The address model</h3><p>At application level a Nacos service name is the application name, and one instance represents one provider process:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// NacosServiceDiscovery.doRegister</span>
+</code></pre><hr><h2 id=13-the-registry>13. The registry</h2><p>The registry answers one question: which provider processes are running and where do they listen. It holds no interface definitions, only an address and a revision per instance.</p><p><code>NacosServiceDiscovery</code> extends <code>AbstractServiceDiscovery</code>, which extends <code>AbstractRegistry</code>, which <code>FailbackRegistry</code> builds on. The layering is inherited from the interface-level registry that predates application-level discovery, and it is still where the useful mechanics live: <code>AbstractRegistry</code> maintains the registered/subscribed/notified maps and a local disk cache, <code>FailbackRegistry</code> retries failed operations, and <code>NacosServiceDiscovery</code> maps Dubbo concepts onto Nacos naming.</p><h3 id=131-the-address-model>13.1 The address model</h3><p>At application level a Nacos service name is the application name, and one instance represents one provider process:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// NacosServiceDiscovery.doRegister</span>
 </span></span><span style=display:flex><span>Instance instance <span style=color:#f92672>=</span> toInstance(serviceInstance);   <span style=color:#75715e>// ip, port, metadata = revision, storage-type, endpoints</span>
 </span></span><span style=display:flex><span>service.<span style=color:#a6e22e>registerInstance</span>(instance.<span style=color:#a6e22e>getServiceName</span>(), group, instance);
-</span></span></code></pre></div><p>The instance metadata is deliberately small. <code>dubbo.metadata.revision</code> identifies the interface definitions the process currently exports, <code>dubbo.metadata.storage-type</code> says where a consumer should resolve that revision, and <code>dubbo.endpoints</code> lists the protocol/port pairs. Nothing describes a single interface. A provider deploying five interfaces produces one registration, and adding a sixth changes the revision rather than the address list.</p><p>The registry <code>group</code> defaults to <code>DEFAULT_GROUP</code> and is overridable by <code>nacos.group</code>. Names containing <code>$</code> — nested interfaces from generated stubs — are rewritten to <code>___</code> before reaching the Nacos client, because Nacos restricts service-name characters.</p><h3 id=122-subscription>12.2 Subscription</h3><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TD
+</span></span></code></pre></div><p>The instance metadata is deliberately small. <code>dubbo.metadata.revision</code> identifies the interface definitions the process currently exports, <code>dubbo.metadata.storage-type</code> says where a consumer should resolve that revision, and <code>dubbo.endpoints</code> lists the protocol/port pairs. Nothing describes a single interface. A provider deploying five interfaces produces one registration, and adding a sixth changes the revision rather than the address list.</p><p>The registry <code>group</code> defaults to <code>DEFAULT_GROUP</code> and is overridable by <code>nacos.group</code>. Names containing <code>$</code> — nested interfaces from generated stubs — are rewritten to <code>___</code> before reaching the Nacos client, because Nacos restricts service-name characters.</p><h3 id=132-subscription>13.2 Subscription</h3><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart TD
     A[&#34;doSubscribe(url, listener)&#34;] --&gt; B[&#34;resolve interface to application&#34;]
     B --&gt; C[&#34;ServiceNameMapping lookup&#34;]
     C --&gt; D[&#34;subscribe application name&#34;]
@@ -1152,7 +1341,7 @@ DefaultFilterChainBuilder ..&gt; Filter
     F --&gt; G[&#34;getInstances: filter enabled&#34;]
     G --&gt; H[&#34;build URLs from revision and endpoints&#34;]
     H --&gt; I[&#34;registry.notify -&gt; Directory refresh&#34;]
-</code></pre><p><code>ServiceDiscoveryRegistry.doSubscribe</code> first resolves the interface to a set of application names, then registers one <code>ServiceInstancesChangedListener</code> per application. <code>NacosServiceDiscovery.addServiceInstancesChangedListener</code> maps each application to a single Nacos <code>EventListener</code>, shared by every interface that application serves — so a consumer of three interfaces from one application holds one subscription, not three.</p><p>Two behaviours matter here. Instances with <code>enabled=false</code> are dropped before addresses are built. And an empty notification is not treated as a scale-to-zero: <code>ServiceDiscoveryRegistryDirectory</code> keeps the previous address list and logs it as empty protection, because an empty notification is far more often a transient Nacos fault than a real teardown.</p><p>The mapping from interface to application is not in Nacos naming. <code>ServiceNameMapping</code> maintains it (with <code>provided-by</code> on the consumer URL and a metadata-center mapping), and <code>ServiceDiscoveryRegistry.doSubscribe</code> consults the mapping before subscribing; with no mapping it stops and waits for the mapping listener, because a consumer cannot name an application it has never been told about. The Nacos client side of that model is covered in <a href=https://kevinwang930.github.io/post/java/spring-cloud/nacos/>Nacos service and configuration management</a>.</p><h3 id=123-coalescing-failure-recovery-and-local-cache>12.3 Coalescing, failure recovery, and local cache</h3><p><code>RegistryNotifier</code> bounds the cost of a flapping provider set. The first ten notifications are delivered immediately (<code>DEFAULT_DELAY_EXECUTE_TIMES = 10</code>); afterwards the notifier enforces the <code>delay-notification</code> window (default 5000 ms) and keeps only the most recent payload, comparing a timestamp so that a superseded task produces no notification. A burst of registrations at deployment time therefore yields one directory refresh instead of one per instance.</p><p><code>FailbackRegistry</code> handles transport-level failures with a <code>HashedWheelTimer</code>. <code>register</code>, <code>unregister</code>, <code>subscribe</code>, and <code>unsubscribe</code> each catch exceptions, throw immediately when <code>check=true</code> (so a bad configuration fails fast at startup), and otherwise record a task that is retried every <code>retry.period</code> (default 5000 ms) until it succeeds. <code>SkipFailbackWrapperException</code> bypasses the retry when retrying cannot succeed.</p><p><code>AbstractRegistry</code> persists every notified address set into a local properties file at <code>~/.dubbo/dubbo-registry-{application}-{registry-address}.cache</code>. The file is loaded into memory at construction. Its purpose is the failure path: when <code>doSubscribe</code> throws, <code>FailbackRegistry.subscribe</code> calls <code>getCacheUrls</code>, which prefers the in-memory <code>notified</code> map and falls back to the file, and if it finds entries it notifies the listener with them before logging the failure — so the consumer starts from the last known provider list rather than an empty directory. Writes are serialized through <code>lastCacheChanged</code> and written asynchronously unless <code>save.file=true</code>, and <code>file-cache=false</code> disables the mechanism entirely.</p><p><code>APPLICATION_FIRST</code> is the consumer-side default for the migration rule. In a configuration that still publishes both levels — <code>register-mode=all</code>, the provider default for a plain <code>nacos://</code> URL — the application-level invoker is preferred and the interface-level one remains available as a fallback, which is why <code>RegistryProtocol.refer</code> returns a <code>MigrationInvoker</code> holding up to two cluster invokers and switching between them by rule:</p><table><thead><tr><th>Step</th><th>Selection</th></tr></thead><tbody><tr><td><code>APPLICATION_FIRST</code> (default)</td><td>Application-level, falling back to interface-level when its address count is below the threshold; a <code>promotion</code> percentage below 100 sends only that fraction of calls to the application-level invoker</td></tr><tr><td><code>FORCE_APPLICATION</code></td><td>Always the application-level invoker, destroying the interface-level one</td></tr><tr><td><code>FORCE_INTERFACE</code></td><td>Always the interface-level invoker, the compatibility mode</td></tr></tbody></table><hr><h2 id=13-metadataservice>13. MetadataService</h2><p>The metadata service answers the other question: what does that interface look like. It is an ordinary RPC service exported by every provider, so a consumer reaches it the same way it reaches a business service, without going through the registry again.</p><h3 id=131-the-service-itself>13.1 The service itself</h3><p><code>MetadataService</code> is a small fixed interface. It exposes <code>getMetadataInfo(revision)</code> and <code>getMetadataInfos()</code>, plus <code>getServiceDefinition(serviceKey)</code> for a single interface. Because it is an ordinary service, it is exported through the same <code>ServiceConfig</code> machinery as business services: <code>ConfigurableMetadataServiceExporter</code> builds a <code>ServiceConfig</code> for it with its own protocol and port (<code>metadata-service-protocol</code>, <code>metadata-service-port</code>) and exports it on startup. A consumer refers it through <code>MetadataUtils.referMetadataService</code>, which builds a URL from the coordinates in the instance metadata and calls it like any other remote service.</p><p>The definition returned is a <code>MetadataInfo</code>: the set of services the provider exports, each with its interface name, version, group, protocol, and method signatures with parameter type descriptors.</p><h3 id=132-resolving-the-revision>13.2 Resolving the revision</h3><p><code>dubbo.metadata.revision</code> is the link back to the interface definitions. It is a digest computed by <code>MetadataInfo.calRevision</code> over the application name and the description of every exported service, so it changes whenever the set or shape of those services changes. A consumer reads the revision from the instance and resolves it via the provider&rsquo;s <code>MetadataService</code>. <code>AbstractServiceDiscovery.getRemoteMetadata</code> performs that resolution behind a revision-keyed cache, retrying three times with a one-second pause before giving up with an empty <code>MetadataInfo</code>. The cache is what keeps the per-revision fetch off the steady-state path.</p><hr><h2 id=references>References</h2><ul><li><a href=https://github.com/apache/dubbo>Apache Dubbo source repository</a></li><li><a href=https://dubbo.apache.org/>Apache Dubbo documentation</a></li><li><a href=https://nacos.io/docs/latest/guide/user/open-api/>Nacos naming service</a></li><li><a href=http://hessian.caucho.com/doc/hessian-serialization.html>Hessian 2 serialization specification</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/network/>network</a>
+</code></pre><p><code>ServiceDiscoveryRegistry.doSubscribe</code> first resolves the interface to a set of application names, then registers one <code>ServiceInstancesChangedListener</code> per application. <code>NacosServiceDiscovery.addServiceInstancesChangedListener</code> maps each application to a single Nacos <code>EventListener</code>, shared by every interface that application serves — so a consumer of three interfaces from one application holds one subscription, not three.</p><p>Two behaviours matter here. Instances with <code>enabled=false</code> are dropped before addresses are built. And an empty notification is not treated as a scale-to-zero: <code>ServiceDiscoveryRegistryDirectory</code> keeps the previous address list and logs it as empty protection, because an empty notification is far more often a transient Nacos fault than a real teardown.</p><p>The mapping from interface to application is not in Nacos naming. <code>ServiceNameMapping</code> maintains it (with <code>provided-by</code> on the consumer URL and a metadata-center mapping), and <code>ServiceDiscoveryRegistry.doSubscribe</code> consults the mapping before subscribing; with no mapping it stops and waits for the mapping listener, because a consumer cannot name an application it has never been told about. The Nacos client side of that model is covered in <a href=https://kevinwang930.github.io/post/java/spring-cloud/nacos/>Nacos service and configuration management</a>.</p><h3 id=133-coalescing-failure-recovery-and-local-cache>13.3 Coalescing, failure recovery, and local cache</h3><p><code>RegistryNotifier</code> bounds the cost of a flapping provider set. The first ten notifications are delivered immediately (<code>DEFAULT_DELAY_EXECUTE_TIMES = 10</code>); afterwards the notifier enforces the <code>delay-notification</code> window (default 5000 ms) and keeps only the most recent payload, comparing a timestamp so that a superseded task produces no notification. A burst of registrations at deployment time therefore yields one directory refresh instead of one per instance.</p><p><code>FailbackRegistry</code> handles transport-level failures with a <code>HashedWheelTimer</code>. <code>register</code>, <code>unregister</code>, <code>subscribe</code>, and <code>unsubscribe</code> each catch exceptions, throw immediately when <code>check=true</code> (so a bad configuration fails fast at startup), and otherwise record a task that is retried every <code>retry.period</code> (default 5000 ms) until it succeeds. <code>SkipFailbackWrapperException</code> bypasses the retry when retrying cannot succeed.</p><p><code>AbstractRegistry</code> persists every notified address set into a local properties file at <code>~/.dubbo/dubbo-registry-{application}-{registry-address}.cache</code>. The file is loaded into memory at construction. Its purpose is the failure path: when <code>doSubscribe</code> throws, <code>FailbackRegistry.subscribe</code> calls <code>getCacheUrls</code>, which prefers the in-memory <code>notified</code> map and falls back to the file, and if it finds entries it notifies the listener with them before logging the failure — so the consumer starts from the last known provider list rather than an empty directory. Writes are serialized through <code>lastCacheChanged</code> and written asynchronously unless <code>save.file=true</code>, and <code>file-cache=false</code> disables the mechanism entirely.</p><p><code>APPLICATION_FIRST</code> is the consumer-side default for the migration rule. In a configuration that still publishes both levels — <code>register-mode=all</code>, the provider default for a plain <code>nacos://</code> URL — the application-level invoker is preferred and the interface-level one remains available as a fallback, which is why <code>RegistryProtocol.refer</code> returns a <code>MigrationInvoker</code> holding up to two cluster invokers and switching between them by rule:</p><table><thead><tr><th>Step</th><th>Selection</th></tr></thead><tbody><tr><td><code>APPLICATION_FIRST</code> (default)</td><td>Application-level, falling back to interface-level when its address count is below the threshold; a <code>promotion</code> percentage below 100 sends only that fraction of calls to the application-level invoker</td></tr><tr><td><code>FORCE_APPLICATION</code></td><td>Always the application-level invoker, destroying the interface-level one</td></tr><tr><td><code>FORCE_INTERFACE</code></td><td>Always the interface-level invoker, the compatibility mode</td></tr></tbody></table><hr><h2 id=14-metadataservice>14. MetadataService</h2><p>The metadata service answers the other question: what does that interface look like. It is an ordinary RPC service exported by every provider, so a consumer reaches it the same way it reaches a business service, without going through the registry again.</p><h3 id=141-the-service-itself>14.1 The service itself</h3><p><code>MetadataService</code> is a small fixed interface. It exposes <code>getMetadataInfo(revision)</code> and <code>getMetadataInfos()</code>, plus <code>getServiceDefinition(serviceKey)</code> for a single interface. Because it is an ordinary service, it is exported through the same <code>ServiceConfig</code> machinery as business services: <code>ConfigurableMetadataServiceExporter</code> builds a <code>ServiceConfig</code> for it with its own protocol and port (<code>metadata-service-protocol</code>, <code>metadata-service-port</code>) and exports it on startup. A consumer refers it through <code>MetadataUtils.referMetadataService</code>, which builds a URL from the coordinates in the instance metadata and calls it like any other remote service.</p><p>The definition returned is a <code>MetadataInfo</code>: the set of services the provider exports, each with its interface name, version, group, protocol, and method signatures with parameter type descriptors.</p><h3 id=142-resolving-the-revision>14.2 Resolving the revision</h3><p><code>dubbo.metadata.revision</code> is the link back to the interface definitions. It is a digest computed by <code>MetadataInfo.calRevision</code> over the application name and the description of every exported service, so it changes whenever the set or shape of those services changes. A consumer reads the revision from the instance and resolves it via the provider&rsquo;s <code>MetadataService</code>. <code>AbstractServiceDiscovery.getRemoteMetadata</code> performs that resolution behind a revision-keyed cache, retrying three times with a one-second pause before giving up with an empty <code>MetadataInfo</code>. The cache is what keeps the per-revision fetch off the steady-state path.</p><hr><h2 id=references>References</h2><ul><li><a href=https://github.com/apache/dubbo>Apache Dubbo source repository</a></li><li><a href=https://dubbo.apache.org/>Apache Dubbo documentation</a></li><li><a href=https://nacos.io/docs/latest/guide/user/open-api/>Nacos naming service</a></li><li><a href=http://hessian.caucho.com/doc/hessian-serialization.html>Hessian 2 serialization specification</a></li></ul></div></div><div id=post-footer class="post-footer main-content-wrap"><div class=post-footer-tags><span class="text-color-light text-small">TAGGED IN</span><br><a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/network/>network</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/rpc/>rpc</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/dubbo/>dubbo</a>
 <a class="tag tag--primary tag--small" href=https://kevinwang930.github.io/tags/nacos/>nacos</a></div><div class=post-actions-wrap><nav><ul class="post-actions post-action-nav"><li class=post-action><a class="post-action-btn btn btn--disabled"><i class="fa fa-angle-left"></i>
