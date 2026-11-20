@@ -123,6 +123,7 @@ class ExtensionDirector implements ExtensionAccessor {
 class ExtensionLoader<T> {
   - type: Class<T>
   - scopeModel: ScopeModel
+  - injector: ExtensionInjector
   - cachedClasses: Holder<Map<String, Class>>
   - cachedInstances: ConcurrentMap<String, Holder<Object>>
   - cachedAdaptiveClass: Class<?>
@@ -161,9 +162,9 @@ class SpringExtensionInjector implements ExtensionInjector
 ScopeModel *-- ExtensionDirector
 ExtensionDirector *-- ExtensionLoader
 ScopeModel --o ExtensionLoader
-ExtensionLoader ..> AdaptiveClassCodeGenerator
-ExtensionLoader ..> Compiler
-ExtensionLoader ..> ExtensionInjector
+ExtensionLoader o-- ExtensionInjector
+ExtensionLoader --> AdaptiveClassCodeGenerator
+ExtensionLoader --> AdaptiveCompiler
 @enduml
 ```
 
@@ -450,7 +451,476 @@ gateway.pay(url2, 1200);
 
 ---
 
-## 3. Protocol
+## 3. Startup deployer
+
+A Dubbo process is typically both a service provider and a downstream consumer at the same time. Before it can safely accept live traffic, startup has to complete four ordered tasks across the process:
+
+1. **Configuration assembly**: pull remote dynamic configuration (when a config center is enabled) and merge it with local properties and annotations into validated application-wide settings (registries, wire protocols, metadata store, metrics) and module-scoped defaults (provider/consumer templates, service and reference definitions).
+2. **Local service exposure**: adapt provider implementations into executable invokers, bind local server ports (alongside in-process `injvm` endpoints), and start the internal `MetadataService` — while keeping the node hidden from service discovery.
+3. **Downstream reference warming**: subscribe all declared consumer references to the registry, resolve upstream provider metadata, assemble routing and cluster failover chains, and establish outbound client connections.
+4. **Service discovery publication**: compute the metadata revision over all exported services and register the live application instance in the registry last, ensuring incoming requests never land on a node whose own downstream dependencies are still uninitialized (with graceful shutdown running the exact reverse order: unregister first, drain in-flight calls, unexport services, and close clients and servers).
+
+Rather than hard-coding those four tasks into a monolithic bootstrap class, Dubbo structures startup around its three-tier `ScopeModel` hierarchy (`FrameworkModel` $\rightarrow$ `ApplicationModel` $\rightarrow$ `ModuleModel`). Constructing each scope triggers SPI bootstrap hooks declared under `META-INF/dubbo/internal/` to attach its configuration store and deployer; deployer initialization populates two-tier configuration (`ConfigManager` at application scope and `ModuleConfigManager` at module scope); and the module deployer then drives export, reference subscription, and instance registration through `@Adaptive` proxies, `Wrapper` decorator chains, and `@Activate` pipelines.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface ScopeModelInitializer {
+  + initializeFrameworkModel(FrameworkModel)
+  + initializeApplicationModel(ApplicationModel)
+  + initializeModuleModel(ModuleModel)
+}
+class ConfigScopeModelInitializer implements ScopeModelInitializer
+interface ApplicationExt
+interface ModuleExt
+
+class DubboSpringInitializer {
+  - REGISTRY_CONTEXT_MAP: Map<BeanDefinitionRegistry, DubboSpringInitContext>
+  + initialize(BeanDefinitionRegistry)
+  - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
+}
+class DubboSpringInitContext {
+  - moduleModel: ModuleModel
+}
+interface InitializingBean {
+  + afterPropertiesSet()
+}
+class DubboConfigBeanInitializer implements InitializingBean {
+  - configManager: ConfigManager
+  - moduleModel: ModuleModel
+  - prepareDubboConfigBeans()
+}
+
+interface BeanDefinitionRegistryPostProcessor {
+  + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
+}
+class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProcessor {
+  - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
+}
+
+interface ApplicationListener<E> {
+  + onApplicationEvent(E)
+}
+class DubboDeployApplicationListener implements ApplicationListener {
+  - applicationModel: ApplicationModel
+  - moduleModel: ModuleModel
+  + onApplicationEvent(ApplicationContextEvent)
+  - onContextRefreshedEvent(ContextRefreshedEvent)
+}
+
+abstract class ScopeModel {
+  - parent: ScopeModel
+  - scope: ExtensionScope
+  - classLoaders: Set<ClassLoader>
+}
+class FrameworkModel extends ScopeModel {
+  - applicationModels: List<ApplicationModel>
+}
+class ApplicationModel extends ScopeModel {
+  - configManager: ConfigManager
+  - deployer: ApplicationDeployer
+  - internalModule: ModuleModel
+  - defaultModule: ModuleModel
+  - moduleModels: List<ModuleModel>
+  + getApplicationConfigManager(): ConfigManager
+}
+class ModuleModel extends ScopeModel {
+  - applicationModel: ApplicationModel
+  - moduleConfigManager: ModuleConfigManager
+  - deployer: ModuleDeployer
+  + getConfigManager(): ModuleConfigManager
+  + getDeployer(): ModuleDeployer
+}
+
+abstract class AbstractConfigManager {
+  ~ configsCache: ConcurrentHashMap<String, Map<String, AbstractConfig>>
+  + loadConfigs()
+  # checkDefaultAndValidateConfigs(Class<T>)
+}
+class ConfigManager extends AbstractConfigManager implements ApplicationExt {
+  + addRegistry(RegistryConfig)
+  + addProtocol(ProtocolConfig)
+  + getDefaultRegistries(): List<RegistryConfig>
+  + getDefaultProtocols(): List<ProtocolConfig>
+}
+class ModuleConfigManager extends AbstractConfigManager implements ModuleExt {
+  - applicationConfigManager: ConfigManager
+  + addProvider(ProviderConfig)
+  + getDefaultProvider(): Optional<ProviderConfig>
+  + addService(ServiceConfigBase)
+  + addReference(ReferenceConfigBase)
+}
+
+abstract class AbstractConfig {
+  - id: String
+  # isDefault: Boolean
+  + refresh()
+}
+class RegistryConfig extends AbstractConfig {
+  - address: String
+  - protocol: String
+  - group: String
+  - registerMode: String
+  - useAsConfigCenter: Boolean
+  - useAsMetadataCenter: Boolean
+}
+class ProtocolConfig extends AbstractConfig {
+  - name: String
+  - host: String
+  - port: Integer
+  - threadpool: String
+  - threads: Integer
+  - serialization: String
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # registries: List<RegistryConfig>
+}
+abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
+  # version: String
+  # group: String
+  # protocols: List<ProtocolConfig>
+}
+class ProviderConfig extends AbstractServiceConfig {
+  - host: String
+  - port: Integer
+  - threadpool: String
+  - threads: Integer
+  - dispatcher: String
+}
+abstract class ServiceConfigBase<T> extends AbstractServiceConfig {
+  # interfaceClass: Class<?>
+  # ref: T
+  # provider: ProviderConfig
+  + export()
+}
+class ServiceConfig<T> extends ServiceConfigBase {
+  - protocolSPI: Protocol
+  - proxyFactory: ProxyFactory
+  + export(RegisterTypeEnum)
+  + register(boolean)
+}
+class ServiceBean<T> extends ServiceConfig implements InitializingBean {
+  - beanName: String
+  + afterPropertiesSet()
+  + destroy()
+}
+
+interface Deployer<E> {
+  + initialize()
+  + start(): Future
+  + stop()
+}
+abstract class AbstractDeployer<E> implements Deployer
+interface ApplicationDeployer extends Deployer {
+  + registerServiceInstance()
+  + refreshServiceInstance()
+  + exportMetadataService()
+}
+interface ModuleDeployer extends Deployer {
+  + setPending()
+}
+class DefaultApplicationDeployer extends AbstractDeployer implements ApplicationDeployer {
+  - configManager: ConfigManager
+  + initialize()
+  - startConfigCenter()
+  - loadApplicationConfigs()
+  - startMetadataCenter()
+}
+class DefaultModuleDeployer extends AbstractDeployer implements ModuleDeployer {
+  - configManager: ModuleConfigManager
+  - applicationDeployer: ApplicationDeployer
+  - exportedServices: List<ServiceConfigBase<?>>
+  + initialize()
+  + start(): Future
+  - startSync(): Future
+  - exportServices()
+  - referServices()
+  - registerServices()
+}
+
+FrameworkModel *-- ApplicationModel
+ApplicationModel *-- ModuleModel
+ApplicationModel *-- ConfigManager
+ApplicationModel *-- ApplicationDeployer
+ModuleModel *-- ModuleConfigManager
+ModuleModel *-- ModuleDeployer
+ConfigScopeModelInitializer --> ApplicationDeployer
+ConfigScopeModelInitializer --> ModuleDeployer
+ModuleConfigManager o-- ConfigManager
+ConfigManager o-- RegistryConfig
+ConfigManager o-- ProtocolConfig
+ModuleConfigManager o-- ProviderConfig
+ModuleConfigManager o-- ServiceConfigBase
+AbstractInterfaceConfig o-- RegistryConfig
+AbstractServiceConfig o-- ProtocolConfig
+ServiceConfigBase o-- ProviderConfig
+DubboSpringInitializer *-- DubboSpringInitContext
+DubboSpringInitContext o-- ModuleModel
+DubboConfigBeanInitializer o-- ConfigManager
+DubboConfigBeanInitializer o-- ModuleModel
+ServiceAnnotationPostProcessor --> ServiceBean
+DubboDeployApplicationListener o-- ApplicationModel
+DubboDeployApplicationListener o-- ModuleModel
+DefaultApplicationDeployer o-- ConfigManager
+DefaultModuleDeployer o-- ModuleConfigManager
+DefaultModuleDeployer o-- ApplicationDeployer
+DefaultModuleDeployer o-- ServiceConfigBase
+@enduml
+```
+
+### 3.1 Extension declarations and startup activation
+
+Every extension loaded during startup is registered as `name=implementationClass` under `META-INF/dubbo/internal/<interface>` and bound to one of the three `ScopeModel` tiers:
+
+- **Framework level (`FrameworkModel`)**:
+  - **`ExtensionInjector`** — `META-INF/dubbo/internal/org.apache.dubbo.common.extension.ExtensionInjector`:
+    ```properties
+    adaptive=org.apache.dubbo.common.extension.inject.AdaptiveExtensionInjector
+    spi=org.apache.dubbo.common.extension.inject.SpiExtensionInjector
+    scopeBean=org.apache.dubbo.common.beans.ScopeBeanExtensionInjector
+    spring=org.apache.dubbo.config.spring.extension.SpringExtensionInjector
+    ```
+    ```java
+    // AdaptiveExtensionInjector.initialize() (called from ScopeModel.initialize() -> ExtensionDirector)
+    ExtensionLoader<ExtensionInjector> loader = extensionAccessor.getExtensionLoader(ExtensionInjector.class);
+    injectors = loader.getSupportedExtensions().stream()
+            .map(loader::getExtension)
+            .collect(Collectors.toList());
+    ```
+  - **`ScopeModelInitializer`** — `META-INF/dubbo/internal/org.apache.dubbo.rpc.model.ScopeModelInitializer`:
+    ```properties
+    dubbo-common=org.apache.dubbo.common.CommonScopeModelInitializer
+    dubbo-config-api=org.apache.dubbo.config.ConfigScopeModelInitializer
+    dubbo-registry-api=org.apache.dubbo.registry.RegistryScopeModelInitializer
+    dubbo-metadata-api=org.apache.dubbo.metadata.report.MetadataScopeModelInitializer
+    dubbo-cluster=org.apache.dubbo.rpc.cluster.ClusterScopeModelInitializer
+    ```
+    ```java
+    // FrameworkModel.<init>()
+    Set<ScopeModelInitializer> initializers =
+            this.getExtensionLoader(ScopeModelInitializer.class).getSupportedExtensionInstances();
+    for (ScopeModelInitializer initializer : initializers) {
+        initializer.initializeFrameworkModel(this);
+    }
+    ```
+  - **`Compiler`** — `META-INF/dubbo/internal/org.apache.dubbo.common.compiler.Compiler`:
+    ```properties
+    adaptive=org.apache.dubbo.common.compiler.support.AdaptiveCompiler
+    javassist=org.apache.dubbo.common.compiler.support.JavassistCompiler
+    jdk=org.apache.dubbo.common.compiler.support.JdkCompiler
+    ```
+    ```java
+    // ExtensionLoader.createAdaptiveExtensionClass()
+    String code = new AdaptiveClassCodeGenerator(type, cachedDefaultName).generate();
+    Compiler compiler = extensionDirector.getExtensionLoader(Compiler.class).getAdaptiveExtension();
+    return compiler.compile(type, code, classLoader);
+    ```
+  - **`Protocol` and `ProxyFactory`** — `META-INF/dubbo/internal/org.apache.dubbo.rpc.Protocol` and `ProxyFactory`:
+    ```properties
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.Protocol
+    dubbo=org.apache.dubbo.rpc.protocol.dubbo.DubboProtocol
+    tri=org.apache.dubbo.rpc.protocol.tri.TripleProtocol
+    injvm=org.apache.dubbo.rpc.protocol.injvm.InjvmProtocol
+    service-discovery-registry=org.apache.dubbo.registry.integration.RegistryProtocol
+    registry=org.apache.dubbo.registry.integration.InterfaceCompatibleRegistryProtocol
+    filter=org.apache.dubbo.rpc.cluster.filter.ProtocolFilterWrapper
+    listener=org.apache.dubbo.rpc.protocol.ProtocolListenerWrapper
+    qos=org.apache.dubbo.qos.protocol.QosProtocolWrapper
+
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.ProxyFactory
+    javassist=org.apache.dubbo.rpc.proxy.javassist.JavassistProxyFactory
+    jdk=org.apache.dubbo.rpc.proxy.jdk.JdkProxyFactory
+    stub=org.apache.dubbo.rpc.proxy.wrapper.StubProxyFactoryWrapper
+    ```
+    ```java
+    // ServiceConfig / ReferenceConfig.postProcessAfterScopeModelChanged()
+    protocolSPI = this.getExtensionLoader(Protocol.class).getAdaptiveExtension();
+    proxyFactory = this.getExtensionLoader(ProxyFactory.class).getAdaptiveExtension();
+    ```
+  - **Transport, framing, serialization, and threading (`Exchanger`, `Transporter`, `Codec2`, `Serialization`, `ThreadPool`, `Dispatcher`)**:
+    ```properties
+    # META-INF/dubbo/internal/org.apache.dubbo.remoting.exchange.Exchanger
+    header=org.apache.dubbo.remoting.exchange.support.header.HeaderExchanger
+    # META-INF/dubbo/internal/org.apache.dubbo.remoting.Transporter
+    netty=org.apache.dubbo.remoting.transport.netty4.NettyTransporter
+    # META-INF/dubbo/internal/org.apache.dubbo.remoting.Codec2
+    dubbo=org.apache.dubbo.rpc.protocol.dubbo.DubboCountCodec
+    # META-INF/dubbo/internal/org.apache.dubbo.common.serialize.Serialization
+    hessian2=org.apache.dubbo.common.serialize.hessian2.Hessian2Serialization
+    fastjson2=org.apache.dubbo.common.serialize.fastjson2.FastJson2Serialization
+    # META-INF/dubbo/internal/org.apache.dubbo.common.threadpool.ThreadPool
+    fixed=org.apache.dubbo.common.threadpool.support.fixed.FixedThreadPool
+    limited=org.apache.dubbo.common.threadpool.support.limited.LimitedThreadPool
+    # META-INF/dubbo/internal/org.apache.dubbo.remoting.Dispatcher
+    all=org.apache.dubbo.remoting.transport.dispatcher.all.AllDispatcher
+    ```
+    ```java
+    // Validated eagerly in ConfigValidationUtils.validateProtocolConfig() / validateProviderConfig():
+    scopeModel.getExtensionLoader(Transporter.class).hasExtension(config.getTransporter());
+
+    // Loaded lazily when DubboProtocol binds a server or connects a client:
+    Exchanger exchanger = url.getOrDefaultFrameworkModel().getExtensionLoader(Exchanger.class).getExtension(type);
+    Transporter transporter = url.getOrDefaultFrameworkModel().getExtensionLoader(Transporter.class).getAdaptiveExtension();
+    Codec2 codec = frameworkModel.getExtensionLoader(Codec2.class).getExtension(codecName);
+    Serialization serialization = url.getOrDefaultFrameworkModel().getExtensionLoader(Serialization.class).getExtension(s);
+    ExecutorService executor = (ExecutorService) extensionAccessor.getExtensionLoader(ThreadPool.class).getAdaptiveExtension().getExecutor(url);
+    ChannelHandler wrapped = url.getOrDefaultFrameworkModel().getExtensionLoader(Dispatcher.class).getAdaptiveExtension().dispatch(handler, url);
+    ```
+
+- **Application level (`ApplicationModel` & `DefaultApplicationDeployer`)**:
+  - **`ApplicationExt` and `DefaultApplicationDeployer`** — `META-INF/dubbo/internal/org.apache.dubbo.common.context.ApplicationExt`:
+    ```properties
+    config=org.apache.dubbo.config.context.ConfigManager
+    environment=org.apache.dubbo.common.config.Environment
+    ```
+    ```java
+    // ApplicationModel.<init>() -> initApplicationExts() & ConfigScopeModelInitializer.initializeApplicationModel()
+    Set<ApplicationExt> exts = this.getExtensionLoader(ApplicationExt.class).getSupportedExtensionInstances();
+    for (ApplicationExt ext : exts) {
+        ext.initialize();                                       // Environment, ConfigManager
+    }
+    ApplicationDeployer applicationDeployer = beanFactory.registerBean(DefaultApplicationDeployer.class);
+    applicationModel.setDeployer(applicationDeployer);
+    ```
+  - **`DynamicConfigurationFactory` and application config initialization** — `META-INF/dubbo/internal/org.apache.dubbo.common.config.configcenter.DynamicConfigurationFactory`:
+    ```properties
+    nop=org.apache.dubbo.common.config.configcenter.nop.NopDynamicConfigurationFactory
+    nacos=org.apache.dubbo.configcenter.support.nacos.NacosDynamicConfigurationFactory
+    zookeeper=org.apache.dubbo.configcenter.support.zookeeper.ZookeeperDynamicConfigurationFactory
+    ```
+    ```java
+    // DefaultApplicationDeployer.initialize() -> startConfigCenter() & loadApplicationConfigs()
+    configManager.loadConfigsOfTypeFromProps(ApplicationConfig.class);
+    configManager.loadConfigsOfTypeFromProps(ConfigCenterConfig.class);
+    useRegistryAsConfigCenterIfNecessary();                     // checks getExtensionLoader(DynamicConfigurationFactory.class).hasExtension(protocol)
+    DynamicConfigurationFactory factory = applicationModel
+            .getExtensionLoader(DynamicConfigurationFactory.class)
+            .getOrDefaultExtension(protocol);
+    environment.setDynamicConfiguration(factory.getDynamicConfiguration(configCenter.toUrl()));
+
+    configManager.loadConfigs();                                // binds ProtocolConfig, RegistryConfig (isRequired == false), MetadataReportConfig
+    ```
+  - **`MetadataReportFactory` and metrics (`MetricsReporterFactory`, `MetricsServiceExporter`)**:
+    ```properties
+    # META-INF/dubbo/internal/org.apache.dubbo.metadata.report.MetadataReportFactory
+    nacos=org.apache.dubbo.metadata.store.nacos.NacosMetadataReportFactory
+    zookeeper=org.apache.dubbo.metadata.store.zookeeper.ZookeeperMetadataReportFactory
+    # META-INF/dubbo/internal/org.apache.dubbo.metrics.report.MetricsReporterFactory
+    default=org.apache.dubbo.metrics.report.DefaultMetricsReporterFactory
+    prometheus=org.apache.dubbo.metrics.prometheus.PrometheusMetricsReporterFactory
+    # META-INF/dubbo/internal/org.apache.dubbo.metrics.service.MetricsServiceExporter
+    default=org.apache.dubbo.config.deploy.DefaultMetricsServiceExporter
+    ```
+    ```java
+    // DefaultApplicationDeployer.initMetricsReporter() / initMetricsService() / startMetadataCenter()
+    MetricsReporterFactory reporterFactory = getExtensionLoader(MetricsReporterFactory.class).getAdaptiveExtension();
+    MetricsServiceExporter metricsExporter = getExtensionLoader(MetricsServiceExporter.class).getDefaultExtension();
+
+    useRegistryAsMetadataCenterIfNecessary();                   // checks getExtensionLoader(MetadataReportFactory.class).hasExtension(protocol)
+    MetadataReportFactory metadataReportFactory =
+            applicationModel.getExtensionLoader(MetadataReportFactory.class).getAdaptiveExtension();
+    MetadataReport metadataReport = metadataReportFactory.getMetadataReport(url);
+    ```
+  - **Discovery, mapping, clustering, and instance customization (`RegistryFactory`, `ServiceDiscoveryFactory`, `ServiceNameMapping`, `Cluster`, `LoadBalance`, `ServiceInstanceCustomizer`)**:
+    ```properties
+    # META-INF/dubbo/internal/org.apache.dubbo.registry.RegistryFactory
+    service-discovery-registry=org.apache.dubbo.registry.client.ServiceDiscoveryRegistryFactory
+    nacos=org.apache.dubbo.registry.nacos.NacosRegistryFactory
+    # META-INF/dubbo/internal/org.apache.dubbo.registry.client.ServiceDiscoveryFactory
+    nacos=org.apache.dubbo.registry.nacos.NacosServiceDiscoveryFactory
+    # META-INF/dubbo/internal/org.apache.dubbo.metadata.ServiceNameMapping
+    metadata=org.apache.dubbo.registry.client.metadata.MetadataServiceNameMapping
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.Cluster
+    mock=org.apache.dubbo.rpc.cluster.support.wrapper.MockClusterWrapper
+    failover=org.apache.dubbo.rpc.cluster.support.FailoverCluster
+    zone-aware=org.apache.dubbo.rpc.cluster.support.registry.ZoneAwareCluster
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.LoadBalance
+    random=org.apache.dubbo.rpc.cluster.loadbalance.RandomLoadBalance
+    # META-INF/dubbo/internal/org.apache.dubbo.registry.client.ServiceInstanceCustomizer
+    protocol-ports=org.apache.dubbo.registry.client.metadata.ProtocolPortsMetadataCustomizer
+    instance-metadata=org.apache.dubbo.registry.client.metadata.ServiceInstanceMetadataCustomizer
+    metadata-url=org.apache.dubbo.config.metadata.MetadataServiceURLParamsMetadataCustomizer
+    ```
+    ```java
+    // RegistryProtocol, ServiceConfig, ReferenceConfig, and ServiceInstanceMetadataUtils
+    Registry registry = applicationModel.getExtensionLoader(RegistryFactory.class).getAdaptiveExtension().getRegistry(registryUrl);
+    ServiceDiscovery discovery = applicationModel.getExtensionLoader(ServiceDiscoveryFactory.class).getAdaptiveExtension().getServiceDiscovery(registryURL);
+    ServiceNameMapping.getDefaultExtension(scopeModel).map(url);
+    Invoker<?> clusterInvoker = Cluster.getCluster(scopeModel, clusterName).join(directory, true);
+    LoadBalance lb = ScopeModelUtil.getExtensionLoader(LoadBalance.class, moduleModel).getExtension(loadbalanceName);
+    applicationModel.getExtensionLoader(ServiceInstanceCustomizer.class)
+            .getSupportedExtensionInstances()
+            .forEach(customizer -> customizer.customize(instance, applicationModel));
+    ```
+
+- **Module level (`ModuleModel` & `DefaultModuleDeployer`)**:
+  - **`ModuleExt` and `DefaultModuleDeployer`** — `META-INF/dubbo/internal/org.apache.dubbo.common.context.ModuleExt`:
+    ```properties
+    moduleEnvironment=org.apache.dubbo.common.config.ModuleEnvironment
+    moduleConfig=org.apache.dubbo.config.context.ModuleConfigManager
+    ```
+    ```java
+    // ModuleModel.<init>() -> initModuleExt() & ConfigScopeModelInitializer.initializeModuleModel()
+    Set<ModuleExt> exts = this.getExtensionLoader(ModuleExt.class).getSupportedExtensionInstances();
+    for (ModuleExt ext : exts) {
+        ext.initialize();                                       // ModuleEnvironment, ModuleConfigManager (delegates shared lookups to ConfigManager)
+    }
+    ModuleDeployer moduleDeployer = beanFactory.registerBean(DefaultModuleDeployer.class);
+    moduleModel.setDeployer(moduleDeployer);
+    ```
+  - **Module config initialization (`DefaultModuleDeployer.initialize()` $\rightarrow$ `ModuleConfigManager.loadConfigs()`)**:
+    ```java
+    // ModuleConfigManager.loadConfigs(): ProviderConfig has isRequired == true (synthesizes blank default with null fields if absent)
+    loadConfigsOfTypeFromProps(ProviderConfig.class);
+    loadConfigsOfTypeFromProps(ConsumerConfig.class);
+    loadConfigsOfTypeFromProps(ModuleConfig.class);
+    checkDefaultAndValidateConfigs(ProviderConfig.class);       // inherited in ServiceConfig.preProcessRefresh() via getDefaultProvider()
+    checkDefaultAndValidateConfigs(ConsumerConfig.class);
+    checkDefaultAndValidateConfigs(ModuleConfig.class);
+    ```
+  - **`Filter`, `ClusterFilter`, `StateRouterFactory`, and `GovernanceRuleRepository` during `DefaultModuleDeployer.startSync()`**:
+    ```properties
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.Filter
+    context=org.apache.dubbo.rpc.filter.ContextFilter
+    echo=org.apache.dubbo.rpc.filter.EchoFilter
+    generic=org.apache.dubbo.rpc.filter.GenericFilter
+    timeout=org.apache.dubbo.rpc.filter.TimeoutFilter
+    exception=org.apache.dubbo.rpc.filter.ExceptionFilter
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.filter.ClusterFilter
+    consumercontext=org.apache.dubbo.rpc.cluster.filter.support.ConsumerContextFilter
+    future=org.apache.dubbo.rpc.protocol.dubbo.filter.FutureFilter
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.router.state.StateRouterFactory
+    condition=org.apache.dubbo.rpc.cluster.router.condition.ConditionStateRouterFactory
+    tag=org.apache.dubbo.rpc.cluster.router.tag.TagStateRouterFactory
+    # META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.governance.GovernanceRuleRepository
+    default=org.apache.dubbo.rpc.cluster.governance.DefaultGovernanceRuleRepositoryImpl
+    ```
+    ```java
+    // DefaultModuleDeployer.startSync() -> DefaultFilterChainBuilder, RouterChain, and AbstractStateRouter
+    private synchronized Future startSync() {
+        initialize();
+        exportServices();                                       // 1. bind local server + injvm (register=false)
+        prepareInternalModule();                                // 2. start internalModule (MetadataService)
+        referServices();                                        // 3. subscribe & connect @DubboReference beans
+        onModuleStarted();                                      // 4. customize & register ServiceInstance
+        registerServices();                                     // 5. publish MetadataInfo + refresh instance last
+        return startFuture;
+    }
+
+    List<Filter> filters = ScopeModelUtil.getExtensionLoader(Filter.class, moduleModel).getActivateExtension(url, key, group);
+    List<ClusterFilter> clusterFilters = ScopeModelUtil.getExtensionLoader(ClusterFilter.class, moduleModel).getActivateExtension(url, key, group);
+    List<StateRouterFactory> routers = moduleModel.getExtensionLoader(StateRouterFactory.class).getActivateExtension(url, ROUTER_KEY);
+    GovernanceRuleRepository ruleRepo = moduleModel.getExtensionLoader(GovernanceRuleRepository.class).getDefaultExtension();
+    ```
+
+---
+
+## 4. Protocol
 
 `Protocol` is the core RPC boundary extension in Dubbo. It reduces remote service exposure and consumption to two operations: `export` turns a provider-side `Invoker` into a reachable `Exporter`, and `refer` turns a target `URL` into a consumer-side `Invoker`.
 
@@ -539,213 +1009,7 @@ AbstractExporter o-- Invoker
 @enduml
 ```
 
-### 3.1 Startup deployer
-
-A Dubbo process is typically both a provider and a consumer at the same time, and its configuration and lifecycle are split across two scopes rather than managed in a single flat container:
-
-- **Application scope (`ApplicationModel`, `ConfigManager`, `DefaultApplicationDeployer`)**: owns process-wide infrastructure shared across every module — `ApplicationConfig`, `ProtocolConfig`, `ExecutorRepository`, the `ServiceDiscovery` client, and **`RegistryConfig`**. During `DefaultApplicationDeployer.initialize()`, `ConfigManager.loadConfigs()` binds `dubbo.registry.*` and `dubbo.registries.<id>.*` properties (alongside Spring `RegistryConfig` beans loaded by `DubboConfigBeanInitializer`). Each `RegistryConfig` specifies the registry endpoint and registration policy (`address`, `protocol`, `group`, `registerMode`, `simplified`). Because `RegistryConfig` is optional (`isRequired == false`, permitting `injvm`-only or direct-URL deployments), Dubbo never synthesizes a blank `RegistryConfig` when none is configured; conversely, when `RegistryConfig` is present and `useAsConfigCenter` or `useAsMetadataCenter` is unset (`null` or `true`), `DefaultApplicationDeployer` reuses that `RegistryConfig` address to bootstrap the dynamic config center and `MetadataReport` store when no dedicated center is declared.
-- **Module scope (`ModuleModel`, `ModuleConfigManager`, `DefaultModuleDeployer`)**: isolates each deployable unit of `@DubboService` and `@DubboReference` definitions with its own `ClassLoader` set, separating framework-internal services (`internalModule`, hosting `MetadataService`) from user modules (`defaultModule` for the primary Spring `ApplicationContext`, plus optional child modules created via `applicationModel.newModule()`). `ModuleConfigManager` stores module-local configs (`ModuleConfig`, `ServiceConfigBase`, `ReferenceConfigBase`, `ConsumerConfig`, and **`ProviderConfig`**) while delegating application-scoped queries such as `getDefaultRegistries()` and `getDefaultProtocols()` up to `ConfigManager`. During `DefaultModuleDeployer.initialize()`, `ModuleConfigManager.loadConfigs()` loads `dubbo.provider.*` and `dubbo.providers.<id>.*` and runs `checkDefaultAndValidateConfigs(ProviderConfig.class)`. Because `ProviderConfig` is required (`isRequired == true`), Dubbo automatically instantiates a default `ProviderConfig` (`getDefaultProvider()`) if none was declared. All attribute fields on a fresh `ProviderConfig` — invocation defaults (`timeout`, `retries`, `loadbalance`), service defaults (`version`, `group`, `protocols`, `registries`), and server defaults (`host`, `port`, `threadpool`, `threads`, `dispatcher`) — start as `null` so exported URLs remain compact and downstream protocol/cluster components apply their built-in constants unless overridden. When `ServiceConfig.refresh()` runs, every `@DubboService` without an explicit `provider` ID attaches this default `ProviderConfig` (`preProcessRefresh()`) and inherits its `protocols` and `registries`, falling back to `ConfigManager.getDefaultRegistries()` if `ProviderConfig` also leaves `registries` unset.
-
-Whether started by Spring (`DubboSpringInitializer` + `DubboDeployApplicationListener` on `ContextRefreshedEvent`) or programmatically (`DubboBootstrap.start()`), startup first initializes `DefaultApplicationDeployer` and `DefaultModuleDeployer` to populate `ConfigManager` and `ModuleConfigManager`, and then converges on `DefaultModuleDeployer.startSync()`, which executes three phases in strict order:
-
-1. **`exportServices()`**: binds the local wire server and `injvm` endpoints using defaults resolved from `ProviderConfig` and `ProtocolConfig`, without registering in the registry yet.
-2. **`referServices()`**: subscribes all `@DubboReference` dependencies to the target `RegistryConfig` endpoints and initializes downstream client invokers.
-3. **`registerServices()`**: publishes `MetadataInfo` and registers the provider instance in the registry last, ensuring incoming traffic never reaches a service whose own downstream `@DubboReference` dependencies are still uninitialized.
-
-```plantuml
-@startuml
-top to bottom direction
-
-class DubboSpringInitializer {
-  - REGISTRY_CONTEXT_MAP: Map<BeanDefinitionRegistry, DubboSpringInitContext>
-  + initialize(BeanDefinitionRegistry)
-  - initContext(DubboSpringInitContext, BeanDefinitionRegistry, ConfigurableListableBeanFactory)
-}
-class DubboConfigBeanInitializer {
-  - configManager: ConfigManager
-  - moduleModel: ModuleModel
-  - prepareDubboConfigBeans()
-}
-
-interface BeanDefinitionRegistryPostProcessor {
-  + postProcessBeanDefinitionRegistry(BeanDefinitionRegistry)
-}
-class ServiceAnnotationPostProcessor implements BeanDefinitionRegistryPostProcessor {
-  - registerServiceBean(BeanDefinitionHolder, BeanDefinitionRegistry, ...)
-}
-
-interface ApplicationListener<E> {
-  + onApplicationEvent(E)
-}
-class DubboDeployApplicationListener implements ApplicationListener {
-  - applicationModel: ApplicationModel
-  - moduleModel: ModuleModel
-  + onApplicationEvent(ApplicationContextEvent)
-  - onContextRefreshedEvent(ContextRefreshedEvent)
-}
-
-abstract class ScopeModel {
-  - parent: ScopeModel
-  - scope: ExtensionScope
-  - classLoaders: Set<ClassLoader>
-}
-class FrameworkModel extends ScopeModel {
-  - applicationModels: List<ApplicationModel>
-}
-class ApplicationModel extends ScopeModel {
-  - configManager: ConfigManager
-  - deployer: ApplicationDeployer
-  - internalModule: ModuleModel
-  - defaultModule: ModuleModel
-  - moduleModels: List<ModuleModel>
-  + getApplicationConfigManager(): ConfigManager
-}
-class ModuleModel extends ScopeModel {
-  - applicationModel: ApplicationModel
-  - moduleConfigManager: ModuleConfigManager
-  - deployer: ModuleDeployer
-  + getConfigManager(): ModuleConfigManager
-  + getDeployer(): ModuleDeployer
-}
-
-abstract class AbstractConfigManager {
-  ~ configsCache: ConcurrentHashMap<String, Map<String, AbstractConfig>>
-  + loadConfigs()
-  # checkDefaultAndValidateConfigs(Class<T>)
-}
-class ConfigManager extends AbstractConfigManager {
-  + addRegistry(RegistryConfig)
-  + getDefaultRegistries(): List<RegistryConfig>
-  + getDefaultProtocols(): List<ProtocolConfig>
-}
-class ModuleConfigManager extends AbstractConfigManager {
-  - applicationConfigManager: ConfigManager
-  + addProvider(ProviderConfig)
-  + getDefaultProvider(): Optional<ProviderConfig>
-  + addService(ServiceConfigBase)
-  + addReference(ReferenceConfigBase)
-}
-
-abstract class AbstractConfig {
-  - id: String
-  # isDefault: Boolean
-  + refresh()
-}
-class RegistryConfig extends AbstractConfig {
-  - address: String
-  - protocol: String
-  - group: String
-  - registerMode: String
-  - useAsConfigCenter: Boolean
-  - useAsMetadataCenter: Boolean
-}
-abstract class AbstractMethodConfig extends AbstractConfig {
-  # timeout: Integer
-  # retries: Integer
-}
-abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
-  # registries: List<RegistryConfig>
-}
-abstract class AbstractServiceConfig extends AbstractInterfaceConfig {
-  # version: String
-  # group: String
-  # protocols: List<ProtocolConfig>
-}
-class ProviderConfig extends AbstractServiceConfig {
-  - host: String
-  - port: Integer
-  - threadpool: String
-  - threads: Integer
-  - dispatcher: String
-}
-
-interface Deployer<E> {
-  + initialize()
-  + start(): Future
-  + stop()
-}
-abstract class AbstractDeployer<E> implements Deployer
-interface ApplicationDeployer extends Deployer {
-  + registerServiceInstance()
-  + refreshServiceInstance()
-  + exportMetadataService()
-}
-interface ModuleDeployer extends Deployer {
-  + setPending()
-}
-class DefaultApplicationDeployer extends AbstractDeployer implements ApplicationDeployer {
-  - configManager: ConfigManager
-  + initialize()
-  - startConfigCenter()
-  - loadApplicationConfigs()
-  - startMetadataCenter()
-}
-class DefaultModuleDeployer extends AbstractDeployer implements ModuleDeployer {
-  - configManager: ModuleConfigManager
-  - applicationDeployer: ApplicationDeployer
-  + initialize()
-  + start(): Future
-  - startSync(): Future
-  - exportServices()
-  - referServices()
-  - registerServices()
-}
-
-FrameworkModel *-- ApplicationModel
-ApplicationModel *-- ModuleModel
-ApplicationModel *-- ConfigManager
-ApplicationModel *-- ApplicationDeployer
-ModuleModel *-- ModuleConfigManager
-ModuleModel *-- ModuleDeployer
-ModuleConfigManager --> ConfigManager
-ConfigManager o-- RegistryConfig
-ModuleConfigManager o-- ProviderConfig
-AbstractInterfaceConfig o-- RegistryConfig
-DubboSpringInitializer ..> DubboConfigBeanInitializer
-DubboSpringInitializer ..> DubboDeployApplicationListener
-DubboSpringInitializer ..> ModuleModel
-DubboConfigBeanInitializer --> ConfigManager
-DubboConfigBeanInitializer ..> ModuleConfigManager
-ServiceAnnotationPostProcessor ..> ModuleConfigManager
-DubboDeployApplicationListener o-- ModuleModel
-DefaultApplicationDeployer --> ConfigManager
-DefaultModuleDeployer --> ModuleConfigManager
-DefaultModuleDeployer --> ApplicationDeployer
-@enduml
-```
-
-```java
-// 1. Bind ModuleModel and register common beans: DubboSpringInitializer.initContext()
-ModuleModel moduleModel = applicationModel.getDefaultModule();
-context.setModuleModel(moduleModel);
-DubboBeanUtils.registerCommonBeans(registry);                   // registers DubboConfigBeanInitializer & DubboDeployApplicationListener
-
-// 2. Register ServiceBean / ReferenceBean into ModuleConfigManager during Spring bean initialization
-public void afterPropertiesSet() {                              // ServiceBean.afterPropertiesSet()
-    ModuleModel moduleModel = DubboBeanUtils.getModuleModel(applicationContext);
-    moduleModel.getConfigManager().addService(this);
-    moduleModel.getDeployer().setPending();
-}
-
-// 3. ContextRefreshedEvent -> DubboDeployApplicationListener -> initialize configs & start module
-private void onContextRefreshedEvent(ContextRefreshedEvent event) {
-    ModuleDeployer deployer = moduleModel.getDeployer();
-    Future future = deployer.start();                           // applicationDeployer.initialize() loads RegistryConfig into ConfigManager
-}
-
-// 4. DefaultModuleDeployer.startSync(): init ProviderConfig -> bind server -> warm references -> register last
-private synchronized Future startSync() {
-    initialize();                                               // ModuleConfigManager.loadConfigs() loads/creates default ProviderConfig
-    exportServices();                                           // 1. bind local server + injvm (register=false)
-    prepareInternalModule();                                    // 2. start internal module (MetadataService)
-    referServices();                                            // 3. subscribe & connect all @DubboReference beans
-    onModuleStarted();                                          // 4. prepareApplicationInstance() -> registerServiceInstance()
-    registerServices();                                         // 5. populate MetadataInfo + refresh registry instance
-    return startFuture;
-}
-```
-
-### 3.2 Export: the provider runtime
+### 4.1 Export: the provider runtime
 
 `export` is the provider-side pipeline that turns a `ServiceConfig` declaration into a live, discoverable RPC endpoint across three functions:
 
@@ -845,8 +1109,8 @@ ModuleModel --o ServiceModel
 ModuleServiceRepository o-- ProviderModel
 ModuleServiceRepository o-- ConsumerModel
 ServiceConfig *-- ProviderModel
-ServiceConfig --> ProxyFactory
-ServiceConfig --> Protocol
+ServiceConfig o-- ProxyFactory
+ServiceConfig o-- Protocol
 @enduml
 ```
 
@@ -970,7 +1234,7 @@ protected void reportMetadata(MetadataInfo metadataInfo) {
 }
 ```
 
-### 3.3 Refer: the consumer side
+### 4.2 Refer: the consumer side
 
 `refer` turns a service interface and target `URL` into a local proxy backed by remote providers. When backed by a registry, `ReferenceConfig` delegates through `Protocol$Adaptive` to `RegistryProtocol.refer`, which subscribes a `Directory` to the registry and joins all discovered provider `Invoker`s behind a single fault-tolerant `ClusterInvoker` before wrapping it in a dynamic proxy for the caller:
 
@@ -1001,9 +1265,7 @@ interface LoadBalance {
   + select(List, URL, Invocation): Invoker
 }
 
-FailoverCluster ..> FailoverClusterInvoker
 FailoverClusterInvoker o-- Directory
-FailoverClusterInvoker ..> LoadBalance
 @enduml
 ```
 
@@ -1080,14 +1342,14 @@ for (int i = 0; i < len; i++) {
 throw le;
 ```
 
-### 3.4 RegistryProtocol
+### 4.3 RegistryProtocol
 
 `RegistryProtocol` (`service-discovery-registry`) and its subclass `InterfaceCompatibleRegistryProtocol` (`registry`) do no socket framing or network transport themselves; they implement `Protocol` solely to bridge `ServiceConfig` and `ReferenceConfig` to the `Registry` / `ServiceDiscovery` SPI without special-casing registry logic in the config layer:
 
 - **On `export`**: unwraps the registry `URL` (`getRegistryUrl`) and the nested wire `URL` (`EXPORT_KEY`), delegates local port binding to `protocol.export(...)` (`ExporterChangeableWrapper`), and hands the provider `URL` to `registry.register(...)` (wrapped in `DestroyableExporter` so `unexport()` unregisters before closing).
 - **On `refer`**: resolves the `Registry` and `Cluster` SPIs, constructs a `ServiceDiscoveryMigrationInvoker` (capable of switching between application-level `ServiceDiscoveryRegistryDirectory` and interface-level `RegistryDirectory`), and subscribes the `Directory` to provider address changes. When a direct point-to-point `URL` (`dubbo://host:port`) is configured instead of a registry, `Protocol$Adaptive` bypasses `RegistryProtocol` completely and dispatches straight to the wire protocol.
 
-### 3.5 DubboProtocol
+### 4.4 DubboProtocol
 
 `DubboProtocol` is Dubbo's default wire protocol (`dubbo://`, port `20880`), pairing `DubboExporter` on the provider with `DubboInvoker` on the consumer over persistent Netty TCP channels.
 
@@ -1227,7 +1489,7 @@ The provider filter chain runs inside `invoker.invoke(inv)` on the business thre
 
 ---
 
-## 4. Exchanger
+## 5. Exchanger
 
 `Exchanger` sits between the protocol and the transport, and it is where request/response semantics enter. The transport moves bytes and knows nothing about correlation; the exchanger adds request identity, two-way versus one-way, event frames, and futures.
 
@@ -1270,16 +1532,12 @@ class DefaultFuture {
   - FUTURES: Map<Long, DefaultFuture>
   + received(Channel, Response)
 }
-
-HeaderExchanger ..> HeaderExchangeServer
-HeaderExchanger ..> HeaderExchangeClient
-HeaderExchangeHandler ..> DefaultFuture
 @enduml
 ```
 
 ---
 
-## 5. Transporter
+## 6. Transporter
 
 `Transporter` is the network implementation: it opens server sockets and client connections. The name is chosen by `server` for binding and `client` for connecting, both falling back to `transporter`, with `netty` as the default.
 
@@ -1325,15 +1583,12 @@ abstract class AbstractClient implements Client {
   + send(Object)
 }
 class NettyClient extends AbstractClient
-
-NettyTransporter ..> NettyServer
-NettyTransporter ..> NettyClient
 @enduml
 ```
 
 ---
 
-## 6. Codec2
+## 7. Codec2
 
 `Codec2` converts between a `ChannelBuffer` and a message object. It is a separate extension from the protocol so that the framing can be reused: the `dubbo` protocol's codec also serves the telnet path through inheritance.
 
@@ -1380,7 +1635,7 @@ DubboCountCodec *-- DubboCodec
 
 ---
 
-## 7. Serialization
+## 8. Serialization
 
 `Serialization` is the body format, and it is the one extension chosen per request rather than per connection. Its two methods return stream wrappers rather than byte arrays, so a large argument can be written without materialising it.
 
@@ -1415,13 +1670,12 @@ class DefaultSerializationSelector {
 }
 
 DefaultSerializationExceptionWrapper o-- Serialization
-DefaultSerializationSelector ..> Serialization
 @enduml
 ```
 
 ---
 
-## 8. ThreadPool
+## 9. ThreadPool
 
 `ThreadPool` decides how a decoded request reaches business code. Its single method returns a `java.util.concurrent.Executor` configured from the URL.
 
@@ -1447,20 +1701,21 @@ class LimitedThreadPool implements ThreadPool
 class EagerThreadPool implements ThreadPool
 class AbortPolicyWithReport
 
-class DefaultExecutorRepository {
+interface ExecutorRepository {
+  + createExecutorIfAbsent(URL): ExecutorService
+  + getExecutor(URL): ExecutorService
+}
+class DefaultExecutorRepository implements ExecutorRepository {
   - data: ConcurrentMap<String, ExecutorService>
   + createExecutorIfAbsent(URL): ExecutorService
   + getExecutor(URL): ExecutorService
 }
-
-FixedThreadPool ..> AbortPolicyWithReport
-DefaultExecutorRepository ..> ThreadPool
 @enduml
 ```
 
 ---
 
-## 9. LoadBalance
+## 10. LoadBalance
 
 `LoadBalance` picks one invoker from the candidates routing left behind.
 
@@ -1496,7 +1751,7 @@ class AdaptiveLoadBalance extends AbstractLoadBalance
 
 ---
 
-## 10. StateRouterFactory
+## 11. StateRouterFactory
 
 Routing narrows the candidate list before load balancing sees it, and in this version the live interface is `StateRouterFactory` rather than the older `RouterFactory`, which is kept only for compatibility.
 
@@ -1540,15 +1795,13 @@ class RouterChain {
   + buildSingleChain(Class, URL): SingleRouterChain
 }
 
-ConditionStateRouterFactory ..> ConditionStateRouter
 RouterChain o-- StateRouter
-RouterChain ..> StateRouterFactory
 @enduml
 ```
 
 ---
 
-## 11. Filter
+## 12. Filter
 
 `Filter` is the extension with the most implementations, and the only one applied twice per call — once on the consumer side and once on the provider side.
 
@@ -1582,23 +1835,24 @@ class TimeoutFilter implements Filter, Listener
 class TokenFilter implements Filter
 class AccessLogFilter implements Filter
 
-class DefaultFilterChainBuilder {
+interface FilterChainBuilder {
   + buildInvokerChain(Invoker, String, String): Invoker
 }
-
-DefaultFilterChainBuilder ..> Filter
+class DefaultFilterChainBuilder implements FilterChainBuilder {
+  + buildInvokerChain(Invoker, String, String): Invoker
+}
 @enduml
 ```
 
 ---
 
-## 12. The registry
+## 13. The registry
 
 The registry answers one question: which provider processes are running and where do they listen. It holds no interface definitions, only an address and a revision per instance.
 
 `NacosServiceDiscovery` extends `AbstractServiceDiscovery`, which extends `AbstractRegistry`, which `FailbackRegistry` builds on. The layering is inherited from the interface-level registry that predates application-level discovery, and it is still where the useful mechanics live: `AbstractRegistry` maintains the registered/subscribed/notified maps and a local disk cache, `FailbackRegistry` retries failed operations, and `NacosServiceDiscovery` maps Dubbo concepts onto Nacos naming.
 
-### 12.1 The address model
+### 13.1 The address model
 
 At application level a Nacos service name is the application name, and one instance represents one provider process:
 
@@ -1612,7 +1866,7 @@ The instance metadata is deliberately small. `dubbo.metadata.revision` identifie
 
 The registry `group` defaults to `DEFAULT_GROUP` and is overridable by `nacos.group`. Names containing `$` — nested interfaces from generated stubs — are rewritten to `___` before reaching the Nacos client, because Nacos restricts service-name characters.
 
-### 12.2 Subscription
+### 13.2 Subscription
 
 ```mermaid
 flowchart TD
@@ -1632,7 +1886,7 @@ Two behaviours matter here. Instances with `enabled=false` are dropped before ad
 
 The mapping from interface to application is not in Nacos naming. `ServiceNameMapping` maintains it (with `provided-by` on the consumer URL and a metadata-center mapping), and `ServiceDiscoveryRegistry.doSubscribe` consults the mapping before subscribing; with no mapping it stops and waits for the mapping listener, because a consumer cannot name an application it has never been told about. The Nacos client side of that model is covered in [Nacos service and configuration management](/post/java/spring-cloud/nacos/).
 
-### 12.3 Coalescing, failure recovery, and local cache
+### 13.3 Coalescing, failure recovery, and local cache
 
 `RegistryNotifier` bounds the cost of a flapping provider set. The first ten notifications are delivered immediately (`DEFAULT_DELAY_EXECUTE_TIMES = 10`); afterwards the notifier enforces the `delay-notification` window (default 5000 ms) and keeps only the most recent payload, comparing a timestamp so that a superseded task produces no notification. A burst of registrations at deployment time therefore yields one directory refresh instead of one per instance.
 
@@ -1650,17 +1904,17 @@ The mapping from interface to application is not in Nacos naming. `ServiceNameMa
 
 ---
 
-## 13. MetadataService
+## 14. MetadataService
 
 The metadata service answers the other question: what does that interface look like. It is an ordinary RPC service exported by every provider, so a consumer reaches it the same way it reaches a business service, without going through the registry again.
 
-### 13.1 The service itself
+### 14.1 The service itself
 
 `MetadataService` is a small fixed interface. It exposes `getMetadataInfo(revision)` and `getMetadataInfos()`, plus `getServiceDefinition(serviceKey)` for a single interface. Because it is an ordinary service, it is exported through the same `ServiceConfig` machinery as business services: `ConfigurableMetadataServiceExporter` builds a `ServiceConfig` for it with its own protocol and port (`metadata-service-protocol`, `metadata-service-port`) and exports it on startup. A consumer refers it through `MetadataUtils.referMetadataService`, which builds a URL from the coordinates in the instance metadata and calls it like any other remote service.
 
 The definition returned is a `MetadataInfo`: the set of services the provider exports, each with its interface name, version, group, protocol, and method signatures with parameter type descriptors.
 
-### 13.2 Resolving the revision
+### 14.2 Resolving the revision
 
 `dubbo.metadata.revision` is the link back to the interface definitions. It is a digest computed by `MetadataInfo.calRevision` over the application name and the description of every exported service, so it changes whenever the set or shape of those services changes. A consumer reads the revision from the instance and resolves it via the provider's `MetadataService`. `AbstractServiceDiscovery.getRemoteMetadata` performs that resolution behind a revision-keyed cache, retrying three times with a one-second pause before giving up with an empty `MetadataInfo`. The cache is what keeps the per-revision fetch off the steady-state path.
 
