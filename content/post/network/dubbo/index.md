@@ -1,5 +1,5 @@
 ---
-title: "Dubbo RPC Architecture and Implementation"
+title: "Dubbo RPC Internals"
 date: 2026-11-15T10:40:00+01:00
 categories:
 - network
@@ -12,9 +12,7 @@ tags:
 keywords:
 - dubbo
 - rpc
-- nacos
-- spi
-- netty
+
 
 #thumbnailImage: //example.com/image.jpg
 ---
@@ -983,7 +981,9 @@ class GrpcProtocol extends TripleProtocol
 class RestProtocol extends TripleProtocol
 class InjvmProtocol extends AbstractProtocol
 class MockProtocol extends AbstractProtocol
-class RegistryProtocol implements Protocol
+class RegistryProtocol implements Protocol {
+  - bounds: ConcurrentMap<String, ExporterChangeableWrapper<?>>
+}
 class InterfaceCompatibleRegistryProtocol extends RegistryProtocol
 
 interface Exporter<T> {
@@ -993,6 +993,22 @@ interface Exporter<T> {
 abstract class AbstractExporter<T> implements Exporter {
   - invoker: Invoker<T>
 }
+class DubboExporter<T> extends AbstractExporter {
+  - key: String
+}
+class InjvmExporter<T> extends AbstractExporter {
+  - key: String
+}
+class ExporterChangeableWrapper<T> implements Exporter {
+  - exporter: Exporter<T>
+  - originInvoker: Invoker<T>
+}
+class DestroyableExporter<T> implements Exporter {
+  - exporter: Exporter<T>
+}
+class ListenerExporterWrapper<T> implements Exporter {
+  - exporter: Exporter<T>
+}
 
 interface Invoker<T> {
   + getInterface(): Class<T>
@@ -1001,11 +1017,33 @@ interface Invoker<T> {
 abstract class AbstractInvoker<T> implements Invoker {
   - type: Class<T>
   - url: URL
+  # doInvoke(Invocation): Result
 }
+class DubboInvoker<T> extends AbstractInvoker {
+  - clientsProvider: ClientsProvider
+}
+class TripleInvoker<T> extends AbstractInvoker {
+  - connectionClient: AbstractConnectionClient
+}
+class InjvmInvoker<T> extends AbstractInvoker {
+  - exporterMap: Map<String, Exporter<?>>
+}
+abstract class AbstractProxyInvoker<T> implements Invoker {
+  - proxy: T
+  # doInvoke(T, String, Class<?>[], Object[]): Object
+}
+class MockInvoker<T> implements Invoker
+class MigrationInvoker<T> implements Invoker
+class ServiceDiscoveryMigrationInvoker<T> extends MigrationInvoker
 
 AbstractProtocol *-- Exporter
 AbstractProtocol *-- Invoker
+RegistryProtocol *-- ExporterChangeableWrapper
 AbstractExporter o-- Invoker
+ExporterChangeableWrapper o-- Exporter
+ExporterChangeableWrapper o-- Invoker
+DestroyableExporter o-- Exporter
+ListenerExporterWrapper o-- Exporter
 @enduml
 ```
 
@@ -1054,10 +1092,16 @@ class ServiceConfig<T> extends ServiceConfigBase {
   - proxyFactory: ProxyFactory
   - providerModel: ProviderModel
   - exporters: ConcurrentHashMap<RegisterTypeEnum, List<Exporter<?>>>
-  + export()
+  + export(RegisterTypeEnum)
   + register(boolean)
-  # doExport()
-  - doExportUrls()
+  # doExport(RegisterTypeEnum)
+  # exported()
+  - doExportUrls(RegisterTypeEnum)
+  - doExportUrlsFor1Protocol(ProtocolConfig, List<URL>, RegisterTypeEnum)
+  - exportUrl(URL, List<URL>, RegisterTypeEnum)
+  - exportLocal(URL)
+  - exportRemote(URL, List<URL>, RegisterTypeEnum): URL
+  - doExportUrl(URL, boolean, RegisterTypeEnum)
 }
 class ServiceBean<T> extends ServiceConfig implements InitializingBean {
   + afterPropertiesSet()
@@ -1115,208 +1159,476 @@ ServiceConfig o-- Protocol
 ```
 
 ```java
-// 1. Entry point: ServiceConfig.export() refreshes config, initializes metadata, and delegates to doExport()
+// 1. ServiceConfig.export(): prepare module deployer, refresh config, initialize metadata, and delegate to doExport()
 public void export(RegisterTypeEnum registerType) {
     if (this.exported) {
         return;
     }
+    if (getScopeModel().isLifeCycleManagedExternally()) {
+        getScopeModel().getDeployer().prepare();
+    } else {
+        getScopeModel().getDeployer().start();
+    }
+
     synchronized (this) {
+        if (this.exported) {
+            return;
+        }
         if (!this.isRefreshed()) {
             this.refresh();                                     // binds YAML/properties -> calls postProcessRefresh()
         }
         if (this.shouldExport()) {
             this.init();                                        // assemble ServiceMetadata and sub-configs
-            doExport(registerType);                             // calls doExportUrls(registerType) -> exported()
+            if (shouldDelay()) {
+                doDelayExport();
+            } else if (Integer.valueOf(-1).equals(getDelay())
+                    && Boolean.parseBoolean(ConfigurationUtils.getProperty(
+                            getScopeModel(), CommonConstants.DubboProperty.DUBBO_MANUAL_REGISTER_KEY, "false"))) {
+                doExport(RegisterTypeEnum.MANUAL_REGISTER);
+            } else {
+                doExport(registerType);                         // calls doExportUrls(registerType) -> exported()
+            }
         }
     }
+
+    getScopeModel().getDeployer().registerServiceInstance();
 }
 
-// 2. Populate registries & protocols during refresh(): postProcessRefresh() -> checkAndUpdateSubConfigs()
+// 2. ServiceConfig.checkAndUpdateSubConfigs() & AbstractInterfaceConfig.convertRegistryIdsToRegistries()
 private void checkAndUpdateSubConfigs() {
     completeCompoundConfigs();                                  // inherit registries / protocols from ProviderConfig or ModuleConfig
     checkProtocol();                                            // populate protocols from protocolIds or ConfigManager.getDefaultProtocols()
+
+    List<ConfigInitializer> configInitializers = this.getExtensionLoader(ConfigInitializer.class)
+            .getActivateExtension(URL.valueOf("configInitializer://", getScopeModel()), (String[]) null);
+    configInitializers.forEach(e -> e.initServiceConfig(this));
+
     if (!isOnlyInJvm()) {
         checkRegistry();                                        // calls AbstractInterfaceConfig.convertRegistryIdsToRegistries()
     }
+    // ... resolve interfaceClass, checkRef(), checkStubAndLocal(interfaceClass)
+    ConfigValidationUtils.validateServiceConfig(this);
+    postProcessConfig();
 }
 
 private void convertRegistryIdsToRegistries() {                 // AbstractInterfaceConfig: resolves protected List<RegistryConfig> registries
     computeValidRegistryIds();
     if (StringUtils.isEmpty(registryIds)) {
         if (CollectionUtils.isEmpty(registries)) {
-            // Pull application-level default RegistryConfig (e.g. dubbo.registry.address: nacos://127.0.0.1:8848)
-            setRegistries(new ArrayList<>(getConfigManager().getDefaultRegistries()));
+            List<RegistryConfig> registryConfigs = getConfigManager().getDefaultRegistries();
+            registryConfigs = new ArrayList<>(registryConfigs);
+            setRegistries(registryConfigs);
         }
     } else {
-        // Resolve explicit @DubboService(registry = {"..."}) IDs from ConfigManager
+        String[] ids = COMMA_SPLIT_PATTERN.split(registryIds);
         List<RegistryConfig> tmpRegistries = new ArrayList<>();
-        for (String id : COMMA_SPLIT_PATTERN.split(registryIds)) {
-            getConfigManager().getRegistry(id).ifPresent(tmpRegistries::add);
-        }
+        Arrays.stream(ids).forEach(id -> {
+            if (tmpRegistries.stream().noneMatch(reg -> reg.getId().equals(id))) {
+                Optional<RegistryConfig> globalRegistry = getConfigManager().getRegistry(id);
+                if (globalRegistry.isPresent()) {
+                    tmpRegistries.add(globalRegistry.get());
+                } else {
+                    throw new IllegalStateException("Registry not found: " + id);
+                }
+            }
+        });
         setRegistries(tmpRegistries);
     }
 }
 
+// 3. ServiceConfig.doExport() -> doExportUrls() -> doExportUrlsFor1Protocol() -> exportUrl() -> exportRemote()
 protected synchronized void doExport(RegisterTypeEnum registerType) {
+    if (unexported) {
+        throw new IllegalStateException("The service " + interfaceClass.getName() + " has already unexported!");
+    }
+    if (exported) {
+        return;
+    }
+    if (StringUtils.isEmpty(path)) {
+        path = interfaceName;
+    }
     doExportUrls(registerType);
     exported();
 }
 
-// 3. Build ProviderModel and URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -> service-discovery-registry://
 private void doExportUrls(RegisterTypeEnum registerType) {
     ModuleServiceRepository repository = getScopeModel().getServiceRepository();
-    ServiceDescriptor serviceDescriptor = repository.registerService(getInterfaceClass());
+    ServiceDescriptor serviceDescriptor;
+    final boolean serverService = ref instanceof ServerService;
+    if (serverService) {
+        serviceDescriptor = ((ServerService) ref).getServiceDescriptor();
+        if (!this.provider.getUseJavaPackageAsPath()) {
+            this.path = serviceDescriptor.getInterfaceName();
+        }
+        repository.registerService(serviceDescriptor);
+    } else {
+        serviceDescriptor = repository.registerService(getInterfaceClass());
+    }
     providerModel = new ProviderModel(
-            serviceMetadata.getServiceKey(), ref, serviceDescriptor, getScopeModel(), serviceMetadata, interfaceClassLoader);
+            serviceMetadata.getServiceKey(),
+            ref,
+            serviceDescriptor,
+            getScopeModel(),
+            serviceMetadata,
+            interfaceClassLoader);
+    providerModel.setConfig(this);
+    providerModel.setDestroyRunner(getDestroyRunner());
     repository.registerProvider(providerModel);
 
-    // Reads this.registries and rewrites nacos://127.0.0.1:8848 -> service-discovery-registry://127.0.0.1:8848?registry=nacos
-    List<URL> registryURLs = ConfigValidationUtils.loadRegistries(this, true);
+    // Rewrites nacos://127.0.0.1:8848 -> service-discovery-registry://127.0.0.1:8848?registry=nacos
+    List<URL> registryURLs = !Boolean.FALSE.equals(isRegister())
+            ? ConfigValidationUtils.loadRegistries(this, true)
+            : Collections.emptyList();
+
+    // protocols holds only configured wire ProtocolConfigs (e.g. "dubbo", port 20880) — NOT a separate "injvm" ProtocolConfig
     for (ProtocolConfig protocolConfig : protocols) {
-        URL url = buildUrl(protocolConfig, map);                // wire URL: dubbo://10.0.0.7:20880/GreetingService?...
-        exportLocal(url);                                       // export injvm://127.0.0.1/... for in-process calls
-        for (URL registryURL : registryURLs) {
-            // Attach wire URL under EXPORT_KEY; AUTO_REGISTER_BY_DEPLOYER defers registry.register to registerServices()
-            doExportUrl(registryURL.putAttribute(EXPORT_KEY, url), true, registerType);
+        String pathKey = URL.buildKey(
+                getContextPath(protocolConfig).map(p -> p + "/" + path).orElse(path), group, version);
+        if (!serverService) {
+            repository.registerService(pathKey, interfaceClass);
         }
-        // Upload per-service FullServiceDefinition to remote MetadataReport (when configured)
-        MetadataUtils.publishServiceDefinition(url, providerModel.getServiceModel(), getApplicationModel());
+        doExportUrlsFor1Protocol(protocolConfig, registryURLs, registerType);
     }
+
+    providerModel.setServiceUrls(urls);
 }
 
-// 4. Wrap ref as Invoker, dispatch to RegistryProtocol.export() for local Netty bind, then map interface -> app
+private void doExportUrlsFor1Protocol(
+        ProtocolConfig protocolConfig, List<URL> registryURLs, RegisterTypeEnum registerType) {
+    Map<String, String> map = buildAttributes(protocolConfig);
+    map.keySet().removeIf(key -> StringUtils.isEmpty(key) || StringUtils.isEmpty(map.get(key)));
+    serviceMetadata.getAttachments().putAll(map);
+
+    URL url = buildUrl(protocolConfig, map);                    // single wire URL: dubbo://10.0.0.7:20880/GreetingService?...
+    processServiceExecutor(url);
+
+    if (CollectionUtils.isEmpty(registryURLs)) {
+        registerType = RegisterTypeEnum.NEVER_REGISTER;
+    }
+    exportUrl(url, registryURLs, registerType);                 // fans one wire URL out to both injvm and remote exports
+    initServiceMethodMetrics(url);
+}
+
+private void exportUrl(URL url, List<URL> registryURLs, RegisterTypeEnum registerType) {
+    String scope = url.getParameter(SCOPE_KEY);                 // default scope is null -> BOTH branches execute
+    if (!SCOPE_NONE.equalsIgnoreCase(scope)) {
+        if (!SCOPE_REMOTE.equalsIgnoreCase(scope)) {
+            exportLocal(url);                                   // 1st export: clone dubbo:// URL -> injvm:// -> InjvmProtocol
+        }
+        if (!SCOPE_LOCAL.equalsIgnoreCase(scope)) {
+            url = exportRemote(url, registryURLs, registerType); // 2nd export: wrap dubbo:// URL -> RegistryProtocol -> DubboProtocol
+            if (!isGeneric(generic) && !getScopeModel().isInternal()) {
+                MetadataUtils.publishServiceDefinition(url, providerModel.getServiceModel(), getApplicationModel());
+            }
+            // ... extra protocols (ext.protocol) omitted
+        }
+    }
+    this.urls.add(url);
+}
+
+private void exportLocal(URL url) {
+    // Rewrites the wire URL's scheme/address to injvm://127.0.0.1:0/... without needing a ProtocolConfig("injvm")
+    URL local = URLBuilder.from(url)
+            .setProtocol(LOCAL_PROTOCOL)
+            .setHost(LOCALHOST_VALUE)
+            .setPort(0)
+            .build();
+    local = local.setScopeModel(getScopeModel()).setServiceModel(providerModel);
+    local = local.addParameter(EXPORTER_LISTENER_KEY, LOCAL_PROTOCOL); // notifies InjvmExporterListener -> ScopeClusterInvoker
+    doExportUrl(local, false, RegisterTypeEnum.AUTO_REGISTER);  // Protocol$Adaptive routes "injvm" -> InjvmProtocol.export()
+}
+
+private URL exportRemote(URL url, List<URL> registryURLs, RegisterTypeEnum registerType) {
+    if (CollectionUtils.isNotEmpty(registryURLs) && registerType != RegisterTypeEnum.NEVER_REGISTER) {
+        for (URL registryURL : registryURLs) {
+            if (SERVICE_REGISTRY_PROTOCOL.equals(registryURL.getProtocol())) {
+                url = url.addParameterIfAbsent(SERVICE_NAME_MAPPING_KEY, "true");
+            }
+            if (LOCAL_PROTOCOL.equalsIgnoreCase(url.getProtocol())) { // skip registry if user explicitly configured protocol=injvm
+                continue;
+            }
+            url = url.addParameterIfAbsent(DYNAMIC_KEY, registryURL.getParameter(DYNAMIC_KEY));
+            URL monitorUrl = ConfigValidationUtils.loadMonitor(this, registryURL);
+            if (monitorUrl != null) {
+                url = url.putAttribute(MONITOR_KEY, monitorUrl);
+            }
+            String proxy = url.getParameter(PROXY_KEY);
+            if (StringUtils.isNotEmpty(proxy)) {
+                registryURL = registryURL.addParameter(PROXY_KEY, proxy);
+            }
+            // Attach wire URL under EXPORT_KEY; Protocol$Adaptive routes "service-discovery-registry" -> RegistryProtocol.export()
+            doExportUrl(registryURL.putAttribute(EXPORT_KEY, url), true, registerType);
+        }
+    } else {
+        doExportUrl(url, true, registerType);                   // no registry: Protocol$Adaptive routes "dubbo" -> DubboProtocol.export()
+    }
+    return url;
+}
+
+// 4. ServiceConfig.doExportUrl() & exported(): shared sink called by BOTH exportLocal() and exportRemote()
 private void doExportUrl(URL url, boolean withMetaData, RegisterTypeEnum registerType) {
-    if (registerType == RegisterTypeEnum.AUTO_REGISTER_BY_DEPLOYER) {
+    if (!url.getParameter(REGISTER_KEY, true)) {
+        registerType = RegisterTypeEnum.MANUAL_REGISTER;
+    }
+    if (registerType == RegisterTypeEnum.NEVER_REGISTER
+            || registerType == RegisterTypeEnum.MANUAL_REGISTER
+            || registerType == RegisterTypeEnum.AUTO_REGISTER_BY_DEPLOYER) {
         url = url.addParameter(REGISTER_KEY, false);            // defer registration until all services finish binding
     }
+
     Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, url); // Javassist Wrapper, no reflection
-    Exporter<?> exporter = protocolSPI.export(new DelegateProviderMetaDataInvoker(invoker, this));
-    exporters.computeIfAbsent(registerType, k -> new CopyOnWriteArrayList<>()).add(exporter);
+    if (withMetaData) {
+        invoker = new DelegateProviderMetaDataInvoker(invoker, this);
+    }
+    Exporter<?> exporter = protocolSPI.export(invoker);         // Protocol$Adaptive dispatches on url.getProtocol()
+    ConcurrentHashMapUtils.computeIfAbsent(exporters, registerType, k -> new CopyOnWriteArrayList<>())
+            .add(exporter);
 }
 
 protected void exported() {
-    serviceNameMapping.map(url);                                // upload interface -> applicationName mapping
-    getScopeModel().getDeployer().getApplicationDeployer().exportMetadataService(); // export local MetadataService
-}
-
-// 5. RegistryProtocol.export(): unwrap EXPORT_KEY and bind local Netty port via DubboProtocol
-public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
-    URL registryUrl = getRegistryUrl(originInvoker);            // unwrap nacos://127.0.0.1:8848
-    URL providerUrl = getProviderUrl(originInvoker);            // read EXPORT_KEY -> dubbo://10.0.0.7:20880/...
-    final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl); // DubboProtocol.export()
-    exporter.setRegisterUrl(customizeURL(providerUrl, registryUrl));
-    return new DestroyableExporter<>(exporter);
-}
-
-// 6. Accumulate exported service URLs into MetadataInfo: sc.register(true) -> AbstractServiceDiscovery.register(URL)
-public void register(URL url) {
-    metadataInfo.addService(url);                               // record interface, version, group, protocol, and method params
-}
-
-// 7. Upload MetadataInfo and register ServiceInstance in Nacos: AbstractServiceDiscovery.register() / update()
-public synchronized void register() throws RuntimeException {
-    if (this.serviceInstance == null) {
-        this.serviceInstance = createServiceInstance(this.metadataInfo); // host, port, app name, endpoints
+    exported = true;
+    List<URL> exportedURLs = this.getExportedUrls();
+    exportedURLs.forEach(url -> {
+        if (url.getParameter(SERVICE_NAME_MAPPING_KEY, false)) {
+            ServiceNameMapping serviceNameMapping = ServiceNameMapping.getDefaultExtension(getScopeModel());
+            ScheduledExecutorService scheduledExecutor = getScopeModel()
+                    .getBeanFactory()
+                    .getBean(FrameworkExecutorRepository.class)
+                    .getSharedScheduledExecutor();
+            mapServiceName(url, serviceNameMapping, scheduledExecutor); // invokes serviceNameMapping.map(url)
+        }
+    });
+    onExported();
+    if (hasRegistrySpecified()) {
+        getScopeModel().getDeployer().getApplicationDeployer().exportMetadataService();
     }
-    boolean revisionUpdated = calOrUpdateInstanceRevision(this.serviceInstance); // compute dubbo.metadata.revision digest
-    if (revisionUpdated) {
-        reportMetadata(this.metadataInfo);                      // upload MetadataInfo + snapshot for local MetadataService
-        doRegister(this.serviceInstance);                       // NacosServiceDiscovery -> namingService.registerInstance(...)
-    }
-}
-
-protected void reportMetadata(MetadataInfo metadataInfo) {
-    if (metadataReport != null) {
-        SubscriberMetadataIdentifier id = new SubscriberMetadataIdentifier(serviceName, metadataInfo.getRevision());
-        metadataReport.publishAppMetadata(id, metadataInfo);    // remote MetadataReport upload (when configured)
-    }
-    metadataInfos.put(metadataInfo.getRevision(), new MetadataInfoStat(metadataInfo.clone())); // served by MetadataService
 }
 ```
 
 ### 4.2 Refer: the consumer side
 
-`refer` turns a service interface and target `URL` into a local proxy backed by remote providers. When backed by a registry, `ReferenceConfig` delegates through `Protocol$Adaptive` to `RegistryProtocol.refer`, which subscribes a `Directory` to the registry and joins all discovered provider `Invoker`s behind a single fault-tolerant `ClusterInvoker` before wrapping it in a dynamic proxy for the caller:
+`refer` turns a service interface and target `URL` into a local proxy backed by remote providers. When backed by a registry, `ReferenceConfig` delegates through `Protocol$Adaptive` to `RegistryProtocol.refer`, which resolves `Cluster` from the `cluster` parameter (`failover` when unset), stores that instance on `MigrationInvoker`, and later calls `cluster.join` to subscribe a `Directory` and place the discovered provider `Invoker`s behind one `ClusterInvoker`. A direct `url` skips the registry and calls `Cluster.getCluster` from `ReferenceConfig.createInvoker`. `LoadBalance` is not retained by either object: `AbstractClusterInvoker.invoke` loads it on each call from the candidate URL's `loadbalance` parameter, default `random`. The joined `Directory` is itself a hierarchy under `AbstractDirectory`: `StaticDirectory` keeps a fixed invoker list for a direct URL, while `DynamicDirectory` implements `NotifyListener` and subscribes to a registry. `RegistryDirectory` refreshes that list from interface-level provider URLs (`isServiceDiscovery()` returns false); `ServiceDiscoveryRegistryDirectory` refreshes it from application instance addresses (`isServiceDiscovery()` returns true).
 
 ```plantuml
 @startuml
 top to bottom direction
 
-interface Invoker {
+interface FactoryBean {
+  + getObject(): T
+}
+interface InitializingBean {
+  + afterPropertiesSet()
+}
+
+abstract class AbstractConfig {
+  # scopeModel: ScopeModel
+  + refresh()
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+  # loadbalance: String
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # interfaceName: String
+  # version: String
+  # group: String
+  # cluster: String
+  # registries: List<RegistryConfig>
+  # scope: String
+}
+abstract class AbstractReferenceConfig extends AbstractInterfaceConfig {
+  # check: Boolean
+  # generic: String
+  # injvm: Boolean
+  # protocol: String
+  # providedBy: String
+}
+class ConsumerConfig extends AbstractReferenceConfig {
+  - threadpool: String
+  - shareconnections: Integer
+  - meshEnable: Boolean
+}
+abstract class ReferenceConfigBase<T> extends AbstractReferenceConfig {
+  # interfaceClass: Class<?>
+  # url: String
+  # consumer: ConsumerConfig
+  + get(): T
+  + get(boolean): T
+}
+class ReferenceConfig<T> extends ReferenceConfigBase {
+  - protocolSPI: Protocol
+  - proxyFactory: ProxyFactory
+  - consumerModel: ConsumerModel
+  - invoker: Invoker<?>
+  - ref: T
+  + get(boolean): T
+  # init(boolean)
+  - appendConfig(): Map
+  - createProxy(Map): T
+  - aggregateUrlFromRegistry(Map)
+  - createInvoker()
+  # shouldJvmRefer(Map): boolean
+}
+class ReferenceBean<T> implements FactoryBean, InitializingBean {
+  - referenceConfig: ReferenceConfig
+  - lazyProxy: Object
+  + getObject(): T
+  + afterPropertiesSet()
+}
+
+class ConsumerModel {
+  - apps: Set<String>
+  - methodModels: Map<Method, ConsumerMethodModel>
+}
+
+interface Protocol {
+  + refer(Class, URL): Invoker
+}
+interface ProxyFactory {
+  + getProxy(Invoker, boolean): T
+}
+
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface Invoker extends Node {
   + getInterface(): Class
   + invoke(Invocation): Result
 }
 class DubboInvoker implements Invoker
-interface ClusterInvoker extends Invoker
-class FailoverClusterInvoker implements ClusterInvoker
-
-interface Directory {
-  + list(Invocation): List
-}
-class RegistryDirectory implements Directory
-class ServiceDiscoveryRegistryDirectory implements Directory
 
 interface Cluster {
-  + join(Directory): Invoker
+  + join(Directory, boolean): Invoker
+  {static} + getCluster(ScopeModel, String): Cluster
 }
-class FailoverCluster implements Cluster
+abstract class AbstractCluster implements Cluster {
+  + join(Directory, boolean): Invoker
+  # doJoin(Directory): AbstractClusterInvoker
+}
+class FailoverCluster extends AbstractCluster
+class ScopeClusterWrapper implements Cluster {
+  - cluster: Cluster
+}
+class MockClusterWrapper implements Cluster {
+  - cluster: Cluster
+}
+
+interface ClusterInvoker extends Invoker
+interface MigrationClusterInvoker extends ClusterInvoker
+class MigrationInvoker<T> implements MigrationClusterInvoker {
+  - cluster: Cluster
+  - invoker: ClusterInvoker
+  - serviceDiscoveryInvoker: ClusterInvoker
+}
+class ServiceDiscoveryMigrationInvoker<T> extends MigrationInvoker
+
+abstract class AbstractClusterInvoker<T> implements ClusterInvoker {
+  # directory: Directory<T>
+  + invoke(Invocation): Result
+  # initLoadBalance(List, Invocation): LoadBalance
+  # doInvoke(Invocation, List, LoadBalance): Result
+}
+class FailoverClusterInvoker<T> extends AbstractClusterInvoker
+class ScopeClusterInvoker<T> implements ClusterInvoker {
+  - directory: Directory<T>
+  - invoker: Invoker<T>
+}
+class MockClusterInvoker<T> implements ClusterInvoker {
+  - directory: Directory<T>
+  - invoker: Invoker<T>
+}
+
+interface NotifyListener {
+  + notify(List<URL>)
+}
+interface Directory extends Node {
+  + getInterface(): Class
+  + list(Invocation): List
+  + getAllInvokers(): List
+  + getConsumerUrl(): URL
+  + isServiceDiscovery(): boolean
+}
+abstract class AbstractDirectory<T> implements Directory {
+  # consumerUrl: URL
+  # routerChain: RouterChain<T>
+  - invokers: BitList<Invoker<T>>
+  - validInvokers: BitList<Invoker<T>>
+  + list(Invocation): List
+  # doList(SingleRouterChain, BitList, Invocation): List
+  # setInvokers(BitList)
+}
+class StaticDirectory<T> extends AbstractDirectory {
+  - interfaceClass: Class<T>
+}
+abstract class DynamicDirectory<T> extends AbstractDirectory implements NotifyListener {
+  # cluster: Cluster
+  # registry: Registry
+  # protocol: Protocol
+  # subscribeUrl: URL
+  # forbidden: boolean
+  + subscribe(URL)
+  + buildRouterChain(URL)
+  # refreshOverrideAndInvoker(List<URL>)
+  # destroyAllInvokers()
+}
+class RegistryDirectory<T> extends DynamicDirectory {
+  # urlInvokerMap: Map<URL, Invoker<T>>
+  + notify(List<URL>)
+  + isServiceDiscovery(): boolean
+}
+class ServiceDiscoveryRegistryDirectory<T> extends DynamicDirectory {
+  - urlInvokerMap: Map<ProtocolServiceKeyWithAddress, Invoker<T>>
+  + notify(List<URL>)
+  + isServiceDiscovery(): boolean
+}
+interface Registry {
+  + register(URL)
+  + subscribe(URL, NotifyListener)
+}
 
 interface LoadBalance {
   + select(List, URL, Invocation): Invoker
 }
+abstract class AbstractLoadBalance implements LoadBalance
+class RandomLoadBalance extends AbstractLoadBalance
 
-FailoverClusterInvoker o-- Directory
+ReferenceConfigBase o-- ConsumerConfig
+ReferenceBean o-- ReferenceConfig
+ReferenceConfig *-- ConsumerModel
+ReferenceConfig o-- ProxyFactory
+ReferenceConfig o-- Protocol
+ReferenceConfig o-- Invoker
+ReferenceConfig --> Cluster : createInvoker
+MigrationInvoker o-- Cluster
+MigrationInvoker o-- ClusterInvoker
+ScopeClusterWrapper o-- Cluster
+MockClusterWrapper o-- Cluster
+AbstractClusterInvoker o-- Directory
+DynamicDirectory o-- Registry
+DynamicDirectory o-- Cluster
+AbstractDirectory o-- Invoker
+ScopeClusterInvoker o-- Directory
+ScopeClusterInvoker o-- Invoker
+MockClusterInvoker o-- Directory
+MockClusterInvoker o-- Invoker
+AbstractClusterInvoker --> LoadBalance : initLoadBalance
 @enduml
 ```
 
 ```java
-// 1. ReferenceConfig refers the registry URL and wraps the returned Invoker in a dynamic proxy
-invoker = protocolSPI.refer(interfaceClass, registryUrl);
+// 1. ReferenceConfig refers the target URL via Protocol$Adaptive and wraps the Invoker in a dynamic proxy
+invoker = protocolSPI.refer(interfaceClass, curUrl);            // dispatches to RegistryProtocol.refer() for registry URLs
 return (T) proxyFactory.getProxy(invoker, ProtocolUtils.isGeneric(generic));
 
-// 2. RegistryProtocol.refer -> doRefer resolves Registry + Cluster and builds MigrationInvoker
-public <T> Invoker<T> refer(Class<T> type, URL url) throws RpcException {
-    url = getRegistryUrl(url);                                  // unwrap nacos://...
-    Registry registry = getRegistry(url);
-    Cluster cluster = Cluster.getCluster(url.getScopeModel(), qs.get(CLUSTER_KEY));
-    return doRefer(cluster, registry, type, url, qs);           // creates ServiceDiscoveryMigrationInvoker
-}
-
-// 3. RegistryProtocol.doCreateInvoker wires Directory, RouterChain, subscription, and ClusterInvoker
-protected <T> ClusterInvoker<T> doCreateInvoker(
-        DynamicDirectory<T> directory, Cluster cluster, Registry registry, Class<T> type) {
-    directory.setRegistry(registry);
-    directory.setProtocol(protocol);                            // Protocol$Adaptive for per-instance refer
-    if (directory.isShouldRegister()) {
-        registry.register(urlToRegistry);                       // optional consumer registration
-    }
-    directory.buildRouterChain(urlToRegistry);                  // assemble activated StateRouters
-    directory.subscribe(toSubscribeUrl(urlToRegistry));         // subscribe addresses + revisions
-    return (ClusterInvoker<T>) cluster.join(directory, true);   // wrap Directory in ClusterInvoker
-}
-
-// 4. InvokerInvocationHandler intercepts application calls on the generated proxy
+// 2. InvokerInvocationHandler intercepts application calls on the generated proxy
 RpcInvocation rpcInvocation = new RpcInvocation(serviceModel, method.getName(),
         invoker.getInterface().getName(), protocolServiceKey,
         method.getParameterTypes(), args);
 return InvocationUtil.invoke(invoker, rpcInvocation);           // sets RpcContext, invokes, calls recreate()
 ```
-
-#### Directory refresh
-
-```mermaid
-flowchart LR
-    A["notify(urls)"] --> B["instance urls, address + revision"]
-    B --> C{"single empty:// url?"}
-    C -->|"yes"| D["forbid, destroy all invokers"]
-    C -->|"no"| E["distinct, drop duplicates"]
-    E --> F["reuse invokers whose url is unchanged"]
-    F --> G["refer new instances"]
-    G --> H["swap urlInvokerMap atomically"]
-    H --> I["refresh router chain"]
-```
-
-An ordinary empty notification list triggers empty protection (retaining the previous `urlInvokerMap`), whereas a single `empty://` URL explicitly forbids the service and destroys all invokers.
 
 #### Cluster invocation
 
@@ -1348,6 +1660,361 @@ throw le;
 
 - **On `export`**: unwraps the registry `URL` (`getRegistryUrl`) and the nested wire `URL` (`EXPORT_KEY`), delegates local port binding to `protocol.export(...)` (`ExporterChangeableWrapper`), and hands the provider `URL` to `registry.register(...)` (wrapped in `DestroyableExporter` so `unexport()` unregisters before closing).
 - **On `refer`**: resolves the `Registry` and `Cluster` SPIs, constructs a `ServiceDiscoveryMigrationInvoker` (capable of switching between application-level `ServiceDiscoveryRegistryDirectory` and interface-level `RegistryDirectory`), and subscribes the `Directory` to provider address changes. When a direct point-to-point `URL` (`dubbo://host:port`) is configured instead of a registry, `Protocol$Adaptive` bypasses `RegistryProtocol` completely and dispatches straight to the wire protocol.
+
+`getRegistry` loads `RegistryFactory` from the registry URL protocol on each call. `service-discovery-registry` selects `ServiceDiscoveryRegistryFactory`. Its `createRegistry` restores the `registry` parameter (`nacos`) and returns a `ServiceDiscoveryRegistry`, which holds the `ServiceDiscovery` created by `ServiceDiscoveryFactory` (`NacosServiceDiscovery` for Nacos). `InterfaceCompatibleRegistryProtocol` rewrites `registry://` to that inner protocol before the same lookup, so interface-level export receives a `NacosRegistry` from `NacosRegistryFactory`. Its application-level refer path calls the parent `getRegistryUrl` and still receives a `ServiceDiscoveryRegistry`.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface Protocol {
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+class RegistryProtocol implements Protocol {
+  # protocol: Protocol
+  + setProtocol(Protocol)
+  + getRegistry(URL): Registry
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+class InterfaceCompatibleRegistryProtocol extends RegistryProtocol {
+  # getRegistryUrl(URL): URL
+}
+class "Protocol$Adaptive" as ProtocolAdaptive implements Protocol {
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+abstract class AbstractProtocol implements Protocol
+class DubboProtocol extends AbstractProtocol
+class TripleProtocol extends AbstractProtocol
+
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface RegistryService {
+  + register(URL)
+  + unregister(URL)
+  + subscribe(URL, NotifyListener)
+  + unsubscribe(URL, NotifyListener)
+}
+interface Registry extends Node, RegistryService {
+  + isServiceDiscovery(): boolean
+}
+abstract class AbstractRegistry implements Registry {
+  + register(URL)
+  + subscribe(URL, NotifyListener)
+}
+abstract class FailbackRegistry extends AbstractRegistry
+class ServiceDiscoveryRegistry extends FailbackRegistry {
+  - serviceDiscovery: ServiceDiscovery
+  + getServiceDiscovery(): ServiceDiscovery
+}
+class NacosRegistry extends FailbackRegistry
+
+interface RegistryFactory {
+  + getRegistry(URL): Registry
+}
+abstract class AbstractRegistryFactory implements RegistryFactory {
+  + getRegistry(URL): Registry
+  # createRegistry(URL): Registry
+}
+class ServiceDiscoveryRegistryFactory extends AbstractRegistryFactory
+class NacosRegistryFactory extends AbstractRegistryFactory
+
+interface ServiceDiscovery extends RegistryService {
+  + register()
+  + update()
+  + unregister()
+  + getInstances(String): List
+  + getLocalInstance(): ServiceInstance
+  + getLocalMetadata(): MetadataInfo
+}
+abstract class AbstractServiceDiscovery implements ServiceDiscovery {
+  # serviceInstance: ServiceInstance
+  # metadataInfo: MetadataInfo
+  + register(URL)
+  + register()
+  # reportMetadata(MetadataInfo)
+  # doRegister(ServiceInstance)
+}
+class NacosServiceDiscovery extends AbstractServiceDiscovery
+
+interface ServiceDiscoveryFactory {
+  + getServiceDiscovery(URL): ServiceDiscovery
+}
+abstract class AbstractServiceDiscoveryFactory implements ServiceDiscoveryFactory {
+  - discoveries: Map<String, ServiceDiscovery>
+  + getServiceDiscovery(URL): ServiceDiscovery
+  # createDiscovery(URL): ServiceDiscovery
+}
+class NacosServiceDiscoveryFactory extends AbstractServiceDiscoveryFactory
+
+RegistryProtocol o-- ProtocolAdaptive : protocol
+ProtocolAdaptive --> DubboProtocol : url.getProtocol()
+ProtocolAdaptive --> TripleProtocol : url.getProtocol()
+RegistryProtocol --> RegistryFactory : getRegistry
+ServiceDiscoveryRegistryFactory --> ServiceDiscoveryRegistry : createRegistry
+NacosRegistryFactory --> NacosRegistry : createRegistry
+ServiceDiscoveryRegistry *-- ServiceDiscovery
+ServiceDiscoveryRegistry --> ServiceDiscoveryFactory : createServiceDiscovery
+AbstractServiceDiscoveryFactory o-- ServiceDiscovery
+NacosServiceDiscoveryFactory --> NacosServiceDiscovery : createDiscovery
+@enduml
+```
+
+```java
+// SPI init: ExtensionLoader.injectExtension calls setProtocol the first time RegistryProtocol is created.
+private T createExtension(String name, boolean wrap) {
+    Class<?> clazz = getExtensionClasses().get(name);           // "service-discovery-registry" -> RegistryProtocol
+    T instance = (T) extensionInstances.get(clazz);
+    if (instance == null) {
+        extensionInstances.putIfAbsent(clazz, createExtensionInstance(clazz));
+        instance = (T) extensionInstances.get(clazz);
+        instance = postProcessBeforeInitialization(instance, name);
+        injectExtension(instance);                              // setter injection before any Protocol wrapper
+        instance = postProcessAfterInitialization(instance, name);
+    }
+    // ... wrap with ProtocolFilterWrapper, ProtocolListenerWrapper, ... then initExtension(instance)
+    return instance;
+}
+
+private T injectExtension(T instance) {
+    for (Method method : instance.getClass().getMethods()) {
+        if (!isSetter(method)) {                                // public, name starts with "set", one parameter
+            continue;
+        }
+        Class<?> pt = method.getParameterTypes()[0];
+        if (ReflectUtils.isPrimitives(pt)) {
+            continue;
+        }
+        String property = getSetterProperty(method);            // setProtocol -> "protocol"
+        Object object = injector.getInstance(pt, property);     // Protocol.class, "protocol"
+        if (object != null) {
+            method.invoke(instance, object);                    // RegistryProtocol.setProtocol(...)
+        }
+    }
+    return instance;
+}
+
+// SpiExtensionInjector sees that Protocol is @SPI and returns Protocol$Adaptive, not DubboProtocol.
+public <T> T getInstance(final Class<T> type, final String name) {
+    if (!type.isInterface() || !type.isAnnotationPresent(SPI.class)) {
+        return null;
+    }
+    ExtensionLoader<T> loader = extensionAccessor.getExtensionLoader(type);
+    if (loader == null) {
+        return null;
+    }
+    if (!loader.getSupportedExtensions().isEmpty()) {
+        return loader.getAdaptiveExtension();                   // name "protocol" is ignored
+    }
+    return null;
+}
+
+public void setProtocol(Protocol protocol) {
+    this.protocol = protocol;                                   // Protocol$Adaptive, reused by export and refer
+}
+
+// The concrete wire scheme stays on the provider URL (dubbo, tri, ...) written by ServiceConfig.buildUrl.
+private URL buildUrl(ProtocolConfig protocolConfig, Map<String, String> params) {
+    String name = protocolConfig.getName();
+    if (StringUtils.isEmpty(name)) {
+        name = DUBBO;                                           // default scheme "dubbo"
+    }
+    String host = findConfiguredHosts(protocolConfig, provider, params);
+    Integer port = findConfiguredPort(
+            protocolConfig, provider, this.getExtensionLoader(Protocol.class), name, params);
+    URL url = new ServiceConfigURL(
+            name, null, null, host, port,
+            getContextPath(protocolConfig).map(p -> p + "/" + path).orElse(path),
+            params);                                            // URL scheme is protocolConfig.name, not the RegistryProtocol field
+    if (this.getExtensionLoader(ConfiguratorFactory.class).hasExtension(url.getProtocol())) {
+        url = this.getExtensionLoader(ConfiguratorFactory.class)
+                .getExtension(url.getProtocol())
+                .getConfigurator(url)
+                .configure(url);
+    }
+    url = url.setScopeModel(getScopeModel());
+    url = url.setServiceModel(providerModel);
+    return url;
+}
+
+// 1. Provider export: RegistryProtocol.export() -> doLocalExport()
+public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
+    URL registryUrl = getRegistryUrl(originInvoker);            // rewrite service-discovery-registry:// -> nacos://127.0.0.1:8848
+    URL providerUrl = getProviderUrl(originInvoker);            // read EXPORT_KEY -> dubbo://10.0.0.7:20880/...
+
+    final URL overrideSubscribeUrl = getSubscribedOverrideUrl(providerUrl);
+    final OverrideListener overrideSubscribeListener = new OverrideListener(overrideSubscribeUrl, originInvoker);
+    providerUrl = overrideUrlWithConfig(providerUrl, overrideSubscribeListener);
+
+    final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl); // second Protocol$Adaptive pass on providerUrl
+
+    final Registry registry = getRegistry(registryUrl);
+    final URL registeredProviderUrl = customizeURL(providerUrl, registryUrl);
+
+    boolean register = providerUrl.getParameter(REGISTER_KEY, true) && registryUrl.getParameter(REGISTER_KEY, true);
+    if (register) {
+        register(registry, registeredProviderUrl);              // skipped during exportServices() because register=false
+    }
+
+    registerStatedUrl(registryUrl, registeredProviderUrl, register);
+    exporter.setRegisterUrl(registeredProviderUrl);
+    exporter.setSubscribeUrl(overrideSubscribeUrl);
+    exporter.setNotifyListener(overrideSubscribeListener);
+    exporter.setRegistered(register);
+
+    notifyExport(exporter);
+    return new DestroyableExporter<>(exporter);
+}
+
+private <T> ExporterChangeableWrapper<T> doLocalExport(final Invoker<T> originInvoker, URL providerUrl) {
+    String providerUrlKey = getProviderUrlKey(originInvoker);
+    String registryUrlKey = getRegistryUrlKey(originInvoker);
+    Invoker<?> invokerDelegate = new InvokerDelegate<>(originInvoker, providerUrl);
+
+    ReferenceCountExporter<?> exporter =
+            exporterFactory.createExporter(providerUrlKey, () -> protocol.export(invokerDelegate)); // protocol is the injected Protocol$Adaptive; url.getProtocol() selects DubboProtocol
+    return (ExporterChangeableWrapper<T>) ConcurrentHashMapUtils.computeIfAbsent(
+            ConcurrentHashMapUtils.computeIfAbsent(bounds, providerUrlKey, k -> new ConcurrentHashMap<>()),
+            registryUrlKey,
+            s -> new ExporterChangeableWrapper<>((ReferenceCountExporter<T>) exporter, originInvoker));
+}
+
+// 2. Provider registration: ServiceConfig.register(true) -> ExporterChangeableWrapper.register() -> AbstractServiceDiscovery
+public void register(boolean byDeployer) {                      // ServiceConfig
+    if (!this.exported) {
+        return;
+    }
+    synchronized (this) {
+        if (!this.exported) {
+            return;
+        }
+        for (Exporter<?> exporter : exporters.getOrDefault(RegisterTypeEnum.AUTO_REGISTER, Collections.emptyList())) {
+            exporter.register();
+        }
+        if (byDeployer) {
+            for (Exporter<?> exporter :
+                    exporters.getOrDefault(RegisterTypeEnum.AUTO_REGISTER_BY_DEPLOYER, Collections.emptyList())) {
+                exporter.register();                            // DestroyableExporter -> ExporterChangeableWrapper.register()
+            }
+        }
+    }
+}
+
+public void register() {                                        // RegistryProtocol.ExporterChangeableWrapper
+    if (registered.compareAndSet(false, true)) {
+        URL registryUrl = getRegistryUrl(originInvoker);
+        Registry registry = getRegistry(registryUrl);
+        RegistryProtocol.register(registry, getRegisterUrl());  // -> registry.register(registeredProviderUrl)
+        // ... mark RegisterStatedURL as registered on ProviderModel
+    }
+}
+
+public void register(URL url) {                                 // AbstractServiceDiscovery
+    metadataInfo.addService(url);                               // record interface, version, group, protocol, and method params
+}
+
+// 3. Instance publication: AbstractServiceDiscovery.register() & reportMetadata()
+public synchronized void register() throws RuntimeException {
+    if (isDestroy) {
+        return;
+    }
+    if (this.serviceInstance == null) {
+        ServiceInstance serviceInstance = createServiceInstance(this.metadataInfo);
+        if (!isValidInstance(serviceInstance)) {
+            return;
+        }
+        this.serviceInstance = serviceInstance;
+    }
+    boolean revisionUpdated = calOrUpdateInstanceRevision(this.serviceInstance); // compute dubbo.metadata.revision digest
+    if (revisionUpdated) {
+        try {
+            reportMetadata(this.metadataInfo);
+            doRegister(this.serviceInstance);                   // NacosServiceDiscovery -> namingService.registerInstance(...)
+        } catch (Exception e) {
+            this.serviceInstance = null;
+            throw e;
+        }
+    }
+}
+
+protected void reportMetadata(MetadataInfo metadataInfo) {
+    if (metadataInfo == null) {
+        return;
+    }
+    if (metadataReport != null) {
+        SubscriberMetadataIdentifier identifier =
+                new SubscriberMetadataIdentifier(serviceName, metadataInfo.getRevision());
+        if ((DEFAULT_METADATA_STORAGE_TYPE.equals(metadataType) && metadataReport.shouldReportMetadata())
+                || REMOTE_METADATA_STORAGE_TYPE.equals(metadataType)) {
+            MetricsEventBus.post(MetadataEvent.toPushEvent(applicationModel), () -> {
+                metadataReport.publishAppMetadata(identifier, metadataInfo);
+                return null;
+            });
+        }
+    }
+    MetadataInfo clonedMetadataInfo = metadataInfo.clone();
+    metadataInfos.put(metadataInfo.getRevision(), new MetadataInfoStat(clonedMetadataInfo)); // served by MetadataService
+}
+
+// 4. Consumer refer: RegistryProtocol.refer() -> doRefer() -> doCreateInvoker()
+public <T> Invoker<T> refer(Class<T> type, URL url) throws RpcException {
+    url = getRegistryUrl(url);                                  // rewrite service-discovery-registry:// -> nacos://...
+    Registry registry = getRegistry(url);
+    if (RegistryService.class.equals(type)) {
+        return proxyFactory.getInvoker((T) registry, type, url);
+    }
+
+    Map<String, String> qs = (Map<String, String>) url.getAttribute(REFER_KEY);
+    String group = qs.get(GROUP_KEY);
+    if (StringUtils.isNotEmpty(group)) {
+        if ((COMMA_SPLIT_PATTERN.split(group)).length > 1 || "*".equals(group)) {
+            return doRefer(Cluster.getCluster(url.getScopeModel(), MERGEABLE_CLUSTER_NAME), registry, type, url, qs);
+        }
+    }
+
+    Cluster cluster = Cluster.getCluster(url.getScopeModel(), qs.get(CLUSTER_KEY));
+    return doRefer(cluster, registry, type, url, qs);
+}
+
+protected <T> Invoker<T> doRefer(
+        Cluster cluster, Registry registry, Class<T> type, URL url, Map<String, String> parameters) {
+    Map<String, Object> consumerAttribute = new HashMap<>(url.getAttributes());
+    consumerAttribute.remove(REFER_KEY);
+    String p = isEmpty(parameters.get(PROTOCOL_KEY)) ? CONSUMER : parameters.get(PROTOCOL_KEY);
+    URL consumerUrl = new ServiceConfigURL(
+            p, null, null, parameters.get(REGISTER_IP_KEY), 0, getPath(parameters, type), parameters, consumerAttribute);
+    url = url.putAttribute(CONSUMER_URL_KEY, consumerUrl);
+    ClusterInvoker<T> migrationInvoker = getMigrationInvoker(this, cluster, registry, type, url, consumerUrl);
+    return interceptInvoker(migrationInvoker, url, consumerUrl); // triggers MigrationRuleListener.onRefer()
+}
+
+protected <T> ClusterInvoker<T> doCreateInvoker(
+        DynamicDirectory<T> directory, Cluster cluster, Registry registry, Class<T> type) {
+    directory.setRegistry(registry);
+    directory.setProtocol(protocol);                            // same injected Protocol$Adaptive; each discovered provider URL is referred by its own wire scheme
+    Map<String, String> parameters = new HashMap<>(directory.getConsumerUrl().getParameters());
+    URL urlToRegistry = new ServiceConfigURL(
+            parameters.get(PROTOCOL_KEY) == null ? CONSUMER : parameters.get(PROTOCOL_KEY),
+            parameters.remove(REGISTER_IP_KEY),
+            0,
+            getPath(parameters, type),
+            parameters);
+    urlToRegistry = urlToRegistry.setScopeModel(directory.getConsumerUrl().getScopeModel());
+    urlToRegistry = urlToRegistry.setServiceModel(directory.getConsumerUrl().getServiceModel());
+    if (directory.isShouldRegister()) {
+        directory.setRegisteredConsumerUrl(urlToRegistry);
+        registry.register(directory.getRegisteredConsumerUrl());
+    }
+    directory.buildRouterChain(urlToRegistry);                  // assemble activated StateRouters
+    directory.subscribe(toSubscribeUrl(urlToRegistry));         // subscribe addresses + revisions
+    return (ClusterInvoker<T>) cluster.join(directory, true);   // wrap Directory in ClusterInvoker
+}
+```
 
 ### 4.4 DubboProtocol
 
