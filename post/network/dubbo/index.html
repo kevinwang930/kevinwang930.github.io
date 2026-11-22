@@ -1,4 +1,4 @@
-<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eDubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/network\/dubbo\/","keywords":"[dubbo, rpc, nacos, spi, netty]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.170.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="dubbo,rpc,nacos,spi,netty"><meta name=description content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:description" content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:type" content="article"><meta property="og:title" content="Dubbo RPC Architecture and Implementation"><meta name=twitter:title content="Dubbo RPC Architecture and Implementation"><meta property="og:url" content="https://kevinwang930.github.io/post/network/dubbo/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/network/dubbo/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta name=twitter:description content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-11-15T10:40:00"><meta property="article:modified_time" content="2026-11-15T10:40:00"><meta property="article:section" content="network"><meta property="article:section" content="dubbo"><meta property="article:tag" content="network"><meta property="article:tag" content="rpc"><meta property="article:tag" content="dubbo"><meta property="article:tag" content="nacos"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Dubbo RPC Architecture and Implementation</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/network/dubbo/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Dubbo RPC Architecture and Implementation</h1><div class="postShorten-meta post-meta"><time datetime=2026-11-15T10:40:00+01:00>November 15, 2026
+<!doctype html><html lang=en-US><head><script type=application/ld+json>{"@context":"http://schema.org","@type":"Website","@id":"https:\/\/kevinwang930.github.io\/","author":{"@type":"Person","name":"Kevin Wang","image":"https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"},"name":"Kevin wang\u0027s blog","description":"\u003cp\u003eDubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one.\u003c\/p\u003e","url":"https:\/\/kevinwang930.github.io\/post\/network\/dubbo\/","keywords":"[dubbo, rpc]"}</script><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=generator content="Hugo 0.170.1 with theme Tranquilpeak 0.5.3-BETA"><meta name=author content="Kevin Wang"><meta name=keywords content="dubbo,rpc"><meta name=description content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:description" content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:type" content="article"><meta property="og:title" content="Dubbo RPC Internals"><meta name=twitter:title content="Dubbo RPC Internals"><meta property="og:url" content="https://kevinwang930.github.io/post/network/dubbo/"><meta property="twitter:url" content="https://kevinwang930.github.io/post/network/dubbo/"><meta property="og:site_name" content="Kevin wang's blog"><meta property="og:description" content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta name=twitter:description content="Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one."><meta property="og:locale" content="en"><meta property="article:published_time" content="2026-11-15T10:40:00"><meta property="article:modified_time" content="2026-11-15T10:40:00"><meta property="article:section" content="network"><meta property="article:section" content="dubbo"><meta property="article:tag" content="network"><meta property="article:tag" content="rpc"><meta property="article:tag" content="dubbo"><meta property="article:tag" content="nacos"><meta name=twitter:card content="summary"><meta name=twitter:site content="@kevinwang930"><meta name=twitter:creator content="@kevinwang930"><meta property="og:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><meta property="twitter:image" content="https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png"><title>Dubbo RPC Internals</title><link rel=icon href=https://kevinwang930.github.io/favicon.png><link rel=canonical href=https://kevinwang930.github.io/post/network/dubbo/><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css integrity="sha512-H9jrZiiopUdsLpg94A333EfumgUBpO9MdbxStdeITo+KEIMaNfHNvwyjjDJb+ERPaRS6DpyRlKbvPUasNItRyw==" crossorigin=anonymous referrerpolicy=no-referrer><link rel=stylesheet href=https://kevinwang930.github.io/css/style-h6ccsoet3mzkbb0wngshlfbaweimexgqcxj0h5hu4h82olsdzz6wmqdkajm.min.css><link rel=stylesheet href=https://kevinwang930.github.io/css/custom.css></head><body><div id=blog><style>:root{--sidebar-width:0px;--main-content-width:100%}@media only screen and (min-width:768px){:root{--sidebar-width:0px;--main-content-width:720px}}@media only screen and (min-width:1024px){:root{--sidebar-width:0px;--main-content-width:800px}}@media only screen and (min-width:1280px){:root{--sidebar-width:0px;--main-content-width:900px}}body,#main{background-color:#f8fafc!important}.main-content-wrap{max-width:1400px!important;width:100%!important;padding-left:24px!important;padding-right:24px!important;margin:0 auto!important;box-sizing:border-box!important}.codeblock .code pre,figure.highlight .code pre{max-width:min(calc(var(--main-content-width) - 50px),calc(100vw - 90px))!important}.modal{max-width:var(--main-content-width)!important}.post-header-cover .post-header .post-title,.post-header-cover .post-header .post-meta{max-width:var(--main-content-width)!important}#sidebar{display:none!important}#main{width:100%!important;float:none!important;margin-left:0!important;padding-left:0!important;transform:none!important}body{padding-top:60px!important}#header{display:block!important;left:0!important;width:100%!important;transform:none!important;background:rgba(255,255,255,.8)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border-bottom:1px solid rgba(226,232,240,.8)!important;box-shadow:0 4px 20px rgba(0,0,0,2%)!important;z-index:1000!important;height:60px!important}#bottom-bar,.post-bottom-bar{margin-left:0!important;left:0!important;width:100%!important;transform:none!important}.header-container{max-width:1400px!important;margin:0 auto!important;padding-left:24px!important;padding-right:24px!important;display:flex;justify-content:space-between;align-items:center;height:100%;position:relative;box-sizing:border-box}.header-title{text-align:left!important;line-height:60px!important;float:none!important;margin:0!important}.header-title-link{font-size:20px!important;font-weight:700!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;text-decoration:none!important}.header-nav{display:flex;margin-left:auto;margin-right:40px}.header-nav-list{display:flex;list-style:none;margin:0;padding:0;gap:30px}.header-nav-item{margin:0}.header-nav-link{color:#475569!important;font-size:14px!important;font-weight:600!important;line-height:60px!important;display:inline-block;text-transform:uppercase;letter-spacing:.5px;transition:color .2s;text-decoration:none;position:relative}.header-nav-link::after{content:'';position:absolute;width:100%;transform:scaleX(0);height:2px;bottom:14px;left:0;background:linear-gradient(90deg,#4f46e5,#7c3aed)!important;transform-origin:bottom right;transition:transform .3s cubic-bezier(.4,0,.2,1)}.header-nav-link:hover::after{transform:scaleX(1);transform-origin:bottom left}.header-nav-link:hover{color:#1e293b!important;text-decoration:none}.header-right-picture{display:flex;align-items:center}.header-picture{width:36px!important;height:36px!important;border-radius:50%!important;border:2px solid #e0e7ff!important;transition:border-color .2s!important}.header-picture:hover{border-color:#4f46e5!important}.about-page-container{max-width:480px!important;margin:60px auto!important;text-align:center!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:24px!important;padding:48px!important;box-shadow:0 10px 30px -10px rgba(148,163,184,.12),0 1px 3px rgba(0,0,0,5%)!important;transition:transform .3s ease,box-shadow .3s ease!important;box-sizing:border-box!important}.about-page-container:hover{transform:translateY(-5px)!important;box-shadow:0 20px 40px -15px rgba(79,70,229,.15)!important;border-color:rgba(79,70,229,.3)!important}.about-profile-picture{width:120px!important;height:120px!important;border-radius:50%!important;object-fit:cover!important;border:4px solid #e0e7ff!important;box-shadow:0 4px 10px rgba(79,70,229,.1)!important;margin-bottom:20px!important}.about-profile-name{font-size:26px!important;font-weight:800!important;margin-bottom:32px!important;color:#1e293b!important}.about-contact-links{display:flex!important;flex-direction:column!important;gap:16px!important;align-items:stretch!important}.about-contact-btn{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;padding:14px 20px!important;border-radius:12px!important;font-size:15px!important;font-weight:600!important;text-decoration:none!important;transition:all .2s ease-in-out!important;box-sizing:border-box!important}.btn-email{background:#f1f5f9!important;color:#475569!important;border:1px solid #e2e8f0!important}.btn-email:hover{background:#e2e8f0!important;color:#1e293b!important}.btn-github{background:#0f172a!important;color:#fff!important}.btn-github:hover{background:#1e293b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important}.blog-layout-container{display:flex!important;flex-direction:row!important;gap:32px!important;align-items:flex-start!important;width:100%!important;margin-top:40px!important;margin-bottom:40px!important}.post-list-column{display:flex!important;flex-direction:column!important;gap:16px!important;flex:1!important;min-width:0!important}.postShorten-card{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:12px!important;padding:0!important;margin-bottom:0!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%),0 2px 8px -1px rgba(148,163,184,3%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1),box-shadow .3s cubic-bezier(.4,0,.2,1),border-color .3s!important;box-sizing:border-box!important;width:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}.postShorten-card:hover{transform:translateY(-3px)!important;box-shadow:0 16px 20px -5px rgba(148,163,184,.1),0 8px 8px -5px rgba(148,163,184,4%)!important;border-color:rgba(79,70,229,.4)!important}@media only screen and (min-width:768px){.postShorten-card.has-thumbnail{flex-direction:row!important;align-items:stretch!important}.postShorten-card-image-wrap{width:240px!important;flex-shrink:0!important;height:auto!important;border-bottom:none!important;border-right:1px solid rgba(226,232,240,.5)!important}}.postShorten-card-image-wrap{width:100%;height:160px;overflow:hidden!important;position:relative!important;background:#f1f5f9!important;border-bottom:1px solid rgba(226,232,240,.5)!important}.postShorten-card-image{width:100%!important;height:100%!important;object-fit:cover!important;transition:transform .5s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-image{transform:scale(1.04)!important}.postShorten-card-content{padding:14px 18px!important;display:flex!important;flex-direction:column!important;flex-grow:1!important;justify-content:space-between!important}.postShorten-card-top{display:flex!important;flex-direction:column!important}.postShorten-card-categories{display:flex!important;flex-wrap:wrap!important;gap:4px!important;margin-bottom:4px!important}.postShorten-card-category-tag{font-size:10px!important;font-weight:700!important;color:#4f46e5!important;background:#e0e7ff!important;padding:4px 10px!important;line-height:1.25!important;border-radius:9999px!important;text-transform:uppercase!important;letter-spacing:.5px!important;text-decoration:none!important;transition:background-color .15s,color .15s!important}.postShorten-card-category-tag:hover{background:#c7d2fe!important;color:#3730a3!important;text-decoration:none!important}.postShorten-card-title{font-size:22px!important;font-weight:850!important;margin:0 0 2px!important;line-height:1.3!important}.postShorten-card-title a{color:#1e293b!important;text-decoration:none!important;transition:color .15s!important}.postShorten-card-title a:hover{color:#4f46e5!important;text-decoration:none!important}.postShorten-card-meta{display:flex!important;align-items:center!important;gap:12px!important;font-size:11px!important;color:#94a3b8!important;margin-bottom:5px!important}.postShorten-card-meta i{color:#94a3b8!important}.postShorten-card-date,.postShorten-card-readingtime{display:flex!important;align-items:center!important;gap:5px!important}.postShorten-card-excerpt{font-size:13px!important;color:#64748b!important;line-height:1.45!important;margin:0!important;display:-webkit-box!important;-webkit-line-clamp:3!important;-webkit-box-orient:vertical!important;overflow:hidden!important;text-overflow:ellipsis!important}.postShorten-card-excerpt p{margin:0!important;padding:0!important;line-height:1.45!important}.postShorten-card-bottom{display:flex!important;flex-direction:column!important;margin-top:6px!important;border-top:1px solid #f1f5f9!important;padding-top:6px!important}.postShorten-card-tags-action{display:flex!important;justify-content:space-between!important;align-items:center!important;flex-wrap:wrap!important;gap:12px!important}.postShorten-card-tags{display:flex!important;flex-wrap:wrap!important;gap:6px!important}.postShorten-card-tag{font-size:10px!important;font-weight:550!important;color:#64748b!important;background:#f1f5f9!important;padding:4px 10px!important;line-height:1.25!important;border-radius:4px!important;text-decoration:none!important;transition:all .15s!important}.postShorten-card-tag:hover{color:#4f46e5!important;background:#e0e7ff!important;text-decoration:none!important}.postShorten-card-readmore{font-size:12px!important;font-weight:600!important;color:#4f46e5!important;text-decoration:none!important;display:inline-flex!important;align-items:center!important;gap:6px!important;transition:color .15s!important}.postShorten-card-readmore i{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}.postShorten-card:hover .postShorten-card-readmore i{transform:translateX(4px)!important}.postShorten-card-readmore:hover{color:#3730a3!important;text-decoration:none!important}.pagination-bar{width:100%!important;background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:16px 24px!important;box-shadow:0 4px 20px -2px rgba(148,163,184,5%)!important;box-sizing:border-box!important;display:flex!important;justify-content:center!important}.pagination{margin:0!important;padding:0!important;display:flex!important;align-items:center!important;gap:15px!important;list-style:none!important}.pagination li{display:inline-block!important;margin:0!important}.pagination-number{font-size:13px!important;color:#64748b!important;font-weight:600!important}.sidebar-right{width:280px!important;flex-shrink:0!important;position:sticky!important;top:90px!important}.sidebar-right-widget{background:#fff!important;border:1px solid rgba(226,232,240,.8)!important;border-radius:16px!important;padding:24px!important;margin-bottom:24px!important;width:100%!important;box-sizing:border-box!important;box-shadow:0 4px 20px -2px rgba(148,163,184,6%)!important;transition:transform .3s ease,box-shadow .3s ease!important}.sidebar-right-widget:hover{transform:translateY(-3px)!important;box-shadow:0 12px 25px -5px rgba(148,163,184,.1)!important}.widget-title{font-size:13px!important;font-weight:800!important;color:#1e293b!important;text-transform:uppercase;letter-spacing:1px!important;margin-top:0;margin-bottom:20px!important;border-bottom:none!important;padding-bottom:0!important;border-left:3px solid #4f46e5!important;padding-left:10px!important;line-height:1.2!important}.widget-list{list-style:none;padding:0;margin:0}.widget-list-item{margin-bottom:12px!important;font-size:13px}.widget-list-item:last-child{margin-bottom:0}.widget-link{display:flex;justify-content:space-between;align-items:center;color:#475569!important;text-decoration:none;transition:all .25s ease!important;font-weight:550!important}.widget-link:hover{color:#4f46e5!important;transform:translateX(3px)!important;text-decoration:none}.widget-link.active{color:#4f46e5!important;font-weight:700!important;padding-left:6px!important;border-left:2px solid #4f46e5!important}.widget-count{background:#f1f5f9!important;color:#64748b!important;font-size:10px!important;font-weight:700!important;padding:2px 8px!important;border-radius:20px!important;transition:all .25s ease!important}.widget-link:hover .widget-count,.widget-link.active .widget-count{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;color:#fff!important}.widget-tag-cloud{display:flex;flex-wrap:wrap;gap:8px!important}.widget-tag-item{font-size:11px!important;font-weight:600!important;color:#475569!important;background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:5px 12px!important;border-radius:20px!important;transition:all .3s cubic-bezier(.165,.84,.44,1)!important;text-decoration:none;display:inline-block}.widget-tag-item:hover,.widget-tag-item.active{color:#fff!important;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)!important;border-color:transparent!important;text-decoration:none}.widget-tag-item:hover{transform:scale(1.05)!important;box-shadow:0 4px 15px rgba(79,70,229,.2)!important}.widget-tag-item.active{box-shadow:0 4px 12px rgba(79,70,229,.15)!important}@media only screen and (max-width:991px){.blog-layout-container{flex-direction:column!important;gap:32px!important}.sidebar-right{width:100%!important;position:static!important;margin-top:20px!important}}@media only screen and (max-width:767px){.header-container{flex-direction:column!important;height:auto!important;padding:12px!important}.header-nav{margin:10px 0 0!important;width:100%!important;justify-content:center!important}.header-nav-list{gap:20px!important}.header-nav-link{line-height:32px!important}.header-right-picture{position:static!important;margin-top:10px!important}body{padding-top:120px!important}#header{height:auto!important}.main-content-wrap{padding-left:16px!important;padding-right:16px!important}.postShorten-card{flex-direction:column!important}.postShorten-card-image-wrap{width:100%!important;height:150px!important;border-right:none!important;border-bottom:1px solid rgba(226,232,240,.5)!important}}</style><header id=header><i id=btn-open-sidebar style=display:none!important></i><div class=header-container><div class=header-title><a class=header-title-link href=https://kevinwang930.github.io/>Kevin wang's blog</a></div><nav class=header-nav><ul class=header-nav-list><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/>Home</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/categories>Categories</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/tags>Tags</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/archives>Archives</a></li><li class=header-nav-item><a class=header-nav-link href=https://kevinwang930.github.io/about/>About</a></li></ul></nav><a class=header-right-picture href=https://kevinwang930.github.io/about/ aria-label=About><img class=header-picture src=https://cdn1.iconfinder.com/data/icons/ninja-things-1/1772/ninja-simple-512.png alt=Author></a></div></header><nav id=sidebar style=display:none!important></nav><div id=main data-behavior class=hasCoverMetaIn><article class=post id=top><div class="post-header main-content-wrap text-left"><h1 class=post-title>Dubbo RPC Internals</h1><div class="postShorten-meta post-meta"><time datetime=2026-11-15T10:40:00+01:00>November 15, 2026
 </time><span>in</span>
 <a class=category-link href=https://kevinwang930.github.io/categories/network>network</a>,
 <a class=category-link href=https://kevinwang930.github.io/categories/dubbo>dubbo</a></div></div><div class="post-content markdown"><div class=main-content-wrap><p>Dubbo is an RPC framework. A service is defined as an ordinary interface, implemented in a provider process, and called from a consumer process as though it were a local object, with a registry telling the consumer where the provider is and a metadata service telling it what that interface looks like. Dubbo has implementations in Go, Python, PHP, Erlang, Rust, and Node.js, and this post covers the Java one.</p><hr><h2 id=1-overview>1. Overview</h2><p>As an RPC framework, Dubbo organises a cluster into four roles.</p><ul><li>A <strong>provider</strong> hosts the implementation. It declares which interfaces it serves and listens on a port to answer calls.</li><li>A <strong>consumer</strong> calls those interfaces as if they were local. It keeps a local list of provider addresses and picks one per call.</li><li>A <strong>registry</strong> holds addresses only. It knows which provider processes exist and tells each consumer when that list changes. It does not store interface definitions.</li><li>A <strong>metadata service</strong> holds the definitions. Every provider exports one alongside its business services; a consumer asks it what an interface looks like — methods, parameter types, method-level settings — for a given revision.</li></ul><p>The split between the last two is the change newer Dubbo made. Older versions stored everything about each interface in the registry, so the registry was large and any change meant rewriting a registration. From Dubbo 3 the definitions moved out to the metadata service, and the registry keeps only addresses plus a revision that points at the right definition. Adding an interface now changes that revision instead of churning every consumer&rsquo;s address list.</p><p>The loop is short: provider registers, consumer subscribes, consumer receives addresses, consumer calls the provider directly. The registry is not in the call path, and the metadata service is consulted once per revision and then cached.</p><p><img src=https://kevinwang930.github.io/post/network/dubbo/images/architecture.svg alt="Dubbo cluster layout: consumer stack, wire protocol, provider stack, MetadataService, and service discovery through Nacos"></p><h3 id=a-minimal-example>A minimal example</h3><p>One shared interface module, so both sides compile against the same type:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>interface</span> <span style=color:#a6e22e>GreetingService</span> {
@@ -722,7 +722,9 @@ class GrpcProtocol extends TripleProtocol
 class RestProtocol extends TripleProtocol
 class InjvmProtocol extends AbstractProtocol
 class MockProtocol extends AbstractProtocol
-class RegistryProtocol implements Protocol
+class RegistryProtocol implements Protocol {
+  - bounds: ConcurrentMap&lt;String, ExporterChangeableWrapper&lt;?&gt;&gt;
+}
 class InterfaceCompatibleRegistryProtocol extends RegistryProtocol
 
 interface Exporter&lt;T&gt; {
@@ -732,6 +734,22 @@ interface Exporter&lt;T&gt; {
 abstract class AbstractExporter&lt;T&gt; implements Exporter {
   - invoker: Invoker&lt;T&gt;
 }
+class DubboExporter&lt;T&gt; extends AbstractExporter {
+  - key: String
+}
+class InjvmExporter&lt;T&gt; extends AbstractExporter {
+  - key: String
+}
+class ExporterChangeableWrapper&lt;T&gt; implements Exporter {
+  - exporter: Exporter&lt;T&gt;
+  - originInvoker: Invoker&lt;T&gt;
+}
+class DestroyableExporter&lt;T&gt; implements Exporter {
+  - exporter: Exporter&lt;T&gt;
+}
+class ListenerExporterWrapper&lt;T&gt; implements Exporter {
+  - exporter: Exporter&lt;T&gt;
+}
 
 interface Invoker&lt;T&gt; {
   + getInterface(): Class&lt;T&gt;
@@ -740,11 +758,33 @@ interface Invoker&lt;T&gt; {
 abstract class AbstractInvoker&lt;T&gt; implements Invoker {
   - type: Class&lt;T&gt;
   - url: URL
+  # doInvoke(Invocation): Result
 }
+class DubboInvoker&lt;T&gt; extends AbstractInvoker {
+  - clientsProvider: ClientsProvider
+}
+class TripleInvoker&lt;T&gt; extends AbstractInvoker {
+  - connectionClient: AbstractConnectionClient
+}
+class InjvmInvoker&lt;T&gt; extends AbstractInvoker {
+  - exporterMap: Map&lt;String, Exporter&lt;?&gt;&gt;
+}
+abstract class AbstractProxyInvoker&lt;T&gt; implements Invoker {
+  - proxy: T
+  # doInvoke(T, String, Class&lt;?&gt;[], Object[]): Object
+}
+class MockInvoker&lt;T&gt; implements Invoker
+class MigrationInvoker&lt;T&gt; implements Invoker
+class ServiceDiscoveryMigrationInvoker&lt;T&gt; extends MigrationInvoker
 
 AbstractProtocol *-- Exporter
 AbstractProtocol *-- Invoker
+RegistryProtocol *-- ExporterChangeableWrapper
 AbstractExporter o-- Invoker
+ExporterChangeableWrapper o-- Exporter
+ExporterChangeableWrapper o-- Invoker
+DestroyableExporter o-- Exporter
+ListenerExporterWrapper o-- Exporter
 @enduml
 </code></pre><h3 id=41-export-the-provider-runtime>4.1 Export: the provider runtime</h3><p><code>export</code> is the provider-side pipeline that turns a <code>ServiceConfig</code> declaration into a live, discoverable RPC endpoint across three functions:</p><ul><li><strong>Endpoint exposure</strong>: adapts the business object into a reflection-free <code>Invoker</code> and binds the local wire server (alongside an in-process <code>injvm</code> endpoint) to accept incoming requests.</li><li><strong>Metadata publication</strong>: aggregates the exported service&rsquo;s interface, version, group, and method signatures into the application&rsquo;s <code>MetadataInfo</code> (served by the local <code>MetadataService</code> or uploaded to a remote metadata center) and publishes the interface-to-application mapping.</li><li><strong>Instance registration</strong>: computes the metadata revision digest over all exported services and registers a single application instance record (host, port, and revision) with the registry.</li></ul><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
@@ -782,10 +822,16 @@ class ServiceConfig&lt;T&gt; extends ServiceConfigBase {
   - proxyFactory: ProxyFactory
   - providerModel: ProviderModel
   - exporters: ConcurrentHashMap&lt;RegisterTypeEnum, List&lt;Exporter&lt;?&gt;&gt;&gt;
-  + export()
+  + export(RegisterTypeEnum)
   + register(boolean)
-  # doExport()
-  - doExportUrls()
+  # doExport(RegisterTypeEnum)
+  # exported()
+  - doExportUrls(RegisterTypeEnum)
+  - doExportUrlsFor1Protocol(ProtocolConfig, List&lt;URL&gt;, RegisterTypeEnum)
+  - exportUrl(URL, List&lt;URL&gt;, RegisterTypeEnum)
+  - exportLocal(URL)
+  - exportRemote(URL, List&lt;URL&gt;, RegisterTypeEnum): URL
+  - doExportUrl(URL, boolean, RegisterTypeEnum)
 }
 class ServiceBean&lt;T&gt; extends ServiceConfig implements InitializingBean {
   + afterPropertiesSet()
@@ -840,191 +886,466 @@ ServiceConfig *-- ProviderModel
 ServiceConfig o-- ProxyFactory
 ServiceConfig o-- Protocol
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. Entry point: ServiceConfig.export() refreshes config, initializes metadata, and delegates to doExport()</span>
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. ServiceConfig.export(): prepare module deployer, refresh config, initialize metadata, and delegate to doExport()</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>export</span>(RegisterTypeEnum registerType) {
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>exported</span>) {
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (getScopeModel().<span style=color:#a6e22e>isLifeCycleManagedExternally</span>()) {
+</span></span><span style=display:flex><span>        getScopeModel().<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>prepare</span>();
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        getScopeModel().<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>start</span>();
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (<span style=color:#66d9ef>this</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>exported</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>isRefreshed</span>()) {
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>refresh</span>();                                     <span style=color:#75715e>// binds YAML/properties -&gt; calls postProcessRefresh()</span>
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>shouldExport</span>()) {
 </span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>init</span>();                                        <span style=color:#75715e>// assemble ServiceMetadata and sub-configs</span>
-</span></span><span style=display:flex><span>            doExport(registerType);                             <span style=color:#75715e>// calls doExportUrls(registerType) -&gt; exported()</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (shouldDelay()) {
+</span></span><span style=display:flex><span>                doDelayExport();
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>if</span> (Integer.<span style=color:#a6e22e>valueOf</span>(<span style=color:#f92672>-</span>1).<span style=color:#a6e22e>equals</span>(getDelay())
+</span></span><span style=display:flex><span>                    <span style=color:#f92672>&amp;&amp;</span> Boolean.<span style=color:#a6e22e>parseBoolean</span>(ConfigurationUtils.<span style=color:#a6e22e>getProperty</span>(
+</span></span><span style=display:flex><span>                            getScopeModel(), CommonConstants.<span style=color:#a6e22e>DubboProperty</span>.<span style=color:#a6e22e>DUBBO_MANUAL_REGISTER_KEY</span>, <span style=color:#e6db74>&#34;false&#34;</span>))) {
+</span></span><span style=display:flex><span>                doExport(RegisterTypeEnum.<span style=color:#a6e22e>MANUAL_REGISTER</span>);
+</span></span><span style=display:flex><span>            } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                doExport(registerType);                         <span style=color:#75715e>// calls doExportUrls(registerType) -&gt; exported()</span>
+</span></span><span style=display:flex><span>            }
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    getScopeModel().<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>registerServiceInstance</span>();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 2. Populate registries &amp; protocols during refresh(): postProcessRefresh() -&gt; checkAndUpdateSubConfigs()</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 2. ServiceConfig.checkAndUpdateSubConfigs() &amp; AbstractInterfaceConfig.convertRegistryIdsToRegistries()</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>checkAndUpdateSubConfigs</span>() {
 </span></span><span style=display:flex><span>    completeCompoundConfigs();                                  <span style=color:#75715e>// inherit registries / protocols from ProviderConfig or ModuleConfig</span>
 </span></span><span style=display:flex><span>    checkProtocol();                                            <span style=color:#75715e>// populate protocols from protocolIds or ConfigManager.getDefaultProtocols()</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>ConfigInitializer<span style=color:#f92672>&gt;</span> configInitializers <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ConfigInitializer.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>getActivateExtension</span>(URL.<span style=color:#a6e22e>valueOf</span>(<span style=color:#e6db74>&#34;configInitializer://&#34;</span>, getScopeModel()), (String<span style=color:#f92672>[]</span>) <span style=color:#66d9ef>null</span>);
+</span></span><span style=display:flex><span>    configInitializers.<span style=color:#a6e22e>forEach</span>(e <span style=color:#f92672>-&gt;</span> e.<span style=color:#a6e22e>initServiceConfig</span>(<span style=color:#66d9ef>this</span>));
+</span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isOnlyInJvm()) {
 </span></span><span style=display:flex><span>        checkRegistry();                                        <span style=color:#75715e>// calls AbstractInterfaceConfig.convertRegistryIdsToRegistries()</span>
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... resolve interfaceClass, checkRef(), checkStubAndLocal(interfaceClass)</span>
+</span></span><span style=display:flex><span>    ConfigValidationUtils.<span style=color:#a6e22e>validateServiceConfig</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    postProcessConfig();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>convertRegistryIdsToRegistries</span>() {                 <span style=color:#75715e>// AbstractInterfaceConfig: resolves protected List&lt;RegistryConfig&gt; registries</span>
 </span></span><span style=display:flex><span>    computeValidRegistryIds();
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isEmpty</span>(registryIds)) {
 </span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (CollectionUtils.<span style=color:#a6e22e>isEmpty</span>(registries)) {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// Pull application-level default RegistryConfig (e.g. dubbo.registry.address: nacos://127.0.0.1:8848)</span>
-</span></span><span style=display:flex><span>            setRegistries(<span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(getConfigManager().<span style=color:#a6e22e>getDefaultRegistries</span>()));
+</span></span><span style=display:flex><span>            List<span style=color:#f92672>&lt;</span>RegistryConfig<span style=color:#f92672>&gt;</span> registryConfigs <span style=color:#f92672>=</span> getConfigManager().<span style=color:#a6e22e>getDefaultRegistries</span>();
+</span></span><span style=display:flex><span>            registryConfigs <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(registryConfigs);
+</span></span><span style=display:flex><span>            setRegistries(registryConfigs);
 </span></span><span style=display:flex><span>        }
 </span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// Resolve explicit @DubboService(registry = {&#34;...&#34;}) IDs from ConfigManager</span>
+</span></span><span style=display:flex><span>        String<span style=color:#f92672>[]</span> ids <span style=color:#f92672>=</span> COMMA_SPLIT_PATTERN.<span style=color:#a6e22e>split</span>(registryIds);
 </span></span><span style=display:flex><span>        List<span style=color:#f92672>&lt;</span>RegistryConfig<span style=color:#f92672>&gt;</span> tmpRegistries <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>();
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (String id : COMMA_SPLIT_PATTERN.<span style=color:#a6e22e>split</span>(registryIds)) {
-</span></span><span style=display:flex><span>            getConfigManager().<span style=color:#a6e22e>getRegistry</span>(id).<span style=color:#a6e22e>ifPresent</span>(tmpRegistries::add);
-</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        Arrays.<span style=color:#a6e22e>stream</span>(ids).<span style=color:#a6e22e>forEach</span>(id <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (tmpRegistries.<span style=color:#a6e22e>stream</span>().<span style=color:#a6e22e>noneMatch</span>(reg <span style=color:#f92672>-&gt;</span> reg.<span style=color:#a6e22e>getId</span>().<span style=color:#a6e22e>equals</span>(id))) {
+</span></span><span style=display:flex><span>                Optional<span style=color:#f92672>&lt;</span>RegistryConfig<span style=color:#f92672>&gt;</span> globalRegistry <span style=color:#f92672>=</span> getConfigManager().<span style=color:#a6e22e>getRegistry</span>(id);
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>if</span> (globalRegistry.<span style=color:#a6e22e>isPresent</span>()) {
+</span></span><span style=display:flex><span>                    tmpRegistries.<span style=color:#a6e22e>add</span>(globalRegistry.<span style=color:#a6e22e>get</span>());
+</span></span><span style=display:flex><span>                } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;Registry not found: &#34;</span> <span style=color:#f92672>+</span> id);
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        });
 </span></span><span style=display:flex><span>        setRegistries(tmpRegistries);
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 3. ServiceConfig.doExport() -&gt; doExportUrls() -&gt; doExportUrlsFor1Protocol() -&gt; exportUrl() -&gt; exportRemote()</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>synchronized</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExport</span>(RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (unexported) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>throw</span> <span style=color:#66d9ef>new</span> IllegalStateException(<span style=color:#e6db74>&#34;The service &#34;</span> <span style=color:#f92672>+</span> interfaceClass.<span style=color:#a6e22e>getName</span>() <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34; has already unexported!&#34;</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (exported) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isEmpty</span>(path)) {
+</span></span><span style=display:flex><span>        path <span style=color:#f92672>=</span> interfaceName;
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    doExportUrls(registerType);
 </span></span><span style=display:flex><span>    exported();
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 3. Build ProviderModel and URLs in ServiceConfig.doExportUrls(): rewrite nacos:// -&gt; service-discovery-registry://</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExportUrls</span>(RegisterTypeEnum registerType) {
 </span></span><span style=display:flex><span>    ModuleServiceRepository repository <span style=color:#f92672>=</span> getScopeModel().<span style=color:#a6e22e>getServiceRepository</span>();
-</span></span><span style=display:flex><span>    ServiceDescriptor serviceDescriptor <span style=color:#f92672>=</span> repository.<span style=color:#a6e22e>registerService</span>(getInterfaceClass());
+</span></span><span style=display:flex><span>    ServiceDescriptor serviceDescriptor;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> <span style=color:#66d9ef>boolean</span> serverService <span style=color:#f92672>=</span> ref <span style=color:#66d9ef>instanceof</span> ServerService;
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (serverService) {
+</span></span><span style=display:flex><span>        serviceDescriptor <span style=color:#f92672>=</span> ((ServerService) ref).<span style=color:#a6e22e>getServiceDescriptor</span>();
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>provider</span>.<span style=color:#a6e22e>getUseJavaPackageAsPath</span>()) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>path</span> <span style=color:#f92672>=</span> serviceDescriptor.<span style=color:#a6e22e>getInterfaceName</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        repository.<span style=color:#a6e22e>registerService</span>(serviceDescriptor);
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        serviceDescriptor <span style=color:#f92672>=</span> repository.<span style=color:#a6e22e>registerService</span>(getInterfaceClass());
+</span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>    providerModel <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ProviderModel(
-</span></span><span style=display:flex><span>            serviceMetadata.<span style=color:#a6e22e>getServiceKey</span>(), ref, serviceDescriptor, getScopeModel(), serviceMetadata, interfaceClassLoader);
+</span></span><span style=display:flex><span>            serviceMetadata.<span style=color:#a6e22e>getServiceKey</span>(),
+</span></span><span style=display:flex><span>            ref,
+</span></span><span style=display:flex><span>            serviceDescriptor,
+</span></span><span style=display:flex><span>            getScopeModel(),
+</span></span><span style=display:flex><span>            serviceMetadata,
+</span></span><span style=display:flex><span>            interfaceClassLoader);
+</span></span><span style=display:flex><span>    providerModel.<span style=color:#a6e22e>setConfig</span>(<span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    providerModel.<span style=color:#a6e22e>setDestroyRunner</span>(getDestroyRunner());
 </span></span><span style=display:flex><span>    repository.<span style=color:#a6e22e>registerProvider</span>(providerModel);
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span>    <span style=color:#75715e>// Reads this.registries and rewrites nacos://127.0.0.1:8848 -&gt; service-discovery-registry://127.0.0.1:8848?registry=nacos</span>
-</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs <span style=color:#f92672>=</span> ConfigValidationUtils.<span style=color:#a6e22e>loadRegistries</span>(<span style=color:#66d9ef>this</span>, <span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Rewrites nacos://127.0.0.1:8848 -&gt; service-discovery-registry://127.0.0.1:8848?registry=nacos</span>
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs <span style=color:#f92672>=</span> <span style=color:#f92672>!</span>Boolean.<span style=color:#a6e22e>FALSE</span>.<span style=color:#a6e22e>equals</span>(isRegister())
+</span></span><span style=display:flex><span>            <span style=color:#f92672>?</span> ConfigValidationUtils.<span style=color:#a6e22e>loadRegistries</span>(<span style=color:#66d9ef>this</span>, <span style=color:#66d9ef>true</span>)
+</span></span><span style=display:flex><span>            : Collections.<span style=color:#a6e22e>emptyList</span>();
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// protocols holds only configured wire ProtocolConfigs (e.g. &#34;dubbo&#34;, port 20880) — NOT a separate &#34;injvm&#34; ProtocolConfig</span>
 </span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (ProtocolConfig protocolConfig : protocols) {
-</span></span><span style=display:flex><span>        URL url <span style=color:#f92672>=</span> buildUrl(protocolConfig, map);                <span style=color:#75715e>// wire URL: dubbo://10.0.0.7:20880/GreetingService?...</span>
-</span></span><span style=display:flex><span>        exportLocal(url);                                       <span style=color:#75715e>// export injvm://127.0.0.1/... for in-process calls</span>
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (URL registryURL : registryURLs) {
-</span></span><span style=display:flex><span>            <span style=color:#75715e>// Attach wire URL under EXPORT_KEY; AUTO_REGISTER_BY_DEPLOYER defers registry.register to registerServices()</span>
-</span></span><span style=display:flex><span>            doExportUrl(registryURL.<span style=color:#a6e22e>putAttribute</span>(EXPORT_KEY, url), <span style=color:#66d9ef>true</span>, registerType);
+</span></span><span style=display:flex><span>        String pathKey <span style=color:#f92672>=</span> URL.<span style=color:#a6e22e>buildKey</span>(
+</span></span><span style=display:flex><span>                getContextPath(protocolConfig).<span style=color:#a6e22e>map</span>(p <span style=color:#f92672>-&gt;</span> p <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;/&#34;</span> <span style=color:#f92672>+</span> path).<span style=color:#a6e22e>orElse</span>(path), group, version);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>serverService) {
+</span></span><span style=display:flex><span>            repository.<span style=color:#a6e22e>registerService</span>(pathKey, interfaceClass);
 </span></span><span style=display:flex><span>        }
-</span></span><span style=display:flex><span>        <span style=color:#75715e>// Upload per-service FullServiceDefinition to remote MetadataReport (when configured)</span>
-</span></span><span style=display:flex><span>        MetadataUtils.<span style=color:#a6e22e>publishServiceDefinition</span>(url, providerModel.<span style=color:#a6e22e>getServiceModel</span>(), getApplicationModel());
+</span></span><span style=display:flex><span>        doExportUrlsFor1Protocol(protocolConfig, registryURLs, registerType);
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    providerModel.<span style=color:#a6e22e>setServiceUrls</span>(urls);
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 4. Wrap ref as Invoker, dispatch to RegistryProtocol.export() for local Netty bind, then map interface -&gt; app</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExportUrlsFor1Protocol</span>(
+</span></span><span style=display:flex><span>        ProtocolConfig protocolConfig, List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs, RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span> map <span style=color:#f92672>=</span> buildAttributes(protocolConfig);
+</span></span><span style=display:flex><span>    map.<span style=color:#a6e22e>keySet</span>().<span style=color:#a6e22e>removeIf</span>(key <span style=color:#f92672>-&gt;</span> StringUtils.<span style=color:#a6e22e>isEmpty</span>(key) <span style=color:#f92672>||</span> StringUtils.<span style=color:#a6e22e>isEmpty</span>(map.<span style=color:#a6e22e>get</span>(key)));
+</span></span><span style=display:flex><span>    serviceMetadata.<span style=color:#a6e22e>getAttachments</span>().<span style=color:#a6e22e>putAll</span>(map);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    URL url <span style=color:#f92672>=</span> buildUrl(protocolConfig, map);                    <span style=color:#75715e>// single wire URL: dubbo://10.0.0.7:20880/GreetingService?...</span>
+</span></span><span style=display:flex><span>    processServiceExecutor(url);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (CollectionUtils.<span style=color:#a6e22e>isEmpty</span>(registryURLs)) {
+</span></span><span style=display:flex><span>        registerType <span style=color:#f92672>=</span> RegisterTypeEnum.<span style=color:#a6e22e>NEVER_REGISTER</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    exportUrl(url, registryURLs, registerType);                 <span style=color:#75715e>// fans one wire URL out to both injvm and remote exports</span>
+</span></span><span style=display:flex><span>    initServiceMethodMetrics(url);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>exportUrl</span>(URL url, List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs, RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    String scope <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getParameter</span>(SCOPE_KEY);                 <span style=color:#75715e>// default scope is null -&gt; BOTH branches execute</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>SCOPE_NONE.<span style=color:#a6e22e>equalsIgnoreCase</span>(scope)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>SCOPE_REMOTE.<span style=color:#a6e22e>equalsIgnoreCase</span>(scope)) {
+</span></span><span style=display:flex><span>            exportLocal(url);                                   <span style=color:#75715e>// 1st export: clone dubbo:// URL -&gt; injvm:// -&gt; InjvmProtocol</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>SCOPE_LOCAL.<span style=color:#a6e22e>equalsIgnoreCase</span>(scope)) {
+</span></span><span style=display:flex><span>            url <span style=color:#f92672>=</span> exportRemote(url, registryURLs, registerType); <span style=color:#75715e>// 2nd export: wrap dubbo:// URL -&gt; RegistryProtocol -&gt; DubboProtocol</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isGeneric(generic) <span style=color:#f92672>&amp;&amp;</span> <span style=color:#f92672>!</span>getScopeModel().<span style=color:#a6e22e>isInternal</span>()) {
+</span></span><span style=display:flex><span>                MetadataUtils.<span style=color:#a6e22e>publishServiceDefinition</span>(url, providerModel.<span style=color:#a6e22e>getServiceModel</span>(), getApplicationModel());
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// ... extra protocols (ext.protocol) omitted</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>urls</span>.<span style=color:#a6e22e>add</span>(url);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>exportLocal</span>(URL url) {
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// Rewrites the wire URL&#39;s scheme/address to injvm://127.0.0.1:0/... without needing a ProtocolConfig(&#34;injvm&#34;)</span>
+</span></span><span style=display:flex><span>    URL local <span style=color:#f92672>=</span> URLBuilder.<span style=color:#a6e22e>from</span>(url)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>setProtocol</span>(LOCAL_PROTOCOL)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>setHost</span>(LOCALHOST_VALUE)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>setPort</span>(0)
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>build</span>();
+</span></span><span style=display:flex><span>    local <span style=color:#f92672>=</span> local.<span style=color:#a6e22e>setScopeModel</span>(getScopeModel()).<span style=color:#a6e22e>setServiceModel</span>(providerModel);
+</span></span><span style=display:flex><span>    local <span style=color:#f92672>=</span> local.<span style=color:#a6e22e>addParameter</span>(EXPORTER_LISTENER_KEY, LOCAL_PROTOCOL); <span style=color:#75715e>// notifies InjvmExporterListener -&gt; ScopeClusterInvoker</span>
+</span></span><span style=display:flex><span>    doExportUrl(local, <span style=color:#66d9ef>false</span>, RegisterTypeEnum.<span style=color:#a6e22e>AUTO_REGISTER</span>);  <span style=color:#75715e>// Protocol$Adaptive routes &#34;injvm&#34; -&gt; InjvmProtocol.export()</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> URL <span style=color:#a6e22e>exportRemote</span>(URL url, List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> registryURLs, RegisterTypeEnum registerType) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (CollectionUtils.<span style=color:#a6e22e>isNotEmpty</span>(registryURLs) <span style=color:#f92672>&amp;&amp;</span> registerType <span style=color:#f92672>!=</span> RegisterTypeEnum.<span style=color:#a6e22e>NEVER_REGISTER</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (URL registryURL : registryURLs) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (SERVICE_REGISTRY_PROTOCOL.<span style=color:#a6e22e>equals</span>(registryURL.<span style=color:#a6e22e>getProtocol</span>())) {
+</span></span><span style=display:flex><span>                url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>addParameterIfAbsent</span>(SERVICE_NAME_MAPPING_KEY, <span style=color:#e6db74>&#34;true&#34;</span>);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (LOCAL_PROTOCOL.<span style=color:#a6e22e>equalsIgnoreCase</span>(url.<span style=color:#a6e22e>getProtocol</span>())) { <span style=color:#75715e>// skip registry if user explicitly configured protocol=injvm</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>addParameterIfAbsent</span>(DYNAMIC_KEY, registryURL.<span style=color:#a6e22e>getParameter</span>(DYNAMIC_KEY));
+</span></span><span style=display:flex><span>            URL monitorUrl <span style=color:#f92672>=</span> ConfigValidationUtils.<span style=color:#a6e22e>loadMonitor</span>(<span style=color:#66d9ef>this</span>, registryURL);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (monitorUrl <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>                url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>putAttribute</span>(MONITOR_KEY, monitorUrl);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            String proxy <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>getParameter</span>(PROXY_KEY);
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isNotEmpty</span>(proxy)) {
+</span></span><span style=display:flex><span>                registryURL <span style=color:#f92672>=</span> registryURL.<span style=color:#a6e22e>addParameter</span>(PROXY_KEY, proxy);
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>            <span style=color:#75715e>// Attach wire URL under EXPORT_KEY; Protocol$Adaptive routes &#34;service-discovery-registry&#34; -&gt; RegistryProtocol.export()</span>
+</span></span><span style=display:flex><span>            doExportUrl(registryURL.<span style=color:#a6e22e>putAttribute</span>(EXPORT_KEY, url), <span style=color:#66d9ef>true</span>, registerType);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    } <span style=color:#66d9ef>else</span> {
+</span></span><span style=display:flex><span>        doExportUrl(url, <span style=color:#66d9ef>true</span>, registerType);                   <span style=color:#75715e>// no registry: Protocol$Adaptive routes &#34;dubbo&#34; -&gt; DubboProtocol.export()</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> url;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 4. ServiceConfig.doExportUrl() &amp; exported(): shared sink called by BOTH exportLocal() and exportRemote()</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>doExportUrl</span>(URL url, <span style=color:#66d9ef>boolean</span> withMetaData, RegisterTypeEnum registerType) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (registerType <span style=color:#f92672>==</span> RegisterTypeEnum.<span style=color:#a6e22e>AUTO_REGISTER_BY_DEPLOYER</span>) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>url.<span style=color:#a6e22e>getParameter</span>(REGISTER_KEY, <span style=color:#66d9ef>true</span>)) {
+</span></span><span style=display:flex><span>        registerType <span style=color:#f92672>=</span> RegisterTypeEnum.<span style=color:#a6e22e>MANUAL_REGISTER</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (registerType <span style=color:#f92672>==</span> RegisterTypeEnum.<span style=color:#a6e22e>NEVER_REGISTER</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>||</span> registerType <span style=color:#f92672>==</span> RegisterTypeEnum.<span style=color:#a6e22e>MANUAL_REGISTER</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>||</span> registerType <span style=color:#f92672>==</span> RegisterTypeEnum.<span style=color:#a6e22e>AUTO_REGISTER_BY_DEPLOYER</span>) {
 </span></span><span style=display:flex><span>        url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>addParameter</span>(REGISTER_KEY, <span style=color:#66d9ef>false</span>);            <span style=color:#75715e>// defer registration until all services finish binding</span>
 </span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span>    Invoker<span style=color:#f92672>&lt;?&gt;</span> invoker <span style=color:#f92672>=</span> proxyFactory.<span style=color:#a6e22e>getInvoker</span>(ref, (Class) interfaceClass, url); <span style=color:#75715e>// Javassist Wrapper, no reflection</span>
-</span></span><span style=display:flex><span>    Exporter<span style=color:#f92672>&lt;?&gt;</span> exporter <span style=color:#f92672>=</span> protocolSPI.<span style=color:#a6e22e>export</span>(<span style=color:#66d9ef>new</span> DelegateProviderMetaDataInvoker(invoker, <span style=color:#66d9ef>this</span>));
-</span></span><span style=display:flex><span>    exporters.<span style=color:#a6e22e>computeIfAbsent</span>(registerType, k <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> CopyOnWriteArrayList<span style=color:#f92672>&lt;&gt;</span>()).<span style=color:#a6e22e>add</span>(exporter);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (withMetaData) {
+</span></span><span style=display:flex><span>        invoker <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> DelegateProviderMetaDataInvoker(invoker, <span style=color:#66d9ef>this</span>);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    Exporter<span style=color:#f92672>&lt;?&gt;</span> exporter <span style=color:#f92672>=</span> protocolSPI.<span style=color:#a6e22e>export</span>(invoker);         <span style=color:#75715e>// Protocol$Adaptive dispatches on url.getProtocol()</span>
+</span></span><span style=display:flex><span>    ConcurrentHashMapUtils.<span style=color:#a6e22e>computeIfAbsent</span>(exporters, registerType, k <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> CopyOnWriteArrayList<span style=color:#f92672>&lt;&gt;</span>())
+</span></span><span style=display:flex><span>            .<span style=color:#a6e22e>add</span>(exporter);
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>exported</span>() {
-</span></span><span style=display:flex><span>    serviceNameMapping.<span style=color:#a6e22e>map</span>(url);                                <span style=color:#75715e>// upload interface -&gt; applicationName mapping</span>
-</span></span><span style=display:flex><span>    getScopeModel().<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>getApplicationDeployer</span>().<span style=color:#a6e22e>exportMetadataService</span>(); <span style=color:#75715e>// export local MetadataService</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 5. RegistryProtocol.export(): unwrap EXPORT_KEY and bind local Netty port via DubboProtocol</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Exporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>export</span>(<span style=color:#66d9ef>final</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> originInvoker) <span style=color:#66d9ef>throws</span> RpcException {
-</span></span><span style=display:flex><span>    URL registryUrl <span style=color:#f92672>=</span> getRegistryUrl(originInvoker);            <span style=color:#75715e>// unwrap nacos://127.0.0.1:8848</span>
-</span></span><span style=display:flex><span>    URL providerUrl <span style=color:#f92672>=</span> getProviderUrl(originInvoker);            <span style=color:#75715e>// read EXPORT_KEY -&gt; dubbo://10.0.0.7:20880/...</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ExporterChangeableWrapper<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> exporter <span style=color:#f92672>=</span> doLocalExport(originInvoker, providerUrl); <span style=color:#75715e>// DubboProtocol.export()</span>
-</span></span><span style=display:flex><span>    exporter.<span style=color:#a6e22e>setRegisterUrl</span>(customizeURL(providerUrl, registryUrl));
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DestroyableExporter<span style=color:#f92672>&lt;&gt;</span>(exporter);
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 6. Accumulate exported service URLs into MetadataInfo: sc.register(true) -&gt; AbstractServiceDiscovery.register(URL)</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(URL url) {
-</span></span><span style=display:flex><span>    metadataInfo.<span style=color:#a6e22e>addService</span>(url);                               <span style=color:#75715e>// record interface, version, group, protocol, and method params</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 7. Upload MetadataInfo and register ServiceInstance in Nacos: AbstractServiceDiscovery.register() / update()</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>synchronized</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>() <span style=color:#66d9ef>throws</span> RuntimeException {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span> <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
-</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span> <span style=color:#f92672>=</span> createServiceInstance(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>metadataInfo</span>); <span style=color:#75715e>// host, port, app name, endpoints</span>
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>boolean</span> revisionUpdated <span style=color:#f92672>=</span> calOrUpdateInstanceRevision(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span>); <span style=color:#75715e>// compute dubbo.metadata.revision digest</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (revisionUpdated) {
-</span></span><span style=display:flex><span>        reportMetadata(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>metadataInfo</span>);                      <span style=color:#75715e>// upload MetadataInfo + snapshot for local MetadataService</span>
-</span></span><span style=display:flex><span>        doRegister(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span>);                       <span style=color:#75715e>// NacosServiceDiscovery -&gt; namingService.registerInstance(...)</span>
+</span></span><span style=display:flex><span>    exported <span style=color:#f92672>=</span> <span style=color:#66d9ef>true</span>;
+</span></span><span style=display:flex><span>    List<span style=color:#f92672>&lt;</span>URL<span style=color:#f92672>&gt;</span> exportedURLs <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExportedUrls</span>();
+</span></span><span style=display:flex><span>    exportedURLs.<span style=color:#a6e22e>forEach</span>(url <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (url.<span style=color:#a6e22e>getParameter</span>(SERVICE_NAME_MAPPING_KEY, <span style=color:#66d9ef>false</span>)) {
+</span></span><span style=display:flex><span>            ServiceNameMapping serviceNameMapping <span style=color:#f92672>=</span> ServiceNameMapping.<span style=color:#a6e22e>getDefaultExtension</span>(getScopeModel());
+</span></span><span style=display:flex><span>            ScheduledExecutorService scheduledExecutor <span style=color:#f92672>=</span> getScopeModel()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getBeanFactory</span>()
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getBean</span>(FrameworkExecutorRepository.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>                    .<span style=color:#a6e22e>getSharedScheduledExecutor</span>();
+</span></span><span style=display:flex><span>            mapServiceName(url, serviceNameMapping, scheduledExecutor); <span style=color:#75715e>// invokes serviceNameMapping.map(url)</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    });
+</span></span><span style=display:flex><span>    onExported();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (hasRegistrySpecified()) {
+</span></span><span style=display:flex><span>        getScopeModel().<span style=color:#a6e22e>getDeployer</span>().<span style=color:#a6e22e>getApplicationDeployer</span>().<span style=color:#a6e22e>exportMetadataService</span>();
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>reportMetadata</span>(MetadataInfo metadataInfo) {
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (metadataReport <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
-</span></span><span style=display:flex><span>        SubscriberMetadataIdentifier id <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> SubscriberMetadataIdentifier(serviceName, metadataInfo.<span style=color:#a6e22e>getRevision</span>());
-</span></span><span style=display:flex><span>        metadataReport.<span style=color:#a6e22e>publishAppMetadata</span>(id, metadataInfo);    <span style=color:#75715e>// remote MetadataReport upload (when configured)</span>
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    metadataInfos.<span style=color:#a6e22e>put</span>(metadataInfo.<span style=color:#a6e22e>getRevision</span>(), <span style=color:#66d9ef>new</span> MetadataInfoStat(metadataInfo.<span style=color:#a6e22e>clone</span>())); <span style=color:#75715e>// served by MetadataService</span>
-</span></span><span style=display:flex><span>}
-</span></span></code></pre></div><h3 id=42-refer-the-consumer-side>4.2 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which subscribes a <code>Directory</code> to the registry and joins all discovered provider <code>Invoker</code>s behind a single fault-tolerant <code>ClusterInvoker</code> before wrapping it in a dynamic proxy for the caller:</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+</span></span></code></pre></div><h3 id=42-refer-the-consumer-side>4.2 Refer: the consumer side</h3><p><code>refer</code> turns a service interface and target <code>URL</code> into a local proxy backed by remote providers. When backed by a registry, <code>ReferenceConfig</code> delegates through <code>Protocol$Adaptive</code> to <code>RegistryProtocol.refer</code>, which resolves <code>Cluster</code> from the <code>cluster</code> parameter (<code>failover</code> when unset), stores that instance on <code>MigrationInvoker</code>, and later calls <code>cluster.join</code> to subscribe a <code>Directory</code> and place the discovered provider <code>Invoker</code>s behind one <code>ClusterInvoker</code>. A direct <code>url</code> skips the registry and calls <code>Cluster.getCluster</code> from <code>ReferenceConfig.createInvoker</code>. <code>LoadBalance</code> is not retained by either object: <code>AbstractClusterInvoker.invoke</code> loads it on each call from the candidate URL&rsquo;s <code>loadbalance</code> parameter, default <code>random</code>. The joined <code>Directory</code> is itself a hierarchy under <code>AbstractDirectory</code>: <code>StaticDirectory</code> keeps a fixed invoker list for a direct URL, while <code>DynamicDirectory</code> implements <code>NotifyListener</code> and subscribes to a registry. <code>RegistryDirectory</code> refreshes that list from interface-level provider URLs (<code>isServiceDiscovery()</code> returns false); <code>ServiceDiscoveryRegistryDirectory</code> refreshes it from application instance addresses (<code>isServiceDiscovery()</code> returns true).</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
 top to bottom direction
 
-interface Invoker {
+interface FactoryBean {
+  + getObject(): T
+}
+interface InitializingBean {
+  + afterPropertiesSet()
+}
+
+abstract class AbstractConfig {
+  # scopeModel: ScopeModel
+  + refresh()
+}
+abstract class AbstractMethodConfig extends AbstractConfig {
+  # timeout: Integer
+  # retries: Integer
+  # loadbalance: String
+}
+abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
+  # interfaceName: String
+  # version: String
+  # group: String
+  # cluster: String
+  # registries: List&lt;RegistryConfig&gt;
+  # scope: String
+}
+abstract class AbstractReferenceConfig extends AbstractInterfaceConfig {
+  # check: Boolean
+  # generic: String
+  # injvm: Boolean
+  # protocol: String
+  # providedBy: String
+}
+class ConsumerConfig extends AbstractReferenceConfig {
+  - threadpool: String
+  - shareconnections: Integer
+  - meshEnable: Boolean
+}
+abstract class ReferenceConfigBase&lt;T&gt; extends AbstractReferenceConfig {
+  # interfaceClass: Class&lt;?&gt;
+  # url: String
+  # consumer: ConsumerConfig
+  + get(): T
+  + get(boolean): T
+}
+class ReferenceConfig&lt;T&gt; extends ReferenceConfigBase {
+  - protocolSPI: Protocol
+  - proxyFactory: ProxyFactory
+  - consumerModel: ConsumerModel
+  - invoker: Invoker&lt;?&gt;
+  - ref: T
+  + get(boolean): T
+  # init(boolean)
+  - appendConfig(): Map
+  - createProxy(Map): T
+  - aggregateUrlFromRegistry(Map)
+  - createInvoker()
+  # shouldJvmRefer(Map): boolean
+}
+class ReferenceBean&lt;T&gt; implements FactoryBean, InitializingBean {
+  - referenceConfig: ReferenceConfig
+  - lazyProxy: Object
+  + getObject(): T
+  + afterPropertiesSet()
+}
+
+class ConsumerModel {
+  - apps: Set&lt;String&gt;
+  - methodModels: Map&lt;Method, ConsumerMethodModel&gt;
+}
+
+interface Protocol {
+  + refer(Class, URL): Invoker
+}
+interface ProxyFactory {
+  + getProxy(Invoker, boolean): T
+}
+
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface Invoker extends Node {
   + getInterface(): Class
   + invoke(Invocation): Result
 }
 class DubboInvoker implements Invoker
-interface ClusterInvoker extends Invoker
-class FailoverClusterInvoker implements ClusterInvoker
-
-interface Directory {
-  + list(Invocation): List
-}
-class RegistryDirectory implements Directory
-class ServiceDiscoveryRegistryDirectory implements Directory
 
 interface Cluster {
-  + join(Directory): Invoker
+  + join(Directory, boolean): Invoker
+  {static} + getCluster(ScopeModel, String): Cluster
 }
-class FailoverCluster implements Cluster
+abstract class AbstractCluster implements Cluster {
+  + join(Directory, boolean): Invoker
+  # doJoin(Directory): AbstractClusterInvoker
+}
+class FailoverCluster extends AbstractCluster
+class ScopeClusterWrapper implements Cluster {
+  - cluster: Cluster
+}
+class MockClusterWrapper implements Cluster {
+  - cluster: Cluster
+}
+
+interface ClusterInvoker extends Invoker
+interface MigrationClusterInvoker extends ClusterInvoker
+class MigrationInvoker&lt;T&gt; implements MigrationClusterInvoker {
+  - cluster: Cluster
+  - invoker: ClusterInvoker
+  - serviceDiscoveryInvoker: ClusterInvoker
+}
+class ServiceDiscoveryMigrationInvoker&lt;T&gt; extends MigrationInvoker
+
+abstract class AbstractClusterInvoker&lt;T&gt; implements ClusterInvoker {
+  # directory: Directory&lt;T&gt;
+  + invoke(Invocation): Result
+  # initLoadBalance(List, Invocation): LoadBalance
+  # doInvoke(Invocation, List, LoadBalance): Result
+}
+class FailoverClusterInvoker&lt;T&gt; extends AbstractClusterInvoker
+class ScopeClusterInvoker&lt;T&gt; implements ClusterInvoker {
+  - directory: Directory&lt;T&gt;
+  - invoker: Invoker&lt;T&gt;
+}
+class MockClusterInvoker&lt;T&gt; implements ClusterInvoker {
+  - directory: Directory&lt;T&gt;
+  - invoker: Invoker&lt;T&gt;
+}
+
+interface NotifyListener {
+  + notify(List&lt;URL&gt;)
+}
+interface Directory extends Node {
+  + getInterface(): Class
+  + list(Invocation): List
+  + getAllInvokers(): List
+  + getConsumerUrl(): URL
+  + isServiceDiscovery(): boolean
+}
+abstract class AbstractDirectory&lt;T&gt; implements Directory {
+  # consumerUrl: URL
+  # routerChain: RouterChain&lt;T&gt;
+  - invokers: BitList&lt;Invoker&lt;T&gt;&gt;
+  - validInvokers: BitList&lt;Invoker&lt;T&gt;&gt;
+  + list(Invocation): List
+  # doList(SingleRouterChain, BitList, Invocation): List
+  # setInvokers(BitList)
+}
+class StaticDirectory&lt;T&gt; extends AbstractDirectory {
+  - interfaceClass: Class&lt;T&gt;
+}
+abstract class DynamicDirectory&lt;T&gt; extends AbstractDirectory implements NotifyListener {
+  # cluster: Cluster
+  # registry: Registry
+  # protocol: Protocol
+  # subscribeUrl: URL
+  # forbidden: boolean
+  + subscribe(URL)
+  + buildRouterChain(URL)
+  # refreshOverrideAndInvoker(List&lt;URL&gt;)
+  # destroyAllInvokers()
+}
+class RegistryDirectory&lt;T&gt; extends DynamicDirectory {
+  # urlInvokerMap: Map&lt;URL, Invoker&lt;T&gt;&gt;
+  + notify(List&lt;URL&gt;)
+  + isServiceDiscovery(): boolean
+}
+class ServiceDiscoveryRegistryDirectory&lt;T&gt; extends DynamicDirectory {
+  - urlInvokerMap: Map&lt;ProtocolServiceKeyWithAddress, Invoker&lt;T&gt;&gt;
+  + notify(List&lt;URL&gt;)
+  + isServiceDiscovery(): boolean
+}
+interface Registry {
+  + register(URL)
+  + subscribe(URL, NotifyListener)
+}
 
 interface LoadBalance {
   + select(List, URL, Invocation): Invoker
 }
+abstract class AbstractLoadBalance implements LoadBalance
+class RandomLoadBalance extends AbstractLoadBalance
 
-FailoverClusterInvoker o-- Directory
+ReferenceConfigBase o-- ConsumerConfig
+ReferenceBean o-- ReferenceConfig
+ReferenceConfig *-- ConsumerModel
+ReferenceConfig o-- ProxyFactory
+ReferenceConfig o-- Protocol
+ReferenceConfig o-- Invoker
+ReferenceConfig --&gt; Cluster : createInvoker
+MigrationInvoker o-- Cluster
+MigrationInvoker o-- ClusterInvoker
+ScopeClusterWrapper o-- Cluster
+MockClusterWrapper o-- Cluster
+AbstractClusterInvoker o-- Directory
+DynamicDirectory o-- Registry
+DynamicDirectory o-- Cluster
+AbstractDirectory o-- Invoker
+ScopeClusterInvoker o-- Directory
+ScopeClusterInvoker o-- Invoker
+MockClusterInvoker o-- Directory
+MockClusterInvoker o-- Invoker
+AbstractClusterInvoker --&gt; LoadBalance : initLoadBalance
 @enduml
-</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. ReferenceConfig refers the registry URL and wraps the returned Invoker in a dynamic proxy</span>
-</span></span><span style=display:flex><span>invoker <span style=color:#f92672>=</span> protocolSPI.<span style=color:#a6e22e>refer</span>(interfaceClass, registryUrl);
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// 1. ReferenceConfig refers the target URL via Protocol$Adaptive and wraps the Invoker in a dynamic proxy</span>
+</span></span><span style=display:flex><span>invoker <span style=color:#f92672>=</span> protocolSPI.<span style=color:#a6e22e>refer</span>(interfaceClass, curUrl);            <span style=color:#75715e>// dispatches to RegistryProtocol.refer() for registry URLs</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> (T) proxyFactory.<span style=color:#a6e22e>getProxy</span>(invoker, ProtocolUtils.<span style=color:#a6e22e>isGeneric</span>(generic));
 </span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 2. RegistryProtocol.refer -&gt; doRefer resolves Registry + Cluster and builds MigrationInvoker</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>refer</span>(Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type, URL url) <span style=color:#66d9ef>throws</span> RpcException {
-</span></span><span style=display:flex><span>    url <span style=color:#f92672>=</span> getRegistryUrl(url);                                  <span style=color:#75715e>// unwrap nacos://...</span>
-</span></span><span style=display:flex><span>    Registry registry <span style=color:#f92672>=</span> getRegistry(url);
-</span></span><span style=display:flex><span>    Cluster cluster <span style=color:#f92672>=</span> Cluster.<span style=color:#a6e22e>getCluster</span>(url.<span style=color:#a6e22e>getScopeModel</span>(), qs.<span style=color:#a6e22e>get</span>(CLUSTER_KEY));
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> doRefer(cluster, registry, type, url, qs);           <span style=color:#75715e>// creates ServiceDiscoveryMigrationInvoker</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 3. RegistryProtocol.doCreateInvoker wires Directory, RouterChain, subscription, and ClusterInvoker</span>
-</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> ClusterInvoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>doCreateInvoker</span>(
-</span></span><span style=display:flex><span>        DynamicDirectory<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> directory, Cluster cluster, Registry registry, Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type) {
-</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>setRegistry</span>(registry);
-</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>setProtocol</span>(protocol);                            <span style=color:#75715e>// Protocol$Adaptive for per-instance refer</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (directory.<span style=color:#a6e22e>isShouldRegister</span>()) {
-</span></span><span style=display:flex><span>        registry.<span style=color:#a6e22e>register</span>(urlToRegistry);                       <span style=color:#75715e>// optional consumer registration</span>
-</span></span><span style=display:flex><span>    }
-</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>buildRouterChain</span>(urlToRegistry);                  <span style=color:#75715e>// assemble activated StateRouters</span>
-</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>subscribe</span>(toSubscribeUrl(urlToRegistry));         <span style=color:#75715e>// subscribe addresses + revisions</span>
-</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> (ClusterInvoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>) cluster.<span style=color:#a6e22e>join</span>(directory, <span style=color:#66d9ef>true</span>);   <span style=color:#75715e>// wrap Directory in ClusterInvoker</span>
-</span></span><span style=display:flex><span>}
-</span></span><span style=display:flex><span>
-</span></span><span style=display:flex><span><span style=color:#75715e>// 4. InvokerInvocationHandler intercepts application calls on the generated proxy</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 2. InvokerInvocationHandler intercepts application calls on the generated proxy</span>
 </span></span><span style=display:flex><span>RpcInvocation rpcInvocation <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> RpcInvocation(serviceModel, method.<span style=color:#a6e22e>getName</span>(),
 </span></span><span style=display:flex><span>        invoker.<span style=color:#a6e22e>getInterface</span>().<span style=color:#a6e22e>getName</span>(), protocolServiceKey,
 </span></span><span style=display:flex><span>        method.<span style=color:#a6e22e>getParameterTypes</span>(), args);
 </span></span><span style=display:flex><span><span style=color:#66d9ef>return</span> InvocationUtil.<span style=color:#a6e22e>invoke</span>(invoker, rpcInvocation);           <span style=color:#75715e>// sets RpcContext, invokes, calls recreate()</span>
-</span></span></code></pre></div><h4 id=directory-refresh>Directory refresh</h4><pre tabindex=0><code class=language-mermaid data-lang=mermaid>flowchart LR
-    A[&#34;notify(urls)&#34;] --&gt; B[&#34;instance urls, address + revision&#34;]
-    B --&gt; C{&#34;single empty:// url?&#34;}
-    C --&gt;|&#34;yes&#34;| D[&#34;forbid, destroy all invokers&#34;]
-    C --&gt;|&#34;no&#34;| E[&#34;distinct, drop duplicates&#34;]
-    E --&gt; F[&#34;reuse invokers whose url is unchanged&#34;]
-    F --&gt; G[&#34;refer new instances&#34;]
-    G --&gt; H[&#34;swap urlInvokerMap atomically&#34;]
-    H --&gt; I[&#34;refresh router chain&#34;]
-</code></pre><p>An ordinary empty notification list triggers empty protection (retaining the previous <code>urlInvokerMap</code>), whereas a single <code>empty://</code> URL explicitly forbids the service and destroys all invokers.</p><h4 id=cluster-invocation>Cluster invocation</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// FailoverClusterInvoker.doInvoke (default Cluster = &#34;failover&#34;)</span>
+</span></span></code></pre></div><h4 id=cluster-invocation>Cluster invocation</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// FailoverClusterInvoker.doInvoke (default Cluster = &#34;failover&#34;)</span>
 </span></span><span style=display:flex><span><span style=color:#66d9ef>int</span> len <span style=color:#f92672>=</span> calculateInvokeTimes(methodName);                     <span style=color:#75715e>// retries + 1 (default 3 attempts)</span>
 </span></span><span style=display:flex><span>List<span style=color:#f92672>&lt;</span>Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;&gt;</span> invoked <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ArrayList<span style=color:#f92672>&lt;&gt;</span>(copyInvokers.<span style=color:#a6e22e>size</span>());
 </span></span><span style=display:flex><span><span style=color:#66d9ef>for</span> (<span style=color:#66d9ef>int</span> i <span style=color:#f92672>=</span> 0; i <span style=color:#f92672>&lt;</span> len; i<span style=color:#f92672>++</span>) {
@@ -1043,7 +1364,354 @@ FailoverClusterInvoker o-- Directory
 </span></span><span style=display:flex><span>    }
 </span></span><span style=display:flex><span>}
 </span></span><span style=display:flex><span><span style=color:#66d9ef>throw</span> le;
-</span></span></code></pre></div><h3 id=43-registryprotocol>4.3 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><h3 id=44-dubboprotocol>4.4 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
+</span></span></code></pre></div><h3 id=43-registryprotocol>4.3 RegistryProtocol</h3><p><code>RegistryProtocol</code> (<code>service-discovery-registry</code>) and its subclass <code>InterfaceCompatibleRegistryProtocol</code> (<code>registry</code>) do no socket framing or network transport themselves; they implement <code>Protocol</code> solely to bridge <code>ServiceConfig</code> and <code>ReferenceConfig</code> to the <code>Registry</code> / <code>ServiceDiscovery</code> SPI without special-casing registry logic in the config layer:</p><ul><li><strong>On <code>export</code></strong>: unwraps the registry <code>URL</code> (<code>getRegistryUrl</code>) and the nested wire <code>URL</code> (<code>EXPORT_KEY</code>), delegates local port binding to <code>protocol.export(...)</code> (<code>ExporterChangeableWrapper</code>), and hands the provider <code>URL</code> to <code>registry.register(...)</code> (wrapped in <code>DestroyableExporter</code> so <code>unexport()</code> unregisters before closing).</li><li><strong>On <code>refer</code></strong>: resolves the <code>Registry</code> and <code>Cluster</code> SPIs, constructs a <code>ServiceDiscoveryMigrationInvoker</code> (capable of switching between application-level <code>ServiceDiscoveryRegistryDirectory</code> and interface-level <code>RegistryDirectory</code>), and subscribes the <code>Directory</code> to provider address changes. When a direct point-to-point <code>URL</code> (<code>dubbo://host:port</code>) is configured instead of a registry, <code>Protocol$Adaptive</code> bypasses <code>RegistryProtocol</code> completely and dispatches straight to the wire protocol.</li></ul><p><code>getRegistry</code> loads <code>RegistryFactory</code> from the registry URL protocol on each call. <code>service-discovery-registry</code> selects <code>ServiceDiscoveryRegistryFactory</code>. Its <code>createRegistry</code> restores the <code>registry</code> parameter (<code>nacos</code>) and returns a <code>ServiceDiscoveryRegistry</code>, which holds the <code>ServiceDiscovery</code> created by <code>ServiceDiscoveryFactory</code> (<code>NacosServiceDiscovery</code> for Nacos). <code>InterfaceCompatibleRegistryProtocol</code> rewrites <code>registry://</code> to that inner protocol before the same lookup, so interface-level export receives a <code>NacosRegistry</code> from <code>NacosRegistryFactory</code>. Its application-level refer path calls the parent <code>getRegistryUrl</code> and still receives a <code>ServiceDiscoveryRegistry</code>.</p><pre tabindex=0><code class=language-plantuml data-lang=plantuml>@startuml
+top to bottom direction
+
+interface Protocol {
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+class RegistryProtocol implements Protocol {
+  # protocol: Protocol
+  + setProtocol(Protocol)
+  + getRegistry(URL): Registry
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+class InterfaceCompatibleRegistryProtocol extends RegistryProtocol {
+  # getRegistryUrl(URL): URL
+}
+class &#34;Protocol$Adaptive&#34; as ProtocolAdaptive implements Protocol {
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+}
+abstract class AbstractProtocol implements Protocol
+class DubboProtocol extends AbstractProtocol
+class TripleProtocol extends AbstractProtocol
+
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface RegistryService {
+  + register(URL)
+  + unregister(URL)
+  + subscribe(URL, NotifyListener)
+  + unsubscribe(URL, NotifyListener)
+}
+interface Registry extends Node, RegistryService {
+  + isServiceDiscovery(): boolean
+}
+abstract class AbstractRegistry implements Registry {
+  + register(URL)
+  + subscribe(URL, NotifyListener)
+}
+abstract class FailbackRegistry extends AbstractRegistry
+class ServiceDiscoveryRegistry extends FailbackRegistry {
+  - serviceDiscovery: ServiceDiscovery
+  + getServiceDiscovery(): ServiceDiscovery
+}
+class NacosRegistry extends FailbackRegistry
+
+interface RegistryFactory {
+  + getRegistry(URL): Registry
+}
+abstract class AbstractRegistryFactory implements RegistryFactory {
+  + getRegistry(URL): Registry
+  # createRegistry(URL): Registry
+}
+class ServiceDiscoveryRegistryFactory extends AbstractRegistryFactory
+class NacosRegistryFactory extends AbstractRegistryFactory
+
+interface ServiceDiscovery extends RegistryService {
+  + register()
+  + update()
+  + unregister()
+  + getInstances(String): List
+  + getLocalInstance(): ServiceInstance
+  + getLocalMetadata(): MetadataInfo
+}
+abstract class AbstractServiceDiscovery implements ServiceDiscovery {
+  # serviceInstance: ServiceInstance
+  # metadataInfo: MetadataInfo
+  + register(URL)
+  + register()
+  # reportMetadata(MetadataInfo)
+  # doRegister(ServiceInstance)
+}
+class NacosServiceDiscovery extends AbstractServiceDiscovery
+
+interface ServiceDiscoveryFactory {
+  + getServiceDiscovery(URL): ServiceDiscovery
+}
+abstract class AbstractServiceDiscoveryFactory implements ServiceDiscoveryFactory {
+  - discoveries: Map&lt;String, ServiceDiscovery&gt;
+  + getServiceDiscovery(URL): ServiceDiscovery
+  # createDiscovery(URL): ServiceDiscovery
+}
+class NacosServiceDiscoveryFactory extends AbstractServiceDiscoveryFactory
+
+RegistryProtocol o-- ProtocolAdaptive : protocol
+ProtocolAdaptive --&gt; DubboProtocol : url.getProtocol()
+ProtocolAdaptive --&gt; TripleProtocol : url.getProtocol()
+RegistryProtocol --&gt; RegistryFactory : getRegistry
+ServiceDiscoveryRegistryFactory --&gt; ServiceDiscoveryRegistry : createRegistry
+NacosRegistryFactory --&gt; NacosRegistry : createRegistry
+ServiceDiscoveryRegistry *-- ServiceDiscovery
+ServiceDiscoveryRegistry --&gt; ServiceDiscoveryFactory : createServiceDiscovery
+AbstractServiceDiscoveryFactory o-- ServiceDiscovery
+NacosServiceDiscoveryFactory --&gt; NacosServiceDiscovery : createDiscovery
+@enduml
+</code></pre><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span><span style=color:#75715e>// SPI init: ExtensionLoader.injectExtension calls setProtocol the first time RegistryProtocol is created.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> T <span style=color:#a6e22e>createExtension</span>(String name, <span style=color:#66d9ef>boolean</span> wrap) {
+</span></span><span style=display:flex><span>    Class<span style=color:#f92672>&lt;?&gt;</span> clazz <span style=color:#f92672>=</span> getExtensionClasses().<span style=color:#a6e22e>get</span>(name);           <span style=color:#75715e>// &#34;service-discovery-registry&#34; -&gt; RegistryProtocol</span>
+</span></span><span style=display:flex><span>    T instance <span style=color:#f92672>=</span> (T) extensionInstances.<span style=color:#a6e22e>get</span>(clazz);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (instance <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        extensionInstances.<span style=color:#a6e22e>putIfAbsent</span>(clazz, createExtensionInstance(clazz));
+</span></span><span style=display:flex><span>        instance <span style=color:#f92672>=</span> (T) extensionInstances.<span style=color:#a6e22e>get</span>(clazz);
+</span></span><span style=display:flex><span>        instance <span style=color:#f92672>=</span> postProcessBeforeInitialization(instance, name);
+</span></span><span style=display:flex><span>        injectExtension(instance);                              <span style=color:#75715e>// setter injection before any Protocol wrapper</span>
+</span></span><span style=display:flex><span>        instance <span style=color:#f92672>=</span> postProcessAfterInitialization(instance, name);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#75715e>// ... wrap with ProtocolFilterWrapper, ProtocolListenerWrapper, ... then initExtension(instance)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> instance;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> T <span style=color:#a6e22e>injectExtension</span>(T instance) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>for</span> (Method method : instance.<span style=color:#a6e22e>getClass</span>().<span style=color:#a6e22e>getMethods</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isSetter(method)) {                                <span style=color:#75715e>// public, name starts with &#34;set&#34;, one parameter</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        Class<span style=color:#f92672>&lt;?&gt;</span> pt <span style=color:#f92672>=</span> method.<span style=color:#a6e22e>getParameterTypes</span>()<span style=color:#f92672>[</span>0<span style=color:#f92672>]</span>;
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (ReflectUtils.<span style=color:#a6e22e>isPrimitives</span>(pt)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>continue</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        String property <span style=color:#f92672>=</span> getSetterProperty(method);            <span style=color:#75715e>// setProtocol -&gt; &#34;protocol&#34;</span>
+</span></span><span style=display:flex><span>        Object object <span style=color:#f92672>=</span> injector.<span style=color:#a6e22e>getInstance</span>(pt, property);     <span style=color:#75715e>// Protocol.class, &#34;protocol&#34;</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (object <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>            method.<span style=color:#a6e22e>invoke</span>(instance, object);                    <span style=color:#75715e>// RegistryProtocol.setProtocol(...)</span>
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> instance;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// SpiExtensionInjector sees that Protocol is @SPI and returns Protocol$Adaptive, not DubboProtocol.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> T <span style=color:#a6e22e>getInstance</span>(<span style=color:#66d9ef>final</span> Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type, <span style=color:#66d9ef>final</span> String name) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>type.<span style=color:#a6e22e>isInterface</span>() <span style=color:#f92672>||</span> <span style=color:#f92672>!</span>type.<span style=color:#a6e22e>isAnnotationPresent</span>(SPI.<span style=color:#a6e22e>class</span>)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    ExtensionLoader<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> loader <span style=color:#f92672>=</span> extensionAccessor.<span style=color:#a6e22e>getExtensionLoader</span>(type);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (loader <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>loader.<span style=color:#a6e22e>getSupportedExtensions</span>().<span style=color:#a6e22e>isEmpty</span>()) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> loader.<span style=color:#a6e22e>getAdaptiveExtension</span>();                   <span style=color:#75715e>// name &#34;protocol&#34; is ignored</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>setProtocol</span>(Protocol protocol) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>protocol</span> <span style=color:#f92672>=</span> protocol;                                   <span style=color:#75715e>// Protocol$Adaptive, reused by export and refer</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// The concrete wire scheme stays on the provider URL (dubbo, tri, ...) written by ServiceConfig.buildUrl.</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> URL <span style=color:#a6e22e>buildUrl</span>(ProtocolConfig protocolConfig, Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span> params) {
+</span></span><span style=display:flex><span>    String name <span style=color:#f92672>=</span> protocolConfig.<span style=color:#a6e22e>getName</span>();
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isEmpty</span>(name)) {
+</span></span><span style=display:flex><span>        name <span style=color:#f92672>=</span> DUBBO;                                           <span style=color:#75715e>// default scheme &#34;dubbo&#34;</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    String host <span style=color:#f92672>=</span> findConfiguredHosts(protocolConfig, provider, params);
+</span></span><span style=display:flex><span>    Integer port <span style=color:#f92672>=</span> findConfiguredPort(
+</span></span><span style=display:flex><span>            protocolConfig, provider, <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(Protocol.<span style=color:#a6e22e>class</span>), name, params);
+</span></span><span style=display:flex><span>    URL url <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ServiceConfigURL(
+</span></span><span style=display:flex><span>            name, <span style=color:#66d9ef>null</span>, <span style=color:#66d9ef>null</span>, host, port,
+</span></span><span style=display:flex><span>            getContextPath(protocolConfig).<span style=color:#a6e22e>map</span>(p <span style=color:#f92672>-&gt;</span> p <span style=color:#f92672>+</span> <span style=color:#e6db74>&#34;/&#34;</span> <span style=color:#f92672>+</span> path).<span style=color:#a6e22e>orElse</span>(path),
+</span></span><span style=display:flex><span>            params);                                            <span style=color:#75715e>// URL scheme is protocolConfig.name, not the RegistryProtocol field</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ConfiguratorFactory.<span style=color:#a6e22e>class</span>).<span style=color:#a6e22e>hasExtension</span>(url.<span style=color:#a6e22e>getProtocol</span>())) {
+</span></span><span style=display:flex><span>        url <span style=color:#f92672>=</span> <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>getExtensionLoader</span>(ConfiguratorFactory.<span style=color:#a6e22e>class</span>)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getExtension</span>(url.<span style=color:#a6e22e>getProtocol</span>())
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>getConfigurator</span>(url)
+</span></span><span style=display:flex><span>                .<span style=color:#a6e22e>configure</span>(url);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>setScopeModel</span>(getScopeModel());
+</span></span><span style=display:flex><span>    url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>setServiceModel</span>(providerModel);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> url;
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 1. Provider export: RegistryProtocol.export() -&gt; doLocalExport()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Exporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>export</span>(<span style=color:#66d9ef>final</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> originInvoker) <span style=color:#66d9ef>throws</span> RpcException {
+</span></span><span style=display:flex><span>    URL registryUrl <span style=color:#f92672>=</span> getRegistryUrl(originInvoker);            <span style=color:#75715e>// rewrite service-discovery-registry:// -&gt; nacos://127.0.0.1:8848</span>
+</span></span><span style=display:flex><span>    URL providerUrl <span style=color:#f92672>=</span> getProviderUrl(originInvoker);            <span style=color:#75715e>// read EXPORT_KEY -&gt; dubbo://10.0.0.7:20880/...</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> URL overrideSubscribeUrl <span style=color:#f92672>=</span> getSubscribedOverrideUrl(providerUrl);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> OverrideListener overrideSubscribeListener <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> OverrideListener(overrideSubscribeUrl, originInvoker);
+</span></span><span style=display:flex><span>    providerUrl <span style=color:#f92672>=</span> overrideUrlWithConfig(providerUrl, overrideSubscribeListener);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> ExporterChangeableWrapper<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> exporter <span style=color:#f92672>=</span> doLocalExport(originInvoker, providerUrl); <span style=color:#75715e>// second Protocol$Adaptive pass on providerUrl</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> Registry registry <span style=color:#f92672>=</span> getRegistry(registryUrl);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>final</span> URL registeredProviderUrl <span style=color:#f92672>=</span> customizeURL(providerUrl, registryUrl);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>boolean</span> register <span style=color:#f92672>=</span> providerUrl.<span style=color:#a6e22e>getParameter</span>(REGISTER_KEY, <span style=color:#66d9ef>true</span>) <span style=color:#f92672>&amp;&amp;</span> registryUrl.<span style=color:#a6e22e>getParameter</span>(REGISTER_KEY, <span style=color:#66d9ef>true</span>);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (register) {
+</span></span><span style=display:flex><span>        register(registry, registeredProviderUrl);              <span style=color:#75715e>// skipped during exportServices() because register=false</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    registerStatedUrl(registryUrl, registeredProviderUrl, register);
+</span></span><span style=display:flex><span>    exporter.<span style=color:#a6e22e>setRegisterUrl</span>(registeredProviderUrl);
+</span></span><span style=display:flex><span>    exporter.<span style=color:#a6e22e>setSubscribeUrl</span>(overrideSubscribeUrl);
+</span></span><span style=display:flex><span>    exporter.<span style=color:#a6e22e>setNotifyListener</span>(overrideSubscribeListener);
+</span></span><span style=display:flex><span>    exporter.<span style=color:#a6e22e>setRegistered</span>(register);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    notifyExport(exporter);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>new</span> DestroyableExporter<span style=color:#f92672>&lt;&gt;</span>(exporter);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>private</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> ExporterChangeableWrapper<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>doLocalExport</span>(<span style=color:#66d9ef>final</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> originInvoker, URL providerUrl) {
+</span></span><span style=display:flex><span>    String providerUrlKey <span style=color:#f92672>=</span> getProviderUrlKey(originInvoker);
+</span></span><span style=display:flex><span>    String registryUrlKey <span style=color:#f92672>=</span> getRegistryUrlKey(originInvoker);
+</span></span><span style=display:flex><span>    Invoker<span style=color:#f92672>&lt;?&gt;</span> invokerDelegate <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> InvokerDelegate<span style=color:#f92672>&lt;&gt;</span>(originInvoker, providerUrl);
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    ReferenceCountExporter<span style=color:#f92672>&lt;?&gt;</span> exporter <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>            exporterFactory.<span style=color:#a6e22e>createExporter</span>(providerUrlKey, () <span style=color:#f92672>-&gt;</span> protocol.<span style=color:#a6e22e>export</span>(invokerDelegate)); <span style=color:#75715e>// protocol is the injected Protocol$Adaptive; url.getProtocol() selects DubboProtocol</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> (ExporterChangeableWrapper<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>) ConcurrentHashMapUtils.<span style=color:#a6e22e>computeIfAbsent</span>(
+</span></span><span style=display:flex><span>            ConcurrentHashMapUtils.<span style=color:#a6e22e>computeIfAbsent</span>(bounds, providerUrlKey, k <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> ConcurrentHashMap<span style=color:#f92672>&lt;&gt;</span>()),
+</span></span><span style=display:flex><span>            registryUrlKey,
+</span></span><span style=display:flex><span>            s <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>new</span> ExporterChangeableWrapper<span style=color:#f92672>&lt;&gt;</span>((ReferenceCountExporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>) exporter, originInvoker));
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 2. Provider registration: ServiceConfig.register(true) -&gt; ExporterChangeableWrapper.register() -&gt; AbstractServiceDiscovery</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(<span style=color:#66d9ef>boolean</span> byDeployer) {                      <span style=color:#75715e>// ServiceConfig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>exported</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>synchronized</span> (<span style=color:#66d9ef>this</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span><span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>exported</span>) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> (Exporter<span style=color:#f92672>&lt;?&gt;</span> exporter : exporters.<span style=color:#a6e22e>getOrDefault</span>(RegisterTypeEnum.<span style=color:#a6e22e>AUTO_REGISTER</span>, Collections.<span style=color:#a6e22e>emptyList</span>())) {
+</span></span><span style=display:flex><span>            exporter.<span style=color:#a6e22e>register</span>();
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (byDeployer) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>for</span> (Exporter<span style=color:#f92672>&lt;?&gt;</span> exporter :
+</span></span><span style=display:flex><span>                    exporters.<span style=color:#a6e22e>getOrDefault</span>(RegisterTypeEnum.<span style=color:#a6e22e>AUTO_REGISTER_BY_DEPLOYER</span>, Collections.<span style=color:#a6e22e>emptyList</span>())) {
+</span></span><span style=display:flex><span>                exporter.<span style=color:#a6e22e>register</span>();                            <span style=color:#75715e>// DestroyableExporter -&gt; ExporterChangeableWrapper.register()</span>
+</span></span><span style=display:flex><span>            }
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>() {                                        <span style=color:#75715e>// RegistryProtocol.ExporterChangeableWrapper</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (registered.<span style=color:#a6e22e>compareAndSet</span>(<span style=color:#66d9ef>false</span>, <span style=color:#66d9ef>true</span>)) {
+</span></span><span style=display:flex><span>        URL registryUrl <span style=color:#f92672>=</span> getRegistryUrl(originInvoker);
+</span></span><span style=display:flex><span>        Registry registry <span style=color:#f92672>=</span> getRegistry(registryUrl);
+</span></span><span style=display:flex><span>        RegistryProtocol.<span style=color:#a6e22e>register</span>(registry, getRegisterUrl());  <span style=color:#75715e>// -&gt; registry.register(registeredProviderUrl)</span>
+</span></span><span style=display:flex><span>        <span style=color:#75715e>// ... mark RegisterStatedURL as registered on ProviderModel</span>
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>(URL url) {                                 <span style=color:#75715e>// AbstractServiceDiscovery</span>
+</span></span><span style=display:flex><span>    metadataInfo.<span style=color:#a6e22e>addService</span>(url);                               <span style=color:#75715e>// record interface, version, group, protocol, and method params</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 3. Instance publication: AbstractServiceDiscovery.register() &amp; reportMetadata()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#66d9ef>synchronized</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>register</span>() <span style=color:#66d9ef>throws</span> RuntimeException {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (isDestroy) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span> <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        ServiceInstance serviceInstance <span style=color:#f92672>=</span> createServiceInstance(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>metadataInfo</span>);
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> (<span style=color:#f92672>!</span>isValidInstance(serviceInstance)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span> <span style=color:#f92672>=</span> serviceInstance;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>boolean</span> revisionUpdated <span style=color:#f92672>=</span> calOrUpdateInstanceRevision(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span>); <span style=color:#75715e>// compute dubbo.metadata.revision digest</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (revisionUpdated) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>try</span> {
+</span></span><span style=display:flex><span>            reportMetadata(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>metadataInfo</span>);
+</span></span><span style=display:flex><span>            doRegister(<span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span>);                   <span style=color:#75715e>// NacosServiceDiscovery -&gt; namingService.registerInstance(...)</span>
+</span></span><span style=display:flex><span>        } <span style=color:#66d9ef>catch</span> (Exception e) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>this</span>.<span style=color:#a6e22e>serviceInstance</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>throw</span> e;
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#66d9ef>void</span> <span style=color:#a6e22e>reportMetadata</span>(MetadataInfo metadataInfo) {
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (metadataInfo <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span>;
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (metadataReport <span style=color:#f92672>!=</span> <span style=color:#66d9ef>null</span>) {
+</span></span><span style=display:flex><span>        SubscriberMetadataIdentifier identifier <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>new</span> SubscriberMetadataIdentifier(serviceName, metadataInfo.<span style=color:#a6e22e>getRevision</span>());
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> ((DEFAULT_METADATA_STORAGE_TYPE.<span style=color:#a6e22e>equals</span>(metadataType) <span style=color:#f92672>&amp;&amp;</span> metadataReport.<span style=color:#a6e22e>shouldReportMetadata</span>())
+</span></span><span style=display:flex><span>                <span style=color:#f92672>||</span> REMOTE_METADATA_STORAGE_TYPE.<span style=color:#a6e22e>equals</span>(metadataType)) {
+</span></span><span style=display:flex><span>            MetricsEventBus.<span style=color:#a6e22e>post</span>(MetadataEvent.<span style=color:#a6e22e>toPushEvent</span>(applicationModel), () <span style=color:#f92672>-&gt;</span> {
+</span></span><span style=display:flex><span>                metadataReport.<span style=color:#a6e22e>publishAppMetadata</span>(identifier, metadataInfo);
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>null</span>;
+</span></span><span style=display:flex><span>            });
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    MetadataInfo clonedMetadataInfo <span style=color:#f92672>=</span> metadataInfo.<span style=color:#a6e22e>clone</span>();
+</span></span><span style=display:flex><span>    metadataInfos.<span style=color:#a6e22e>put</span>(metadataInfo.<span style=color:#a6e22e>getRevision</span>(), <span style=color:#66d9ef>new</span> MetadataInfoStat(clonedMetadataInfo)); <span style=color:#75715e>// served by MetadataService</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>// 4. Consumer refer: RegistryProtocol.refer() -&gt; doRefer() -&gt; doCreateInvoker()</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>public</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>refer</span>(Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type, URL url) <span style=color:#66d9ef>throws</span> RpcException {
+</span></span><span style=display:flex><span>    url <span style=color:#f92672>=</span> getRegistryUrl(url);                                  <span style=color:#75715e>// rewrite service-discovery-registry:// -&gt; nacos://...</span>
+</span></span><span style=display:flex><span>    Registry registry <span style=color:#f92672>=</span> getRegistry(url);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (RegistryService.<span style=color:#a6e22e>class</span>.<span style=color:#a6e22e>equals</span>(type)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> proxyFactory.<span style=color:#a6e22e>getInvoker</span>((T) registry, type, url);
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span> qs <span style=color:#f92672>=</span> (Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span>) url.<span style=color:#a6e22e>getAttribute</span>(REFER_KEY);
+</span></span><span style=display:flex><span>    String group <span style=color:#f92672>=</span> qs.<span style=color:#a6e22e>get</span>(GROUP_KEY);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (StringUtils.<span style=color:#a6e22e>isNotEmpty</span>(group)) {
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> ((COMMA_SPLIT_PATTERN.<span style=color:#a6e22e>split</span>(group)).<span style=color:#a6e22e>length</span> <span style=color:#f92672>&gt;</span> 1 <span style=color:#f92672>||</span> <span style=color:#e6db74>&#34;*&#34;</span>.<span style=color:#a6e22e>equals</span>(group)) {
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> doRefer(Cluster.<span style=color:#a6e22e>getCluster</span>(url.<span style=color:#a6e22e>getScopeModel</span>(), MERGEABLE_CLUSTER_NAME), registry, type, url, qs);
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    Cluster cluster <span style=color:#f92672>=</span> Cluster.<span style=color:#a6e22e>getCluster</span>(url.<span style=color:#a6e22e>getScopeModel</span>(), qs.<span style=color:#a6e22e>get</span>(CLUSTER_KEY));
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> doRefer(cluster, registry, type, url, qs);
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> Invoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>doRefer</span>(
+</span></span><span style=display:flex><span>        Cluster cluster, Registry registry, Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type, URL url, Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span> parameters) {
+</span></span><span style=display:flex><span>    Map<span style=color:#f92672>&lt;</span>String, Object<span style=color:#f92672>&gt;</span> consumerAttribute <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> HashMap<span style=color:#f92672>&lt;&gt;</span>(url.<span style=color:#a6e22e>getAttributes</span>());
+</span></span><span style=display:flex><span>    consumerAttribute.<span style=color:#a6e22e>remove</span>(REFER_KEY);
+</span></span><span style=display:flex><span>    String p <span style=color:#f92672>=</span> isEmpty(parameters.<span style=color:#a6e22e>get</span>(PROTOCOL_KEY)) <span style=color:#f92672>?</span> CONSUMER : parameters.<span style=color:#a6e22e>get</span>(PROTOCOL_KEY);
+</span></span><span style=display:flex><span>    URL consumerUrl <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ServiceConfigURL(
+</span></span><span style=display:flex><span>            p, <span style=color:#66d9ef>null</span>, <span style=color:#66d9ef>null</span>, parameters.<span style=color:#a6e22e>get</span>(REGISTER_IP_KEY), 0, getPath(parameters, type), parameters, consumerAttribute);
+</span></span><span style=display:flex><span>    url <span style=color:#f92672>=</span> url.<span style=color:#a6e22e>putAttribute</span>(CONSUMER_URL_KEY, consumerUrl);
+</span></span><span style=display:flex><span>    ClusterInvoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> migrationInvoker <span style=color:#f92672>=</span> getMigrationInvoker(<span style=color:#66d9ef>this</span>, cluster, registry, type, url, consumerUrl);
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> interceptInvoker(migrationInvoker, url, consumerUrl); <span style=color:#75715e>// triggers MigrationRuleListener.onRefer()</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>protected</span> <span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> ClusterInvoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> <span style=color:#a6e22e>doCreateInvoker</span>(
+</span></span><span style=display:flex><span>        DynamicDirectory<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> directory, Cluster cluster, Registry registry, Class<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> type) {
+</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>setRegistry</span>(registry);
+</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>setProtocol</span>(protocol);                            <span style=color:#75715e>// same injected Protocol$Adaptive; each discovered provider URL is referred by its own wire scheme</span>
+</span></span><span style=display:flex><span>    Map<span style=color:#f92672>&lt;</span>String, String<span style=color:#f92672>&gt;</span> parameters <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> HashMap<span style=color:#f92672>&lt;&gt;</span>(directory.<span style=color:#a6e22e>getConsumerUrl</span>().<span style=color:#a6e22e>getParameters</span>());
+</span></span><span style=display:flex><span>    URL urlToRegistry <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> ServiceConfigURL(
+</span></span><span style=display:flex><span>            parameters.<span style=color:#a6e22e>get</span>(PROTOCOL_KEY) <span style=color:#f92672>==</span> <span style=color:#66d9ef>null</span> <span style=color:#f92672>?</span> CONSUMER : parameters.<span style=color:#a6e22e>get</span>(PROTOCOL_KEY),
+</span></span><span style=display:flex><span>            parameters.<span style=color:#a6e22e>remove</span>(REGISTER_IP_KEY),
+</span></span><span style=display:flex><span>            0,
+</span></span><span style=display:flex><span>            getPath(parameters, type),
+</span></span><span style=display:flex><span>            parameters);
+</span></span><span style=display:flex><span>    urlToRegistry <span style=color:#f92672>=</span> urlToRegistry.<span style=color:#a6e22e>setScopeModel</span>(directory.<span style=color:#a6e22e>getConsumerUrl</span>().<span style=color:#a6e22e>getScopeModel</span>());
+</span></span><span style=display:flex><span>    urlToRegistry <span style=color:#f92672>=</span> urlToRegistry.<span style=color:#a6e22e>setServiceModel</span>(directory.<span style=color:#a6e22e>getConsumerUrl</span>().<span style=color:#a6e22e>getServiceModel</span>());
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> (directory.<span style=color:#a6e22e>isShouldRegister</span>()) {
+</span></span><span style=display:flex><span>        directory.<span style=color:#a6e22e>setRegisteredConsumerUrl</span>(urlToRegistry);
+</span></span><span style=display:flex><span>        registry.<span style=color:#a6e22e>register</span>(directory.<span style=color:#a6e22e>getRegisteredConsumerUrl</span>());
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>buildRouterChain</span>(urlToRegistry);                  <span style=color:#75715e>// assemble activated StateRouters</span>
+</span></span><span style=display:flex><span>    directory.<span style=color:#a6e22e>subscribe</span>(toSubscribeUrl(urlToRegistry));         <span style=color:#75715e>// subscribe addresses + revisions</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> (ClusterInvoker<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span>) cluster.<span style=color:#a6e22e>join</span>(directory, <span style=color:#66d9ef>true</span>);   <span style=color:#75715e>// wrap Directory in ClusterInvoker</span>
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><h3 id=44-dubboprotocol>4.4 DubboProtocol</h3><p><code>DubboProtocol</code> is Dubbo&rsquo;s default wire protocol (<code>dubbo://</code>, port <code>20880</code>), pairing <code>DubboExporter</code> on the provider with <code>DubboInvoker</code> on the consumer over persistent Netty TCP channels.</p><h4 id=local-export-and-server-binding>Local export and server binding</h4><p>Local export descends from <code>RegistryProtocol.doLocalExport</code> through the protocol wrappers into <code>DubboProtocol.export</code>:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-java data-lang=java><span style=display:flex><span>String key <span style=color:#f92672>=</span> serviceKey(url);                       <span style=color:#75715e>// group/path:version:port</span>
 </span></span><span style=display:flex><span>DubboExporter<span style=color:#f92672>&lt;</span>T<span style=color:#f92672>&gt;</span> exporter <span style=color:#f92672>=</span> <span style=color:#66d9ef>new</span> DubboExporter<span style=color:#f92672>&lt;&gt;</span>(invoker, key, exporterMap);
 </span></span><span style=display:flex><span>openServer(url);
 </span></span></code></pre></div><p><code>openServer</code> keeps one server per <code>host:port</code> in <code>serverMap</code>, so all services sharing a port share a single Netty server; <code>server.reset(url)</code> applies URL changes to the existing server. <code>createServer</code> binds through <code>Exchangers.bind(url, requestHandler)</code>, which resolves the <code>Exchanger</code> SPI (<code>header</code> by default), whose <code>HeaderExchanger.bind</code> wraps the handler as <code>DecodeHandler(HeaderExchangeHandler(handler))</code> and delegates to <code>Transporters.bind</code> — <code>NettyServer</code> with the <code>DubboCountCodec</code> on the pipeline. The <code>EventLoop</code> and <code>ChannelPipeline</code> mechanics underneath are those of <a href=https://kevinwang930.github.io/post/java/netty/>Netty</a>; Dubbo adds one codec and one handler chain on top of a standard bootstrap.</p><p>The <code>exporterMap</code> key is what the provider uses to route an incoming request. <code>AbstractProtocol.serviceKey</code> composes <code>group/path:version:port</code>, with the port included so two services with the same interface on different ports do not collide.</p><h4 id=provider-side-dispatch-and-threading>Provider-side dispatch and threading</h4><p>An arriving frame is decoded on the Netty I/O thread into a <code>Request</code> whose payload is a <code>DecodeableRpcInvocation</code>; the argument bytes are not yet deserialized. The handler chain installed by <code>ChannelHandlers.wrap</code> is:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-text data-lang=text><span style=display:flex><span>MultiMessageHandler -&gt; HeartbeatHandler -&gt; Dispatcher(all) -&gt; DecodeHandler -&gt; HeaderExchangeHandler
