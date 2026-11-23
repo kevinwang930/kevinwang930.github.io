@@ -50,6 +50,126 @@ figure.highlight .code pre {
   max-width: min(calc(var(--main-content-width) - 50px), calc(100vw - 90px)) !important;
 }
 
+/* Code blocks sit on #f8fafc; Hugo also paints pre inline (#272822) and the theme paints code #f7f8f8 */
+.post-content div.highlight,
+.post-content figure.highlight {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.post-content pre {
+  background: #e4e4e7 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.post-content pre:has(code.language-plantuml),
+.post-content pre:has(.plantuml) {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.plantuml svg {
+  background: transparent !important;
+}
+
+.plantuml svg rect[fill="#F1F1F1"],
+.plantuml svg polygon[fill="#F1F1F1"] {
+  fill: transparent !important;
+}
+
+.post-content pre {
+  padding: 16px 18px;
+  margin: 1.25em 0;
+  overflow-x: auto;
+}
+
+.post-content pre > code,
+.post-content pre code,
+.post-content figure.highlight code,
+.post-content figure.highlight pre,
+.post-content .codeblock code,
+.post-content .hljs {
+  background: transparent !important;
+  color: #24292f;
+}
+
+/* Light-background syntax colors. Dark enough to read on #e4e4e7, distinct by role. */
+.post-content .codeblock .comment {
+  color: #4b5563;
+}
+
+.post-content .codeblock .keyword,
+.post-content .codeblock .meta {
+  color: #a71d5d;
+}
+
+.post-content .codeblock .string {
+  color: #0a3069;
+}
+
+.post-content .codeblock .type,
+.post-content .codeblock .built_in,
+.post-content .codeblock .literal {
+  color: #0550ae;
+}
+
+.post-content .codeblock .title.class_ {
+  color: #6f42c1;
+}
+
+.post-content .codeblock .title.function_ {
+  color: #6639ba;
+}
+
+.post-content .codeblock .variable,
+.post-content .codeblock .attr {
+  color: #116329;
+}
+
+.post-content .codeblock .params,
+.post-content .codeblock .number {
+  color: #953800;
+}
+
+.post-content .codeblock .operator {
+  color: #9a3412;
+}
+
+/* Properties files keep Chroma's monokai inline colors. Map them onto the same palette. */
+.post-content pre span[style*="color:#a6e22e"] {
+  color: #116329 !important;
+}
+
+.post-content pre span[style*="color:#e6db74"] {
+  color: #0a3069 !important;
+}
+
+.post-content pre span[style*="color:#f92672"] {
+  color: #a71d5d !important;
+}
+
+.post-content pre span[style*="color:#75715e"] {
+  color: #4b5563 !important;
+}
+
+.post-content :not(pre) > code {
+  display: inline;
+  background: #efefef !important;
+  color: #3a4350;
+  border: none;
+  border-radius: 3px;
+  padding: 0.05em 0.28em;
+  margin: 0;
+  font-size: 0.92em;
+  line-height: inherit;
+  vertical-align: baseline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 /* Scale wide diagram SVGs to post column width on Hugo */
 .post-content img[src$=".svg"],
 .post-content p img {

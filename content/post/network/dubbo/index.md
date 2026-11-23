@@ -2018,141 +2018,294 @@ protected <T> ClusterInvoker<T> doCreateInvoker(
 
 ### 4.4 DubboProtocol
 
-`DubboProtocol` is Dubbo's default wire protocol (`dubbo://`, port `20880`), pairing `DubboExporter` on the provider with `DubboInvoker` on the consumer over persistent Netty TCP channels.
+`DubboProtocol` is Dubbo's default protocol (`dubbo://`, port `20880`). It exports a `DubboExporter` and refers a `DubboInvoker`. It does not read or write a `Request` or a `Response`. `createServer` calls `Exchangers.bind`, and `initClient` calls `Exchangers.connect`.
 
-#### Local export and server binding
+#### Provider side
 
-Local export descends from `RegistryProtocol.doLocalExport` through the protocol wrappers into `DubboProtocol.export`:
+The provider side records each exported service. `export` puts a `DubboExporter` in `exporterMap` under `group/path:version:port` and keeps one `ExchangeServer` per `host:port` in `serverMap`. `requestHandler` is the `ExchangeHandler` passed into `Exchangers.bind`. When that handler is called, `getInvoker` reads `exporterMap` and `invoker.invoke` runs the service. The `Result` is returned to the exchanger.
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface Protocol {
+  + getDefaultPort(): int
+  + export(Invoker): Exporter
+  + refer(Class, URL): Invoker
+  + destroy()
+}
+interface ScopeModelAware {
+  + setFrameworkModel(FrameworkModel)
+}
+abstract class AbstractProtocol implements Protocol, ScopeModelAware {
+  # exporterMap: Map<String, Exporter<?>>
+  # serverMap: Map<String, ProtocolServer>
+  # invokers: Set<Invoker<?>>
+  # frameworkModel: FrameworkModel
+}
+class DubboProtocol extends AbstractProtocol {
+  - requestHandler: ExchangeHandler
+  + export(Invoker): Exporter
+  - openServer(URL)
+  - getInvoker(Channel, Invocation): Invoker
+}
+
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface Invoker<T> extends Node {
+  + getInterface(): Class<T>
+  + invoke(Invocation): Result
+}
+interface Exporter<T> {
+  + getInvoker(): Invoker<T>
+  + unexport()
+  + register()
+  + unregister()
+}
+abstract class AbstractExporter<T> implements Exporter {
+  - invoker: Invoker<T>
+  - unexported: boolean
+}
+class DubboExporter<T> extends AbstractExporter {
+  - key: String
+  - exporterMap: Map<String, Exporter<?>>
+}
+
+interface ChannelHandler {
+  + received(Channel, Object)
+}
+interface TelnetHandler {
+  + telnet(Channel, String): String
+}
+interface ExchangeHandler extends ChannelHandler, TelnetHandler {
+  + reply(ExchangeChannel, Object): CompletableFuture
+}
+abstract class ExchangeHandlerAdapter implements ExchangeHandler
+
+interface RemotingServer
+interface ExchangeServer extends RemotingServer {
+  + getExchangeChannels(): Collection
+}
+interface Exchanger {
+  + bind(URL, ExchangeHandler): ExchangeServer
+  + connect(URL, ExchangeHandler): ExchangeClient
+}
+class Exchangers {
+  {static} + bind(URL, ExchangeHandler): ExchangeServer
+  {static} + getExchanger(URL): Exchanger
+}
+interface ProtocolServer {
+  + getRemotingServer(): RemotingServer
+  + reset(URL)
+}
+class DefaultProtocolServer implements ProtocolServer {
+  - server: RemotingServer
+}
+
+AbstractProtocol o-- DubboExporter : exporterMap
+AbstractExporter o-- Invoker : invoker
+AbstractProtocol o-- DefaultProtocolServer : serverMap
+DubboProtocol o-- ExchangeHandler : requestHandler
+DubboProtocol --> Exchangers : createServer
+Exchangers --> Exchanger : getExchanger
+Exchanger --> ExchangeServer : bind
+DefaultProtocolServer o-- ExchangeServer : server
+@enduml
+```
 
 ```java
-String key = serviceKey(url);                       // group/path:version:port
-DubboExporter<T> exporter = new DubboExporter<>(invoker, key, exporterMap);
-openServer(url);
+// DubboProtocol.export: one DubboExporter per service key, one server per host:port
+public <T> Exporter<T> export(Invoker<T> invoker) throws RpcException {
+    URL url = invoker.getUrl();
+    String key = serviceKey(url);                              // group/path:version:port
+    DubboExporter<T> exporter = new DubboExporter<>(invoker, key, exporterMap);
+    openServer(url);
+    return exporter;
+}
+
+private void openServer(URL url) {
+    String key = url.getAddress();                             // one Netty server per host:port
+    if (url.getParameter(IS_SERVER_KEY, true)) {
+        ProtocolServer server = serverMap.get(key);
+        if (server == null) {
+            synchronized (this) {
+                if (serverMap.get(key) == null) {
+                    serverMap.put(key, createServer(url));     // Exchangers.bind(url, requestHandler)
+                    return;
+                }
+            }
+        }
+        server.reset(url);
+    }
+}
+
+private ProtocolServer createServer(URL url) {
+    url = URLBuilder.from(url)
+            .addParameter(CODEC_KEY, DubboCodec.NAME)          // codec name only; framing is Codec2
+            .build();
+    ExchangeServer server = Exchangers.bind(url, requestHandler); // HeaderExchanger.bind owns the server
+    return new DefaultProtocolServer(server);
+}
+
+// requestHandler.reply receives an Invocation from the exchanger and returns a Result future
+public CompletableFuture<Object> reply(ExchangeChannel channel, Object message) throws RemotingException {
+    Invocation inv = (Invocation) message;
+    Invoker<?> invoker = getInvoker(channel, inv);             // exporterMap lookup by group/path:version:port
+    Result result = invoker.invoke(inv);                       // provider filter chain and service method
+    return result.thenApply(Function.identity());              // exchanger turns this Result into a Response
+}
 ```
 
-`openServer` keeps one server per `host:port` in `serverMap`, so all services sharing a port share a single Netty server; `server.reset(url)` applies URL changes to the existing server. `createServer` binds through `Exchangers.bind(url, requestHandler)`, which resolves the `Exchanger` SPI (`header` by default), whose `HeaderExchanger.bind` wraps the handler as `DecodeHandler(HeaderExchangeHandler(handler))` and delegates to `Transporters.bind` — `NettyServer` with the `DubboCountCodec` on the pipeline. The `EventLoop` and `ChannelPipeline` mechanics underneath are those of [Netty](/post/java/netty/); Dubbo adds one codec and one handler chain on top of a standard bootstrap.
+#### Consumer side
 
-The `exporterMap` key is what the provider uses to route an incoming request. `AbstractProtocol.serviceKey` composes `group/path:version:port`, with the port included so two services with the same interface on different ports do not collide.
+The consumer side records each reference. `protocolBindingRefer` stores a `DubboInvoker` in `invokers` and gives it a `ClientsProvider`. `initClient` obtains the `ExchangeClient` from `Exchangers.connect`. `doInvoke` selects one client and returns the future from `ExchangeClient.request`. Completing that future is the exchanger's work.
 
-#### Provider-side dispatch and threading
+```plantuml
+@startuml
+top to bottom direction
 
-An arriving frame is decoded on the Netty I/O thread into a `Request` whose payload is a `DecodeableRpcInvocation`; the argument bytes are not yet deserialized. The handler chain installed by `ChannelHandlers.wrap` is:
+interface Protocol {
+  + refer(Class, URL): Invoker
+  + destroy()
+}
+interface ScopeModelAware {
+  + setFrameworkModel(FrameworkModel)
+}
+abstract class AbstractProtocol implements Protocol, ScopeModelAware {
+  # exporterMap: Map<String, Exporter<?>>
+  # serverMap: Map<String, ProtocolServer>
+  # invokers: Set<Invoker<?>>
+  # frameworkModel: FrameworkModel
+}
+class DubboProtocol extends AbstractProtocol {
+  - referenceClientMap: Map<String, SharedClientsProvider>
+  - requestHandler: ExchangeHandler
+  + protocolBindingRefer(Class, URL): Invoker
+  - getClients(URL): ClientsProvider
+  - initClient(URL): ExchangeClient
+}
 
-```text
-MultiMessageHandler -> HeartbeatHandler -> Dispatcher(all) -> DecodeHandler -> HeaderExchangeHandler
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface Invoker<T> extends Node {
+  + getInterface(): Class<T>
+  + invoke(Invocation): Result
+}
+abstract class AbstractInvoker<T> implements Invoker {
+  - type: Class<T>
+  - url: URL
+  # version: String
+  + invoke(Invocation): Result
+  # doInvoke(Invocation): Result
+}
+class DubboInvoker<T> extends AbstractInvoker {
+  - clientsProvider: ClientsProvider
+  - index: AtomicPositiveInteger
+  - invokers: Set<Invoker<?>>
+}
+
+interface ClientsProvider {
+  + getClients(): List
+  + close(int)
+}
+class SharedClientsProvider implements ClientsProvider {
+  - dubboProtocol: DubboProtocol
+  - addressKey: String
+  - clients: List<ReferenceCountExchangeClient>
+}
+class ExclusiveClientsProvider implements ClientsProvider {
+  - clients: List<ExchangeClient>
+}
+
+interface ExchangeClient {
+  + request(Object, int, ExecutorService): CompletableFuture
+}
+class ReferenceCountExchangeClient implements ExchangeClient {
+  - client: ExchangeClient
+  - referenceCount: AtomicInteger
+}
+class LazyConnectExchangeClient implements ExchangeClient {
+  - url: URL
+  - requestHandler: ExchangeHandler
+}
+interface Exchanger {
+  + bind(URL, ExchangeHandler): ExchangeServer
+  + connect(URL, ExchangeHandler): ExchangeClient
+}
+class Exchangers {
+  {static} + connect(URL, ExchangeHandler): ExchangeClient
+  {static} + getExchanger(URL): Exchanger
+}
+
+AbstractProtocol o-- DubboInvoker : invokers
+DubboProtocol o-- SharedClientsProvider : referenceClientMap
+DubboInvoker o-- ClientsProvider
+SharedClientsProvider o-- ReferenceCountExchangeClient
+ExclusiveClientsProvider o-- ExchangeClient
+ReferenceCountExchangeClient o-- ExchangeClient
+DubboProtocol --> Exchangers : initClient
+Exchangers --> Exchanger : getExchanger
+Exchanger --> ExchangeClient : connect
+@enduml
 ```
-
-`AllChannelHandler.received` submits a `ChannelEventRunnable` to the business thread pool, so `DecodeHandler` — and therefore argument deserialization — runs on a business thread, not on the event loop. `decode.in.io.thread=false` is the default and exists to keep long deserialization off the I/O threads.
-
-`HeaderExchangeHandler.handleRequest` then calls the `ExchangeHandler.reply` implemented inside `DubboProtocol`:
 
 ```java
-Invocation inv = (Invocation) message;
-Invoker<?> invoker = inv.getInvoker() == null ? getInvoker(channel, inv) : inv.getInvoker();
-RpcContext.getServiceContext().setRemoteAddress(channel.getRemoteAddress());
-Result result = invoker.invoke(inv);
-return result.thenApply(Function.identity());
+// DubboProtocol.protocolBindingRefer: one DubboInvoker, clients chosen by connections
+public <T> Invoker<T> protocolBindingRefer(Class<T> serviceType, URL url) throws RpcException {
+    DubboInvoker<T> invoker = new DubboInvoker<>(serviceType, url, getClients(url), invokers);
+    invokers.add(invoker);
+    return invoker;
+}
+
+private ClientsProvider getClients(URL url) {
+    int connections = url.getParameter(CONNECTIONS_KEY, 0);
+    if (connections == 0) {
+        String shareConnectionsStr = StringUtils.isBlank(url.getParameter(SHARE_CONNECTIONS_KEY, (String) null))
+                ? ConfigurationUtils.getProperty(
+                        url.getOrDefaultApplicationModel(), SHARE_CONNECTIONS_KEY, DEFAULT_SHARE_CONNECTIONS)
+                : url.getParameter(SHARE_CONNECTIONS_KEY, (String) null);
+        // default 1; SharedClientsProvider holds ReferenceCountExchangeClient, one socket per address
+        return getSharedClient(url, Integer.parseInt(shareConnectionsStr));
+    }
+    // connections=n: n exclusive clients, round-robined in doInvoke
+    List<ExchangeClient> clients =
+            IntStream.range(0, connections).mapToObj((i) -> initClient(url)).collect(Collectors.toList());
+    return new ExclusiveClientsProvider(clients);
+}
+
+// initClient: lazy=true defers connect; otherwise HeaderExchangeClient via Exchangers.connect
+private ExchangeClient initClient(URL url) {
+    return url.getParameter(LAZY_CONNECT_KEY, false)
+            ? new LazyConnectExchangeClient(url, requestHandler)
+            : Exchangers.connect(url, requestHandler);
+}
+
+// DubboInvoker.doInvoke: two-way Request, callback executor default "cached"
+protected Result doInvoke(final Invocation invocation) throws Throwable {
+    RpcInvocation inv = (RpcInvocation) invocation;
+    final String methodName = RpcUtils.getMethodName(invocation);
+    List<? extends ExchangeClient> exchangeClients = clientsProvider.getClients();
+    ExchangeClient currentClient = exchangeClients.size() == 1
+            ? exchangeClients.get(0)
+            : exchangeClients.get(index.getAndIncrement() % exchangeClients.size());
+    int timeout = RpcUtils.calculateTimeout(getUrl(), invocation, methodName, DEFAULT_TIMEOUT); // default 1000ms
+    invocation.setAttachment(TIMEOUT_KEY, String.valueOf(timeout));
+    Request request = new Request();
+    request.setData(inv);
+    request.setVersion(Version.getProtocolVersion());
+    request.setTwoWay(true);
+    ExecutorService executor = getCallbackExecutor(getUrl(), inv);
+    CompletableFuture<AppResponse> appResponseFuture =
+            currentClient.request(request, timeout, executor).thenApply(AppResponse.class::cast);
+    return new AsyncRpcResult(appResponseFuture, inv);
+}
 ```
-
-`getInvoker` extracts `path`, `version`, and `group` from the invocation attachments, rebuilds the service key with the local port, and looks it up in `exporterMap`. A miss produces a `RemotingException` naming the key and the channel pair, which the caller observes as a "not found exported service" error rather than a timeout. On a hit the invocation is stamped with the provider's `ServiceModel`, which is what lets the subsequent filter chain and the generated wrapper resolve methods and switch the context class loader.
-
-The reply is completed asynchronously: `HeaderExchangeHandler` attaches a completion stage that writes a `Response` with status `OK` on success, or status `70` (`SERVICE_ERROR`) with the exception text. Because the `Result` may complete on a different thread than the one that received the request, the response write is not tied to the business thread that ran the service method.
-
-The thread pool itself is the `ThreadPool` extension selected by the `threadpool` parameter. Its SPI default is `fixed`, which is also what a provider gets when nothing is configured: `threads` (default `200`) fixed-size workers, `SynchronousQueue` when `queues=0` (the default), and `AbortPolicyWithReport` as the rejection handler. `cached` is the default for *client* URLs, because a consumer's executor services replies and callbacks rather than business methods; `limited` and `eager` are also available. Saturation is not silent: the rejection policy throws, and `AllChannelHandler.sendFeedback` converts that into a `Response` with status `100` (`SERVER_THREADPOOL_EXHAUSTED_ERROR`) for two-way requests, so the consumer receives an immediate server-side rejection instead of waiting for its timeout.
-
-#### Shutdown
-
-`DubboProtocol` participates in `DubboGracefulShutdown`. The server sends a read-only event to every connected channel; the consumer's `HeaderExchangeHandler` records the event on the channel and marks the corresponding client unavailable, so the directory stops selecting new invocations toward it while in-flight requests complete. The server then waits for the configured shutdown timeout before closing.
-
-#### Frame layout
-
-The protocol layer on both sides reduces to one frame format. `ExchangeCodec` fixes a 16-byte header for both directions, followed by a serialized body.
-
-| Offset | Size | Content |
-|--------|------|---------|
-| 0 | 2 | Magic `0xdabb` |
-| 2 | 1 | Bit 7: request; bit 6: two-way; bit 5: event; bits 0–4: serialization id |
-| 3 | 1 | Status, meaningful in responses only |
-| 4 | 8 | Request id |
-| 12 | 4 | Body length |
-| 16 | var | Serialized body |
-
-The request flag in bit 7 and the serialization id in the low five bits of byte 2 give a reader everything needed to classify the frame and pick a body codec before any deserialization. A request sets bit 7; a response leaves it clear and fills byte 3 with a status code. The status byte is present but ignored in requests, so the fixed layout is symmetric and cheap to parse. Responses carry `20` (`OK`), `30` (`CLIENT_TIMEOUT`), `35` (`CHANNEL_INACTIVE`), `40` (`BAD_REQUEST`), `50` (`BAD_RESPONSE`), `60` (`SERVICE_NOT_FOUND`), `70` (`SERVICE_ERROR`), `90` (`CLIENT_ERROR`), or `100` (`SERVER_THREADPOOL_EXHAUSTED_ERROR`).
-
-Requests are encoded by `DubboCodec.encodeRequestData`, which writes a fixed sequence into the serialized stream:
-
-```text
-protocol version (UTF) | service name (UTF) | service version (UTF) |
-method name (UTF) | parameter type descriptor (UTF) | arguments | attachments
-```
-
-The service name is taken from the `interface` attachment with the `path` attachment as fallback. The parameter descriptor is a JVM type descriptor string (`Ljava/lang/String;IZ`) rather than a serialized `Class[]`; the provider resolves the `Method` from its own service model, so a consumer compiled against the same interface can invoke it without transmitting class metadata. Attachments (trace ids, timeouts, tags) travel in the same body, so the invocation context is carried by the protocol rather than by a side channel.
-
-Responses are typed by a leading byte: value, null, exception, and each with attachments. Attachments on the response are omitted for peers older than protocol version 2.0.2, detected by parsing the version string from the request.
-
-`DubboCountCodec` decodes in a loop, accumulating messages until the buffer is exhausted or decoding returns `NEED_MORE_INPUT`, rewinding the reader index in the latter case. A single `decode` call therefore yields one `MultiMessage` holding every complete frame in the buffer, and `MultiMessageHandler` at the head of the handler chain dispatches each element in turn, isolating a failure in one message from the rest of the batch. One TCP read carrying several small requests costs one decode call, not one per read event.
-
-Payload size is enforced by `checkPayload` against the `payload` parameter, default 8 MiB, on both encode and decode. Exceeding it on the response path is converted into a `BAD_RESPONSE` frame so the consumer fails immediately rather than waiting for a timeout.
-
-Serialization is negotiated per request, not per connection. `DubboCodec.getSerialization` checks the `Invocation` for a `serialization id` attachment and, when present, uses that codec id; otherwise it resolves `UrlUtils.serializationOrDefault(url)`, which tries `prefer.serialization` in order, then `serialization`, then the framework default — `hessian2` unless `DUBBO_DEFAULT_SERIALIZATION` overrides it. On the provider, the `AppResponse` carries its `Invocation`, so the reply is encoded with the same id the request used. Because that id occupies the low five bits of the header, the receiver needs no out-of-band agreement, and one connection can carry requests encoded with different serializers.
-
-#### Request/response correlation and timeouts
-
-The RPC layer is synchronous in appearance but asynchronous in structure. `DubboInvoker.doInvoke` builds a `Request` with `twoWay=true`, then:
-
-```java
-CompletableFuture<AppResponse> appResponseFuture =
-        currentClient.request(request, timeout, executor).thenApply(AppResponse.class::cast);
-AsyncRpcResult result = new AsyncRpcResult(appResponseFuture, inv);
-```
-
-`HeaderExchangeChannel.request` creates a `DefaultFuture` before sending, registers it in a static `FUTURES` map keyed by request id, and arms a `HashedWheelTimer` timeout task. When a `Response` arrives, `HeaderExchangeHandler.handleResponse` calls `DefaultFuture.received`, which removes the entry, cancels the timeout task, and completes the future. An id with no live future — a response that arrived after its timeout — is logged and discarded.
-
-A late response is therefore not an error path in the transport; it is simply dropped. The consequence is that a timed-out request may still execute on the provider, which is why the fault-tolerance policy treats timeouts as retryable only under the caller's explicit configuration, and why the retry loop excludes business exceptions.
-
-Timeout values compose before the call. `RpcUtils.calculateTimeout` honours a `TIME_COUNTDOWN` attachment (used for nested calls that must fit inside the caller's remaining budget), otherwise reads `methodName.timeout` then `timeout`, defaulting to 1000 ms. When a countdown is present, or when `enable-timeout-countdown` is set on the method, the resolved value is written into a `TIMEOUT_ATTACHMENT_KEY` attachment so the provider can apply the same budget.
-
-Connection loss is handled explicitly. `DefaultFuture.closeChannel` walks the channels for uncompleted futures, waits up to the configured close timeout for a response, and then synthesizes a `CHANNEL_INACTIVE` response, so a broken connection fails fast instead of consuming the RPC timeout.
-
-#### Keepalive and reconnection
-
-`HeaderExchangeClient` owns two timer tasks per client. `HeartbeatTimerTask` sends an event request when neither a read nor a write has occurred within `heartbeat` (default 60 s); `HeartbeatHandler` answers heartbeat requests on the I/O thread, without entering the business pool. `ReconnectTimerTask` reconnects a channel that is not connected, and also one whose last read is older than the idle timeout, which defaults to three heartbeat intervals. `getCloseTimeout` enforces the corresponding invariant: the close timeout may not be shorter than twice the heartbeat interval, and the idle timeout may not be either.
-
-One client per provider address is the default: `connections=0` selects shared clients (`shareconnections`, default `1`), which are reference counted (`ReferenceCountExchangeClient`) so that two services on the same port share one connection and closing one does not close the socket. `connections=n` with `n>0` instead creates `n` dedicated clients per service, round-robined by `DubboInvoker`. `lazy=true` defers the TCP connect to the first call.
-
-#### One invocation across the boundary
-
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant Px as Proxy
-    participant Cl as FailoverClusterInvoker
-    participant Dir as RegistryDirectory
-    participant Inv as DubboInvoker
-    participant Ch as NettyClient channel
-    participant Srv as NettyServer
-    participant Ex as Provider dispatch
-
-    App->>Px: method call
-    Px->>Cl: invoke RpcInvocation
-    Cl->>Dir: list invocation
-    Dir-->>Cl: routed provider invokers
-    Cl->>Cl: select via LoadBalance
-    Cl->>Inv: invoke invocation
-    Inv->>Ch: Request id, twoWay, via DefaultFuture
-    Ch->>Srv: 16-byte header and Hessian2 body
-    Srv->>Srv: decode header, dispatch to business pool
-    Srv->>Ex: decoded Invocation
-    Ex->>Ex: exporterMap lookup by serviceKey
-    Ex->>Ex: provider filter chain, service method
-    Ex-->>Ch: Response id, status=20, value
-    Ch->>Inv: DefaultFuture.received completes
-    Inv-->>Cl: AsyncRpcResult
-    Cl-->>Px: Result
-    Px-->>App: recreate returns value
-```
-
-The provider filter chain runs inside `invoker.invoke(inv)` on the business thread, so the service key resolution, the context class loader switch, and the filters all precede the business method, while the response is written from the completion callback that `HeaderExchangeHandler` attaches to the returned stage — on the business thread for a synchronous service method, and on whichever thread completes the future otherwise.
 
 ---
 
@@ -2160,46 +2313,172 @@ The provider filter chain runs inside `invoker.invoke(inv)` on the business thre
 
 `Exchanger` sits between the protocol and the transport, and it is where request/response semantics enter. The transport moves bytes and knows nothing about correlation; the exchanger adds request identity, two-way versus one-way, event frames, and futures.
 
-```java
-@SPI(value = HeaderExchanger.NAME, scope = ExtensionScope.FRAMEWORK)
-public interface Exchanger {
-    @Adaptive ExchangeServer bind(URL url, ExchangeHandler handler);
-    @Adaptive ExchangeClient connect(URL url, ExchangeHandler handler);
-}
-```
-
-`HeaderExchanger` is the only implementation. `bind` wraps the handler as `HeaderExchangeHandler` inside the transport's server, `connect` wraps the channel as `HeaderExchangeClient`. `HeaderExchangeHandler.handleResponse` routes a `Response` to `DefaultFuture.received`, the single point where a waiting call is completed, and `HeaderExchangeClient` owns the heartbeat and reconnect timers.
-
 ```plantuml
 @startuml
 top to bottom direction
 
+class DubboProtocol {
+  - requestHandler: ExchangeHandler
+  - createServer(URL): ProtocolServer
+  - initClient(URL): ExchangeClient
+}
+interface ExchangeHandler {
+  + reply(ExchangeChannel, Object): CompletableFuture
+}
+
+class Exchangers {
+  {static} + bind(URL, ExchangeHandler): ExchangeServer
+  {static} + connect(URL, ExchangeHandler): ExchangeClient
+  {static} + getExchanger(URL): Exchanger
+}
 interface Exchanger {
   + bind(URL, ExchangeHandler): ExchangeServer
   + connect(URL, ExchangeHandler): ExchangeClient
 }
 class HeaderExchanger implements Exchanger
 
-interface ExchangeServer
-class HeaderExchangeServer implements ExchangeServer
-
-interface ExchangeChannel {
-  + request(Object, int): CompletableFuture
+interface RemotingServer {
+  + getChannelHandler(): ChannelHandler
+  + getChannels(): Collection
 }
-interface ExchangeClient extends ExchangeChannel
+interface ExchangeServer extends RemotingServer {
+  + getExchangeChannels(): Collection
+  + getExchangeChannel(InetSocketAddress): ExchangeChannel
+}
+class HeaderExchangeServer implements ExchangeServer {
+  - server: RemotingServer
+}
+interface ProtocolServer {
+  + getRemotingServer(): RemotingServer
+  + reset(URL)
+}
+class DefaultProtocolServer implements ProtocolServer {
+  - server: RemotingServer
+}
+interface ExchangeClient
 class HeaderExchangeClient implements ExchangeClient {
-  - idleTimeout: int
-  + request(Object): CompletableFuture
+  - client: Client
+  - channel: ExchangeChannel
+}
+interface ExchangeChannel {
+  + request(Object, int, ExecutorService): CompletableFuture
+}
+class HeaderExchangeChannel implements ExchangeChannel {
+  - channel: Channel
 }
 class HeaderExchangeHandler {
-  + received(Channel, Object)
+  - handler: ExchangeHandler
   + handleRequest(ExchangeChannel, Request)
+  + handleResponse(Channel, Response)
+}
+class DecodeHandler {
+  # handler: ChannelHandler
 }
 class DefaultFuture {
-  - FUTURES: Map<Long, DefaultFuture>
+  {static} - FUTURES: Map<Long, DefaultFuture>
+  - request: Request
+  - timeout: int
+  + newFuture(Channel, Request, int, ExecutorService): DefaultFuture
   + received(Channel, Response)
 }
+
+class Transporters {
+  {static} + bind(URL, ChannelHandler): RemotingServer
+  {static} + connect(URL, ChannelHandler): Client
+  {static} + getTransporter(URL): Transporter
+}
+interface Transporter {
+  + bind(URL, ChannelHandler): RemotingServer
+  + connect(URL, ChannelHandler): Client
+}
+interface Client
+
+DubboProtocol o-- ExchangeHandler : requestHandler
+DubboProtocol o-- DefaultProtocolServer : serverMap
+DefaultProtocolServer o-- ExchangeServer : server
+DubboProtocol --> Exchangers : createServer
+DubboProtocol --> Exchangers : initClient
+Exchangers --> Exchanger : getExchanger
+HeaderExchangeServer o-- RemotingServer : server
+HeaderExchangeServer --> ExchangeChannel : getExchangeChannels
+HeaderExchangeServer --> ExchangeHandler : getChannelHandler
+HeaderExchangeClient o-- Client : client
+HeaderExchangeClient o-- ExchangeChannel : channel
+DecodeHandler o-- HeaderExchangeHandler : handler
+HeaderExchangeHandler o-- ExchangeHandler : handler
+HeaderExchangeChannel --> DefaultFuture : newFuture
+HeaderExchangeHandler --> DefaultFuture : received
+HeaderExchanger --> Transporters : bind
+HeaderExchanger --> Transporters : connect
+Transporters --> Transporter : getTransporter
 @enduml
+```
+
+```java
+@SPI(value = HeaderExchanger.NAME, scope = ExtensionScope.FRAMEWORK)
+public interface Exchanger {
+    @Adaptive({Constants.EXCHANGER_KEY}) ExchangeServer bind(URL url, ExchangeHandler handler);
+    @Adaptive({Constants.EXCHANGER_KEY}) ExchangeClient connect(URL url, ExchangeHandler handler);
+}
+```
+
+`@SPI` names the default `header`. The registration file is the map `ExtensionLoader` reads for that name:
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.remoting.exchange.Exchanger
+header=org.apache.dubbo.remoting.exchange.support.header.HeaderExchanger
+```
+
+`Exchangers.getExchanger` loads `url.getParameter("exchanger", "header")` from that file. `DubboProtocol.createServer` and `initClient` stop at `Exchangers.bind` and `Exchangers.connect`. `HeaderExchanger` wraps the protocol `ExchangeHandler` and calls `Transporters`. `HeaderExchangeChannel` correlates each two-way call with a `DefaultFuture`.
+
+```java
+// HeaderExchanger: request/response wrapper around the transport. DubboProtocol passes requestHandler in.
+public ExchangeServer bind(URL url, ExchangeHandler handler) throws RemotingException {
+    return new HeaderExchangeServer(Transporters.bind(
+            url, new DecodeHandler(new HeaderExchangeHandler(handler))));
+}
+
+public ExchangeClient connect(URL url, ExchangeHandler handler) throws RemotingException {
+    return new HeaderExchangeClient(
+            Transporters.connect(url, new DecodeHandler(new HeaderExchangeHandler(handler))), true);
+}
+
+// HeaderExchangeHandler.handleRequest: DubboProtocol.reply runs the service; the Response is written when it completes
+void handleRequest(final ExchangeChannel channel, Request req) throws RemotingException {
+    Response res = new Response(req.getId(), req.getVersion());
+    CompletionStage<Object> future = handler.reply(channel, req.getData());
+    future.whenComplete((appResult, t) -> {
+        if (t == null) {
+            res.setStatus(Response.OK);                        // status 20
+            res.setResult(appResult);
+        } else {
+            res.setStatus(Response.SERVICE_ERROR);             // status 70
+            res.setErrorMessage(StringUtils.toString(t));
+        }
+        channel.send(res);
+    });
+}
+
+// HeaderExchangeChannel.request: register the future before send. HashedWheelTimer arms the timeout.
+public CompletableFuture<Object> request(Object request, int timeout, ExecutorService executor)
+        throws RemotingException {
+    Request req = (Request) request;
+    DefaultFuture future = DefaultFuture.newFuture(channel, req, timeout, executor); // FUTURES keyed by request id
+    try {
+        channel.send(req);
+    } catch (RemotingException e) {
+        future.cancel();
+        throw e;
+    }
+    return future;
+}
+
+// HeaderExchangeHandler.handleResponse: complete that future. A response whose id is already gone is dropped.
+static void handleResponse(Channel channel, Response response) throws RemotingException {
+    if (response != null && !response.isHeartbeat()) {
+        DefaultFuture.received(channel, response);
+    }
+}
 ```
 
 ---
@@ -2216,7 +2495,32 @@ public interface Transporter {
 }
 ```
 
-`NettyTransporter` returns a `NettyServer` or a `NettyClient`; the state and behaviour live in `AbstractServer`/`AbstractClient`, which handle bind retry, port detection, channel bookkeeping, and the connection listener set, while the subclass builds only the Netty `ServerBootstrap`. The SPI name `netty` maps to the Netty 4 module; the Netty 3 module registers as `netty3`.
+`NettyTransporter` returns a `NettyServer` or a `NettyClient`; the state and behaviour live in `AbstractServer`/`AbstractClient`, which handle bind retry, port detection, channel bookkeeping, and the connection listener set, while the subclass builds only the Netty `ServerBootstrap`. The SPI name `netty` maps to the Netty 4 module; the Netty 3 module registers as `netty3`. `NettyServer` wraps the exchanger's handler before the socket is opened, and `AllChannelHandler` is the default dispatcher that moves each received message onto the business pool.
+
+```java
+// NettyServer calls ChannelHandlers.wrap. Default dispatcher name is "all".
+protected ChannelHandler wrapInternal(ChannelHandler handler, URL url) {
+    return new MultiMessageHandler(new HeartbeatHandler(
+            url.getOrDefaultFrameworkModel()
+                    .getExtensionLoader(Dispatcher.class)
+                    .getAdaptiveExtension()
+                    .dispatch(handler, url)));                 // AllChannelHandler around DecodeHandler
+}
+
+// AllChannelHandler.received: decode and the service method run off the Netty I/O thread
+public void received(Channel channel, Object message) throws RemotingException {
+    ExecutorService executor = getPreferredExecutorService(message); // threadpool=fixed, threads=200, queues=0
+    try {
+        executor.execute(new ChannelEventRunnable(channel, handler, ChannelState.RECEIVED, message));
+    } catch (Throwable t) {
+        if (message instanceof Request && t instanceof RejectedExecutionException) {
+            sendFeedback(channel, (Request) message, t);       // Response status 100 SERVER_THREADPOOL_EXHAUSTED_ERROR
+            return;
+        }
+        throw new ExecutionException(message, channel, getClass() + " error when process received event .", t);
+    }
+}
+```
 
 ```plantuml
 @startuml
@@ -2299,6 +2603,17 @@ class DubboCountCodec implements Codec2 {
 DubboCountCodec *-- DubboCodec
 @enduml
 ```
+
+`ExchangeCodec` fixes the 16-byte header. `DubboCodec.encodeRequestData` writes the body. The status byte is meaningful on a response: `20` OK, `25` serialization error, `30` client timeout, `31` server timeout, `35` channel inactive, `40` bad request, `50` bad response, `60` service not found, `70` service error, `80` server error, `90` client error, `100` server threadpool exhausted.
+
+| Offset | Size | Content |
+|--------|------|---------|
+| 0 | 2 | Magic `0xdabb` |
+| 2 | 1 | Bit 7: request; bit 6: two-way; bit 5: event; bits 0–4: serialization id |
+| 3 | 1 | Status |
+| 4 | 8 | Request id |
+| 12 | 4 | Body length |
+| 16 | var | Body: `version \| service \| service version \| method \| parameter descriptor \| arguments \| attachments` |
 
 ---
 
