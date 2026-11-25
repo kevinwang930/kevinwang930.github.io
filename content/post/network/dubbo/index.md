@@ -13,7 +13,6 @@ keywords:
 - dubbo
 - rpc
 
-
 #thumbnailImage: //example.com/image.jpg
 ---
 
@@ -82,7 +81,7 @@ Three things happen behind that call. At startup the provider exported `Greeting
 
 ## 2. Extension architecture
 
-Dubbo is structured around a microkernel and plugin design pattern. The framework core defines contracts as Service Provider Interfaces (SPIs) — `Protocol`, `Exchanger`, `Transporter`, `Codec2`, `Serialization`, `ThreadPool`, `LoadBalance`, `StateRouterFactory`, and `Filter` — and contains no hard-coded dependency on any concrete transport, serializer, or cluster strategy. Unlike `java.util.ServiceLoader`, which instantiates every declared provider eagerly from a flat list, Dubbo's SPI combines five design patterns into a single container:
+Dubbo is structured around a microkernel and plugin design pattern. The framework core defines contracts as Service Provider Interfaces (SPIs) — `Protocol`, `Registry`, `Exchanger`, `Transporter`, `Codec2`, `Serialization`, `ThreadPool`, `LoadBalance`, `StateRouterFactory`, and `Filter` — and contains no hard-coded dependency on any concrete transport, serializer, or cluster strategy. Unlike `java.util.ServiceLoader`, which instantiates every declared provider eagerly from a flat list, Dubbo's SPI combines five design patterns into a single container:
 
 - **Name-indexed lazy loading**: implementations are declared as `name=class` pairs in resource files and loaded only when that name is requested.
 - **URL-driven late binding (Adaptive Proxy)**: every remote call is described by a `URL` carrying configuration parameters (`protocol=dubbo`, `transporter=netty`, `serialization=hessian2`, `loadbalance=random`). Because collaborators are wired at startup before any service `URL` exists, the container supplies a generated *adaptive* proxy that defers implementation lookup to call time by reading the parameter from the invocation's `URL`.
@@ -673,7 +672,7 @@ DefaultModuleDeployer o-- ServiceConfigBase
 
 ### 3.1 Extension declarations and startup activation
 
-Every extension loaded during startup is registered as `name=implementationClass` under `META-INF/dubbo/internal/<interface>` and bound to one of the three `ScopeModel` tiers:
+Every extension loaded during startup is registered as `name=implementationClass` under `META-INF/dubbo/internal/<interface>` and bound to one of the three `ScopeModel` tiers. `ExtensionLoader.getExtension(extName)` returns the class registered under that name:
 
 - **Framework level (`FrameworkModel`)**:
   - **`ExtensionInjector`** — `META-INF/dubbo/internal/org.apache.dubbo.common.extension.ExtensionInjector`:
@@ -1661,7 +1660,7 @@ throw le;
 - **On `export`**: unwraps the registry `URL` (`getRegistryUrl`) and the nested wire `URL` (`EXPORT_KEY`), delegates local port binding to `protocol.export(...)` (`ExporterChangeableWrapper`), and hands the provider `URL` to `registry.register(...)` (wrapped in `DestroyableExporter` so `unexport()` unregisters before closing).
 - **On `refer`**: resolves the `Registry` and `Cluster` SPIs, constructs a `ServiceDiscoveryMigrationInvoker` (capable of switching between application-level `ServiceDiscoveryRegistryDirectory` and interface-level `RegistryDirectory`), and subscribes the `Directory` to provider address changes. When a direct point-to-point `URL` (`dubbo://host:port`) is configured instead of a registry, `Protocol$Adaptive` bypasses `RegistryProtocol` completely and dispatches straight to the wire protocol.
 
-`getRegistry` loads `RegistryFactory` from the registry URL protocol on each call. `service-discovery-registry` selects `ServiceDiscoveryRegistryFactory`. Its `createRegistry` restores the `registry` parameter (`nacos`) and returns a `ServiceDiscoveryRegistry`, which holds the `ServiceDiscovery` created by `ServiceDiscoveryFactory` (`NacosServiceDiscovery` for Nacos). `InterfaceCompatibleRegistryProtocol` rewrites `registry://` to that inner protocol before the same lookup, so interface-level export receives a `NacosRegistry` from `NacosRegistryFactory`. Its application-level refer path calls the parent `getRegistryUrl` and still receives a `ServiceDiscoveryRegistry`.
+`getRegistry` loads `RegistryFactory$Adaptive` and calls `getRegistry(registryUrl)`. The application-level scheme stays `service-discovery-registry`, so that call selects `ServiceDiscoveryRegistryFactory`. `InterfaceCompatibleRegistryProtocol.getRegistryUrl` rewrites `registry://` to the inner scheme, `nacos`, before the same call, so `RegistryFactory` selects `NacosRegistryFactory`.
 
 ```plantuml
 @startuml
@@ -1689,79 +1688,14 @@ abstract class AbstractProtocol implements Protocol
 class DubboProtocol extends AbstractProtocol
 class TripleProtocol extends AbstractProtocol
 
-interface Node {
-  + getUrl(): URL
-  + isAvailable(): boolean
-  + destroy()
-}
-interface RegistryService {
-  + register(URL)
-  + unregister(URL)
-  + subscribe(URL, NotifyListener)
-  + unsubscribe(URL, NotifyListener)
-}
-interface Registry extends Node, RegistryService {
-  + isServiceDiscovery(): boolean
-}
-abstract class AbstractRegistry implements Registry {
-  + register(URL)
-  + subscribe(URL, NotifyListener)
-}
-abstract class FailbackRegistry extends AbstractRegistry
-class ServiceDiscoveryRegistry extends FailbackRegistry {
-  - serviceDiscovery: ServiceDiscovery
-  + getServiceDiscovery(): ServiceDiscovery
-}
-class NacosRegistry extends FailbackRegistry
-
 interface RegistryFactory {
   + getRegistry(URL): Registry
 }
-abstract class AbstractRegistryFactory implements RegistryFactory {
-  + getRegistry(URL): Registry
-  # createRegistry(URL): Registry
-}
-class ServiceDiscoveryRegistryFactory extends AbstractRegistryFactory
-class NacosRegistryFactory extends AbstractRegistryFactory
-
-interface ServiceDiscovery extends RegistryService {
-  + register()
-  + update()
-  + unregister()
-  + getInstances(String): List
-  + getLocalInstance(): ServiceInstance
-  + getLocalMetadata(): MetadataInfo
-}
-abstract class AbstractServiceDiscovery implements ServiceDiscovery {
-  # serviceInstance: ServiceInstance
-  # metadataInfo: MetadataInfo
-  + register(URL)
-  + register()
-  # reportMetadata(MetadataInfo)
-  # doRegister(ServiceInstance)
-}
-class NacosServiceDiscovery extends AbstractServiceDiscovery
-
-interface ServiceDiscoveryFactory {
-  + getServiceDiscovery(URL): ServiceDiscovery
-}
-abstract class AbstractServiceDiscoveryFactory implements ServiceDiscoveryFactory {
-  - discoveries: Map<String, ServiceDiscovery>
-  + getServiceDiscovery(URL): ServiceDiscovery
-  # createDiscovery(URL): ServiceDiscovery
-}
-class NacosServiceDiscoveryFactory extends AbstractServiceDiscoveryFactory
 
 RegistryProtocol o-- ProtocolAdaptive : protocol
 ProtocolAdaptive --> DubboProtocol : url.getProtocol()
 ProtocolAdaptive --> TripleProtocol : url.getProtocol()
 RegistryProtocol --> RegistryFactory : getRegistry
-ServiceDiscoveryRegistryFactory --> ServiceDiscoveryRegistry : createRegistry
-NacosRegistryFactory --> NacosRegistry : createRegistry
-ServiceDiscoveryRegistry *-- ServiceDiscovery
-ServiceDiscoveryRegistry --> ServiceDiscoveryFactory : createServiceDiscovery
-AbstractServiceDiscoveryFactory o-- ServiceDiscovery
-NacosServiceDiscoveryFactory --> NacosServiceDiscovery : createDiscovery
 @enduml
 ```
 
@@ -1844,7 +1778,7 @@ private URL buildUrl(ProtocolConfig protocolConfig, Map<String, String> params) 
 
 // 1. Provider export: RegistryProtocol.export() -> doLocalExport()
 public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
-    URL registryUrl = getRegistryUrl(originInvoker);            // rewrite service-discovery-registry:// -> nacos://127.0.0.1:8848
+    URL registryUrl = getRegistryUrl(originInvoker);            // originInvoker.getUrl(); scheme stays service-discovery-registry
     URL providerUrl = getProviderUrl(originInvoker);            // read EXPORT_KEY -> dubbo://10.0.0.7:20880/...
 
     final URL overrideSubscribeUrl = getSubscribedOverrideUrl(providerUrl);
@@ -1853,7 +1787,7 @@ public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcExceptio
 
     final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl); // second Protocol$Adaptive pass on providerUrl
 
-    final Registry registry = getRegistry(registryUrl);
+    final Registry registry = getRegistry(registryUrl);         // RegistryFactory$Adaptive.getRegistry
     final URL registeredProviderUrl = customizeURL(providerUrl, registryUrl);
 
     boolean register = providerUrl.getParameter(REGISTER_KEY, true) && registryUrl.getParameter(REGISTER_KEY, true);
@@ -1909,62 +1843,15 @@ public void register() {                                        // RegistryProto
     if (registered.compareAndSet(false, true)) {
         URL registryUrl = getRegistryUrl(originInvoker);
         Registry registry = getRegistry(registryUrl);
-        RegistryProtocol.register(registry, getRegisterUrl());  // -> registry.register(registeredProviderUrl)
+        RegistryProtocol.register(registry, getRegisterUrl());  // registry.register(registeredProviderUrl)
         // ... mark RegisterStatedURL as registered on ProviderModel
     }
 }
 
-public void register(URL url) {                                 // AbstractServiceDiscovery
-    metadataInfo.addService(url);                               // record interface, version, group, protocol, and method params
-}
-
-// 3. Instance publication: AbstractServiceDiscovery.register() & reportMetadata()
-public synchronized void register() throws RuntimeException {
-    if (isDestroy) {
-        return;
-    }
-    if (this.serviceInstance == null) {
-        ServiceInstance serviceInstance = createServiceInstance(this.metadataInfo);
-        if (!isValidInstance(serviceInstance)) {
-            return;
-        }
-        this.serviceInstance = serviceInstance;
-    }
-    boolean revisionUpdated = calOrUpdateInstanceRevision(this.serviceInstance); // compute dubbo.metadata.revision digest
-    if (revisionUpdated) {
-        try {
-            reportMetadata(this.metadataInfo);
-            doRegister(this.serviceInstance);                   // NacosServiceDiscovery -> namingService.registerInstance(...)
-        } catch (Exception e) {
-            this.serviceInstance = null;
-            throw e;
-        }
-    }
-}
-
-protected void reportMetadata(MetadataInfo metadataInfo) {
-    if (metadataInfo == null) {
-        return;
-    }
-    if (metadataReport != null) {
-        SubscriberMetadataIdentifier identifier =
-                new SubscriberMetadataIdentifier(serviceName, metadataInfo.getRevision());
-        if ((DEFAULT_METADATA_STORAGE_TYPE.equals(metadataType) && metadataReport.shouldReportMetadata())
-                || REMOTE_METADATA_STORAGE_TYPE.equals(metadataType)) {
-            MetricsEventBus.post(MetadataEvent.toPushEvent(applicationModel), () -> {
-                metadataReport.publishAppMetadata(identifier, metadataInfo);
-                return null;
-            });
-        }
-    }
-    MetadataInfo clonedMetadataInfo = metadataInfo.clone();
-    metadataInfos.put(metadataInfo.getRevision(), new MetadataInfoStat(clonedMetadataInfo)); // served by MetadataService
-}
-
-// 4. Consumer refer: RegistryProtocol.refer() -> doRefer() -> doCreateInvoker()
+// 3. Consumer refer: RegistryProtocol.refer() -> doRefer() -> doCreateInvoker()
 public <T> Invoker<T> refer(Class<T> type, URL url) throws RpcException {
-    url = getRegistryUrl(url);                                  // rewrite service-discovery-registry:// -> nacos://...
-    Registry registry = getRegistry(url);
+    url = getRegistryUrl(url);                                  // keep service-discovery-registry://
+    Registry registry = getRegistry(url);                       // RegistryFactory$Adaptive.getRegistry
     if (RegistryService.class.equals(type)) {
         return proxyFactory.getInvoker((T) registry, type, url);
     }
@@ -2309,7 +2196,191 @@ protected Result doInvoke(final Invocation invocation) throws Throwable {
 
 ---
 
-## 5. Exchanger
+## 5. Registry
+
+The registry records which provider processes are running and where they listen. Each record is an address plus a revision. The revision identifies the interface definitions; the definitions themselves stay in `MetadataInfo`.
+
+`RegistryProtocol` prepares one registry URL, then calls `RegistryFactory.getRegistry(url)`. The adaptive method uses `url.getProtocol()` as the extension name and loads that one name from the `RegistryFactory` file. One call builds one `Registry`. `RegistryProtocol` then calls `register` and `subscribe` on it.
+
+- A `service-discovery-registry://` URL is left unchanged by `RegistryProtocol.getRegistryUrl`. The name is `ServiceDiscoveryRegistryFactory`, which returns a `ServiceDiscoveryRegistry`. That registry holds a `ServiceDiscovery`. Before constructing it, the factory copies the `registry` parameter onto the URL scheme, so `registry=nacos` makes the next lookup `nacos` on `ServiceDiscoveryFactory`, which returns a `NacosServiceDiscovery`.
+- A `registry://` URL is rewritten by `InterfaceCompatibleRegistryProtocol.getRegistryUrl` to the inner scheme, `nacos://`. The name is then `NacosRegistryFactory`, which returns a `NacosRegistry`.
+
+`RegistryFactory` returns the `Registry`. `ServiceDiscoveryFactory` returns the `ServiceDiscovery` held by a `ServiceDiscoveryRegistry`. A deployment that still publishes both levels makes two `getRegistry` calls, one URL each. The SPI files, the class diagram, and the snippets are those two paths. `ExtensionLoader.getExtension(extName)` returns the class registered under that name.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.registry.RegistryFactory
+service-discovery-registry=org.apache.dubbo.registry.client.ServiceDiscoveryRegistryFactory
+wrapper=org.apache.dubbo.registry.RegistryFactoryWrapper
+nacos=org.apache.dubbo.registry.nacos.NacosRegistryFactory
+```
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.registry.client.ServiceDiscoveryFactory
+default=org.apache.dubbo.registry.client.DefaultServiceDiscoveryFactory
+nacos=org.apache.dubbo.registry.nacos.NacosServiceDiscoveryFactory
+```
+
+```plantuml
+@startuml
+top to bottom direction
+
+class RegistryProtocol {
+  + getRegistry(URL): Registry
+}
+interface Node {
+  + getUrl(): URL
+  + isAvailable(): boolean
+  + destroy()
+}
+interface RegistryService {
+  + register(URL)
+  + unregister(URL)
+  + subscribe(URL, NotifyListener)
+  + unsubscribe(URL, NotifyListener)
+}
+interface Registry extends Node, RegistryService {
+  + isServiceDiscovery(): boolean
+}
+abstract class AbstractRegistry implements Registry {
+  + register(URL)
+  + subscribe(URL, NotifyListener)
+}
+abstract class FailbackRegistry extends AbstractRegistry
+class ServiceDiscoveryRegistry extends FailbackRegistry {
+  - serviceDiscovery: ServiceDiscovery
+  + getServiceDiscovery(): ServiceDiscovery
+}
+class NacosRegistry extends FailbackRegistry
+
+interface RegistryFactory {
+  + getRegistry(URL): Registry
+}
+abstract class AbstractRegistryFactory implements RegistryFactory {
+  + getRegistry(URL): Registry
+  # createRegistry(URL): Registry
+}
+class ServiceDiscoveryRegistryFactory extends AbstractRegistryFactory
+class NacosRegistryFactory extends AbstractRegistryFactory
+
+interface ServiceDiscovery extends RegistryService {
+  + register()
+  + update()
+  + unregister()
+  + getInstances(String): List
+  + getLocalInstance(): ServiceInstance
+  + getLocalMetadata(): MetadataInfo
+}
+abstract class AbstractServiceDiscovery implements ServiceDiscovery {
+  # serviceInstance: ServiceInstance
+  # metadataInfo: MetadataInfo
+  + register(URL)
+  + register()
+  # reportMetadata(MetadataInfo)
+  # doRegister(ServiceInstance)
+}
+class NacosServiceDiscovery extends AbstractServiceDiscovery
+
+interface ServiceDiscoveryFactory {
+  + getServiceDiscovery(URL): ServiceDiscovery
+}
+abstract class AbstractServiceDiscoveryFactory implements ServiceDiscoveryFactory {
+  - discoveries: Map<String, ServiceDiscovery>
+  + getServiceDiscovery(URL): ServiceDiscovery
+  # createDiscovery(URL): ServiceDiscovery
+}
+class NacosServiceDiscoveryFactory extends AbstractServiceDiscoveryFactory
+
+RegistryProtocol --> RegistryFactory : getRegistry
+ServiceDiscoveryRegistryFactory --> ServiceDiscoveryRegistry : createRegistry
+NacosRegistryFactory --> NacosRegistry : createRegistry
+ServiceDiscoveryRegistry *-- ServiceDiscovery
+ServiceDiscoveryRegistry --> ServiceDiscoveryFactory : createServiceDiscovery
+AbstractServiceDiscoveryFactory o-- ServiceDiscovery
+NacosServiceDiscoveryFactory --> NacosServiceDiscovery : createDiscovery
+@enduml
+```
+
+```java
+@SPI(scope = APPLICATION)
+public interface RegistryFactory {
+    @Adaptive({"protocol"})                                     // registry URL scheme selects the Registry
+    Registry getRegistry(URL url);
+}
+
+protected Registry createRegistry(URL url) {                    // ServiceDiscoveryRegistryFactory
+    if (UrlUtils.hasServiceDiscoveryRegistryProtocol(url)) {
+        String protocol = url.getParameter(REGISTRY_KEY, DEFAULT_REGISTRY); // parameter registry, default "dubbo"
+        url = url.setProtocol(protocol).removeParameter(REGISTRY_KEY);
+    }
+    return new ServiceDiscoveryRegistry(url, applicationModel); // holds the ServiceDiscovery
+}
+
+protected Registry createRegistry(URL url) {                    // NacosRegistryFactory
+    return new NacosRegistry(url, createNamingService(url));    // interface URL in Nacos naming
+}
+
+@SPI(value = "default", scope = APPLICATION)
+public interface ServiceDiscoveryFactory {
+    ServiceDiscovery getServiceDiscovery(URL registryURL);
+
+    static ServiceDiscoveryFactory getExtension(URL registryURL) {
+        String protocol = registryURL.getProtocol();            // "nacos" after the rewrite above
+        return registryURL.getOrDefaultApplicationModel()
+                .getExtensionLoader(ServiceDiscoveryFactory.class)
+                .getOrDefaultExtension(protocol);               // missing name -> NopServiceDiscovery
+    }
+}
+
+public void register(URL url) {                                 // AbstractServiceDiscovery
+    metadataInfo.addService(url);                               // record interface, version, group, protocol, and method params
+}
+
+public synchronized void register() throws RuntimeException {   // AbstractServiceDiscovery
+    if (isDestroy) {
+        return;
+    }
+    if (this.serviceInstance == null) {
+        ServiceInstance serviceInstance = createServiceInstance(this.metadataInfo);
+        if (!isValidInstance(serviceInstance)) {
+            return;
+        }
+        this.serviceInstance = serviceInstance;
+    }
+    boolean revisionUpdated = calOrUpdateInstanceRevision(this.serviceInstance); // compute dubbo.metadata.revision digest
+    if (revisionUpdated) {
+        try {
+            reportMetadata(this.metadataInfo);
+            doRegister(this.serviceInstance);                   // NacosServiceDiscovery -> namingService.registerInstance(...)
+        } catch (Exception e) {
+            this.serviceInstance = null;
+            throw e;
+        }
+    }
+}
+
+protected void reportMetadata(MetadataInfo metadataInfo) {
+    if (metadataInfo == null) {
+        return;
+    }
+    if (metadataReport != null) {
+        SubscriberMetadataIdentifier identifier =
+                new SubscriberMetadataIdentifier(serviceName, metadataInfo.getRevision());
+        if ((DEFAULT_METADATA_STORAGE_TYPE.equals(metadataType) && metadataReport.shouldReportMetadata())
+                || REMOTE_METADATA_STORAGE_TYPE.equals(metadataType)) {
+            MetricsEventBus.post(MetadataEvent.toPushEvent(applicationModel), () -> {
+                metadataReport.publishAppMetadata(identifier, metadataInfo);
+                return null;
+            });
+        }
+    }
+    MetadataInfo clonedMetadataInfo = metadataInfo.clone();
+    metadataInfos.put(metadataInfo.getRevision(), new MetadataInfoStat(clonedMetadataInfo)); // served by MetadataService
+}
+```
+
+---
+
+## 6. Exchanger
 
 `Exchanger` sits between the protocol and the transport, and it is where request/response semantics enter. The transport moves bytes and knows nothing about correlation; the exchanger adds request identity, two-way versus one-way, event frames, and futures.
 
@@ -2422,14 +2493,14 @@ public interface Exchanger {
 }
 ```
 
-`@SPI` names the default `header`. The registration file is the map `ExtensionLoader` reads for that name:
+`@SPI` names the default `header`. `ExtensionLoader.getExtension(extName)` returns the class registered under that name:
 
 ```properties
 # META-INF/dubbo/internal/org.apache.dubbo.remoting.exchange.Exchanger
 header=org.apache.dubbo.remoting.exchange.support.header.HeaderExchanger
 ```
 
-`Exchangers.getExchanger` loads `url.getParameter("exchanger", "header")` from that file. `DubboProtocol.createServer` and `initClient` stop at `Exchangers.bind` and `Exchangers.connect`. `HeaderExchanger` wraps the protocol `ExchangeHandler` and calls `Transporters`. `HeaderExchangeChannel` correlates each two-way call with a `DefaultFuture`.
+`Exchangers.getExchanger` passes `url.getParameter("exchanger", "header")` as `extName`. `DubboProtocol.createServer` and `initClient` stop at `Exchangers.bind` and `Exchangers.connect`. `HeaderExchanger` wraps the protocol `ExchangeHandler` and calls `Transporters`. `HeaderExchangeChannel` correlates each two-way call with a `DefaultFuture`.
 
 ```java
 // HeaderExchanger: request/response wrapper around the transport. DubboProtocol passes requestHandler in.
@@ -2483,7 +2554,7 @@ static void handleResponse(Channel channel, Response response) throws RemotingEx
 
 ---
 
-## 6. Transporter
+## 7. Transporter
 
 `Transporter` is the network implementation: it opens server sockets and client connections. The name is chosen by `server` for binding and `client` for connecting, both falling back to `transporter`, with `netty` as the default.
 
@@ -2495,71 +2566,201 @@ public interface Transporter {
 }
 ```
 
-`NettyTransporter` returns a `NettyServer` or a `NettyClient`; the state and behaviour live in `AbstractServer`/`AbstractClient`, which handle bind retry, port detection, channel bookkeeping, and the connection listener set, while the subclass builds only the Netty `ServerBootstrap`. The SPI name `netty` maps to the Netty 4 module; the Netty 3 module registers as `netty3`. `NettyServer` wraps the exchanger's handler before the socket is opened, and `AllChannelHandler` is the default dispatcher that moves each received message onto the business pool.
+`ExtensionLoader.getExtension(extName)` returns the class registered under that name. `netty` and `netty4` are the Netty 4 class. `netty3` is the Netty 3 module.
 
-```java
-// NettyServer calls ChannelHandlers.wrap. Default dispatcher name is "all".
-protected ChannelHandler wrapInternal(ChannelHandler handler, URL url) {
-    return new MultiMessageHandler(new HeartbeatHandler(
-            url.getOrDefaultFrameworkModel()
-                    .getExtensionLoader(Dispatcher.class)
-                    .getAdaptiveExtension()
-                    .dispatch(handler, url)));                 // AllChannelHandler around DecodeHandler
-}
-
-// AllChannelHandler.received: decode and the service method run off the Netty I/O thread
-public void received(Channel channel, Object message) throws RemotingException {
-    ExecutorService executor = getPreferredExecutorService(message); // threadpool=fixed, threads=200, queues=0
-    try {
-        executor.execute(new ChannelEventRunnable(channel, handler, ChannelState.RECEIVED, message));
-    } catch (Throwable t) {
-        if (message instanceof Request && t instanceof RejectedExecutionException) {
-            sendFeedback(channel, (Request) message, t);       // Response status 100 SERVER_THREADPOOL_EXHAUSTED_ERROR
-            return;
-        }
-        throw new ExecutionException(message, channel, getClass() + " error when process received event .", t);
-    }
-}
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.remoting.Transporter
+netty4=org.apache.dubbo.remoting.transport.netty4.NettyTransporter
+netty=org.apache.dubbo.remoting.transport.netty4.NettyTransporter
+netty3=org.apache.dubbo.remoting.transport.netty.NettyTransporter
 ```
 
 ```plantuml
 @startuml
 top to bottom direction
 
+interface Endpoint {
+  + getUrl(): URL
+  + getChannelHandler(): ChannelHandler
+  + send(Object)
+  + send(Object, boolean)
+}
+interface ChannelHandler {
+  + connected(Channel)
+  + disconnected(Channel)
+  + sent(Channel, Object)
+  + received(Channel, Object)
+  + caught(Channel, Throwable)
+}
+interface Channel extends Endpoint {
+  + getRemoteAddress(): InetSocketAddress
+  + isConnected(): boolean
+}
+interface Resetable {
+  + reset(URL)
+}
+interface IdleSensible {
+  + canHandleIdle(): boolean
+}
+interface RemotingServer extends Endpoint, Resetable, IdleSensible {
+  + isBound(): boolean
+  + getChannels(): Collection
+  + getChannel(InetSocketAddress): Channel
+}
+interface Client extends Endpoint, Channel, Resetable, IdleSensible {
+  + reconnect()
+}
+abstract class AbstractPeer implements Endpoint, ChannelHandler {
+  - handler: ChannelHandler
+  - url: URL
+  + send(Object)
+  + received(Channel, Object)
+}
+abstract class AbstractEndpoint extends AbstractPeer implements Resetable {
+  - codec: Codec2
+  - connectTimeout: int
+  # getChannelCodec(URL): Codec2
+}
+abstract class AbstractServer extends AbstractEndpoint implements RemotingServer {
+  - bindAddress: InetSocketAddress
+  + send(Object, boolean)
+  + getChannels(): Collection
+  # doOpen()
+}
+abstract class AbstractClient extends AbstractEndpoint implements Client {
+  - connectLock: Lock
+  + send(Object, boolean)
+  + reconnect()
+  # getChannel(): Channel
+  # doOpen()
+  # doConnect()
+}
+
 interface Transporter {
   + bind(URL, ChannelHandler): RemotingServer
   + connect(URL, ChannelHandler): Client
 }
-class NettyTransporter implements Transporter
-
-interface RemotingServer
-abstract class AbstractServer implements RemotingServer {
-  # url: URL
-  # handler: ChannelHandler
-  + send(Object)
-  # doOpen()
-  # doClose()
+class NettyTransporter implements Transporter {
+  {static} NAME: String = "netty"
+  + bind(URL, ChannelHandler): RemotingServer
+  + connect(URL, ChannelHandler): Client
 }
 class NettyServer extends AbstractServer {
+  - channels: Map<String, Channel>
+  - channel: "io.netty.channel.Channel"
   - bootstrap: ServerBootstrap
   - bossGroup: EventLoopGroup
   - workerGroup: EventLoopGroup
-  # initServerBootstrap(NettyServerHandler)
+  # doOpen()
+}
+class NettyClient extends AbstractClient {
+  - bootstrap: Bootstrap
+  - channel: "io.netty.channel.Channel"
+  # doOpen()
+  # doConnect()
+  # getChannel(): Channel
+}
+interface "io.netty.channel.ChannelHandler" as NettyChannelHandler
+interface "io.netty.channel.ChannelInboundHandler" as InboundHandler extends NettyChannelHandler
+interface "io.netty.channel.ChannelOutboundHandler" as OutboundHandler extends NettyChannelHandler
+class ChannelInboundHandlerAdapter implements InboundHandler
+class ChannelOutboundHandlerAdapter implements OutboundHandler
+class ByteToMessageDecoder extends ChannelInboundHandlerAdapter
+class MessageToByteEncoder extends ChannelOutboundHandlerAdapter
+class ChannelDuplexHandler extends ChannelInboundHandlerAdapter implements OutboundHandler
+
+class NettyCodecAdapter {
+  - encoder: InternalEncoder
+  - decoder: InternalDecoder
+  - codec: Codec2
+  + getEncoder(): InternalEncoder
+  + getDecoder(): InternalDecoder
+}
+class InternalEncoder extends MessageToByteEncoder {
+  # encode(ChannelHandlerContext, Object, ByteBuf)
+}
+class InternalDecoder extends ByteToMessageDecoder {
+  # decode(ChannelHandlerContext, ByteBuf, List)
+}
+class NettyServerHandler extends ChannelDuplexHandler {
+  - url: URL
+  - handler: ChannelHandler
+  - channels: Map<String, Channel>
+  + channelRead(ChannelHandlerContext, Object)
+}
+class NettyClientHandler extends ChannelDuplexHandler {
+  - url: URL
+  - handler: ChannelHandler
+  + channelRead(ChannelHandlerContext, Object)
 }
 
-interface Client
-abstract class AbstractClient implements Client {
-  # connectLock: ReentrantLock
-  + reconnect()
-  + send(Object)
-}
-class NettyClient extends AbstractClient
+NettyTransporter --> NettyServer : bind
+NettyTransporter --> NettyClient : connect
+NettyCodecAdapter *-- InternalEncoder : encoder
+NettyCodecAdapter *-- InternalDecoder : decoder
+AbstractPeer o-- ChannelHandler : handler
+NettyServerHandler o-- ChannelHandler : handler
+NettyClientHandler o-- ChannelHandler : handler
 @enduml
+```
+
+`NettyTransporter.bind` constructs a `NettyServer`, and `connect` constructs a `NettyClient`. The constructor stores the Dubbo `ChannelHandler` on `AbstractPeer`. `AbstractServer` and `AbstractClient` then call `doOpen`, which builds the Netty bootstrap and puts the codec handlers and `NettyServerHandler` or `NettyClientHandler` on the pipeline. Each Netty handler is given `this`, so a Netty event is delivered back to the server or the client.
+
+```java
+public RemotingServer bind(URL url, ChannelHandler handler) throws RemotingException { // NettyTransporter
+    return new NettyServer(url, handler);
+}
+
+public Client connect(URL url, ChannelHandler handler) throws RemotingException {      // NettyTransporter
+    return new NettyClient(url, handler);
+}
+
+public NettyServer(URL url, ChannelHandler handler) throws RemotingException {
+    super(url, ChannelHandlers.wrap(handler, url));             // AbstractServer() calls doOpen()
+}
+
+protected void doOpen() throws Throwable {                      // NettyServer
+    bootstrap = new ServerBootstrap();
+    bossGroup = createBossGroup();
+    workerGroup = createWorkerGroup();
+    final NettyServerHandler nettyServerHandler = createNettyServerHandler(); // new NettyServerHandler(getUrl(), this)
+    channels = nettyServerHandler.getChannels();
+    initServerBootstrap(nettyServerHandler);
+    ChannelFuture channelFuture = bootstrap.bind(getBindAddress());
+    channelFuture.syncUninterruptibly();
+    channel = channelFuture.channel();                          // boss channel
+}
+
+protected void initChannel(SocketChannel ch) {                  // ChannelInitializer on the accepted socket
+    NettyCodecAdapter adapter = new NettyCodecAdapter(getCodec(), getUrl(), NettyServer.this);
+    ch.pipeline()
+            .addLast("decoder", adapter.getDecoder())           // inbound InternalDecoder
+            .addLast("encoder", adapter.getEncoder())           // outbound InternalEncoder
+            .addLast("handler", nettyServerHandler);            // Netty event -> this.received
+}
+
+public NettyClient(URL url, ChannelHandler handler) throws RemotingException {
+    super(url, wrapChannelHandler(url, handler));               // AbstractClient() calls doOpen(), then connect()
+}
+
+protected void doOpen() throws Throwable {                      // NettyClient
+    final NettyClientHandler nettyClientHandler = createNettyClientHandler(); // new NettyClientHandler(getUrl(), this)
+    bootstrap = new Bootstrap();
+    initBootstrap(nettyClientHandler);
+}
+
+protected void initChannel(SocketChannel ch) {                  // ChannelInitializer on the connected socket
+    NettyCodecAdapter adapter = new NettyCodecAdapter(getCodec(), getUrl(), NettyClient.this);
+    ch.pipeline()
+            .addLast("decoder", adapter.getDecoder())
+            .addLast("encoder", adapter.getEncoder())
+            .addLast("handler", nettyClientHandler);
+}
 ```
 
 ---
 
-## 7. Codec2
+## 8. Codec2
 
 `Codec2` converts between a `ChannelBuffer` and a message object. It is a separate extension from the protocol so that the framing can be reused: the `dubbo` protocol's codec also serves the telnet path through inheritance.
 
@@ -2572,7 +2773,41 @@ public interface Codec2 {
 }
 ```
 
-The adaptive key is `codec`, but the transport does not require it: `AbstractEndpoint.getChannelCodec` falls back to the protocol name when the parameter is absent, which is how `dubbo://` resolves `DubboCountCodec` with no configuration. `decode` returning `NEED_MORE_INPUT` is the contract that lets a partial frame stay in the buffer instead of being parsed twice.
+`ExtensionLoader.getExtension(extName)` returns the class registered under that name. `AbstractEndpoint.getChannelCodec` sets `extName` from the `codec` parameter, and uses the URL scheme when that parameter is absent.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.remoting.Codec2
+transport=org.apache.dubbo.remoting.transport.codec.TransportCodec
+telnet=org.apache.dubbo.remoting.telnet.codec.TelnetCodec
+exchange=org.apache.dubbo.remoting.exchange.codec.ExchangeCodec
+default=org.apache.dubbo.remoting.api.pu.DefaultCodec
+dubbo=org.apache.dubbo.rpc.protocol.dubbo.DubboCountCodec
+```
+
+```java
+public AbstractEndpoint(URL url, ChannelHandler handler) {
+    super(url, handler);
+    this.codec = getChannelCodec(url);                          // loaded once per endpoint
+}
+
+protected static Codec2 getChannelCodec(URL url) {
+    String codecName = url.getParameter(Constants.CODEC_KEY);   // "codec"
+    if (StringUtils.isEmpty(codecName)) {
+        codecName = url.getProtocol();                          // dubbo:// -> extName "dubbo"
+    }
+    FrameworkModel frameworkModel = getFrameworkModel(url.getScopeModel());
+    if (frameworkModel.getExtensionLoader(Codec2.class).hasExtension(codecName)) {
+        return frameworkModel.getExtensionLoader(Codec2.class).getExtension(codecName);
+    } else if (frameworkModel.getExtensionLoader(Codec.class).hasExtension(codecName)) {
+        return new CodecAdapter(
+                frameworkModel.getExtensionLoader(Codec.class).getExtension(codecName));
+    } else {
+        return frameworkModel.getExtensionLoader(Codec2.class).getExtension("default");
+    }
+}
+```
+
+`decode` returning `NEED_MORE_INPUT` is the contract that lets a partial frame stay in the buffer instead of being parsed twice.
 
 ```plantuml
 @startuml
@@ -2617,7 +2852,7 @@ DubboCountCodec *-- DubboCodec
 
 ---
 
-## 8. Serialization
+## 9. Serialization
 
 `Serialization` is the body format, and it is the one extension chosen per request rather than per connection. Its two methods return stream wrappers rather than byte arrays, so a large argument can be written without materialising it.
 
@@ -2657,7 +2892,7 @@ DefaultSerializationExceptionWrapper o-- Serialization
 
 ---
 
-## 9. ThreadPool
+## 10. ThreadPool
 
 `ThreadPool` decides how a decoded request reaches business code. Its single method returns a `java.util.concurrent.Executor` configured from the URL.
 
@@ -2697,7 +2932,7 @@ class DefaultExecutorRepository implements ExecutorRepository {
 
 ---
 
-## 10. LoadBalance
+## 11. LoadBalance
 
 `LoadBalance` picks one invoker from the candidates routing left behind.
 
@@ -2733,7 +2968,7 @@ class AdaptiveLoadBalance extends AbstractLoadBalance
 
 ---
 
-## 11. StateRouterFactory
+## 12. StateRouterFactory
 
 Routing narrows the candidate list before load balancing sees it, and in this version the live interface is `StateRouterFactory` rather than the older `RouterFactory`, which is kept only for compatibility.
 
@@ -2783,7 +3018,7 @@ RouterChain o-- StateRouter
 
 ---
 
-## 12. Filter
+## 13. Filter
 
 `Filter` is the extension with the most implementations, and the only one applied twice per call — once on the consumer side and once on the provider side.
 
@@ -2825,81 +3060,6 @@ class DefaultFilterChainBuilder implements FilterChainBuilder {
 }
 @enduml
 ```
-
----
-
-## 13. The registry
-
-The registry answers one question: which provider processes are running and where do they listen. It holds no interface definitions, only an address and a revision per instance.
-
-`NacosServiceDiscovery` extends `AbstractServiceDiscovery`, which extends `AbstractRegistry`, which `FailbackRegistry` builds on. The layering is inherited from the interface-level registry that predates application-level discovery, and it is still where the useful mechanics live: `AbstractRegistry` maintains the registered/subscribed/notified maps and a local disk cache, `FailbackRegistry` retries failed operations, and `NacosServiceDiscovery` maps Dubbo concepts onto Nacos naming.
-
-### 13.1 The address model
-
-At application level a Nacos service name is the application name, and one instance represents one provider process:
-
-```java
-// NacosServiceDiscovery.doRegister
-Instance instance = toInstance(serviceInstance);   // ip, port, metadata = revision, storage-type, endpoints
-service.registerInstance(instance.getServiceName(), group, instance);
-```
-
-The instance metadata is deliberately small. `dubbo.metadata.revision` identifies the interface definitions the process currently exports, `dubbo.metadata.storage-type` says where a consumer should resolve that revision, and `dubbo.endpoints` lists the protocol/port pairs. Nothing describes a single interface. A provider deploying five interfaces produces one registration, and adding a sixth changes the revision rather than the address list.
-
-The registry `group` defaults to `DEFAULT_GROUP` and is overridable by `nacos.group`. Names containing `$` — nested interfaces from generated stubs — are rewritten to `___` before reaching the Nacos client, because Nacos restricts service-name characters.
-
-### 13.2 Subscription
-
-```mermaid
-flowchart TD
-    A["doSubscribe(url, listener)"] --> B["resolve interface to application"]
-    B --> C["ServiceNameMapping lookup"]
-    C --> D["subscribe application name"]
-    D --> E["Nacos EventListener per app"]
-    E --> F["onEvent: RegistryNotifier coalesces"]
-    F --> G["getInstances: filter enabled"]
-    G --> H["build URLs from revision and endpoints"]
-    H --> I["registry.notify -> Directory refresh"]
-```
-
-`ServiceDiscoveryRegistry.doSubscribe` first resolves the interface to a set of application names, then registers one `ServiceInstancesChangedListener` per application. `NacosServiceDiscovery.addServiceInstancesChangedListener` maps each application to a single Nacos `EventListener`, shared by every interface that application serves — so a consumer of three interfaces from one application holds one subscription, not three.
-
-Two behaviours matter here. Instances with `enabled=false` are dropped before addresses are built. And an empty notification is not treated as a scale-to-zero: `ServiceDiscoveryRegistryDirectory` keeps the previous address list and logs it as empty protection, because an empty notification is far more often a transient Nacos fault than a real teardown.
-
-The mapping from interface to application is not in Nacos naming. `ServiceNameMapping` maintains it (with `provided-by` on the consumer URL and a metadata-center mapping), and `ServiceDiscoveryRegistry.doSubscribe` consults the mapping before subscribing; with no mapping it stops and waits for the mapping listener, because a consumer cannot name an application it has never been told about. The Nacos client side of that model is covered in [Nacos service and configuration management](/post/java/spring-cloud/nacos/).
-
-### 13.3 Coalescing, failure recovery, and local cache
-
-`RegistryNotifier` bounds the cost of a flapping provider set. The first ten notifications are delivered immediately (`DEFAULT_DELAY_EXECUTE_TIMES = 10`); afterwards the notifier enforces the `delay-notification` window (default 5000 ms) and keeps only the most recent payload, comparing a timestamp so that a superseded task produces no notification. A burst of registrations at deployment time therefore yields one directory refresh instead of one per instance.
-
-`FailbackRegistry` handles transport-level failures with a `HashedWheelTimer`. `register`, `unregister`, `subscribe`, and `unsubscribe` each catch exceptions, throw immediately when `check=true` (so a bad configuration fails fast at startup), and otherwise record a task that is retried every `retry.period` (default 5000 ms) until it succeeds. `SkipFailbackWrapperException` bypasses the retry when retrying cannot succeed.
-
-`AbstractRegistry` persists every notified address set into a local properties file at `~/.dubbo/dubbo-registry-{application}-{registry-address}.cache`. The file is loaded into memory at construction. Its purpose is the failure path: when `doSubscribe` throws, `FailbackRegistry.subscribe` calls `getCacheUrls`, which prefers the in-memory `notified` map and falls back to the file, and if it finds entries it notifies the listener with them before logging the failure — so the consumer starts from the last known provider list rather than an empty directory. Writes are serialized through `lastCacheChanged` and written asynchronously unless `save.file=true`, and `file-cache=false` disables the mechanism entirely.
-
-`APPLICATION_FIRST` is the consumer-side default for the migration rule. In a configuration that still publishes both levels — `register-mode=all`, the provider default for a plain `nacos://` URL — the application-level invoker is preferred and the interface-level one remains available as a fallback, which is why `RegistryProtocol.refer` returns a `MigrationInvoker` holding up to two cluster invokers and switching between them by rule:
-
-| Step | Selection |
-|------|-----------|
-| `APPLICATION_FIRST` (default) | Application-level, falling back to interface-level when its address count is below the threshold; a `promotion` percentage below 100 sends only that fraction of calls to the application-level invoker |
-| `FORCE_APPLICATION` | Always the application-level invoker, destroying the interface-level one |
-| `FORCE_INTERFACE` | Always the interface-level invoker, the compatibility mode |
-
----
-
-## 14. MetadataService
-
-The metadata service answers the other question: what does that interface look like. It is an ordinary RPC service exported by every provider, so a consumer reaches it the same way it reaches a business service, without going through the registry again.
-
-### 14.1 The service itself
-
-`MetadataService` is a small fixed interface. It exposes `getMetadataInfo(revision)` and `getMetadataInfos()`, plus `getServiceDefinition(serviceKey)` for a single interface. Because it is an ordinary service, it is exported through the same `ServiceConfig` machinery as business services: `ConfigurableMetadataServiceExporter` builds a `ServiceConfig` for it with its own protocol and port (`metadata-service-protocol`, `metadata-service-port`) and exports it on startup. A consumer refers it through `MetadataUtils.referMetadataService`, which builds a URL from the coordinates in the instance metadata and calls it like any other remote service.
-
-The definition returned is a `MetadataInfo`: the set of services the provider exports, each with its interface name, version, group, protocol, and method signatures with parameter type descriptors.
-
-### 14.2 Resolving the revision
-
-`dubbo.metadata.revision` is the link back to the interface definitions. It is a digest computed by `MetadataInfo.calRevision` over the application name and the description of every exported service, so it changes whenever the set or shape of those services changes. A consumer reads the revision from the instance and resolves it via the provider's `MetadataService`. `AbstractServiceDiscovery.getRemoteMetadata` performs that resolution behind a revision-keyed cache, retrying three times with a one-second pause before giving up with an empty `MetadataInfo`. The cache is what keeps the per-revision fetch off the steady-state path.
-
 
 ---
 
