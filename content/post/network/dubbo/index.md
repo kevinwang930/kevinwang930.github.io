@@ -2839,16 +2839,55 @@ DubboCountCodec *-- DubboCodec
 @enduml
 ```
 
-`ExchangeCodec` fixes the 16-byte header. `DubboCodec.encodeRequestData` writes the body. The status byte is meaningful on a response: `20` OK, `25` serialization error, `30` client timeout, `31` server timeout, `35` channel inactive, `40` bad request, `50` bad response, `60` service not found, `70` service error, `80` server error, `90` client error, `100` server threadpool exhausted.
+`ExchangeCodec` writes a fixed 16-byte header, then the body. Magic, the request id, and the body length are big-endian: the high byte is stored at the lower offset. Inside one byte the diagram counts `7` to `0` from the left. Bit `7` is the high bit, value `0x80`.
 
-| Offset | Size | Content |
-|--------|------|---------|
-| 0 | 2 | Magic `0xdabb` |
-| 2 | 1 | Bit 7: request; bit 6: two-way; bit 5: event; bits 0–4: serialization id |
-| 3 | 1 | Status |
-| 4 | 8 | Request id |
-| 12 | 4 | Body length |
-| 16 | var | Body: `version \| service \| service version \| method \| parameter descriptor \| arguments \| attachments` |
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |        Magic = 0xdabb         |R|T|E|  SerId  |    Status     |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          Request ID                           |
+        |                                                               |
+byte 8  |                                                               |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          Body length                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                           Body ...                            |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+- **Magic.** Two bytes, `0xdabb`. `decode` uses this to find the start of a frame.
+- **R.** Bit `7` of the flag byte, value `0x80`. Set on a request. Clear on a response.
+- **T.** Bit `6`, value `0x40`. Set when the request expects a response.
+- **E.** Bit `5`, value `0x20`. Set for an event, including a heartbeat.
+- **SerId.** Bits `0`–`4`, mask `0x1f`. The serialization id from `Serialization.getContentTypeId`.
+- **Status.** One byte. A request leaves it at `0`. A response writes the result: `20` OK, `25` serialization error, `30` client timeout, `31` server timeout, `35` channel inactive, `40` bad request, `50` bad response, `60` service not found, `70` service error, `80` server error, `90` client error, `100` server threadpool exhausted.
+- **Request ID.** Eight bytes. The same id is written on the request and on its response.
+- **Body length.** Four bytes. The number of bytes that follow the 16-byte header.
+- **Body.** Variable. `DubboCodec.encodeRequestData` writes `version`, service name, service version, method, parameter descriptor, arguments, and attachments.
+
+One two-way request, id `1`, Hessian2 (`SerId = 2`). The flag byte is `0xc2`: bit `7` and bit `6` are set, bit `5` is clear, and the low five bits are `00010`. The status byte stays `0`. The body length stays the four-byte value written after the body is serialized.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |1|1|0|  00010  |      00       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                             2.0.2                             |
+        |               org.apache.dubbo.GreetingService                |
+        |                             1.0.0                             |
+        |                             greet                             |
+        |                      Ljava/lang/String;                       |
+        |                             hello                             |
+        |                          attachments                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
 
 ---
 
@@ -2866,7 +2905,28 @@ public interface Serialization {
 }
 ```
 
-`getContentTypeId` is constrained to five bits because the `dubbo` header stores it there. The implementations registered in this tree are `hessian2` and `fastjson2`; others exist in separate modules, and `DefaultSerializationExceptionWrapper` wraps whichever is selected to normalise exception handling. Selection order is `prefer.serialization`, then `serialization`, then the framework default.
+`ExtensionLoader.getExtension(extName)` returns the class registered under that name. `getContentTypeId` is the `SerId` stored in five bits of the `dubbo` header, so a custom id must be at most `31`.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.common.serialize.Serialization
+hessian2=org.apache.dubbo.common.serialize.hessian2.Hessian2Serialization
+fastjson2=org.apache.dubbo.common.serialize.fastjson2.FastJson2Serialization
+wrapper=org.apache.dubbo.common.serialize.DefaultSerializationExceptionWrapper
+```
+
+`wrapper` is stacked around the selected implementation because its constructor takes a `Serialization`. The name used for `getExtension` is chosen per request. If the invocation already carries a serialization id, that id selects the instance. Otherwise the URL is searched in order: `prefer.serialization`, then `serialization`, then `DUBBO_DEFAULT_SERIALIZATION`, which is `hessian2` when unset.
+
+```java
+public static Serialization getRequestSerialization(URL url, Invocation invocation) {
+    Object serializationTypeObj = invocation.get(SERIALIZATION_ID_KEY);
+    if (serializationTypeObj != null) {
+        return CodecSupport.getSerializationById((byte) serializationTypeObj);
+    }
+    return url.getOrDefaultFrameworkModel()
+            .getExtensionLoader(Serialization.class)
+            .getExtension(UrlUtils.serializationOrDefault(url)); // prefer.serialization, serialization, hessian2
+}
+```
 
 ```plantuml
 @startuml
@@ -2890,6 +2950,263 @@ DefaultSerializationExceptionWrapper o-- Serialization
 @enduml
 ```
 
+Each request picks one serialization for the Dubbo body. `dubbo-serialization` builds Hessian2 and Fastjson2. `dubbo-serialization-protobuf` adds Protobuf. `DubboCodec.encodeRequestData` writes the call, including the interface and the method name, and the selected `ObjectOutput` encodes every `writeUTF` and `writeObject`.
+
+```java
+protected void encodeRequestData(Channel channel, ObjectOutput out, Object data, String version)
+        throws IOException {
+    RpcInvocation inv = (RpcInvocation) data;
+
+    out.writeUTF(version);
+    String serviceName = inv.getAttachment(INTERFACE_KEY);
+    if (serviceName == null) {
+        serviceName = inv.getAttachment(PATH_KEY);
+    }
+    out.writeUTF(serviceName);
+    out.writeUTF(inv.getAttachment(VERSION_KEY));
+    out.writeUTF(inv.getMethodName());
+    out.writeUTF(inv.getParameterTypesDesc());
+    Object[] args = inv.getArguments();
+    if (args != null) {
+        for (int i = 0; i < args.length; i++) {
+            out.writeObject(callbackServiceCodec.encodeInvocationArgument(channel, inv, i));
+        }
+    }
+    out.writeAttachments(inv.getObjectAttachments());
+}
+```
+
+### 9.1 Hessian2
+
+Hessian2 is the default. A string is a length and its characters. An object is a class name and its fields.
+
+```java
+public void writeUTF(String v) throws IOException {
+    mH2o.writeString(v);          // length, then UTF-8 bytes, no Java class name
+}
+
+public void writeObject(Object obj) throws IOException {
+    mH2o.writeObject(obj);        // class name, then fields
+}
+```
+
+A two-way `greet("hello")` request. `SerId` is `2`.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |1|1|0|  00010  |      00       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                           05 2.0.2                            |
+        |            30 20 org.apache.dubbo.GreetingService             |
+        |                           05 1.0.0                            |
+        |                           05 greet                            |
+        |                     12 Ljava/lang/String;                     |
+        |                           05 hello                            |
+        |                          attachments                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+The matching response clears `R`. The status byte is `20` OK.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |0|0|0|  00010  |      14       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                               4                               |
+        |                             02 ok                             |
+        |                          attachments                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+```java
+String dubboVersion = in.readUTF();
+String path = in.readUTF();
+String version = in.readUTF();
+setMethodName(in.readUTF());
+String desc = in.readUTF();
+MethodDescriptor methodDescriptor = serviceDescriptor.getMethod(getMethodName(), desc);
+args[i] = in.readObject(pts[i]);
+```
+
+### 9.2 Fastjson2
+
+Fastjson2 stores each value as JSONB, with a length in front of the bytes.
+
+```java
+public void writeUTF(String v) throws IOException {
+    writeObject(v);
+}
+
+public void writeObject(Object obj) throws IOException {
+    byte[] bytes = JSONB.toBytes(
+            obj,
+            JSONWriter.Feature.WriteClassName,
+            JSONWriter.Feature.FieldBased,
+            JSONWriter.Feature.ErrorOnNoneSerializable,
+            JSONWriter.Feature.ReferenceDetection,
+            JSONWriter.Feature.WriteNulls,
+            JSONWriter.Feature.NotWriteDefaultValue,
+            JSONWriter.Feature.NotWriteHashMapArrayListClassName,
+            JSONWriter.Feature.WriteNameAsSymbol);
+    writeLength(bytes.length);    // 4 bytes, high byte first
+    os.write(bytes);
+}
+```
+
+The same call. `SerId` is `23`.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |1|1|0|  10111  |      00       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                    len  "2.0.2"                               |
+        |                    len  "org.apache.dubbo.GreetingService"    |
+        |                    len  "1.0.0"                               |
+        |                    len  "greet"                               |
+        |                    len  "Ljava/lang/String;"                  |
+        |                    len  "hello"                               |
+        |                    len  {attachments}                         |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+The response uses the same id. Status is `20` OK.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |0|0|0|  10111  |      14       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                               4                               |
+        |                         len  "ok"                             |
+        |                      len  {attachments}                       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+### 9.3 Protobuf
+
+A standard protobuf payload is one message, field tags and values. The Dubbo extension of that payload is `dubbo-serialization-protobuf`, outside `dubbo-serialization`. `GenericProtobufSerialization` is registered there as `protobuf`, id `22`. `protobuf-json` is id `21`. `encodeRequestData` still appends the call to the same body, ahead of the business message: the service string is the fully qualified interface, so it carries the package and the service, and the next string is the method.
+
+```properties
+# dubbo-serialization-protobuf
+# META-INF/dubbo/internal/org.apache.dubbo.common.serialize.Serialization
+protobuf-json=org.apache.dubbo.common.serialize.protobuf.support.GenericProtobufJsonSerialization
+protobuf=org.apache.dubbo.common.serialize.protobuf.support.GenericProtobufSerialization
+```
+
+Each of those strings becomes a `StringValue`. The argument that follows has to be a protobuf message.
+
+```java
+String serviceName = inv.getAttachment(INTERFACE_KEY); // package and service
+if (serviceName == null) {
+    serviceName = inv.getAttachment(PATH_KEY);
+}
+out.writeUTF(serviceName);
+out.writeUTF(inv.getMethodName());                     // method
+
+public void writeUTF(String v) throws IOException {
+    writeObject(StringValue.newBuilder().setValue(v).build());
+}
+
+public void writeObject(Object obj) throws IOException {
+    ProtobufUtils.serialize(obj, os);
+    os.flush();
+}
+
+static void serialize(Object value, OutputStream os) throws IOException {
+    ((MessageLite) value).writeDelimitedTo(os);
+}
+
+public String readUTF() throws IOException {
+    return read(StringValue.class).getValue();
+}
+
+public <T> T readObject(Class<T> cls) throws IOException {
+    return ProtobufUtils.deserialize(is, cls);
+}
+
+public void writeByte(byte v) throws IOException {
+    writeObject(Int32Value.newBuilder().setValue(v).build());
+}
+```
+
+`sayHello(PBRequestType)` is the request below. `SerId` is `22`. The response is `PBResponseType`.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |1|1|0|  10110  |      00       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                        07 0a 05 2.0.2                         |
+        |                    4b 0a 49 ServiceInterface                  |
+        |                        07 0a 05 1.0.0                         |
+        |                       0a 0a 08 sayHello                       |
+        |                     53 0a 51 PBRequestType                    |
+        |                        07 32 05 hello                         |
+        |                     delimited MapValue                        |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+The matching response clears `R`. The status byte is `20` OK.
+
+```text
+         7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 0  |             da bb             |0|0|0|  10110  |      14       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 4  |                          00 00 00 00                          |
+        |                                                               |
+byte 8  |                          00 00 00 01                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 12 |                          00 00 00 LL                          |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+byte 16 |                           02 08 04                            |
+        |                          04 0a 02 ok                          |
+        |                     delimited MapValue                        |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+`protobuf-json` uses the same header with `SerId` `21`. Each message is one JSON line.
+
+```java
+public void writeObject(Object obj) throws IOException {
+    writer.write(ProtobufUtils.serializeJson(obj));
+    writer.println();
+}
+```
+
 ---
 
 ## 10. ThreadPool
@@ -2903,7 +3220,96 @@ public interface ThreadPool {
 }
 ```
 
-Four implementations differ only in the queue and the sizing: `fixed` uses a fixed worker count with a `SynchronousQueue` by default, `cached` allows growth and idle reclamation, `limited` grows to a maximum and then queues, and `eager` hands work to a new thread before queuing. All four share `AbortPolicyWithReport` as the rejection handler, which is what produces the `SERVER_THREADPOOL_EXHAUSTED_ERROR` response instead of a silent drop. The pool is owned by `DefaultExecutorRepository`, not by the protocol, so one executor serves every service on a port.
+`THREADPOOL_KEY` is `threadpool`. `ExtensionLoader.getExtension(extName)` returns the class registered under that name. The default name is `fixed`.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.common.threadpool.ThreadPool
+fixed=org.apache.dubbo.common.threadpool.support.fixed.FixedThreadPool
+cached=org.apache.dubbo.common.threadpool.support.cached.CachedThreadPool
+limited=org.apache.dubbo.common.threadpool.support.limited.LimitedThreadPool
+eager=org.apache.dubbo.common.threadpool.support.eager.EagerThreadPool
+```
+
+```properties
+# dubbo-plugin-loom
+# META-INF/dubbo/internal/org.apache.dubbo.common.threadpool.ThreadPool
+virtual=org.apache.dubbo.common.threadpool.support.loom.VirtualThreadPool
+```
+
+Four implementations differ only in the queue and the sizing: `fixed` uses a fixed worker count with a `SynchronousQueue` by default, `cached` allows growth and idle reclamation, `limited` grows to a maximum and then queues, and `eager` hands work to a new thread before queuing. The pool is owned by `DefaultExecutorRepository`, so one executor serves every service on a port.
+
+`ProtocolConfig.threadpool` is written onto the protocol URL. `threads` defaults to `200` and `queues` defaults to `0`. For `fixed`, `queues` of `0` selects a `SynchronousQueue`.
+
+```yaml
+dubbo:
+  protocol:
+    name: dubbo
+    threadpool: fixed
+    threads: 200
+    queues: 0
+```
+
+The Netty worker calls `channelRead`. The default dispatcher `all` submits that message to the Dubbo executor. `ChannelEventRunnable` runs `handler.received` on a pool thread. `createExecutor` builds that executor from the `ThreadPool` SPI.
+
+```java
+// NettyServer
+super(url, ChannelHandlers.wrap(handler, url));
+return new NettyServerHandler(getUrl(), this);
+
+// ChannelHandlers
+return new MultiMessageHandler(new HeartbeatHandler(url.getOrDefaultFrameworkModel()
+        .getExtensionLoader(Dispatcher.class)
+        .getAdaptiveExtension()
+        .dispatch(handler, url)));
+
+// AllDispatcher
+public ChannelHandler dispatch(ChannelHandler handler, URL url) {
+    return new AllChannelHandler(handler, url);
+}
+
+// NettyServerHandler, on the Netty worker
+public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    NettyChannel channel = NettyChannel.getOrAddChannel(ctx.channel(), url, handler);
+    handler.received(channel, msg);
+}
+
+// AbstractPeer
+public void received(Channel ch, Object msg) throws RemotingException {
+    if (closed) {
+        return;
+    }
+    handler.received(ch, msg);
+}
+
+// AllChannelHandler
+public void received(Channel channel, Object message) throws RemotingException {
+    ExecutorService executor = getPreferredExecutorService(message);
+    try {
+        executor.execute(new ChannelEventRunnable(channel, handler, ChannelState.RECEIVED, message));
+    } catch (Throwable t) {
+        if (message instanceof Request && t instanceof RejectedExecutionException) {
+            sendFeedback(channel, (Request) message, t);
+            return;
+        }
+        throw new ExecutionException(message, channel, getClass() + " error when process received event .", t);
+    }
+}
+
+// ChannelEventRunnable, on the Dubbo pool thread
+public void run() {
+    if (state == ChannelState.RECEIVED) {
+        handler.received(channel, message);
+    }
+}
+
+// DefaultExecutorRepository
+protected ExecutorService createExecutor(URL url) {
+    return (ExecutorService) extensionAccessor
+            .getExtensionLoader(ThreadPool.class)
+            .getAdaptiveExtension()
+            .getExecutor(url);
+}
+```
 
 ```plantuml
 @startuml
@@ -2916,7 +3322,6 @@ class FixedThreadPool implements ThreadPool
 class CachedThreadPool implements ThreadPool
 class LimitedThreadPool implements ThreadPool
 class EagerThreadPool implements ThreadPool
-class AbortPolicyWithReport
 
 interface ExecutorRepository {
   + createExecutorIfAbsent(URL): ExecutorService
@@ -2926,7 +3331,10 @@ class DefaultExecutorRepository implements ExecutorRepository {
   - data: ConcurrentMap<String, ExecutorService>
   + createExecutorIfAbsent(URL): ExecutorService
   + getExecutor(URL): ExecutorService
+  # createExecutor(URL): ExecutorService
 }
+
+DefaultExecutorRepository --> ThreadPool : getExecutor
 @enduml
 ```
 
@@ -2944,6 +3352,32 @@ public interface LoadBalance {
 ```
 
 Six implementations: `random`, `roundrobin`, `leastactive`, `shortestresponse`, `consistenthash`, and `adaptive`. All six extend `AbstractLoadBalance`, which supplies the weight calculation including the warm-up ramp. The method-level key means a single service can use different strategies per method, and the lookup happens per call rather than at refer time.
+
+`AbstractClusterInvoker.invoke` lists the candidates, then `initLoadBalance` loads the extension named by the method parameter `loadbalance`. The default name is `random`. `FailoverClusterInvoker.doInvoke` calls `select`, and `doSelect` calls `loadbalance.select` when more than one invoker remains.
+
+```java
+// AbstractClusterInvoker.invoke
+List<Invoker<T>> invokers = list(invocation);
+LoadBalance loadbalance = initLoadBalance(invokers, invocation);
+return doInvoke(invocation, invokers, loadbalance);
+
+// initLoadBalance
+return applicationModel
+        .getExtensionLoader(LoadBalance.class)
+        .getExtension(invokers.get(0)
+                .getUrl()
+                .getMethodParameter(RpcUtils.getMethodName(invocation), LOADBALANCE_KEY, DEFAULT_LOADBALANCE));
+
+// FailoverClusterInvoker.doInvoke
+Invoker<T> invoker = select(loadbalance, invocation, copyInvokers, invoked);
+Result result = invokeWithContext(invoker, invocation);
+
+// AbstractClusterInvoker.doSelect
+if (invokers.size() == 1) {
+    return invokers.get(0);
+}
+Invoker<T> invoker = loadbalance.select(invokers, getUrl(), invocation);
+```
 
 ```plantuml
 @startuml
@@ -2979,7 +3413,21 @@ public interface StateRouterFactory {
 }
 ```
 
-Factories registered in this tree are `condition`, `tag`, `script-app`, `app`, `service`, `provider-app`, `standard-mesh-rule`, and `mock`. A router factory is not named by a call-site parameter: `RouterChain.buildSingleChain` collects them with `getActivateExtension(url, ROUTER_KEY)`, so which routers exist is decided by the URL conditions on each factory. `getRouter` is itself `@Adaptive` on the `protocol` key, which matters when a factory has several internal variants.
+`ExtensionLoader.getExtension(extName)` returns the class registered under that name.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.router.state.StateRouterFactory
+mock=org.apache.dubbo.rpc.cluster.router.mock.MockStateRouterFactory
+condition=org.apache.dubbo.rpc.cluster.router.condition.ConditionStateRouterFactory
+service=org.apache.dubbo.rpc.cluster.router.condition.config.ServiceStateRouterFactory
+app=org.apache.dubbo.rpc.cluster.router.condition.config.AppStateRouterFactory
+provider-app=org.apache.dubbo.rpc.cluster.router.condition.config.ProviderAppStateRouterFactory
+standard-mesh-rule=org.apache.dubbo.rpc.cluster.router.mesh.route.StandardMeshRuleRouterFactory
+script-app=org.apache.dubbo.rpc.cluster.router.script.config.AppScriptRouterFactory
+tag=org.apache.dubbo.rpc.cluster.router.tag.TagStateRouterFactory
+```
+
+A router factory is not named by a call-site parameter: `RouterChain.buildSingleChain` collects them with `getActivateExtension(url, ROUTER_KEY)`, so which routers exist is decided by the URL conditions on each factory. `getRouter` is itself `@Adaptive` on the `protocol` key, which matters when a factory has several internal variants.
 
 ```plantuml
 @startuml
