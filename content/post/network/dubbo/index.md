@@ -81,7 +81,7 @@ Three things happen behind that call. At startup the provider exported `Greeting
 
 ## 2. Extension architecture
 
-Dubbo is structured around a microkernel and plugin design pattern. The framework core defines contracts as Service Provider Interfaces (SPIs) — `Protocol`, `Registry`, `Exchanger`, `Transporter`, `Codec2`, `Serialization`, `ThreadPool`, `LoadBalance`, `StateRouterFactory`, and `Filter` — and contains no hard-coded dependency on any concrete transport, serializer, or cluster strategy. Unlike `java.util.ServiceLoader`, which instantiates every declared provider eagerly from a flat list, Dubbo's SPI combines five design patterns into a single container:
+Dubbo is structured around a microkernel and plugin design pattern. The framework core defines contracts as Service Provider Interfaces (SPIs) — `Protocol`, `Registry`, `Exchanger`, `Transporter`, `Codec2`, `Serialization`, `ThreadPool`, `StateRouterFactory`, `LoadBalance`, and `Filter` — and contains no hard-coded dependency on any concrete transport, serializer, or cluster strategy. Unlike `java.util.ServiceLoader`, which instantiates every declared provider eagerly from a flat list, Dubbo's SPI combines five design patterns into a single container:
 
 - **Name-indexed lazy loading**: implementations are declared as `name=class` pairs in resource files and loaded only when that name is requested.
 - **URL-driven late binding (Adaptive Proxy)**: every remote call is described by a `URL` carrying configuration parameters (`protocol=dubbo`, `transporter=netty`, `serialization=hessian2`, `loadbalance=random`). Because collaborators are wired at startup before any service `URL` exists, the container supplies a generated *adaptive* proxy that defers implementation lookup to call time by reading the parameter from the invocation's `URL`.
@@ -3340,7 +3340,101 @@ DefaultExecutorRepository --> ThreadPool : getExecutor
 
 ---
 
-## 11. LoadBalance
+## 11. StateRouterFactory
+
+Routing narrows the candidate list before load balancing sees it, and in this version the live interface is `StateRouterFactory` rather than the older `RouterFactory`, which is kept only for compatibility.
+
+```java
+@SPI
+public interface StateRouterFactory {
+    <T> StateRouter<T> getRouter(Class<T> interfaceClass, URL url);
+}
+```
+
+`ExtensionLoader.getExtension(extName)` returns the class registered under that name.
+
+```properties
+# META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.router.state.StateRouterFactory
+mock=org.apache.dubbo.rpc.cluster.router.mock.MockStateRouterFactory
+condition=org.apache.dubbo.rpc.cluster.router.condition.ConditionStateRouterFactory
+service=org.apache.dubbo.rpc.cluster.router.condition.config.ServiceStateRouterFactory
+app=org.apache.dubbo.rpc.cluster.router.condition.config.AppStateRouterFactory
+provider-app=org.apache.dubbo.rpc.cluster.router.condition.config.ProviderAppStateRouterFactory
+standard-mesh-rule=org.apache.dubbo.rpc.cluster.router.mesh.route.StandardMeshRuleRouterFactory
+script-app=org.apache.dubbo.rpc.cluster.router.script.config.AppScriptRouterFactory
+tag=org.apache.dubbo.rpc.cluster.router.tag.TagStateRouterFactory
+```
+
+A router factory is not named by a call-site parameter: `RouterChain.buildSingleChain` collects them with `getActivateExtension(url, ROUTER_KEY)`, so which routers exist is decided by the URL conditions on each factory. `getRouter` is itself `@Adaptive` on the `protocol` key, which matters when a factory has several internal variants.
+
+`AbstractClusterInvoker.invoke` calls `list`. `AbstractDirectory.list` takes the current chain, and `StaticDirectory.doList` calls `route`. `simpleRoute` starts at `headStateRouter`. Each router runs `doRoute` and then `continueRoute`, which calls the next router.
+
+```java
+// RouterChain.buildSingleChain
+List<StateRouter<T>> stateRouters =
+        moduleModel.getExtensionLoader(StateRouterFactory.class).getActivateExtension(url, ROUTER_KEY).stream()
+                .map(factory -> factory.getRouter(interfaceClass, url))
+                .collect(Collectors.toList());
+
+// AbstractClusterInvoker.invoke
+List<Invoker<T>> invokers = list(invocation);
+
+// AbstractDirectory.list
+singleChain = routerChain.getSingleChain(getConsumerUrl(), availableInvokers, invocation);
+List<Invoker<T>> routedResult = doList(singleChain, availableInvokers, invocation);
+
+// StaticDirectory.doList
+List<Invoker<T>> finalInvokers = singleRouterChain.route(getConsumerUrl(), invokers, invocation);
+
+// SingleRouterChain.simpleRoute
+resultInvokers = headStateRouter.route(resultInvokers, url, invocation, false, null);
+
+// AbstractStateRouter.route
+routeResult = doRoute(invokers, url, invocation, needToPrintMessage, nodeHolder, messageHolder);
+routeResult = continueRoute(routeResult, url, invocation, needToPrintMessage, nodeHolder);
+
+// AbstractStateRouter.continueRoute
+return nextRouter.route(invokers, url, invocation, needToPrintMessage, nodeHolder);
+```
+
+```plantuml
+@startuml
+top to bottom direction
+
+interface StateRouterFactory {
+  + getRouter(Class, URL): StateRouter
+}
+abstract class CacheableStateRouterFactory implements StateRouterFactory {
+  - cache: ConcurrentMap<String, StateRouter>
+  + getRouter(Class, URL): StateRouter
+}
+class ConditionStateRouterFactory extends CacheableStateRouterFactory
+class TagStateRouterFactory extends CacheableStateRouterFactory
+class ScriptStateRouterFactory extends CacheableStateRouterFactory
+
+interface StateRouter {
+  + route(BitList, URL, Invocation): BitList
+}
+abstract class AbstractStateRouter implements StateRouter {
+  # url: URL
+  # enabled: boolean
+  + route(BitList, URL, Invocation): BitList
+}
+class ConditionStateRouter extends AbstractStateRouter
+
+class RouterChain {
+  - stateRouters: List<StateRouter>
+  + route(URL, BitList, Invocation): List
+  + buildSingleChain(Class, URL): SingleRouterChain
+}
+
+RouterChain o-- StateRouter
+@enduml
+```
+
+---
+
+## 12. LoadBalance
 
 `LoadBalance` picks one invoker from the candidates routing left behind.
 
@@ -3402,80 +3496,14 @@ class AdaptiveLoadBalance extends AbstractLoadBalance
 
 ---
 
-## 12. StateRouterFactory
-
-Routing narrows the candidate list before load balancing sees it, and in this version the live interface is `StateRouterFactory` rather than the older `RouterFactory`, which is kept only for compatibility.
-
-```java
-@SPI
-public interface StateRouterFactory {
-    <T> StateRouter<T> getRouter(Class<T> interfaceClass, URL url);
-}
-```
-
-`ExtensionLoader.getExtension(extName)` returns the class registered under that name.
-
-```properties
-# META-INF/dubbo/internal/org.apache.dubbo.rpc.cluster.router.state.StateRouterFactory
-mock=org.apache.dubbo.rpc.cluster.router.mock.MockStateRouterFactory
-condition=org.apache.dubbo.rpc.cluster.router.condition.ConditionStateRouterFactory
-service=org.apache.dubbo.rpc.cluster.router.condition.config.ServiceStateRouterFactory
-app=org.apache.dubbo.rpc.cluster.router.condition.config.AppStateRouterFactory
-provider-app=org.apache.dubbo.rpc.cluster.router.condition.config.ProviderAppStateRouterFactory
-standard-mesh-rule=org.apache.dubbo.rpc.cluster.router.mesh.route.StandardMeshRuleRouterFactory
-script-app=org.apache.dubbo.rpc.cluster.router.script.config.AppScriptRouterFactory
-tag=org.apache.dubbo.rpc.cluster.router.tag.TagStateRouterFactory
-```
-
-A router factory is not named by a call-site parameter: `RouterChain.buildSingleChain` collects them with `getActivateExtension(url, ROUTER_KEY)`, so which routers exist is decided by the URL conditions on each factory. `getRouter` is itself `@Adaptive` on the `protocol` key, which matters when a factory has several internal variants.
-
-```plantuml
-@startuml
-top to bottom direction
-
-interface StateRouterFactory {
-  + getRouter(Class, URL): StateRouter
-}
-abstract class CacheableStateRouterFactory implements StateRouterFactory {
-  - cache: ConcurrentMap<String, StateRouter>
-  + getRouter(Class, URL): StateRouter
-}
-class ConditionStateRouterFactory extends CacheableStateRouterFactory
-class TagStateRouterFactory extends CacheableStateRouterFactory
-class ScriptStateRouterFactory extends CacheableStateRouterFactory
-
-interface StateRouter {
-  + route(BitList, URL, Invocation): BitList
-}
-abstract class AbstractStateRouter implements StateRouter {
-  # url: URL
-  # enabled: boolean
-  + route(BitList, URL, Invocation): BitList
-}
-class ConditionStateRouter extends AbstractStateRouter
-
-class RouterChain {
-  - stateRouters: List<StateRouter>
-  + route(URL, BitList, Invocation): List
-  + buildSingleChain(Class, URL): SingleRouterChain
-}
-
-RouterChain o-- StateRouter
-@enduml
-```
-
----
-
 ## 13. Filter
 
-`Filter` is the extension with the most implementations, and the only one applied twice per call — once on the consumer side and once on the provider side.
+A filter is one step in front of an invoker. `invoke` runs on the way in and hands the call to the next step. `onResponse` and `onError` run on the way out. The consumer and the provider each have a chain. `@Activate` chooses the steps and their order. The call does not name a filter. It calls the head of the chain.
 
 ```java
 @SPI(scope = ExtensionScope.MODULE)
 public interface Filter extends BaseFilter {}
 ```
-
-A filter is a pair of callbacks, not a single method: `invoke` runs before the next node, and the `Listener` methods `onResponse` and `onError` run after it. Eighteen are registered in the core module, among them `echo`, `generic`, `token`, `accesslog`, `classloader`, `context`, `exception`, `timeout`, and `tps`. Selection is entirely by `@Activate`: the consumer chain takes group `consumer` filtered by the `reference.filter` parameter, the provider chain takes group `provider` filtered by `service.filter`, and order comes from the annotation's `order`. A filter therefore never appears at a call site by name.
 
 ```plantuml
 @startuml
@@ -3507,6 +3535,43 @@ class DefaultFilterChainBuilder implements FilterChainBuilder {
   + buildInvokerChain(Invoker, String, String): Invoker
 }
 @enduml
+```
+
+```java
+// the chain is built from the last filter back to the head
+filters = loader.getActivateExtension(url, key, group);
+for (int i = filters.size() - 1; i >= 0; i--) {
+    final Filter filter = filters.get(i);
+    final Invoker<T> next = last;
+    last = new CopyOfFilterChainNode<>(originalInvoker, next, filter);
+}
+
+// client: the protocol invoker is wrapped, group consumer
+return builder.buildInvokerChain(protocol.refer(type, url), REFERENCE_FILTER_KEY, CommonConstants.CONSUMER);
+
+// client: the cluster invoker is wrapped with the same group
+tmpInvoker = builder.buildClusterInvokerChain(tmpInvoker, REFERENCE_FILTER_KEY, CommonConstants.CONSUMER);
+
+// server: the service invoker is wrapped, group provider
+return protocol.export(builder.buildInvokerChain(invoker, SERVICE_FILTER_KEY, CommonConstants.PROVIDER));
+
+// client: the call starts here
+return invoker.invoke(rpcInvocation).recreate();
+
+// client: cluster filters run before AbstractClusterInvoker
+return filterInvoker.invoke(invocation);
+
+// each node, on the way in and on the way out
+asyncResult = filter.invoke(nextNode, invocation);
+listener.onError(e, originalInvoker, invocation);
+
+// server: a decoded invocation arrives
+if (message instanceof Invocation) {
+    reply((ExchangeChannel) channel, message);
+}
+
+// server: reply enters the provider chain
+Result result = invoker.invoke(inv);
 ```
 
 ---
