@@ -1,11 +1,2 @@
 {{ $stat := os.Stat "static/css/custom.css" }}
-<script>
-(function () {
-  var href = {{ printf "/css/custom.css?v=%d" $stat.ModTime.Unix | jsonify }};
-  var host = location.hostname;
-  if (host === "localhost" || host === "127.0.0.1") {
-    href = "/css/custom.css?v=" + Date.now();
-  }
-  document.write('<link rel="stylesheet" href="' + href + '">');
-})();
-</script>
+<link rel="stylesheet" href="/css/custom.css?v={{ $stat.ModTime.Unix }}">
